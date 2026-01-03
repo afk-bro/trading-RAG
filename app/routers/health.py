@@ -20,7 +20,8 @@ async def check_qdrant_health(settings: Settings) -> DependencyHealth:
     start = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.qdrant_timeout) as client:
-            response = await client.get(f"{settings.qdrant_url}/health")
+            # Qdrant uses /healthz for health checks (not /health)
+            response = await client.get(f"{settings.qdrant_url}/healthz")
             latency = (time.perf_counter() - start) * 1000
             if response.status_code == 200:
                 return DependencyHealth(status="ok", latency_ms=latency)

@@ -15,7 +15,7 @@
       "Step 10: Verify response contains 'latency_ms' object with per-dependency timings",
       "Step 11: Verify response contains 'version' field"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -63,7 +63,7 @@
       "Step 4: Verify latency_ms.supabase < 500",
       "Step 5: Verify latency_ms.ollama < 500"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1374,7 +1374,7 @@
       "Step 3: Verify request/response schemas documented",
       "Step 4: Verify example values provided"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1417,7 +1417,7 @@
       "Step 2: Verify all are set via environment variables",
       "Step 3: Verify naming follows convention (UPPERCASE_WITH_UNDERSCORES)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1437,7 +1437,7 @@
       "Step 2: Verify function signatures have type hints",
       "Step 3: Verify Pydantic models use proper types"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1448,7 +1448,7 @@
       "Step 3: Verify asyncpg used for database",
       "Step 4: Verify no time.sleep() calls in async code"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1459,7 +1459,7 @@
       "Step 3: Verify volumes and networks named appropriately",
       "Step 4: Verify healthchecks defined"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1470,7 +1470,7 @@
       "Step 3: Verify non-root user",
       "Step 4: Verify proper layer caching (requirements before code)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1481,7 +1481,7 @@
       "Step 3: Verify API endpoint documentation exists",
       "Step 4: Verify environment variable documentation exists"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",

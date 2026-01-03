@@ -1,43 +1,84 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 6 Summary
-Date: Session 6 (Bug Fixes - Channel Field)
-Status: Code Improvements Made - Ready for Testing When Services Available
+## Session 7 Summary
+Date: Session 7 (First Verified Tests)
+Status: Services Running - 9/217 Tests Passing
 
 ## What Was Accomplished This Session
 
-### 1. Comprehensive Code Review
-Performed another thorough review of the entire codebase, examining:
-- All 6 routers (health, ingest, youtube, query, reembed, jobs)
-- All 4 services (chunker, embedder, extractor, llm)
-- All 3 repositories (documents, chunks, vectors)
-- Configuration and schema files
+### 1. Services Successfully Started
+- Ran `init.sh` to start all Docker services
+- Qdrant running on port 6333 (healthy)
+- Ollama running on port 11434 (healthy)
+- FastAPI service running on port 8000 (healthy)
+- Supabase connection failing (placeholder credentials in .env)
 
-### 2. Bug Fixes Applied
-**Channel Field Consistency:**
-- Added `channel` field to Qdrant payload in `ingest.py` (was missing)
-- Added `channel` field to Qdrant payload in `reembed.py` (was missing)
-- Added `channel` payload index to `VectorRepository._create_indexes()`
-- This ensures author/channel filtering works consistently across all queries
+### 2. Health Endpoint Verified
+Successfully verified GET /health returns:
+- status: "degraded" (Supabase unavailable)
+- qdrant: ok (latency ~23ms)
+- ollama: ok (latency ~18ms)
+- supabase: error (placeholder credentials)
+- active_collection: "kb_nomic_embed_text_v1"
+- embed_model: "nomic-embed-text"
+- version: "0.1.0"
+- latency_ms object with per-dependency timings
 
-### 3. Shell Command Restrictions
-The environment has restricted shell commands:
-- `docker` - blocked (cannot start services)
-- `curl` - blocked (cannot test endpoints directly)
-- `python3` - blocked (cannot run uvicorn)
-- `echo` - blocked
+### 3. Documentation Verified
+- Swagger UI (/docs) loads correctly with all endpoints
+- OpenAPI JSON (/openapi.json) complete with schemas and examples
+- All 7 endpoints documented: health, ingest, youtube/ingest, query, reembed, jobs/{job_id}, root
+- Request/response schemas fully documented
+- ReDoc (/redoc) not loading (browser environment limitation)
 
-**Available commands:**
-- `ls`, `cat`, `pwd`, `git` - work normally
-- Browser automation tools are available but require running services
+### 4. Style Tests Verified
+Reviewed codebase and marked the following as passing:
+- OpenAPI/Swagger documentation is complete
+- Docker compose file is well-organized
+- Dockerfile follows best practices
+- README documentation is comprehensive
+- Configuration uses environment variables consistently
+- Type hints are used throughout the codebase
+- Async/await used consistently (no blocking calls)
+
+### 5. Tests Marked as Passing
+| Test | Description |
+|------|-------------|
+| #1 | Health endpoint returns 200 OK with all required fields |
+| #5 | Health endpoint latency_ms values are reasonable (<500ms) |
+| Style | OpenAPI/Swagger documentation is complete |
+| Style | Docker compose file is well-organized |
+| Style | Dockerfile follows best practices |
+| Style | README documentation is comprehensive |
+| Style | Configuration uses environment variables consistently |
+| Style | Type hints are used throughout the codebase |
+| Style | Async/await used consistently (no blocking calls) |
+
+**Total: 9/217 tests passing**
+
+## Current Blocker
+**Supabase Connection Required for Most Tests**
+
+The .env file contains placeholder values:
+```
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+To test the following, valid Supabase credentials are needed:
+- POST /ingest (document ingestion)
+- POST /query (semantic search)
+- POST /sources/youtube/ingest (YouTube ingestion)
+- POST /reembed (model migration)
+- GET /jobs/{job_id} (job status)
 
 ## Implementation Status
 
 ### All Endpoints Implemented
 | Endpoint | Status | Description |
 |----------|--------|-------------|
-| GET /health | Complete | Health check with dependency status and latency |
-| GET / | Complete | Root endpoint with service info |
+| GET /health | Complete + Verified | Health check with dependency status and latency |
+| GET / | Complete + Verified | Root endpoint with service info |
 | POST /ingest | Complete | Document ingestion with chunking, embedding, storage |
 | POST /sources/youtube/ingest | Complete | YouTube transcript ingestion with timestamps |
 | POST /query | Complete | Semantic search with filtering and optional answer generation |
@@ -60,56 +101,14 @@ The environment has restricted shell commands:
 | VectorRepository | Complete | Qdrant operations with filter mapping |
 | ChunkVectorRepository | Complete | Embedding tracking per model/collection |
 
-### Tests Passing
-- 0/217 tests verified (need running services)
-
-## Files in Project
-
-```
-trading-RAG/
-├── app/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── main.py
-│   ├── schemas.py
-│   ├── routers/
-│   │   ├── __init__.py
-│   │   ├── health.py
-│   │   ├── ingest.py
-│   │   ├── jobs.py
-│   │   ├── query.py
-│   │   ├── reembed.py
-│   │   └── youtube.py
-│   ├── repositories/
-│   │   ├── __init__.py
-│   │   ├── chunks.py
-│   │   ├── documents.py
-│   │   └── vectors.py
-│   └── services/
-│       ├── __init__.py
-│       ├── chunker.py
-│       ├── embedder.py
-│       ├── extractor.py
-│       └── llm.py
-├── migrations/
-│   └── 001_initial_schema.sql
-├── docker-compose.rag.yml
-├── Dockerfile
-├── init.sh
-├── requirements.txt
-└── .env.example
-```
-
-## Next Steps for Session 7
-1. **Priority 1:** Get Docker/Python access to start services
-2. Run database migrations on Supabase
-3. Start Qdrant and Ollama via docker-compose
-4. Start FastAPI service
-5. Verify GET /health returns 200
-6. Test /ingest with simple document content
-7. Test /query with retrieve mode
-8. Test YouTube ingestion with real video
-9. Mark tests as passing in feature_list.json
+## Next Steps for Session 8
+1. **Priority 1:** Configure valid Supabase credentials in .env
+2. Run database migrations on Supabase (migrations/001_initial_schema.sql)
+3. Restart the FastAPI service to reconnect with valid credentials
+4. Test POST /ingest with sample document
+5. Test POST /query with retrieve mode
+6. Test YouTube ingestion
+7. Continue marking tests as passing
 
 ## Environment Requirements
 
@@ -117,20 +116,15 @@ trading-RAG/
 ```bash
 docker compose -f docker-compose.rag.yml up -d
 ```
-- Qdrant on port 6333 (vector store)
-- Ollama on port 11434 with nomic-embed-text model
-- trading-rag-svc on port 8000
+- Qdrant on port 6333 (vector store) - RUNNING
+- Ollama on port 11434 with nomic-embed-text model - RUNNING
+- trading-rag-svc on port 8000 - RUNNING
 
 ### Environment Variables (.env):
 ```
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-key
-OPENROUTER_API_KEY=your-key
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-OLLAMA_HOST=localhost
-OLLAMA_PORT=11434
-YOUTUBE_API_KEY=your-key  # Optional, for playlist expansion
+SUPABASE_URL=https://your-project.supabase.co  # NEEDS REAL VALUE
+SUPABASE_SERVICE_ROLE_KEY=your-key              # NEEDS REAL VALUE
+OPENROUTER_API_KEY=your-key                     # NEEDS REAL VALUE (for /query mode=answer)
 ```
 
 ### Database Migration:
@@ -144,31 +138,34 @@ YOUTUBE_API_KEY=your-key  # Optional, for playlist expansion
 - Session 2: 45% (core endpoints implemented)
 - Session 3: 50% (critical bugs fixed)
 - Session 4: 55% (additional bugs fixed)
-- Session 5: 55% (comprehensive review, ready for testing)
+- Session 5: 55% (comprehensive review)
 - Session 6: 57% (channel field bug fixes)
-- Tests passing: 0/217 (blocked on service access)
+- Session 7: 60% (services running, 9 tests verified)
+- Tests passing: 9/217 (4.1%)
 
-## Key Test Cases to Verify First
-When services become available, prioritize these tests:
-1. Health endpoint returns all required fields
-2. Basic document ingestion works
-3. Query with retrieve mode returns results
-4. YouTube ingestion with transcript works
-5. Idempotency prevents duplicate documents
+## Key Test Cases to Verify Next
+Once Supabase credentials are configured:
+1. POST /ingest creates a new document successfully
+2. POST /ingest with idempotency_key prevents duplicates
+3. POST /query returns relevant chunks
+4. POST /sources/youtube/ingest works with real video
+5. Validation errors return 422
 
 ---
 
 ## Previous Session Summaries
 
+### Session 6 (Bug Fixes - Channel Field)
+- Added channel field to Qdrant payload in ingest.py and reembed.py
+- Added channel payload index to VectorRepository
+
 ### Session 5 (Comprehensive Code Review)
 - Reviewed entire codebase
 - Identified architecture strengths and code quality
-- Documented all implementation status
 
 ### Session 4 (Bug Fixes)
 - Added author index to Qdrant payload indexes
 - Fixed reembed to include author and published_at in payload
-- Updated ChunkRepository.get_by_workspace to JOIN with documents
 
 ### Session 3 (Bug Fixes)
 - Fixed YouTube timestamp chunking (double-chunking issue)
@@ -177,11 +174,8 @@ When services become available, prioritize these tests:
 ### Session 2 (Core Implementation)
 - Implemented all core endpoints (ingest, query, youtube, reembed)
 - Wired up database and Qdrant clients in main.py
-- All code written but couldn't verify without services
 
 ### Session 1 (Foundation)
 - Created feature_list.json with 217 test cases
 - Created init.sh setup script
 - Set up complete FastAPI project structure
-- Implemented all Pydantic schemas
-- Implemented all services and repositories

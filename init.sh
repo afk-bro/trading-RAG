@@ -170,7 +170,7 @@ fi
 # Step 8: Start the FastAPI service
 echo -e "${BLUE}Step 8: Starting FastAPI service...${NC}"
 
-$DOCKER_COMPOSE -f docker-compose.rag.yml up -d trading-rag-svc
+$DOCKER_COMPOSE -f docker-compose.rag.yml up -d --build trading-rag-svc
 
 wait_for_service "Trading RAG Service" "http://localhost:8000/health" 30
 
