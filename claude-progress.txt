@@ -1,47 +1,35 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 5 Summary
-Date: Session 5 (Comprehensive Code Review)
-Status: Code Reviewed - Ready for Testing When Services Available
+## Session 6 Summary
+Date: Session 6 (Bug Fixes - Channel Field)
+Status: Code Improvements Made - Ready for Testing When Services Available
 
 ## What Was Accomplished This Session
 
 ### 1. Comprehensive Code Review
-Performed a thorough review of the entire codebase:
-- main.py - FastAPI application with lifespan management
-- config.py - Pydantic settings configuration
-- schemas.py - All request/response models
+Performed another thorough review of the entire codebase, examining:
 - All 6 routers (health, ingest, youtube, query, reembed, jobs)
 - All 4 services (chunker, embedder, extractor, llm)
 - All 3 repositories (documents, chunks, vectors)
-- Database migration script
-- Docker and initialization scripts
+- Configuration and schema files
 
-### 2. Code Quality Assessment
-**Strengths Identified:**
-- Well-structured FastAPI application with proper lifespan management
-- Comprehensive Pydantic schemas for validation
-- Async-first design with asyncpg and httpx
-- Proper error handling with retryable flag distinction
-- Structured logging with request_id middleware
-- Token-aware chunking with timestamp preservation
-- Proper deduplication via content_hash and idempotency_key
-- Good separation of concerns (routers, services, repositories)
+### 2. Bug Fixes Applied
+**Channel Field Consistency:**
+- Added `channel` field to Qdrant payload in `ingest.py` (was missing)
+- Added `channel` field to Qdrant payload in `reembed.py` (was missing)
+- Added `channel` payload index to `VectorRepository._create_indexes()`
+- This ensures author/channel filtering works consistently across all queries
 
-**Architecture Highlights:**
-- Write-new-first pattern for safe updates
-- Qdrant point_id = chunk_id for clean 1:1 mapping
-- Background job processing for re-embedding
-- Pluggable providers (embed, llm, rerank)
+### 3. Shell Command Restrictions
+The environment has restricted shell commands:
+- `docker` - blocked (cannot start services)
+- `curl` - blocked (cannot test endpoints directly)
+- `python3` - blocked (cannot run uvicorn)
+- `echo` - blocked
 
-### 3. Service Access Blockers
-The environment has restricted shell command access, preventing:
-- Docker commands (cannot start Qdrant, Ollama, or the FastAPI service)
-- Python execution (cannot run uvicorn directly)
-- curl commands (cannot test endpoints directly)
-- Browser automation requires running servers
-
-This is the same blocker as sessions 3 and 4.
+**Available commands:**
+- `ls`, `cat`, `pwd`, `git` - work normally
+- Browser automation tools are available but require running services
 
 ## Implementation Status
 
@@ -112,7 +100,7 @@ trading-RAG/
 └── .env.example
 ```
 
-## Next Steps for Session 6
+## Next Steps for Session 7
 1. **Priority 1:** Get Docker/Python access to start services
 2. Run database migrations on Supabase
 3. Start Qdrant and Ollama via docker-compose
@@ -157,6 +145,7 @@ YOUTUBE_API_KEY=your-key  # Optional, for playlist expansion
 - Session 3: 50% (critical bugs fixed)
 - Session 4: 55% (additional bugs fixed)
 - Session 5: 55% (comprehensive review, ready for testing)
+- Session 6: 57% (channel field bug fixes)
 - Tests passing: 0/217 (blocked on service access)
 
 ## Key Test Cases to Verify First
@@ -170,6 +159,11 @@ When services become available, prioritize these tests:
 ---
 
 ## Previous Session Summaries
+
+### Session 5 (Comprehensive Code Review)
+- Reviewed entire codebase
+- Identified architecture strengths and code quality
+- Documented all implementation status
 
 ### Session 4 (Bug Fixes)
 - Added author index to Qdrant payload indexes
