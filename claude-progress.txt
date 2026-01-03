@@ -1,124 +1,193 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 4 Summary
-Date: Session 4 (Additional Bug Fixes)
-Status: Code Reviewed and Additional Bugs Fixed
+## Session 5 Summary
+Date: Session 5 (Comprehensive Code Review)
+Status: Code Reviewed - Ready for Testing When Services Available
 
 ## What Was Accomplished This Session
 
-### 1. Full Code Review
-- Reviewed entire codebase for potential issues
-- Identified additional bugs in vector storage and reembed functionality
+### 1. Comprehensive Code Review
+Performed a thorough review of the entire codebase:
+- main.py - FastAPI application with lifespan management
+- config.py - Pydantic settings configuration
+- schemas.py - All request/response models
+- All 6 routers (health, ingest, youtube, query, reembed, jobs)
+- All 4 services (chunker, embedder, extractor, llm)
+- All 3 repositories (documents, chunks, vectors)
+- Database migration script
+- Docker and initialization scripts
 
-### 2. Bug Fixes Applied
+### 2. Code Quality Assessment
+**Strengths Identified:**
+- Well-structured FastAPI application with proper lifespan management
+- Comprehensive Pydantic schemas for validation
+- Async-first design with asyncpg and httpx
+- Proper error handling with retryable flag distinction
+- Structured logging with request_id middleware
+- Token-aware chunking with timestamp preservation
+- Proper deduplication via content_hash and idempotency_key
+- Good separation of concerns (routers, services, repositories)
 
-#### Bug Fix 3: Missing Author Index in Qdrant
-**Problem:** The `author` field was being used for filtering but had no payload index.
-- Filtering by author (via `filters.authors`) would cause a full scan instead of indexed search
-- This would significantly slow down queries with author filters at scale
+**Architecture Highlights:**
+- Write-new-first pattern for safe updates
+- Qdrant point_id = chunk_id for clean 1:1 mapping
+- Background job processing for re-embedding
+- Pluggable providers (embed, llm, rerank)
 
-**Fix:**
-- Added `("author", qmodels.PayloadSchemaType.KEYWORD)` to the payload indexes in `_create_indexes()`
-- New collections will now have proper author filtering performance
-
-#### Bug Fix 4: Reembed Missing Author and Published_at in Payload
-**Problem:** The reembed task wasn't including `author` or `published_at` in the Qdrant payload.
-- After re-embedding, vectors would be missing critical filter fields
-- Author and date range filtering would fail on reembedded collections
-
-**Fix:**
-- Updated `get_by_workspace()` in ChunkRepository to JOIN with documents table
-- Now returns `author`, `channel`, `published_at`, `source_type`, and `video_id`
-- Updated reembed task to include `author` and `published_at` in payload
-
-### 3. Shell Command Limitations (Same as Previous Sessions)
+### 3. Service Access Blockers
 The environment has restricted shell command access, preventing:
-- Docker container management
-- Starting the FastAPI server
-- Running curl for API tests
-- Browser-based testing via puppeteer (server not running)
+- Docker commands (cannot start Qdrant, Ollama, or the FastAPI service)
+- Python execution (cannot run uvicorn directly)
+- curl commands (cannot test endpoints directly)
+- Browser automation requires running servers
 
-## Files Changed This Session
-- `app/repositories/vectors.py` - Added author index to payload indexes
-- `app/repositories/chunks.py` - Updated get_by_workspace to JOIN with documents
-- `app/routers/reembed.py` - Added author and published_at to payload
+This is the same blocker as sessions 3 and 4.
 
 ## Implementation Status
 
-### All Code Complete
-- GET /health - Health check with dependency status
-- GET / - Root endpoint with service info
-- POST /ingest - Document ingestion pipeline
-- POST /sources/youtube/ingest - YouTube processing
-- POST /query - Semantic search and answer generation
-- POST /reembed - Re-embedding job creation (now with proper payloads)
-- GET /jobs/{job_id} - Job status tracking
+### All Endpoints Implemented
+| Endpoint | Status | Description |
+|----------|--------|-------------|
+| GET /health | Complete | Health check with dependency status and latency |
+| GET / | Complete | Root endpoint with service info |
+| POST /ingest | Complete | Document ingestion with chunking, embedding, storage |
+| POST /sources/youtube/ingest | Complete | YouTube transcript ingestion with timestamps |
+| POST /query | Complete | Semantic search with filtering and optional answer generation |
+| POST /reembed | Complete | Background re-embedding for model migration |
+| GET /jobs/{job_id} | Complete | Job status tracking |
+
+### All Services Implemented
+| Service | Status | Description |
+|---------|--------|-------------|
+| Chunker | Complete | Token-aware chunking with timestamp preservation |
+| Embedder | Complete | Ollama integration with batch processing |
+| Extractor | Complete | Symbol, entity, and topic extraction |
+| LLM | Complete | OpenRouter integration for answer generation |
+
+### All Repositories Implemented
+| Repository | Status | Description |
+|------------|--------|-------------|
+| DocumentRepository | Complete | CRUD for documents table |
+| ChunkRepository | Complete | CRUD with document joins |
+| VectorRepository | Complete | Qdrant operations with filter mapping |
+| ChunkVectorRepository | Complete | Embedding tracking per model/collection |
 
 ### Tests Passing
 - 0/217 tests verified (need running services)
 
-## Next Steps for Session 5
-1. **Get services running** - Need Docker access or alternative hosting
+## Files in Project
+
+```
+trading-RAG/
+├── app/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── main.py
+│   ├── schemas.py
+│   ├── routers/
+│   │   ├── __init__.py
+│   │   ├── health.py
+│   │   ├── ingest.py
+│   │   ├── jobs.py
+│   │   ├── query.py
+│   │   ├── reembed.py
+│   │   └── youtube.py
+│   ├── repositories/
+│   │   ├── __init__.py
+│   │   ├── chunks.py
+│   │   ├── documents.py
+│   │   └── vectors.py
+│   └── services/
+│       ├── __init__.py
+│       ├── chunker.py
+│       ├── embedder.py
+│       ├── extractor.py
+│       └── llm.py
+├── migrations/
+│   └── 001_initial_schema.sql
+├── docker-compose.rag.yml
+├── Dockerfile
+├── init.sh
+├── requirements.txt
+└── .env.example
+```
+
+## Next Steps for Session 6
+1. **Priority 1:** Get Docker/Python access to start services
 2. Run database migrations on Supabase
-3. Verify GET /health returns 200
-4. Test /ingest with simple document content
-5. Test /query with retrieve mode
-6. Test YouTube ingestion with real video
-7. Mark tests as passing in feature_list.json
+3. Start Qdrant and Ollama via docker-compose
+4. Start FastAPI service
+5. Verify GET /health returns 200
+6. Test /ingest with simple document content
+7. Test /query with retrieve mode
+8. Test YouTube ingestion with real video
+9. Mark tests as passing in feature_list.json
 
 ## Environment Requirements
-To test, the following must be configured:
 
-1. **Docker Services (via docker-compose.rag.yml)**:
-   - Qdrant on port 6333
-   - Ollama on port 11434 with nomic-embed-text model
-   - trading-rag-svc on port 8000
+### Docker Services (via docker-compose.rag.yml):
+```bash
+docker compose -f docker-compose.rag.yml up -d
+```
+- Qdrant on port 6333 (vector store)
+- Ollama on port 11434 with nomic-embed-text model
+- trading-rag-svc on port 8000
 
-2. **Environment Variables (.env)**:
-   - SUPABASE_URL=https://your-project.supabase.co
-   - SUPABASE_SERVICE_ROLE_KEY=your-key
-   - OPENROUTER_API_KEY=your-key
-   - Optional: YOUTUBE_API_KEY (for playlist expansion)
+### Environment Variables (.env):
+```
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-key
+OPENROUTER_API_KEY=your-key
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+OLLAMA_HOST=localhost
+OLLAMA_PORT=11434
+YOUTUBE_API_KEY=your-key  # Optional, for playlist expansion
+```
 
-3. **Database Migration**:
-   - Run migrations/001_initial_schema.sql against Supabase Postgres
+### Database Migration:
+```sql
+-- Run migrations/001_initial_schema.sql against Supabase Postgres
+-- This creates: documents, chunks, chunk_vectors tables with proper indexes
+```
 
 ## Estimated Completion
 - Session 1: 15% (foundation)
 - Session 2: 45% (core endpoints implemented)
 - Session 3: 50% (critical bugs fixed)
-- Session 4: 55% (additional bugs fixed, ready for testing)
+- Session 4: 55% (additional bugs fixed)
+- Session 5: 55% (comprehensive review, ready for testing)
 - Tests passing: 0/217 (blocked on service access)
 
----
-
-## Session 3 Summary (Previous)
-Date: Session 3 (Bug Fixes)
-Status: Code Reviewed and Critical Bugs Fixed
-
-### Bug Fixes Applied
-1. **YouTube Timestamp Chunking** - Fixed double-chunking issue
-2. **Missing video_id in Documents Table** - Added video_id/playlist_id tracking
+## Key Test Cases to Verify First
+When services become available, prioritize these tests:
+1. Health endpoint returns all required fields
+2. Basic document ingestion works
+3. Query with retrieve mode returns results
+4. YouTube ingestion with transcript works
+5. Idempotency prevents duplicate documents
 
 ---
 
-## Session 2 Summary (Previous)
+## Previous Session Summaries
+
+### Session 4 (Bug Fixes)
+- Added author index to Qdrant payload indexes
+- Fixed reembed to include author and published_at in payload
+- Updated ChunkRepository.get_by_workspace to JOIN with documents
+
+### Session 3 (Bug Fixes)
+- Fixed YouTube timestamp chunking (double-chunking issue)
+- Added video_id/playlist_id tracking to documents table
+
+### Session 2 (Core Implementation)
 - Implemented all core endpoints (ingest, query, youtube, reembed)
 - Wired up database and Qdrant clients in main.py
 - All code written but couldn't verify without services
 
-## Session 1 Summary (Previous)
+### Session 1 (Foundation)
 - Created feature_list.json with 217 test cases
 - Created init.sh setup script
 - Set up complete FastAPI project structure
 - Implemented all Pydantic schemas
-- Implemented all services (chunker, embedder, extractor, llm)
-- Implemented all repositories (documents, chunks, vectors)
-- Created health endpoint and API stubs
-
-### Architecture Decisions
-- Using asyncpg for raw SQL (not ORM) for performance
-- Qdrant point_id = chunk_id (1:1 mapping by design)
-- Write-new-first pattern for safe updates
-- Structured logging with request_id middleware
-- Pluggable providers (embed, llm, rerank)
+- Implemented all services and repositories
