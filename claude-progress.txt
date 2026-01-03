@@ -1,145 +1,143 @@
-# Trading RAG Pipeline - Session 1 Progress
+# Trading RAG Pipeline - Progress Notes
 
-## Session Summary
-Date: Session 1 (Initializer Agent)
-Status: Foundation Complete
+## Session 2 Summary
+Date: Session 2 (Continuation)
+Status: Core Endpoints Implemented
 
-## What Was Accomplished
+## What Was Accomplished This Session
 
-### 1. Feature List (feature_list.json)
-- Created comprehensive feature_list.json with exactly 200 test cases
-- Categories: "functional" (majority) and "style" (UI/code quality)
-- Mix of test complexity:
-  - Narrow tests (2-5 steps): ~160 tests
-  - Comprehensive tests (10+ steps): ~40 tests
-- All tests start with "passes": false
-- Ordered by priority (infrastructure/health first, then core features)
+### 1. Full /ingest Endpoint Implementation
+- Completed the document ingestion pipeline in `app/routers/ingest.py`
+- Features implemented:
+  - Content deduplication via content_hash and canonical_url
+  - Automatic text chunking with token-aware splitting
+  - Metadata extraction (symbols, entities, topics)
+  - Embedding generation via Ollama
+  - Vector storage in Qdrant
+  - Document/chunk storage in Supabase Postgres
+  - Idempotent operation support
 
-### 2. Environment Setup (init.sh)
-- Created executable init.sh script
-- Handles:
-  - Docker/Docker Compose prerequisite checks
-  - .env file creation from template
-  - Docker network (rag-net) creation
-  - Starting Qdrant and Ollama containers
-  - Pulling nomic-embed-text embedding model
-  - Python virtual environment setup
-  - FastAPI service startup
-- Includes service health checks with retry logic
+### 2. Full YouTube Ingestion Endpoint
+- Completed YouTube processing in `app/routers/youtube.py`
+- Features implemented:
+  - YouTube URL parsing (videos, playlists, shorts)
+  - Video metadata fetching (title, channel, duration)
+  - Transcript fetching with retry and exponential backoff
+  - Transcript normalization (removes [Music], repeated phrases)
+  - Timestamp-aware chunking
+  - Playlist expansion for n8n fan-out
+  - Error handling (retryable vs terminal errors)
 
-### 3. Project Structure
-Created complete FastAPI project structure:
-```
-trading-RAG/
-├── app/
-│   ├── __init__.py          # Version: 0.1.0
-│   ├── main.py               # FastAPI app with middleware
-│   ├── config.py             # Pydantic Settings configuration
-│   ├── schemas.py            # All request/response Pydantic models
-│   ├── routers/
-│   │   ├── health.py         # Health check endpoint (IMPLEMENTED)
-│   │   ├── ingest.py         # Document ingestion (STUB)
-│   │   ├── youtube.py        # YouTube ingestion (STUB)
-│   │   ├── query.py          # Query endpoint (STUB)
-│   │   ├── reembed.py        # Re-embedding (STUB)
-│   │   └── jobs.py           # Job status (PARTIAL)
-│   ├── services/
-│   │   ├── chunker.py        # Token-aware chunking (IMPLEMENTED)
-│   │   ├── embedder.py       # Ollama embedding (IMPLEMENTED)
-│   │   ├── extractor.py      # Metadata extraction (IMPLEMENTED)
-│   │   └── llm.py            # OpenRouter LLM (IMPLEMENTED)
-│   └── repositories/
-│       ├── documents.py      # Document CRUD (IMPLEMENTED)
-│       ├── chunks.py         # Chunk CRUD (IMPLEMENTED)
-│       └── vectors.py        # Qdrant operations (IMPLEMENTED)
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── migrations/
-│   └── 001_initial_schema.sql  # Complete database schema
-├── docker-compose.rag.yml    # Qdrant, Ollama, FastAPI service
-├── Dockerfile                # Multi-stage Python build
-├── requirements.txt          # Pinned dependencies
-├── .env.example              # Environment template
-├── .gitignore                # Python/IDE/secrets exclusions
-├── README.md                 # Full documentation
-├── feature_list.json         # 200 test cases
-└── init.sh                   # Setup script
-```
+### 3. Full /query Endpoint Implementation
+- Completed semantic search in `app/routers/query.py`
+- Features implemented:
+  - Query embedding via Ollama
+  - Vector search in Qdrant with filters
+  - Optional LLM-based reranking
+  - Postgres hydration with rank preservation
+  - Citation URL building (YouTube timestamps, PDF pages)
+  - LLM answer generation with citations (mode="answer")
 
-### 4. Git Repository
-- Initialized git repository
-- Created initial commit with all files
-- Commit: "Initial setup: feature_list.json, init.sh, and project structure"
+### 4. /reembed Endpoint Implementation
+- Completed re-embedding job in `app/routers/reembed.py`
+- Features implemented:
+  - Background job creation for model migration
+  - New collection creation in Qdrant
+  - Batch re-embedding with progress tracking
+  - chunk_vectors table updates
+  - Job status tracking via /jobs endpoint
+
+### 5. Application Wiring (main.py)
+- Updated `app/main.py` with proper initialization:
+  - Qdrant client initialization and wiring
+  - asyncpg connection pool for Supabase
+  - Ollama embedder validation at startup
+  - Qdrant collection creation/validation
+  - Proper cleanup on shutdown
+  - Client injection to all routers
 
 ## Implementation Status
 
 ### Fully Implemented
-- Health check endpoint with dependency status (Qdrant, Supabase, Ollama)
-- Pydantic schemas for all API models
-- Chunker service with token-aware splitting and timestamp preservation
-- Embedder service for Ollama batch embeddings
-- Metadata extractor (symbols, entities, topics, quality score)
-- LLM service for OpenRouter (answer generation, reranking)
-- All database repositories (documents, chunks, chunk_vectors)
-- Qdrant vector repository with filter building
+- ✅ GET /health - Health check with dependency status
+- ✅ GET / - Root endpoint with service info
+- ✅ POST /ingest - Document ingestion pipeline
+- ✅ POST /sources/youtube/ingest - YouTube processing
+- ✅ POST /query - Semantic search and answer generation
+- ✅ POST /reembed - Re-embedding job creation
+- ✅ GET /jobs/{job_id} - Job status tracking
 
-### Stubs (Not Yet Implemented)
-- POST /ingest - Document ingestion pipeline
-- POST /sources/youtube/ingest - YouTube processing
-- POST /query - Semantic search pipeline
-- POST /reembed - Re-embedding job creation
-- Database connection pool initialization
-- Qdrant client initialization
-- Full end-to-end flow integration
+### Services & Repositories
+- ✅ Chunker with token-aware splitting
+- ✅ Embedder for Ollama batch operations
+- ✅ Metadata extractor (symbols, entities, topics)
+- ✅ LLM service for OpenRouter (answers, reranking)
+- ✅ Document repository (CRUD operations)
+- ✅ Chunk repository (CRUD with ordering)
+- ✅ Vector repository (Qdrant operations)
+- ✅ ChunkVector repository (migration tracking)
 
-## Key Files for Next Session
+## Notes for Testing
 
-### Priority 1: Wire up the ingestion pipeline
-1. app/routers/ingest.py - Complete the /ingest endpoint
-2. Need to connect: chunker → extractor → embedder → repositories
+### Environment Requirements
+1. Run `./init.sh` to start Docker services (Qdrant, Ollama)
+2. Configure `.env` with:
+   - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+   - OPENROUTER_API_KEY (for answer generation)
+   - Optional: YOUTUBE_API_KEY (for playlist expansion)
+3. Run database migration against Supabase
 
-### Priority 2: YouTube integration
-1. app/routers/youtube.py - Implement URL parsing, transcript fetching
-2. Use youtube-transcript-api library (already in requirements)
+### Test Priority
+1. Start with GET /health - verify all dependencies
+2. Test POST /ingest with simple content
+3. Test POST /query with retrieve mode
+4. Test YouTube ingestion with a real video
+5. Test answer generation mode
 
-### Priority 3: Query pipeline
-1. app/routers/query.py - Connect query → embed → search → hydrate → answer
+### Shell Command Limitations
+Note: This session encountered shell command restrictions preventing:
+- Starting Docker containers
+- Running the FastAPI server
+- Browser-based testing
 
-### Priority 4: Integration
-1. app/main.py - Initialize connection pools in lifespan
-2. Test end-to-end with docker-compose
+All code has been written but could not be verified with running services.
 
-## Notes for Next Agent
+## Files Changed This Session
+- `app/routers/ingest.py` - Full implementation
+- `app/routers/youtube.py` - Full implementation
+- `app/routers/query.py` - Full implementation
+- `app/routers/reembed.py` - Full implementation
+- `app/main.py` - Connection pool wiring
 
-### Critical: Do NOT modify feature_list.json
-- Only change "passes": false to "passes": true when tests pass
-- Never edit descriptions or steps
-- Never remove features
+## Next Steps for Session 3
+1. Start infrastructure services (Qdrant, Ollama)
+2. Run database migrations
+3. Verify GET /health returns 200 with all dependencies
+4. Test /ingest endpoint end-to-end
+5. Mark first tests as passing in feature_list.json
 
-### Environment
-- Run `./init.sh` to start services
-- Edit `.env` with real credentials before testing
-- Database migration needs to be run against Supabase
+## Estimated Completion
+- Session 1: 15% (foundation)
+- Session 2: 45% (core endpoints implemented)
+- Tests passing: 0/217 (need service running to verify)
+
+---
+
+## Session 1 Summary (Previous)
+
+### What Was Accomplished
+- Created feature_list.json with 200+ test cases
+- Created init.sh setup script
+- Set up complete FastAPI project structure
+- Implemented all Pydantic schemas
+- Implemented all services (chunker, embedder, extractor, llm)
+- Implemented all repositories (documents, chunks, vectors)
+- Created health endpoint
+- Created stubs for all API endpoints
 
 ### Architecture Decisions
 - Using asyncpg for raw SQL (not ORM) for performance
 - Qdrant point_id = chunk_id (1:1 mapping by design)
 - Write-new-first pattern for safe updates
 - Structured logging with request_id middleware
-
-### Dependencies Ready
-All Python dependencies specified in requirements.txt are production-ready:
-- FastAPI 0.109.2
-- Pydantic 2.6.1
-- httpx 0.26.0
-- asyncpg 0.29.0
-- qdrant-client 1.7.3
-- youtube-transcript-api 0.6.2
-- tiktoken 0.6.0
-- structlog 24.1.0
-
-## Estimated Completion
-- Session 1: 15% complete (foundation)
-- Next session should focus on wiring up /ingest endpoint end-to-end
-- Target: Have first test passing by end of session 2
+- Pluggable providers (embed, llm, rerank)
