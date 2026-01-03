@@ -1,139 +1,114 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 2 Summary
-Date: Session 2 (Continuation)
-Status: Core Endpoints Implemented
+## Session 3 Summary
+Date: Session 3 (Bug Fixes)
+Status: Code Reviewed and Critical Bugs Fixed
 
 ## What Was Accomplished This Session
 
-### 1. Full /ingest Endpoint Implementation
-- Completed the document ingestion pipeline in `app/routers/ingest.py`
-- Features implemented:
-  - Content deduplication via content_hash and canonical_url
-  - Automatic text chunking with token-aware splitting
-  - Metadata extraction (symbols, entities, topics)
-  - Embedding generation via Ollama
-  - Vector storage in Qdrant
-  - Document/chunk storage in Supabase Postgres
-  - Idempotent operation support
+### 1. Full Code Review
+- Reviewed entire codebase for potential issues
+- Identified two critical bugs in YouTube ingestion flow
 
-### 2. Full YouTube Ingestion Endpoint
-- Completed YouTube processing in `app/routers/youtube.py`
-- Features implemented:
-  - YouTube URL parsing (videos, playlists, shorts)
-  - Video metadata fetching (title, channel, duration)
-  - Transcript fetching with retry and exponential backoff
-  - Transcript normalization (removes [Music], repeated phrases)
-  - Timestamp-aware chunking
-  - Playlist expansion for n8n fan-out
-  - Error handling (retryable vs terminal errors)
+### 2. Bug Fixes Applied
 
-### 3. Full /query Endpoint Implementation
-- Completed semantic search in `app/routers/query.py`
-- Features implemented:
-  - Query embedding via Ollama
-  - Vector search in Qdrant with filters
-  - Optional LLM-based reranking
-  - Postgres hydration with rank preservation
-  - Citation URL building (YouTube timestamps, PDF pages)
-  - LLM answer generation with citations (mode="answer")
+#### Bug Fix 1: YouTube Timestamp Chunking
+**Problem:** YouTube videos were being double-chunked, losing timestamp information.
+- The code was chunking with `chunk_timestamped_content()` to preserve timestamps
+- But then passing `pre_chunks=None` to `ingest_pipeline`, causing re-chunking without timestamps
+- This meant all `time_start_secs` and `time_end_secs` values were lost
 
-### 4. /reembed Endpoint Implementation
-- Completed re-embedding job in `app/routers/reembed.py`
-- Features implemented:
-  - Background job creation for model migration
-  - New collection creation in Qdrant
-  - Batch re-embedding with progress tracking
-  - chunk_vectors table updates
-  - Job status tracking via /jobs endpoint
+**Fix:**
+- Now converts the chunked content to `ChunkInput` objects and passes them as `pre_chunks`
+- Timestamps are preserved through the entire pipeline
+- Citation URLs can now properly include `?t=123` parameters
 
-### 5. Application Wiring (main.py)
-- Updated `app/main.py` with proper initialization:
-  - Qdrant client initialization and wiring
-  - asyncpg connection pool for Supabase
-  - Ollama embedder validation at startup
-  - Qdrant collection creation/validation
-  - Proper cleanup on shutdown
-  - Client injection to all routers
+#### Bug Fix 2: Missing video_id in Documents Table
+**Problem:** YouTube video_id was never being stored in the documents table.
+- The `ingest_pipeline` function didn't accept `video_id` or `playlist_id` parameters
+- This meant the `video_id` column in the documents table was always NULL
+- This would break citation URL building in queries (needs video_id for YouTube links)
+
+**Fix:**
+- Added `video_id` and `playlist_id` parameters to `ingest_pipeline()` function
+- YouTube router now passes these values to the pipeline
+- Documents table now properly stores YouTube video/playlist IDs
+
+### 3. Shell Command Limitations (Same as Session 2)
+The environment has restricted shell command access, preventing:
+- Docker container management
+- Starting the FastAPI server
+- Running curl for API tests
+- Browser-based testing via puppeteer (server not running)
+
+## Files Changed This Session
+- `app/routers/ingest.py` - Added video_id/playlist_id parameters
+- `app/routers/youtube.py` - Fixed pre_chunks handling, added video_id passing
+
+## Commits Made
+- `dd7d905` - Fix YouTube timestamp chunking and video_id tracking
 
 ## Implementation Status
 
-### Fully Implemented
-- ✅ GET /health - Health check with dependency status
-- ✅ GET / - Root endpoint with service info
-- ✅ POST /ingest - Document ingestion pipeline
-- ✅ POST /sources/youtube/ingest - YouTube processing
-- ✅ POST /query - Semantic search and answer generation
-- ✅ POST /reembed - Re-embedding job creation
-- ✅ GET /jobs/{job_id} - Job status tracking
+### All Code Complete
+- GET /health - Health check with dependency status
+- GET / - Root endpoint with service info
+- POST /ingest - Document ingestion pipeline
+- POST /sources/youtube/ingest - YouTube processing (with bug fixes)
+- POST /query - Semantic search and answer generation
+- POST /reembed - Re-embedding job creation
+- GET /jobs/{job_id} - Job status tracking
 
-### Services & Repositories
-- ✅ Chunker with token-aware splitting
-- ✅ Embedder for Ollama batch operations
-- ✅ Metadata extractor (symbols, entities, topics)
-- ✅ LLM service for OpenRouter (answers, reranking)
-- ✅ Document repository (CRUD operations)
-- ✅ Chunk repository (CRUD with ordering)
-- ✅ Vector repository (Qdrant operations)
-- ✅ ChunkVector repository (migration tracking)
+### Tests Passing
+- 0/217 tests verified (need running services)
 
-## Notes for Testing
+## Next Steps for Session 4
+1. **Get services running** - Need Docker access or alternative hosting
+2. Run database migrations on Supabase
+3. Verify GET /health returns 200
+4. Test /ingest with simple document content
+5. Test /query with retrieve mode
+6. Test YouTube ingestion with real video
+7. Mark tests as passing in feature_list.json
 
-### Environment Requirements
-1. Run `./init.sh` to start Docker services (Qdrant, Ollama)
-2. Configure `.env` with:
-   - SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
-   - OPENROUTER_API_KEY (for answer generation)
+## Environment Requirements
+To test, the following must be configured:
+
+1. **Docker Services (via docker-compose.rag.yml)**:
+   - Qdrant on port 6333
+   - Ollama on port 11434 with nomic-embed-text model
+   - trading-rag-svc on port 8000
+
+2. **Environment Variables (.env)**:
+   - SUPABASE_URL=https://your-project.supabase.co
+   - SUPABASE_SERVICE_ROLE_KEY=your-key
+   - OPENROUTER_API_KEY=your-key
    - Optional: YOUTUBE_API_KEY (for playlist expansion)
-3. Run database migration against Supabase
 
-### Test Priority
-1. Start with GET /health - verify all dependencies
-2. Test POST /ingest with simple content
-3. Test POST /query with retrieve mode
-4. Test YouTube ingestion with a real video
-5. Test answer generation mode
-
-### Shell Command Limitations
-Note: This session encountered shell command restrictions preventing:
-- Starting Docker containers
-- Running the FastAPI server
-- Browser-based testing
-
-All code has been written but could not be verified with running services.
-
-## Files Changed This Session
-- `app/routers/ingest.py` - Full implementation
-- `app/routers/youtube.py` - Full implementation
-- `app/routers/query.py` - Full implementation
-- `app/routers/reembed.py` - Full implementation
-- `app/main.py` - Connection pool wiring
-
-## Next Steps for Session 3
-1. Start infrastructure services (Qdrant, Ollama)
-2. Run database migrations
-3. Verify GET /health returns 200 with all dependencies
-4. Test /ingest endpoint end-to-end
-5. Mark first tests as passing in feature_list.json
+3. **Database Migration**:
+   - Run migrations/001_initial_schema.sql against Supabase Postgres
 
 ## Estimated Completion
 - Session 1: 15% (foundation)
 - Session 2: 45% (core endpoints implemented)
-- Tests passing: 0/217 (need service running to verify)
+- Session 3: 50% (critical bugs fixed, ready for testing)
+- Tests passing: 0/217 (blocked on service access)
 
 ---
 
-## Session 1 Summary (Previous)
+## Session 2 Summary (Previous)
+- Implemented all core endpoints (ingest, query, youtube, reembed)
+- Wired up database and Qdrant clients in main.py
+- All code written but couldn't verify without services
 
-### What Was Accomplished
-- Created feature_list.json with 200+ test cases
+## Session 1 Summary (Previous)
+- Created feature_list.json with 217 test cases
 - Created init.sh setup script
 - Set up complete FastAPI project structure
 - Implemented all Pydantic schemas
 - Implemented all services (chunker, embedder, extractor, llm)
 - Implemented all repositories (documents, chunks, vectors)
-- Created health endpoint
-- Created stubs for all API endpoints
+- Created health endpoint and API stubs
 
 ### Architecture Decisions
 - Using asyncpg for raw SQL (not ORM) for performance
