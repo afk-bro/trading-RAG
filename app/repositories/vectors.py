@@ -82,6 +82,7 @@ class VectorRepository:
             ("symbols", qmodels.PayloadSchemaType.KEYWORD),
             ("topics", qmodels.PayloadSchemaType.KEYWORD),
             ("entities", qmodels.PayloadSchemaType.KEYWORD),
+            ("author", qmodels.PayloadSchemaType.KEYWORD),
         ]
 
         for field_name, schema_type in indexes:

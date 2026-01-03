@@ -114,6 +114,10 @@ async def reembed_chunks_task(
             # Prepare Qdrant points
             points = []
             for chunk, embedding in zip(batch, embeddings):
+                # Get published_at as unix timestamp if available
+                published_at = chunk.get("published_at")
+                published_at_ts = int(published_at.timestamp()) if published_at else None
+
                 points.append({
                     "id": chunk["id"],
                     "vector": embedding,
@@ -121,10 +125,12 @@ async def reembed_chunks_task(
                         "workspace_id": str(workspace_id),
                         "doc_id": str(chunk["doc_id"]),
                         "source_type": chunk.get("source_type", ""),
+                        "author": chunk.get("author") or chunk.get("channel"),
                         "symbols": chunk.get("symbols", []),
                         "topics": chunk.get("topics", []),
                         "entities": chunk.get("entities", []),
                         "time_start_secs": chunk.get("time_start_secs"),
+                        "published_at": published_at_ts,
                     },
                 })
 

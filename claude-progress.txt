@@ -1,40 +1,37 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 3 Summary
-Date: Session 3 (Bug Fixes)
-Status: Code Reviewed and Critical Bugs Fixed
+## Session 4 Summary
+Date: Session 4 (Additional Bug Fixes)
+Status: Code Reviewed and Additional Bugs Fixed
 
 ## What Was Accomplished This Session
 
 ### 1. Full Code Review
 - Reviewed entire codebase for potential issues
-- Identified two critical bugs in YouTube ingestion flow
+- Identified additional bugs in vector storage and reembed functionality
 
 ### 2. Bug Fixes Applied
 
-#### Bug Fix 1: YouTube Timestamp Chunking
-**Problem:** YouTube videos were being double-chunked, losing timestamp information.
-- The code was chunking with `chunk_timestamped_content()` to preserve timestamps
-- But then passing `pre_chunks=None` to `ingest_pipeline`, causing re-chunking without timestamps
-- This meant all `time_start_secs` and `time_end_secs` values were lost
+#### Bug Fix 3: Missing Author Index in Qdrant
+**Problem:** The `author` field was being used for filtering but had no payload index.
+- Filtering by author (via `filters.authors`) would cause a full scan instead of indexed search
+- This would significantly slow down queries with author filters at scale
 
 **Fix:**
-- Now converts the chunked content to `ChunkInput` objects and passes them as `pre_chunks`
-- Timestamps are preserved through the entire pipeline
-- Citation URLs can now properly include `?t=123` parameters
+- Added `("author", qmodels.PayloadSchemaType.KEYWORD)` to the payload indexes in `_create_indexes()`
+- New collections will now have proper author filtering performance
 
-#### Bug Fix 2: Missing video_id in Documents Table
-**Problem:** YouTube video_id was never being stored in the documents table.
-- The `ingest_pipeline` function didn't accept `video_id` or `playlist_id` parameters
-- This meant the `video_id` column in the documents table was always NULL
-- This would break citation URL building in queries (needs video_id for YouTube links)
+#### Bug Fix 4: Reembed Missing Author and Published_at in Payload
+**Problem:** The reembed task wasn't including `author` or `published_at` in the Qdrant payload.
+- After re-embedding, vectors would be missing critical filter fields
+- Author and date range filtering would fail on reembedded collections
 
 **Fix:**
-- Added `video_id` and `playlist_id` parameters to `ingest_pipeline()` function
-- YouTube router now passes these values to the pipeline
-- Documents table now properly stores YouTube video/playlist IDs
+- Updated `get_by_workspace()` in ChunkRepository to JOIN with documents table
+- Now returns `author`, `channel`, `published_at`, `source_type`, and `video_id`
+- Updated reembed task to include `author` and `published_at` in payload
 
-### 3. Shell Command Limitations (Same as Session 2)
+### 3. Shell Command Limitations (Same as Previous Sessions)
 The environment has restricted shell command access, preventing:
 - Docker container management
 - Starting the FastAPI server
@@ -42,11 +39,9 @@ The environment has restricted shell command access, preventing:
 - Browser-based testing via puppeteer (server not running)
 
 ## Files Changed This Session
-- `app/routers/ingest.py` - Added video_id/playlist_id parameters
-- `app/routers/youtube.py` - Fixed pre_chunks handling, added video_id passing
-
-## Commits Made
-- `dd7d905` - Fix YouTube timestamp chunking and video_id tracking
+- `app/repositories/vectors.py` - Added author index to payload indexes
+- `app/repositories/chunks.py` - Updated get_by_workspace to JOIN with documents
+- `app/routers/reembed.py` - Added author and published_at to payload
 
 ## Implementation Status
 
@@ -54,15 +49,15 @@ The environment has restricted shell command access, preventing:
 - GET /health - Health check with dependency status
 - GET / - Root endpoint with service info
 - POST /ingest - Document ingestion pipeline
-- POST /sources/youtube/ingest - YouTube processing (with bug fixes)
+- POST /sources/youtube/ingest - YouTube processing
 - POST /query - Semantic search and answer generation
-- POST /reembed - Re-embedding job creation
+- POST /reembed - Re-embedding job creation (now with proper payloads)
 - GET /jobs/{job_id} - Job status tracking
 
 ### Tests Passing
 - 0/217 tests verified (need running services)
 
-## Next Steps for Session 4
+## Next Steps for Session 5
 1. **Get services running** - Need Docker access or alternative hosting
 2. Run database migrations on Supabase
 3. Verify GET /health returns 200
@@ -91,8 +86,19 @@ To test, the following must be configured:
 ## Estimated Completion
 - Session 1: 15% (foundation)
 - Session 2: 45% (core endpoints implemented)
-- Session 3: 50% (critical bugs fixed, ready for testing)
+- Session 3: 50% (critical bugs fixed)
+- Session 4: 55% (additional bugs fixed, ready for testing)
 - Tests passing: 0/217 (blocked on service access)
+
+---
+
+## Session 3 Summary (Previous)
+Date: Session 3 (Bug Fixes)
+Status: Code Reviewed and Critical Bugs Fixed
+
+### Bug Fixes Applied
+1. **YouTube Timestamp Chunking** - Fixed double-chunking issue
+2. **Missing video_id in Documents Table** - Added video_id/playlist_id tracking
 
 ---
 

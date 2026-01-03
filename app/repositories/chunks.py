@@ -153,27 +153,36 @@ class ChunkRepository:
         limit: int = 1000,
     ) -> list[dict]:
         """
-        Get chunks for a workspace.
+        Get chunks for a workspace with document metadata.
 
         Args:
             workspace_id: Workspace ID
             doc_ids: Optional list of doc IDs to filter
             limit: Maximum chunks to return
+
+        Returns:
+            List of chunks with document metadata (author, published_at, source_type)
         """
         if doc_ids:
             query = """
-                SELECT * FROM chunks
-                WHERE workspace_id = $1
-                  AND doc_id = ANY($2::uuid[])
-                ORDER BY doc_id, chunk_index
+                SELECT c.*, d.source_url, d.canonical_url, d.title, d.author,
+                       d.channel, d.published_at, d.source_type, d.video_id
+                FROM chunks c
+                JOIN documents d ON c.doc_id = d.id
+                WHERE c.workspace_id = $1
+                  AND c.doc_id = ANY($2::uuid[])
+                ORDER BY c.doc_id, c.chunk_index
                 LIMIT $3
             """
             params = (workspace_id, doc_ids, limit)
         else:
             query = """
-                SELECT * FROM chunks
-                WHERE workspace_id = $1
-                ORDER BY doc_id, chunk_index
+                SELECT c.*, d.source_url, d.canonical_url, d.title, d.author,
+                       d.channel, d.published_at, d.source_type, d.video_id
+                FROM chunks c
+                JOIN documents d ON c.doc_id = d.id
+                WHERE c.workspace_id = $1
+                ORDER BY c.doc_id, c.chunk_index
                 LIMIT $2
             """
             params = (workspace_id, limit)
