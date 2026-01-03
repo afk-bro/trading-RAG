@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/x/dev/automation-infra/trading-RAG/logs/.2fb48e0adf4d9c6131cf196a675d28d2cd374076-audit.json",
+    "files": [
+        {
+            "date": 1767475903874,
+            "name": "/home/x/dev/automation-infra/trading-RAG/logs/mcp-puppeteer-2026-01-03.log",
+            "hash": "f233192af208267d435e2b3f811e9c08e27df063603b127ef4d14da80ac51484"
+        }
+    ],
+    "hashType": "sha256"
+}
