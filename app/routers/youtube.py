@@ -447,6 +447,17 @@ async def ingest_youtube(
     # Build canonical URL
     canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
+    # Convert Chunk dataclass to ChunkInput for pre_chunks parameter
+    from app.schemas import ChunkInput
+    pre_chunks = [
+        ChunkInput(
+            content=chunk.content,
+            time_start_secs=chunk.time_start_secs,
+            time_end_secs=chunk.time_end_secs,
+        )
+        for chunk in chunks
+    ]
+
     # Run through ingestion pipeline
     try:
         response = await ingest_pipeline(
@@ -462,7 +473,9 @@ async def ingest_youtube(
             published_at=published_at,
             language="en",
             duration_secs=metadata.get("duration_secs"),
-            pre_chunks=None,  # We'll handle chunking ourselves with timestamps
+            video_id=video_id,
+            playlist_id=playlist_id,
+            pre_chunks=pre_chunks,  # Pass pre-chunked content with timestamps
             settings=settings,
         )
 

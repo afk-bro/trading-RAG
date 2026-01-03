@@ -51,6 +51,8 @@ async def ingest_pipeline(
     published_at=None,
     language: str = "en",
     duration_secs: Optional[int] = None,
+    video_id: Optional[str] = None,
+    playlist_id: Optional[str] = None,
     pre_chunks: Optional[list] = None,
     settings: Settings = None,
 ) -> IngestResponse:
@@ -139,6 +141,8 @@ async def ingest_pipeline(
         published_at=published_at,
         language=language,
         duration_secs=duration_secs,
+        video_id=video_id,
+        playlist_id=playlist_id,
     )
 
     logger.info(
