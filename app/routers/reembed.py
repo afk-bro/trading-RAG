@@ -118,6 +118,9 @@ async def reembed_chunks_task(
                 published_at = chunk.get("published_at")
                 published_at_ts = int(published_at.timestamp()) if published_at else None
 
+                # Get author/channel - prefer author, fallback to channel
+                author_value = chunk.get("author") or chunk.get("channel")
+
                 points.append({
                     "id": chunk["id"],
                     "vector": embedding,
@@ -125,7 +128,8 @@ async def reembed_chunks_task(
                         "workspace_id": str(workspace_id),
                         "doc_id": str(chunk["doc_id"]),
                         "source_type": chunk.get("source_type", ""),
-                        "author": chunk.get("author") or chunk.get("channel"),
+                        "author": author_value,
+                        "channel": author_value,  # Same as author for consistency
                         "symbols": chunk.get("symbols", []),
                         "topics": chunk.get("topics", []),
                         "entities": chunk.get("entities", []),

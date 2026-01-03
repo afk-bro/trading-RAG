@@ -265,6 +265,7 @@ async def ingest_pipeline(
                 "doc_id": str(doc_id),
                 "source_type": source_type.value,
                 "author": author,
+                "channel": author,  # Same as author for consistency in queries
                 "symbols": chunk_record["symbols"],
                 "topics": chunk_record["topics"],
                 "entities": chunk_record["entities"],
