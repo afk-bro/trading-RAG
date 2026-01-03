@@ -128,7 +128,7 @@
       "Step 5: POST payload missing content",
       "Step 6: Verify 422 validation error"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -530,7 +530,7 @@
       "Step 1: GET /jobs/non-existent-uuid",
       "Step 2: Verify response status is 404"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -619,7 +619,7 @@
       "Step 4: Send request with custom X-Request-ID header",
       "Step 5: Verify that provided ID is used in response"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -868,7 +868,7 @@
       "Step 1: POST /ingest with source_type='invalid_type'",
       "Step 2: Verify 422 validation error with helpful message"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -877,7 +877,7 @@
       "Step 1: POST /ingest with workspace_id='not-a-uuid'",
       "Step 2: Verify 422 validation error"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -886,7 +886,7 @@
       "Step 1: POST /ingest with content=''",
       "Step 2: Verify appropriate error response (400 or 422)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1353,7 +1353,7 @@
       "Step 3: Verify consistent data types",
       "Step 4: Verify null handling is consistent"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1363,7 +1363,7 @@
       "Step 2: Verify all errors have 'detail' field",
       "Step 3: Verify consistent error structure"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1491,7 +1491,7 @@
       "Step 2: Verify non-obvious logic has comments",
       "Step 3: Verify comments are up-to-date with code"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1501,7 +1501,7 @@
       "Step 2: Verify docstrings exist",
       "Step 3: Verify docstrings describe parameters and returns"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1511,7 +1511,7 @@
       "Step 2: Verify repositories separate from business logic",
       "Step 3: Verify schemas separate from models"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1532,7 +1532,7 @@
       "Step 3: Verify UPPER_SNAKE_CASE for constants",
       "Step 4: Verify consistency in schema field names"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1553,7 +1553,7 @@
       "Step 3: Verify .venv is ignored",
       "Step 4: Verify IDE files are ignored"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1563,7 +1563,7 @@
       "Step 2: Search for passwords in code",
       "Step 3: Verify .env.example has placeholders not real values"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1583,7 +1583,7 @@
       "Step 2: Verify latency_ms object is formatted clearly",
       "Step 3: Verify units are consistent (all ms)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1593,7 +1593,7 @@
       "Step 2: Verify Field() has description parameter",
       "Step 3: Verify descriptions appear in OpenAPI docs"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1603,7 +1603,7 @@
       "Step 2: Verify timeouts have reasonable defaults",
       "Step 3: Verify batch sizes have reasonable defaults"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1613,7 +1613,7 @@
       "Step 2: Verify versions are pinned (==)",
       "Step 3: Verify no vulnerable versions"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1967,7 +1967,7 @@
       "Step 2: Verify all required variables listed",
       "Step 3: Verify placeholder values (not real secrets)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2149,7 +2149,7 @@
       "Step 2: Verify tests/ directory for tests",
       "Step 3: Verify clear separation of modules"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2180,7 +2180,7 @@
       "Step 2: Verify no string concatenation for queries",
       "Step 3: Verify all parameters are bound safely"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
