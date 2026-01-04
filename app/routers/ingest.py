@@ -208,7 +208,11 @@ async def ingest_pipeline(
             if chunk.time_start_secs is not None:
                 locator_label = chunker._format_timestamp(chunk.time_start_secs)
             elif chunk.page_start is not None:
-                locator_label = f"p. {chunk.page_start}"
+                # Handle single page vs multi-page spans
+                if chunk.page_end is not None and chunk.page_end != chunk.page_start:
+                    locator_label = f"pp. {chunk.page_start}-{chunk.page_end}"
+                else:
+                    locator_label = f"p. {chunk.page_start}"
 
         chunk_records.append({
             "content": chunk.content,

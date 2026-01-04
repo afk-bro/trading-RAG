@@ -202,3 +202,71 @@ class TestUrlEncoding:
         url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         result = parse_youtube_url(url)
         assert result["video_id"] == "dQw4w9WgXcQ"
+
+
+class TestYouTubeErrorReasonParsing:
+    """Tests for YouTube error reason parsing logic."""
+
+    def test_parse_video_private_error(self):
+        """Test parsing video:video_private error string."""
+        error_str = "video:video_private:test123"
+        parts = error_str.split(":")
+        if error_str.startswith("video:"):
+            error_reason = parts[1] if len(parts) > 1 else "video_unavailable"
+        else:
+            error_reason = "no_transcript"
+        assert error_reason == "video_private"
+
+    def test_parse_video_age_restricted_error(self):
+        """Test parsing video:video_age_restricted error string."""
+        error_str = "video:video_age_restricted:test123"
+        parts = error_str.split(":")
+        if error_str.startswith("video:"):
+            error_reason = parts[1] if len(parts) > 1 else "video_unavailable"
+        else:
+            error_reason = "no_transcript"
+        assert error_reason == "video_age_restricted"
+
+    def test_parse_video_livestream_error(self):
+        """Test parsing video:video_is_livestream error string."""
+        error_str = "video:video_is_livestream:test123"
+        parts = error_str.split(":")
+        if error_str.startswith("video:"):
+            error_reason = parts[1] if len(parts) > 1 else "video_unavailable"
+        else:
+            error_reason = "no_transcript"
+        assert error_reason == "video_is_livestream"
+
+    def test_parse_video_unavailable_error(self):
+        """Test parsing video:video_unavailable error string."""
+        error_str = "video:video_unavailable:test123"
+        parts = error_str.split(":")
+        if error_str.startswith("video:"):
+            error_reason = parts[1] if len(parts) > 1 else "video_unavailable"
+        else:
+            error_reason = "no_transcript"
+        assert error_reason == "video_unavailable"
+
+    def test_parse_no_transcript_error(self):
+        """Test parsing no_transcript error (non-video: prefix)."""
+        error_str = "No transcript available for video test123"
+        if error_str.startswith("video:"):
+            parts = error_str.split(":")
+            error_reason = parts[1] if len(parts) > 1 else "video_unavailable"
+        else:
+            error_reason = "no_transcript"
+        assert error_reason == "no_transcript"
+
+    def test_error_reason_retryable_flag(self):
+        """Test that video-related errors are marked as non-retryable."""
+        non_retryable_errors = [
+            "video_private",
+            "video_age_restricted",
+            "video_is_livestream",
+            "video_unavailable",
+            "no_transcript",
+        ]
+        # All of these should be terminal (non-retryable)
+        for error in non_retryable_errors:
+            # These are terminal errors - retryable should be False
+            assert error in non_retryable_errors

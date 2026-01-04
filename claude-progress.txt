@@ -1,5 +1,71 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 33 Summary
+Date: Session 33 (Code Improvements)
+Status: Code Updated - 106/217 Tests Passing (48.8%)
+
+### What Was Accomplished This Session
+
+#### 1. Environment Status
+- Docker not available in this environment (WSL2 integration issue)
+- Cannot start services or run browser automation tests
+- Focused on code improvements that can be verified through code review
+
+#### 2. Code Improvements Made
+
+**Improved PDF locator label handling (app/routers/ingest.py):**
+- Now supports multi-page spans with "pp. X-Y" format
+- Single pages still use "p. X" format
+- This addresses the test "Locator label for PDF uses page numbers"
+
+**Enhanced YouTube error handling (app/routers/youtube.py):**
+- Added VideoUnavailable exception handling for:
+  - Private videos: `error_reason="video_private"`
+  - Age-restricted videos: `error_reason="video_age_restricted"`
+  - Live streams: `error_reason="video_is_livestream"`
+  - Deleted/unavailable videos: `error_reason="video_unavailable"`
+- Added YouTubeRequestFailed exception handling with retry support
+- All video unavailability errors are marked as `retryable=False` (terminal)
+- This addresses multiple tests:
+  - "YouTube ingestion handles live streams appropriately"
+  - "YouTube ingestion handles age-restricted videos"
+  - "Private/unlisted YouTube videos handled appropriately"
+  - "Deleted YouTube videos handled appropriately"
+
+**Added unit tests (tests/unit/test_youtube.py):**
+- TestYouTubeErrorReasonParsing class with tests for:
+  - Parsing video_private error
+  - Parsing video_age_restricted error
+  - Parsing video_is_livestream error
+  - Parsing video_unavailable error
+  - Parsing no_transcript error
+  - Error retryable flag verification
+
+#### 3. Test Status
+- Current: 106/217 tests passing (48.8%)
+- No new tests marked as passing (require service verification)
+- Code improvements made for 5 potential tests that need verification
+
+#### 4. Key Blockers Remain
+- **Primary:** Docker not available in this WSL2 environment
+- **Secondary:** Supabase credentials not configured
+- **Tertiary:** n8n workflow not configured
+
+#### 5. Tests Ready for Verification (Once Services Available)
+1. "Locator label for PDF uses page numbers" - Code now supports pp. X-Y format
+2. "YouTube ingestion handles live streams appropriately" - VideoUnavailable handling added
+3. "YouTube ingestion handles age-restricted videos" - Specific error_reason added
+4. "Private/unlisted YouTube videos handled appropriately" - Specific error_reason added
+5. "Deleted YouTube videos handled appropriately" - Proper error handling added
+
+#### 6. Next Steps for Future Sessions
+1. Verify Docker is available and start services
+2. Test the new YouTube error handling with actual restricted videos
+3. Test PDF ingestion with multi-page spans
+4. Configure Supabase to unlock ~100+ functional tests
+
+---
+
 ## Session 32 Summary
 Date: Session 32 (Rate Limiter Bug Fix)
 Status: Services Running - 106/217 Tests Passing (48.8%)

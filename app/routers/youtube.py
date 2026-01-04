@@ -155,7 +155,11 @@ async def fetch_transcript(
     from youtube_transcript_api import (
         NoTranscriptFound,
         TranscriptsDisabled,
+        VideoUnavailable,
         YouTubeTranscriptApi,
+    )
+    from youtube_transcript_api._errors import (
+        YouTubeRequestFailed,
     )
 
     delay = initial_delay
@@ -188,6 +192,25 @@ async def fetch_transcript(
                 for segment in transcript_data
             ]
 
+        except VideoUnavailable as e:
+            # Terminal error - video is unavailable (private, deleted, age-restricted)
+            error_msg = str(e).lower()
+            if "private" in error_msg:
+                error_reason = "video_private"
+            elif "age" in error_msg or "restricted" in error_msg:
+                error_reason = "video_age_restricted"
+            elif "live" in error_msg or "stream" in error_msg:
+                error_reason = "video_is_livestream"
+            else:
+                error_reason = "video_unavailable"
+            logger.warning(
+                "Video unavailable",
+                video_id=video_id,
+                error_reason=error_reason,
+                error=str(e),
+            )
+            raise ValueError(f"video:{error_reason}:{video_id}")
+
         except (TranscriptsDisabled, NoTranscriptFound) as e:
             # Terminal error - no transcript available
             logger.warning(
@@ -196,6 +219,20 @@ async def fetch_transcript(
                 error=str(e),
             )
             raise ValueError(f"No transcript available for video {video_id}")
+
+        except YouTubeRequestFailed as e:
+            # This could be a temporary error, allow retry
+            logger.warning(
+                "YouTube API request failed",
+                video_id=video_id,
+                attempt=attempt + 1,
+                error=str(e),
+            )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+            else:
+                raise
 
         except Exception as e:
             logger.warning(
@@ -395,17 +432,26 @@ async def ingest_youtube(
             segments=len(segments),
         )
     except ValueError as e:
-        # Terminal error - no transcript
+        # Terminal error - parse error reason from exception
+        error_str = str(e)
+        if error_str.startswith("video:"):
+            # Parse structured error: video:error_reason:video_id
+            parts = error_str.split(":")
+            error_reason = parts[1] if len(parts) > 1 else "video_unavailable"
+        else:
+            error_reason = "no_transcript"
+
         logger.warning(
-            "No transcript available",
+            "Terminal error for video",
             video_id=video_id,
-            error=str(e),
+            error_reason=error_reason,
+            error=error_str,
         )
         return YouTubeIngestResponse(
             video_id=video_id,
             status="error",
             retryable=False,
-            error_reason="no_transcript",
+            error_reason=error_reason,
         )
     except Exception as e:
         # Retryable error
