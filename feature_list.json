@@ -798,7 +798,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify all normalized to uppercase AAPL"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -808,7 +808,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify common false positives are filtered out"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -828,7 +828,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify topics contains 'earnings'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -838,7 +838,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify topics contains 'macro'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -848,7 +848,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify speaker field is populated where detected"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -859,7 +859,7 @@
       "Step 3: Ingest transcript with low-quality/noisy text",
       "Step 4: Verify quality_score reflects confidence difference"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1843,7 +1843,7 @@
       "Step 2: Verify no SQL execution",
       "Step 3: Verify parameterized queries used"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2028,7 +2028,7 @@
       "Step 2: Ingest document",
       "Step 3: Verify chunk boundaries have appropriate overlap"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

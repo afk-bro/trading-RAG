@@ -69,6 +69,14 @@ class Settings(BaseSettings):
         default=60, description="OpenRouter timeout in seconds"
     )
 
+    # Chunking configuration
+    chunk_max_tokens: int = Field(
+        default=512, description="Maximum tokens per chunk"
+    )
+    chunk_overlap_tokens: int = Field(
+        default=50, description="Overlap tokens between chunks for context preservation"
+    )
+
     # Rate limiting
     rate_limit_enabled: bool = Field(
         default=True, description="Enable rate limiting"

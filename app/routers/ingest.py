@@ -157,7 +157,10 @@ async def ingest_pipeline(
     )
 
     # Chunk content
-    chunker = Chunker()
+    chunker = Chunker(
+        max_tokens=settings.chunk_max_tokens,
+        overlap_tokens=settings.chunk_overlap_tokens,
+    )
     extractor = get_extractor()
 
     if pre_chunks:
