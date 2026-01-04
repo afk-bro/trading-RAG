@@ -1,5 +1,88 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 15 Summary
+Date: Session 15 (Service Verification and Constraint Analysis)
+Status: Services Running - 58/217 Tests Passing (26.7%)
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~35ms)
+  - ollama: "ok" (latency ~29ms)
+  - supabase: "error" (expected - not configured)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- Tested POST /ingest via Swagger - returns 503 with proper error:
+  - Response: {"detail": "Database connection not available"}
+  - Includes X-Request-ID and X-Response-Time-Ms headers
+- Qdrant dashboard confirms collection kb_nomic_embed_text_v1 with correct settings:
+  - Vector dimension: 768
+  - Distance: Cosine
+  - Status: GREEN
+  - Points: 0 (no data ingested yet)
+  - All 8 payload indexes present: workspace_id, source_type, symbols, topics, entities, author, channel, published_at
+
+### 3. Test Assessment
+Analyzed remaining 159 failing tests:
+- **~100+ tests require Supabase database operations** - Main blocker
+- ~10 tests require Docker commands (stop/start services) - Sandbox restriction
+- ~20 tests are n8n workflow tests - n8n not configured
+- Remaining tests require actual data operations
+
+### 4. Code Review - Error Handling
+Reviewed YouTube endpoint error handling in app/routers/youtube.py:
+- `retryable=False` for terminal errors:
+  - No transcript available
+  - Can't extract video ID
+  - Missing YouTube API key for playlists
+- `retryable=True` for transient errors:
+  - Network errors
+  - Playlist expansion failures
+  - Metadata fetch failures
+  - Transcript fetch failures (except "no transcript")
+
+### 5. Tests That Cannot Be Verified Without Dependencies
+- **Test file naming convention**: tests/ directory only has __init__.py files
+- **CHANGELOG maintained**: No CHANGELOG.md file exists
+- **Development dependencies separate**: No requirements-dev.txt or pyproject.toml
+- **Docker image size**: Cannot run docker commands in sandbox
+
+### 6. Test Status
+- Current: 58/217 tests passing (26.7%)
+- No new tests marked as passing this session
+- All remaining tests require either Supabase or Docker access
+
+### 7. Key Blockers
+1. **Primary:** Supabase credentials needed for ~80% of remaining functional tests
+2. **Secondary:** Docker commands restricted in sandbox (connectivity tests)
+3. **Tertiary:** n8n workflow not configured
+
+### 8. Next Steps for Future Sessions
+1. **Configure Supabase** - This will unlock ~100 functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - Symbol/entity/topic extraction verification
+   - YouTube transcript ingestion
+   - Reembed jobs
+3. Consider creating CHANGELOG.md, requirements-dev.txt
+4. Add unit/integration tests to tests/ directory
+
+---
+
 ## Session 14 Summary
 Date: Session 14 (Service Verification and Test Assessment)
 Status: Services Running - 58/217 Tests Passing (26.7%)
@@ -168,96 +251,9 @@ Based on thorough code review:
 
 ---
 
-## Session 12 Summary
-Date: Session 12 (Verification and Constraints Analysis)
-Status: Services Running - 56/217 Tests Passing
+## Tests Now Passing (58 total)
 
-## What Was Accomplished (Session 12)
-
-### 1. Started Services
-- Ran init.sh to start Docker services
-- All services running:
-  - FastAPI service on port 8000 (healthy)
-  - Qdrant on port 6333 (healthy, latency ~35ms)
-  - Ollama on port 11434 (healthy, latency ~25ms)
-  - Supabase still not configured (placeholder credentials causing "Name or service not known" error)
-
-### 2. Verification Tests
-Verified core functionality via browser automation:
-- GET /health returns 200 with all required fields
-- Qdrant dashboard confirms collection kb_nomic_embed_text_v1 with correct settings (768-dim, Cosine)
-- Swagger UI (/docs) shows all 7 endpoint groups with comprehensive documentation
-
-### 3. Constraints Identified
-- **No docker/docker-compose commands allowed** - Cannot test connectivity status by stopping/starting services
-- **Supabase not configured** - Most functional tests require database operations
-- Remaining tests mostly require either:
-  - Docker commands to test service connectivity
-  - Supabase for actual data operations
-
-### 4. Code Analysis
-Reviewed YouTube URL parser code in app/routers/youtube.py:
-- parse_youtube_url() handles all required formats:
-  - youtube.com/watch?v=XXX ✓
-  - youtu.be/XXX ✓
-  - youtube.com/embed/XXX ✓
-  - youtube.com/playlist?list=XXX ✓
-  - youtube.com/watch?v=XXX&list=XXX ✓
-
-### 5. Test Status
-- Marked 1 test as passing via browser automation:
-  - **Health endpoint latency target (<100ms)** - Tested 10 requests, average latency ~39ms, all under 100ms
-- Current: 56/217 tests passing (25.8%)
-- Remaining: 161 tests
-
-### 6. Blockers
-1. **Primary:** Supabase credentials needed for ~80% of remaining functional tests
-2. **Secondary:** Docker commands restricted, limiting connectivity tests
-
----
-
-## Session 11 Summary
-Date: Session 11 (Verification and Code Review)
-Status: Services Running - 55/217 Tests Passing
-
-## What Was Accomplished (Session 11)
-
-### 1. Started Services
-- Ran init.sh to start Docker services
-- All services running:
-  - FastAPI service on port 8000 (healthy)
-  - Qdrant on port 6333 (healthy, latency ~34ms)
-  - Ollama on port 11434 (healthy, latency ~22ms)
-  - Supabase still not configured (placeholder credentials causing "Name or service not known" error)
-
-### 2. Verification Tests
-Verified core functionality via browser automation:
-- GET /health returns 200 with all required fields (status, qdrant, supabase, ollama, active_collection, embed_model, latency_ms, version)
-- GET /docs loads Swagger UI with all 7 endpoint groups documented
-- GET /jobs/{non-existent-id} returns 404 correctly
-- Qdrant dashboard shows collection kb_nomic_embed_text_v1 with correct settings:
-  - Vector dimension: 768
-  - Distance: Cosine
-  - Payload indexes: workspace_id, source_type, author, symbols, topics, entities, published_at (integer), channel
-
-### 3. Code Review Verification
-Reviewed code to verify implementation of tests:
-- main.py: Request middleware logs duration_ms for every request (line 244-248)
-- config.py: All configurable settings with Field descriptions
-- schemas.py: All Pydantic models have proper Field descriptions
-
-### 4. Test Marked as Passing
-Marked 1 additional test as passing based on code review:
-- **Service logs request duration for all endpoints** - main.py middleware logs `duration_ms` for every request
-
-### 5. Test Count Progress
-- Previous session: 54 tests passing
-- This session: 55 tests passing (+1 test)
-- Remaining: 162 tests
-
-## Tests Now Passing (55 total)
-
-### Functional Tests (16)
+### Functional Tests (17)
 1. Health endpoint returns 200 OK with all required fields
 2. Health endpoint latency_ms values are reasonable (<500ms)
 3. POST /ingest validates required fields
@@ -274,47 +270,50 @@ Marked 1 additional test as passing based on code review:
 14. Structured logging includes request context
 15. CORS headers configured for cross-origin requests
 16. Service starts within reasonable time (<30 seconds)
-17. **Service logs request duration for all endpoints (NEW)**
+17. Service logs request duration for all endpoints
+18. Health endpoint latency target (<100ms)
+19. YouTube URL parser handles various URL formats
+20. YouTube playlist URL detection and parsing
 
 ### Style Tests (38)
-18. API responses follow consistent JSON structure
-19. Error responses follow consistent format
-20. OpenAPI/Swagger documentation is complete
-21. FastAPI auto-generated docs are accessible
-22. Log format is JSON structured and consistent
-23. Log levels are appropriate for message types
-24. Configuration uses environment variables consistently
-25. Type hints are used throughout the codebase
-26. Async/await used consistently (no blocking calls)
-27. Docker compose file is well-organized
-28. Dockerfile follows best practices
-29. README documentation is comprehensive
-30. Code comments explain complex logic
-31. Docstrings provided for public functions
-32. Module organization follows clean architecture
-33. Error messages are user-friendly
-34. Consistent naming conventions across codebase
-35. Git commit messages follow conventional format
-36. .gitignore includes appropriate entries
-37. Secrets not committed to repository
-38. Response times displayed in health endpoint
-39. Pydantic models have proper field descriptions
-40. Configuration has sensible defaults
-41. Dependencies pinned in requirements.txt
-42. Environment variables have .env.example template
-43. Project has consistent directory structure
-44. Database queries use parameterized statements
-45. VERSION file or __version__ in package
-46. Service host configurable (0.0.0.0 for Docker)
-47. Healthcheck in Dockerfile works
-48. Import statements organized properly
-49. Exception handling is specific (not bare except)
-50. Context managers used for resource management
-51. Class responsibilities are single-purpose
-52. No hardcoded values in business logic
-53. Python code follows PEP 8 style guidelines
-54. Function/method length is reasonable (<50 lines)
-55. Service port configurable via environment
+21. API responses follow consistent JSON structure
+22. Error responses follow consistent format
+23. OpenAPI/Swagger documentation is complete
+24. FastAPI auto-generated docs are accessible
+25. Log format is JSON structured and consistent
+26. Log levels are appropriate for message types
+27. Configuration uses environment variables consistently
+28. Type hints are used throughout the codebase
+29. Async/await used consistently (no blocking calls)
+30. Docker compose file is well-organized
+31. Dockerfile follows best practices
+32. README documentation is comprehensive
+33. Code comments explain complex logic
+34. Docstrings provided for public functions
+35. Module organization follows clean architecture
+36. Error messages are user-friendly
+37. Consistent naming conventions across codebase
+38. Git commit messages follow conventional format
+39. .gitignore includes appropriate entries
+40. Secrets not committed to repository
+41. Response times displayed in health endpoint
+42. Pydantic models have proper field descriptions
+43. Configuration has sensible defaults
+44. Dependencies pinned in requirements.txt
+45. Environment variables have .env.example template
+46. Project has consistent directory structure
+47. Database queries use parameterized statements
+48. VERSION file or __version__ in package
+49. Service host configurable (0.0.0.0 for Docker)
+50. Healthcheck in Dockerfile works
+51. Import statements organized properly
+52. Exception handling is specific (not bare except)
+53. Context managers used for resource management
+54. Class responsibilities are single-purpose
+55. No hardcoded values in business logic
+56. Python code follows PEP 8 style guidelines
+57. Function/method length is reasonable (<50 lines)
+58. Service port configurable via environment
 
 ## Current Blocker
 **Supabase Connection Required for Functional Tests**
@@ -352,101 +351,9 @@ Without valid Supabase credentials, these functional tests cannot be verified:
 | FastAPI | Running | All endpoints accessible, request timing logged |
 | Supabase | Not Connected | Requires valid credentials |
 
-## Next Steps for Session 13
-1. **Priority 1:** Configure valid Supabase credentials in .env
-2. Run database migrations on Supabase
-3. Test POST /ingest with sample document
-4. Test POST /query with retrieve mode
-5. Test YouTube ingestion with real video
-6. Continue marking functional tests as passing
-7. Note: Docker commands needed for connectivity tests (may need sandbox adjustment)
-
-## Environment Requirements
-
-### Docker Services (via docker-compose.rag.yml):
-- Qdrant on port 6333 (vector store) - RUNNING
-- Ollama on port 11434 with nomic-embed-text model - RUNNING
-- trading-rag-svc on port 8000 - RUNNING
-
-### Environment Variables (.env):
-```
-SUPABASE_URL=https://your-project.supabase.co  # NEEDS REAL VALUE
-SUPABASE_SERVICE_ROLE_KEY=your-key              # NEEDS REAL VALUE
-OPENROUTER_API_KEY=your-key                     # NEEDS REAL VALUE
-```
-
 ## Estimated Completion
-- Session 1: 15% (foundation)
-- Session 2: 45% (core endpoints implemented)
-- Session 3: 50% (critical bugs fixed)
-- Session 4: 55% (additional bugs fixed)
-- Session 5: 55% (comprehensive review)
-- Session 6: 57% (channel field bug fixes)
-- Session 7: 60% (services running, 9 tests verified)
-- Session 8: 68% (code review, 34 tests verified)
-- Session 9: 76% (browser verification, 46 tests verified)
-- Session 10: 82% (continued verification, 54 tests verified)
-- Session 11: 83% (verification, 55 tests verified)
-- Session 12: 84% (constraints analysis + latency test, 56 tests verified)
-- Tests passing: 56/217 (25.8%)
-
-### Tests Blocked By Supabase (~100 tests)
-- All POST /ingest tests
-- All POST /query tests
-- All POST /sources/youtube/ingest tests
-- All POST /reembed tests
-- All database-related tests
-
-### Tests Blocked By Docker Commands (~10 tests)
-- Health endpoint connectivity status tests (requires stopping/starting services)
-
----
-
-## Previous Session Summaries
-
-### Session 10 (Continued Verification and Style Tests)
-- Verified services running
-- Marked 8 additional tests as passing based on browser verification and code review
-- 54 tests passing total
-
-### Session 9 (Browser Verification and Style Tests)
-- Fixed httpx version conflict with supabase package
-- Browser automation testing via Puppeteer
-- Verified Qdrant configuration and collection settings
-- Marked 46 tests as passing
-
-### Session 8 (Code Review and Style Tests)
-- Verified browser-based testing with Swagger UI
-- Performed thorough code review
-- Marked 34 tests as passing
-
-### Session 7 (First Verified Tests)
-- Started all Docker services
-- Verified health endpoint
-- Verified documentation (Swagger UI, OpenAPI)
-- Marked 9 tests as passing
-
-### Session 6 (Bug Fixes - Channel Field)
-- Added channel field to Qdrant payload in ingest.py and reembed.py
-- Added channel payload index to VectorRepository
-
-### Session 5 (Comprehensive Code Review)
-- Reviewed entire codebase
-- Identified architecture strengths and code quality
-
-### Session 4 (Bug Fixes)
-- Added author index to Qdrant payload indexes
-- Fixed reembed to include author and published_at in payload
-
-### Session 3 (Bug Fixes)
-- Fixed YouTube timestamp chunking (double-chunking issue)
-- Added video_id/playlist_id tracking to documents table
-
-### Session 2 (Core Implementation)
-- Implemented all core endpoints (ingest, query, youtube, reembed)
-- Wired up database and Qdrant clients in main.py
-
-### Session 1 (Foundation)
-- Created feature_list.json with 217 test cases
-- Created init.sh setup script
-- Set up complete FastAPI project structure
+- Tests passing: 58/217 (26.7%)
+- Tests blocked by Supabase: ~100
+- Tests blocked by Docker commands: ~10
+- Tests blocked by n8n: ~20
+- Tests blocked by missing files: ~5
