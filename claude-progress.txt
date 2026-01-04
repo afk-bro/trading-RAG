@@ -1,5 +1,89 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 25 Summary
+Date: Session 25 (Service Verification and Blocker Analysis)
+Status: Services Running - 91/217 Tests Passing (41.9%)
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~18-22ms)
+  - ollama: "ok" (latency ~13ms)
+  - supabase: "error" (expected - not configured)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all endpoint groups
+- Response headers verified:
+  - x-request-id: properly generated UUID
+  - x-response-time-ms: ~25ms
+- GET /metrics returns Prometheus format with:
+  - trading_rag_requests_total with endpoint/method/status_code labels
+  - trading_rag_request_latency_seconds histogram
+- Qdrant dashboard verified collection configuration:
+  - Vector dimension: 768, Distance: Cosine
+  - Status: GREEN, Points: 0
+  - All 8 payload indexes confirmed: workspace_id, published_at, source_type, author, channel, topics, entities, symbols
+
+### 3. Code Review Verification
+Reviewed and verified SQL injection prevention:
+- **documents.py**: All queries use parameterized statements ($1, $2, etc.) with asyncpg
+- **chunks.py**: All queries use parameterized statements
+- **vectors.py**: ChunkVectorRepository uses parameterized queries
+- **vectors.py**: VectorRepository uses typed Qdrant SDK methods (FieldCondition, MatchValue, MatchAny) - no string concatenation
+- **query.py**: Filter building uses typed Qdrant SDK methods
+
+Conclusion: SQL injection is prevented through:
+1. Parameterized queries in all asyncpg database operations
+2. Typed SDK methods for Qdrant operations (no raw string queries)
+
+### 4. Tests Analysis
+- Current: 91/217 tests passing (41.9%)
+- No new tests marked as passing this session
+- Reason: All remaining tests require:
+  - Supabase database operations (~100+ tests)
+  - Docker commands (sandbox restricted)
+  - n8n workflow configuration
+  - Actual SQL injection attempt testing (needs database)
+
+### 5. API RESTful Conventions Analysis
+Analyzed API structure for "API endpoints use RESTful conventions" test:
+- `/jobs/{job_id}` - GET - Uses noun "jobs", plural, correct method ✓
+- `/health` - GET - Appropriate method ✓
+- `/ingest` - POST - Action-based endpoint (verb)
+- `/query` - POST - Action-based endpoint (verb)
+- `/reembed` - POST - Action-based endpoint (verb)
+
+The API uses a pragmatic mix of resource-based and action-based endpoints, common in data pipeline APIs. While GET/POST methods are appropriate, not all endpoints use strict RESTful resource nouns. Test remains failing.
+
+### 6. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+- **Secondary:** Docker commands restricted in sandbox (can't verify image size)
+- **Tertiary:** n8n workflow not configured
+
+### 7. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+   - SQL injection prevention (full verification with injection attempts)
+   - All metadata extraction (symbols, entities, topics)
+
+---
+
 ## Session 24 Summary
 Date: Session 24 (Code Review and Test Verification)
 Status: Services Running - 91/217 Tests Passing (41.9%)
