@@ -1730,7 +1730,7 @@
       "Step 2: Record latencies",
       "Step 3: Verify average < 100ms"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
