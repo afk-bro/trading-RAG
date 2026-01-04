@@ -1427,7 +1427,7 @@
       "Step 2: Verify no critical style violations",
       "Step 3: Verify consistent formatting"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2210,7 +2210,7 @@
       "Step 2: Verify most functions < 50 lines",
       "Step 3: Verify long functions have clear structure"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
