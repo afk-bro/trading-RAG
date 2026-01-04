@@ -48,16 +48,24 @@ Reviewed ingest.py endpoint configuration:
 ### 5. Tests Marked as Passing (+1)
 1. **"API returns proper HTTP status codes for all scenarios"** - Verified all 5 status code scenarios
 
-### 6. Test Status
+### 6. Additional Findings
+- **YouTube endpoint issue**: POST /sources/youtube/ingest with invalid URL "string" returns 500 instead of expected 200 with `retryable: false`
+  - Code at lines 365-370 in youtube.py has proper error handling for invalid URLs
+  - Exception appears to be caught by global middleware before reaching that code
+  - This needs investigation in a future session
+- **Metrics endpoint verified**: GET /metrics returns proper Prometheus format with request counts, latency histograms, and per-endpoint breakdown
+- **Qdrant payload indexes confirmed**: All 8 indexes present (workspace_id, source_type, published_at, topics, entities, author, symbols, channel)
+
+### 7. Test Status
 - Previous: 100/217 tests passing (46.1%)
 - Current: 101/217 tests passing (46.5%)
 
-### 7. Key Blockers Remain
+### 8. Key Blockers Remain
 - **Primary:** Supabase credentials needed for ~100+ functional tests
 - **Secondary:** Docker commands restricted in sandbox
 - **Tertiary:** n8n workflow not configured
 
-### 8. Next Steps for Future Sessions
+### 9. Next Steps for Future Sessions
 1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
 2. Tests ready to verify once Supabase is configured:
    - POST /ingest document creation
