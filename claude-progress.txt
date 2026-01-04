@@ -1,10 +1,57 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 12 Summary
+Date: Session 12 (Verification and Constraints Analysis)
+Status: Services Running - 55/217 Tests Passing
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, latency ~35ms)
+  - Ollama on port 11434 (healthy, latency ~25ms)
+  - Supabase still not configured (placeholder credentials causing "Name or service not known" error)
+
+### 2. Verification Tests
+Verified core functionality via browser automation:
+- GET /health returns 200 with all required fields
+- Qdrant dashboard confirms collection kb_nomic_embed_text_v1 with correct settings (768-dim, Cosine)
+- Swagger UI (/docs) shows all 7 endpoint groups with comprehensive documentation
+
+### 3. Constraints Identified
+- **No docker/docker-compose commands allowed** - Cannot test connectivity status by stopping/starting services
+- **Supabase not configured** - Most functional tests require database operations
+- Remaining tests mostly require either:
+  - Docker commands to test service connectivity
+  - Supabase for actual data operations
+
+### 4. Code Analysis
+Reviewed YouTube URL parser code in app/routers/youtube.py:
+- parse_youtube_url() handles all required formats:
+  - youtube.com/watch?v=XXX ✓
+  - youtu.be/XXX ✓
+  - youtube.com/embed/XXX ✓
+  - youtube.com/playlist?list=XXX ✓
+  - youtube.com/watch?v=XXX&list=XXX ✓
+
+### 5. Test Status
+- No new tests marked as passing (constraints prevent full verification)
+- Current: 55/217 tests passing (25.3%)
+- Remaining: 162 tests
+
+### 6. Blockers
+1. **Primary:** Supabase credentials needed for ~80% of remaining functional tests
+2. **Secondary:** Docker commands restricted, limiting connectivity tests
+
+---
+
 ## Session 11 Summary
 Date: Session 11 (Verification and Code Review)
 Status: Services Running - 55/217 Tests Passing
 
-## What Was Accomplished This Session
+## What Was Accomplished (Session 11)
 
 ### 1. Started Services
 - Ran init.sh to start Docker services
@@ -136,13 +183,14 @@ Without valid Supabase credentials, these functional tests cannot be verified:
 | FastAPI | Running | All endpoints accessible, request timing logged |
 | Supabase | Not Connected | Requires valid credentials |
 
-## Next Steps for Session 12
+## Next Steps for Session 13
 1. **Priority 1:** Configure valid Supabase credentials in .env
 2. Run database migrations on Supabase
 3. Test POST /ingest with sample document
 4. Test POST /query with retrieve mode
 5. Test YouTube ingestion with real video
 6. Continue marking functional tests as passing
+7. Note: Docker commands needed for connectivity tests (may need sandbox adjustment)
 
 ## Environment Requirements
 
@@ -170,7 +218,18 @@ OPENROUTER_API_KEY=your-key                     # NEEDS REAL VALUE
 - Session 9: 76% (browser verification, 46 tests verified)
 - Session 10: 82% (continued verification, 54 tests verified)
 - Session 11: 83% (verification, 55 tests verified)
+- Session 12: 83% (constraints analysis, 55 tests verified - blocked on Supabase)
 - Tests passing: 55/217 (25.3%)
+
+### Tests Blocked By Supabase (~100 tests)
+- All POST /ingest tests
+- All POST /query tests
+- All POST /sources/youtube/ingest tests
+- All POST /reembed tests
+- All database-related tests
+
+### Tests Blocked By Docker Commands (~10 tests)
+- Health endpoint connectivity status tests (requires stopping/starting services)
 
 ---
 
