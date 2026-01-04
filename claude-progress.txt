@@ -1,5 +1,92 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 41 Summary
+Date: Session 41 (Service Verification - Blocker Remains)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services (all started successfully)
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials in .env)
+
+#### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~19ms)
+  - ollama: "ok" (latency ~14ms)
+  - supabase: "error" (expected - "[Errno -3] Temporary failure in name resolution")
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups:
+  - Health, Ingestion, YouTube, Query, Re-embed, Jobs, Metrics
+
+#### 3. Qdrant Dashboard Verification
+- Collection: kb_nomic_embed_text_v1
+  - Status: GREEN
+  - Points: 0 (empty - no documents ingested)
+  - Vector config: 768 dimensions, Cosine distance
+  - Segments: 3, Shards: 1
+
+#### 4. Query Endpoint Testing
+- Tested POST /query via Swagger UI
+- Response: **503 Service Unavailable** - `{"detail": "Database connection not available"}`
+- Confirms Supabase is required for query operations
+
+#### 5. Code Review
+- Reviewed ingest.py (lines 210-215): PDF locator labels correctly implemented
+  - Single page: "p. X"
+  - Multi-page spans: "pp. X-Y"
+- Reviewed query.py (line 232): Citation URL fallback uses `source_url or canonical_url`
+- These implementations are correct but require Supabase to test end-to-end
+
+#### 6. Test Status Analysis
+- Current: 113/217 tests passing (52%)
+- No new tests marked as passing this session
+- Reason: ALL remaining tests require one of:
+  - Supabase database (~100 tests) - PRIMARY BLOCKER
+  - Docker container management (~4 tests) - sandbox restricted
+  - n8n workflow configuration (~7 tests)
+  - Intentional design decision (1 test - RESTful conventions)
+
+#### 7. Key Blocker Analysis (Unchanged)
+- **PRIMARY: Supabase credentials not configured**
+  - .env file still has placeholder values:
+    - `SUPABASE_URL=https://your-project.supabase.co`
+    - `SUPABASE_SERVICE_ROLE_KEY=your-service-role-key`
+  - All database-dependent tests blocked
+- **SECONDARY: Docker commands restricted in sandbox**
+  - Cannot run `docker` commands directly
+  - Cannot test recovery scenarios or image size
+- **TERTIARY: n8n workflow not configured**
+  - All n8n-related tests blocked
+
+#### 8. Services Health Summary
+All local services are functioning correctly:
+- FastAPI → Qdrant: OK (~19ms)
+- FastAPI → Ollama: OK (~14ms)
+- FastAPI → Supabase: ERROR (not configured)
+
+#### 9. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock ~100 functional tests
+   - Need valid SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env
+   - Run database migrations
+2. Once Supabase is configured, test:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest with real video
+   - POST /reembed model migration
+   - Workspace isolation tests
+3. Consider n8n workflow setup if time permits
+
+---
+
 ## Session 40 Summary
 Date: Session 40 (Service Verification - Blocker Remains)
 Status: Services Running - 113/217 Tests Passing (52%)
