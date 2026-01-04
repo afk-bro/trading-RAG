@@ -7,17 +7,12 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.config import Settings, get_settings
 from app.schemas import IngestRequest, IngestResponse, SourceType
 from app.services.chunker import Chunk, Chunker
 from app.services.embedder import get_embedder
 from app.services.extractor import get_extractor
-
-# Rate limiter for this router
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -366,9 +361,7 @@ async def ingest_pipeline(
         500: {"description": "Internal server error"},
     },
 )
-@limiter.limit("30/minute")
 async def ingest_document(
-    http_request: Request,
     request: IngestRequest,
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:

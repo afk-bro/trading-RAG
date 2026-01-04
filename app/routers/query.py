@@ -4,16 +4,11 @@ from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.config import Settings, get_settings
 from app.schemas import ChunkResult, QueryMode, QueryRequest, QueryResponse
 from app.services.embedder import get_embedder
 from app.services.llm import get_llm
-
-# Rate limiter for this router
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -74,9 +69,7 @@ def build_citation_url(
         500: {"description": "Internal server error"},
     },
 )
-@limiter.limit("60/minute")
 async def query(
-    http_request: Request,
     request: QueryRequest,
     settings: Settings = Depends(get_settings),
 ) -> QueryResponse:
