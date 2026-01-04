@@ -1,6 +1,7 @@
 """Document ingestion endpoint."""
 
 import hashlib
+import time
 from typing import Optional
 from uuid import UUID
 
@@ -157,9 +158,11 @@ async def ingest_pipeline(
     )
 
     # Chunk content
+    chunk_start = time.perf_counter()
     chunker = Chunker(
         max_tokens=settings.chunk_max_tokens,
         overlap_tokens=settings.chunk_overlap_tokens,
+        encoding_name=settings.chunk_tokenizer_encoding,
     )
     extractor = get_extractor()
 
@@ -181,6 +184,14 @@ async def ingest_pipeline(
     else:
         # Chunk the content
         chunks = chunker.chunk_text(content)
+
+    chunk_duration_ms = (time.perf_counter() - chunk_start) * 1000
+    logger.info(
+        "Chunking completed",
+        doc_id=str(doc_id),
+        chunk_count=len(chunks) if chunks else 0,
+        chunking_duration_ms=round(chunk_duration_ms, 2),
+    )
 
     if not chunks:
         logger.warning("No chunks created", doc_id=str(doc_id))
@@ -223,30 +234,36 @@ async def ingest_pipeline(
         })
 
     # Store chunks in database
+    db_write_start = time.perf_counter()
     chunk_ids = await chunk_repo.create_batch(
         doc_id=doc_id,
         workspace_id=workspace_id,
         chunks=chunk_records,
     )
+    db_write_duration_ms = (time.perf_counter() - db_write_start) * 1000
 
     logger.info(
-        "Created chunks",
+        "Database write completed",
         doc_id=str(doc_id),
-        count=len(chunk_ids),
+        chunk_count=len(chunk_ids),
+        database_write_duration_ms=round(db_write_duration_ms, 2),
     )
 
     # Generate embeddings
+    embed_start = time.perf_counter()
     embedder = get_embedder()
 
     try:
         texts = [c["content"] for c in chunk_records]
         embeddings = await embedder.embed_batch(texts)
+        embed_duration_ms = (time.perf_counter() - embed_start) * 1000
 
         logger.info(
-            "Generated embeddings",
+            "Embedding completed",
             doc_id=str(doc_id),
             count=len(embeddings),
             dimension=len(embeddings[0]) if embeddings else 0,
+            embedding_duration_ms=round(embed_duration_ms, 2),
         )
     except Exception as e:
         logger.error(

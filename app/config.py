@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     chunk_overlap_tokens: int = Field(
         default=50, description="Overlap tokens between chunks for context preservation"
     )
+    chunk_tokenizer_encoding: str = Field(
+        default="cl100k_base",
+        description="Tiktoken encoding name for tokenization (e.g., cl100k_base, p50k_base, r50k_base)"
+    )
 
     # Rate limiting
     rate_limit_enabled: bool = Field(

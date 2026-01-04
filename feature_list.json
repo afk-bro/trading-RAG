@@ -1099,7 +1099,7 @@
       "Step 4: Verify embedding duration logged",
       "Step 5: Verify database write duration logged"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2039,7 +2039,7 @@
       "Step 3: Configure different tokenizer",
       "Step 4: Verify token counts change appropriately"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
