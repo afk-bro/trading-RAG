@@ -632,7 +632,7 @@
       "Step 5: Verify logs include timestamp",
       "Step 6: Verify logs include level"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1385,7 +1385,7 @@
       "Step 3: Navigate to /redoc",
       "Step 4: Verify ReDoc loads"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1688,7 +1688,7 @@
       "Step 2: Verify startup completes in <30 seconds",
       "Step 3: Verify /health returns OK immediately after startup"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1801,7 +1801,7 @@
       "Step 2: Verify Access-Control-Allow-Origin header",
       "Step 3: Verify Access-Control-Allow-Methods header"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1928,7 +1928,7 @@
       "Step 2: Start service",
       "Step 3: Verify service listens on port 8080"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1947,7 +1947,7 @@
       "Step 2: Run container",
       "Step 3: Check docker ps shows healthy status"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
