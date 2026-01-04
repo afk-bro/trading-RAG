@@ -140,7 +140,7 @@
       "Step 4: Verify each chunk's token_count is <= 512 (with reasonable tolerance)",
       "Step 5: Verify chunks don't have excessive overlap"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -712,7 +712,7 @@
       "Step 4: Verify page_end is stored",
       "Step 5: Verify locator_label contains 'p. X' format"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1180,7 +1180,7 @@
       "Step 3: Query Qdrant for points",
       "Step 4: Verify point IDs match chunk UUIDs 1:1"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
