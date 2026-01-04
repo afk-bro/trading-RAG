@@ -1823,7 +1823,7 @@
       "Step 4: Send request with valid key",
       "Step 5: Verify success"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

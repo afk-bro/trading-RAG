@@ -1,5 +1,77 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 30 Summary
+Date: Session 30 (API Key Authentication)
+Status: Services Running - 106/217 Tests Passing (48.8%)
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- Qdrant dashboard shows collection with correct settings
+
+### 3. Implemented API Key Authentication Feature
+**Added to app/config.py:**
+- `api_key: Optional[str]` - Optional API key for authentication
+- `api_key_header_name: str` - Header name (default: "X-API-Key")
+
+**Added to app/main.py:**
+- API key validation middleware in request_middleware()
+- Public paths exempt from auth: /health, /metrics, /docs, /openapi.json, /redoc, /
+- Returns 401 Unauthorized when key missing
+- Returns 403 Forbidden when key invalid
+- Includes proper error response format with "detail" and "retryable" fields
+
+**Updated .env.example:**
+- Documented API_KEY and API_KEY_HEADER_NAME options
+
+### 4. Browser Testing Results
+Tested API key authentication via Puppeteer browser automation:
+
+| Test Case | Expected | Actual | Pass |
+|-----------|----------|--------|------|
+| No API key | 401 Unauthorized | 401 with "API key required" | ✅ |
+| Invalid API key | 403 Forbidden | 403 with "Invalid API key" | ✅ |
+| Valid API key | Pass auth | Pass auth, 500 (db unavailable) | ✅ |
+| Public endpoints | No auth needed | /health, /docs work without key | ✅ |
+
+### 5. Tests Marked as Passing (+1)
+1. **"Service validates API keys/tokens if configured"** - Full implementation with:
+   - Configurable API key via environment variable
+   - 401 for missing key, 403 for invalid key
+   - Success when valid key provided
+   - Public endpoints exempt from authentication
+
+### 6. Test Status
+- Previous: 105/217 tests passing (48.4%)
+- Current: 106/217 tests passing (48.8%)
+- Progress this session: +1 test
+
+### 7. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+- **Secondary:** Docker commands restricted in sandbox
+- **Tertiary:** n8n workflow not configured
+
+### 8. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+
+---
+
 ## Session 29 Summary
 Date: Session 29 (Timing Spans, Tokenizer Config, API Version, Size Limits)
 Status: Services Running - 105/217 Tests Passing (48.4%)

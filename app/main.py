@@ -223,7 +223,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_middleware(request: Request, call_next):
-    """Add request ID, timing, and size limits to all requests."""
+    """Add request ID, timing, size limits, and API key validation to all requests."""
     # Get or generate request ID
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
@@ -234,6 +234,44 @@ async def request_middleware(request: Request, call_next):
         method=request.method,
         path=request.url.path,
     )
+
+    # Check API key authentication (if configured)
+    # Skip auth for health, metrics, docs, and openapi endpoints
+    public_paths = {"/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/"}
+    if settings.api_key and request.url.path not in public_paths:
+        provided_key = request.headers.get(settings.api_key_header_name)
+        if not provided_key:
+            logger.warning(
+                "API key missing",
+                path=request.url.path,
+            )
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": f"API key required. Provide key in {settings.api_key_header_name} header",
+                    "retryable": False,
+                },
+                headers={
+                    "X-Request-ID": request_id,
+                    "X-API-Version": __version__,
+                },
+            )
+        if provided_key != settings.api_key:
+            logger.warning(
+                "Invalid API key",
+                path=request.url.path,
+            )
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "Invalid API key",
+                    "retryable": False,
+                },
+                headers={
+                    "X-Request-ID": request_id,
+                    "X-API-Version": __version__,
+                },
+            )
 
     # Check request body size limit
     content_length = request.headers.get("content-length")

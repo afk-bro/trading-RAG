@@ -98,6 +98,16 @@ class Settings(BaseSettings):
         description="Maximum request body size in bytes"
     )
 
+    # API Key Authentication
+    api_key: Optional[str] = Field(
+        default=None,
+        description="Optional API key for authentication. If set, all requests must include X-API-Key header"
+    )
+    api_key_header_name: str = Field(
+        default="X-API-Key",
+        description="Header name for API key"
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""
