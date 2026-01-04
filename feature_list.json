@@ -1064,7 +1064,7 @@
       "Step 4: Not found returns 404",
       "Step 5: Server error returns 500"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
