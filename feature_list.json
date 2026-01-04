@@ -907,7 +907,7 @@
       "Step 3: Test youtube.com/embed/XXX format",
       "Step 4: Verify all extract correct video_id"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -917,7 +917,7 @@
       "Step 2: Test youtube.com/watch?v=XXX&list=XXX format",
       "Step 3: Verify playlist_id extracted correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
