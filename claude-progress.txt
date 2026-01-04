@@ -1,8 +1,8 @@
 # Trading RAG Pipeline - Progress Notes
 
 ## Session 21 Summary
-Date: Session 21 (Rate Limiting Implementation)
-Status: Services Running - 74/217 Tests Passing (34.1%)
+Date: Session 21 (Rate Limiting and Configuration Verification)
+Status: Services Running - 78/217 Tests Passing (35.9%)
 
 ## What Was Accomplished This Session
 
@@ -47,13 +47,17 @@ Added slowapi-based rate limiting to the service:
   - /query: 60 requests/minute
   - /sources/youtube/ingest: 20 requests/minute
 
-### 5. Tests Marked as Passing (+1)
+### 5. Tests Marked as Passing (+5)
 1. **"Rate limiting prevents abuse"** - Rate limiting implemented with slowapi, 429 response documented in OpenAPI
+2. **"Embedding batch size is configurable"** - embed_batch_size in config.py, used in embedder.py
+3. **"Qdrant search timeout prevents hanging"** - qdrant_timeout in config.py, used in main.py and health.py
+4. **"OpenRouter API timeout configured"** - openrouter_timeout in config.py, used in llm.py
+5. **"Connection pool size configurable"** - db_pool_min_size/db_pool_max_size in config.py, used in main.py
 
 ### 6. Test Status
 - Previous: 73/217 tests passing (33.6%)
-- Current: 74/217 tests passing (34.1%)
-- Remaining: 143 tests
+- Current: 78/217 tests passing (35.9%)
+- Remaining: 139 tests
 
 ### 7. Key Blockers Remain
 - **Primary:** Supabase credentials needed for ~100+ functional tests

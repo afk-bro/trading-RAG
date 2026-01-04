@@ -1986,7 +1986,7 @@
       "Step 2: Ingest large document",
       "Step 3: Verify embeddings processed in batches of 50"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2007,7 +2007,7 @@
       "Step 2: Simulate slow Qdrant response",
       "Step 3: Verify service doesn't hang indefinitely"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2018,7 +2018,7 @@
       "Step 3: Verify timeout error returned",
       "Step 4: Verify retryable flag is true"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2359,7 +2359,7 @@
       "Step 2: Start service",
       "Step 3: Verify pool respects configuration"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
