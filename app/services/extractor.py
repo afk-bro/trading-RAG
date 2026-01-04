@@ -66,6 +66,28 @@ ENTITY_KEYWORDS = {
     "congress": "US Congress",
     "sec": "SEC",
     "cftc": "CFTC",
+    # Major companies
+    "apple inc": "Apple Inc.",
+    "apple inc.": "Apple Inc.",
+    "microsoft corporation": "Microsoft Corporation",
+    "microsoft corp": "Microsoft Corporation",
+    "alphabet inc": "Alphabet Inc.",
+    "amazon.com": "Amazon.com Inc.",
+    "amazon inc": "Amazon.com Inc.",
+    "meta platforms": "Meta Platforms Inc.",
+    "nvidia corporation": "NVIDIA Corporation",
+    "nvidia corp": "NVIDIA Corporation",
+    "tesla inc": "Tesla Inc.",
+    "tesla, inc": "Tesla Inc.",
+    "berkshire hathaway": "Berkshire Hathaway",
+    "jpmorgan chase": "JPMorgan Chase",
+    "jp morgan": "JPMorgan Chase",
+    "goldman sachs": "Goldman Sachs",
+    "morgan stanley": "Morgan Stanley",
+    "bank of america": "Bank of America",
+    "wells fargo": "Wells Fargo",
+    "citigroup": "Citigroup",
+    "blackrock": "BlackRock",
 }
 
 # Topic keywords

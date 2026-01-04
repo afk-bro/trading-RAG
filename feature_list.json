@@ -818,7 +818,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify entities array contains company names"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
