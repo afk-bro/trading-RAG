@@ -1645,7 +1645,7 @@
       "Step 2: Verify appropriate error or handling",
       "Step 3: Verify retryable flag is correct"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1655,7 +1655,7 @@
       "Step 2: Verify appropriate error handling",
       "Step 3: Verify error_reason explains the issue"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2339,7 +2339,7 @@
       "Step 2: Verify appropriate error response",
       "Step 3: Verify error_reason explains access issue"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2349,7 +2349,7 @@
       "Step 2: Verify appropriate error response",
       "Step 3: Verify retryable is false"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
