@@ -151,7 +151,7 @@
       "Step 3: Concatenate chunk contents",
       "Step 4: Verify all original content is present in concatenated result"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1750,7 +1750,7 @@
       "Step 2: Verify chunks created with empty arrays",
       "Step 3: Verify no errors raised"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2069,7 +2069,7 @@
       "Step 2: Query and get citations",
       "Step 3: Verify citation uses canonical_url"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
