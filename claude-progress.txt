@@ -41,10 +41,21 @@ Status: Code Updated - 106/217 Tests Passing (48.8%)
   - Parsing no_transcript error
   - Error retryable flag verification
 
+**Added unit tests for content integrity (tests/unit/test_chunker.py):**
+- TestChunkingContentIntegrity class with tests for:
+  - Short content fully preserved
+  - Long content all words present
+  - Timestamped content all segments preserved
+  - Unicode content preserved
+  - Special characters preserved
+
+**Added unit tests for edge cases (tests/unit/test_extractor.py):**
+- test_extract_no_detectable_entities for empty array handling
+
 #### 3. Test Status
 - Current: 106/217 tests passing (48.8%)
 - No new tests marked as passing (require service verification)
-- Code improvements made for 5 potential tests that need verification
+- Code improvements made for 9 potential tests that need verification
 
 #### 4. Key Blockers Remain
 - **Primary:** Docker not available in this WSL2 environment
@@ -53,16 +64,21 @@ Status: Code Updated - 106/217 Tests Passing (48.8%)
 
 #### 5. Tests Ready for Verification (Once Services Available)
 1. "Locator label for PDF uses page numbers" - Code now supports pp. X-Y format
-2. "YouTube ingestion handles live streams appropriately" - VideoUnavailable handling added
-3. "YouTube ingestion handles age-restricted videos" - Specific error_reason added
-4. "Private/unlisted YouTube videos handled appropriately" - Specific error_reason added
-5. "Deleted YouTube videos handled appropriately" - Proper error handling added
+2. "Multi-page PDF chunk spans tracked correctly" - Using pp. X-Y format
+3. "YouTube ingestion handles live streams appropriately" - VideoUnavailable handling added
+4. "YouTube ingestion handles age-restricted videos" - Specific error_reason added
+5. "Private/unlisted YouTube videos handled appropriately" - Specific error_reason added
+6. "Deleted YouTube videos handled appropriately" - Proper error handling added
+7. "Chunking preserves content integrity" - Unit tests added to verify
+8. "Metadata extraction handles content with no detectable entities" - Unit test added
+9. "Citation URLs use canonical_url when source_url unavailable" - Already implemented
 
 #### 6. Next Steps for Future Sessions
 1. Verify Docker is available and start services
-2. Test the new YouTube error handling with actual restricted videos
-3. Test PDF ingestion with multi-page spans
-4. Configure Supabase to unlock ~100+ functional tests
+2. Run unit tests to verify new test cases pass
+3. Test the new YouTube error handling with actual restricted videos
+4. Test PDF ingestion with multi-page spans
+5. Configure Supabase to unlock ~100+ functional tests
 
 ---
 
