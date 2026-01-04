@@ -8,12 +8,17 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.config import Settings, get_settings
 from app.routers.ingest import compute_content_hash, ingest_pipeline
 from app.schemas import SourceType, YouTubeIngestRequest, YouTubeIngestResponse
 from app.services.chunker import Chunker, normalize_transcript
+
+# Rate limiter for this router
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -263,10 +268,13 @@ async def fetch_playlist_videos(
     responses={
         200: {"description": "Video ingested or playlist expanded"},
         422: {"description": "Validation error"},
+        429: {"description": "Rate limit exceeded"},
         500: {"description": "Internal server error"},
     },
 )
+@limiter.limit("20/minute")
 async def ingest_youtube(
+    http_request: Request,
     request: YouTubeIngestRequest,
     settings: Settings = Depends(get_settings),
 ) -> YouTubeIngestResponse:

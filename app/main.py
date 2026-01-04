@@ -11,6 +11,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from qdrant_client import AsyncQdrantClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app import __version__
 from app.config import get_settings
@@ -35,6 +38,14 @@ structlog.configure(
 )
 
 logger = structlog.get_logger(__name__)
+
+# Initialize rate limiter
+settings = get_settings()
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[f"{settings.rate_limit_requests_per_minute}/minute"],
+    enabled=settings.rate_limit_enabled,
+)
 
 # Global clients
 _db_pool = None
@@ -195,6 +206,10 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+# Add rate limiter state and exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add CORS middleware
 app.add_middleware(

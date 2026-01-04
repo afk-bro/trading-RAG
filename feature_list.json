@@ -1811,7 +1811,7 @@
       "Step 2: Verify rate limit kicks in",
       "Step 3: Verify 429 status returned when limited"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

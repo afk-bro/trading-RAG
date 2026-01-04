@@ -69,6 +69,17 @@ class Settings(BaseSettings):
         default=60, description="OpenRouter timeout in seconds"
     )
 
+    # Rate limiting
+    rate_limit_enabled: bool = Field(
+        default=True, description="Enable rate limiting"
+    )
+    rate_limit_requests_per_minute: int = Field(
+        default=60, description="Maximum requests per minute per IP"
+    )
+    rate_limit_burst: int = Field(
+        default=10, description="Burst limit for rate limiting"
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""
