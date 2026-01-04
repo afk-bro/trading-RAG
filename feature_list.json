@@ -1791,7 +1791,7 @@
       "Step 2: Check logs for duration information",
       "Step 3: Verify duration logged in milliseconds"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

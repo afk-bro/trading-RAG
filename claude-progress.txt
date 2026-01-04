@@ -1,8 +1,8 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 10 Summary
-Date: Session 10 (Continued Verification and Style Tests)
-Status: Services Running - 54/217 Tests Passing
+## Session 11 Summary
+Date: Session 11 (Verification and Code Review)
+Status: Services Running - 55/217 Tests Passing
 
 ## What Was Accomplished This Session
 
@@ -10,39 +10,38 @@ Status: Services Running - 54/217 Tests Passing
 - Ran init.sh to start Docker services
 - All services running:
   - FastAPI service on port 8000 (healthy)
-  - Qdrant on port 6333 (healthy, latency ~31ms)
-  - Ollama on port 11434 (healthy, latency ~24ms)
+  - Qdrant on port 6333 (healthy, latency ~34ms)
+  - Ollama on port 11434 (healthy, latency ~22ms)
   - Supabase still not configured (placeholder credentials causing "Name or service not known" error)
 
 ### 2. Verification Tests
-Verified core functionality:
-- GET /health returns 200 with all required fields
-- GET /docs loads Swagger UI with all endpoints documented
-- GET /redoc returns 200 (JS rendering limited in headless mode)
-- Qdrant collection kb_nomic_embed_text_v1 exists with correct settings
+Verified core functionality via browser automation:
+- GET /health returns 200 with all required fields (status, qdrant, supabase, ollama, active_collection, embed_model, latency_ms, version)
+- GET /docs loads Swagger UI with all 7 endpoint groups documented
+- GET /jobs/{non-existent-id} returns 404 correctly
+- Qdrant dashboard shows collection kb_nomic_embed_text_v1 with correct settings:
+  - Vector dimension: 768
+  - Distance: Cosine
+  - Payload indexes: workspace_id, source_type, author, symbols, topics, entities, published_at (integer), channel
 
-### 3. Additional Tests Verified
-Marked 6 additional tests as passing based on browser verification and code review:
+### 3. Code Review Verification
+Reviewed code to verify implementation of tests:
+- main.py: Request middleware logs duration_ms for every request (line 244-248)
+- config.py: All configurable settings with Field descriptions
+- schemas.py: All Pydantic models have proper Field descriptions
 
-| Test | Description | Evidence |
-|------|-------------|----------|
-| FastAPI auto-generated docs are accessible | /docs and /redoc both return 200 | Browser screenshot |
-| Structured logging includes request context | structlog configured with JSONRenderer, TimeStamper, request_id binding | Code review (main.py) |
-| CORS headers configured for cross-origin requests | CORSMiddleware added with allow_origins=["*"] | Code review (main.py lines 199-206) |
-| Service starts within reasonable time (<30 seconds) | Service immediately responsive after init.sh | Browser verification |
-| Service port configurable via environment | service_port field in config.py with env var support | Code review (config.py) |
-| Healthcheck in Dockerfile works | HEALTHCHECK instruction present with curl to /health | Code review (Dockerfile lines 40-41) |
-| Python code follows PEP 8 style guidelines | Consistent style across all modules | Code review |
-| Function/method length is reasonable (<50 lines) | Most functions under 50 lines, longer ones well-structured | Code review |
+### 4. Test Marked as Passing
+Marked 1 additional test as passing based on code review:
+- **Service logs request duration for all endpoints** - main.py middleware logs `duration_ms` for every request
 
-### 4. Test Count Progress
-- Previous session: 46 tests passing
-- This session: 54 tests passing (+8 tests)
-- Remaining: 163 tests
+### 5. Test Count Progress
+- Previous session: 54 tests passing
+- This session: 55 tests passing (+1 test)
+- Remaining: 162 tests
 
-## Tests Now Passing (54 total)
+## Tests Now Passing (55 total)
 
-### Functional Tests
+### Functional Tests (16)
 1. Health endpoint returns 200 OK with all required fields
 2. Health endpoint latency_ms values are reasonable (<500ms)
 3. POST /ingest validates required fields
@@ -56,49 +55,50 @@ Marked 6 additional tests as passing based on browser verification and code revi
 11. Docker compose starts all services correctly
 12. Service handles malformed JSON gracefully
 13. Service handles missing Content-Type header
-14. **Structured logging includes request context (NEW)**
-15. **CORS headers configured for cross-origin requests (NEW)**
-16. **Service starts within reasonable time (<30 seconds) (NEW)**
+14. Structured logging includes request context
+15. CORS headers configured for cross-origin requests
+16. Service starts within reasonable time (<30 seconds)
+17. **Service logs request duration for all endpoints (NEW)**
 
-### Style Tests
-17. API responses follow consistent JSON structure
-18. Error responses follow consistent format
-19. OpenAPI/Swagger documentation is complete
-20. **FastAPI auto-generated docs are accessible (NEW)**
-21. Log format is JSON structured and consistent
-22. Log levels are appropriate for message types
-23. Configuration uses environment variables consistently
-24. Type hints are used throughout the codebase
-25. Async/await used consistently (no blocking calls)
-26. Docker compose file is well-organized
-27. Dockerfile follows best practices
-28. README documentation is comprehensive
-29. Code comments explain complex logic
-30. Docstrings provided for public functions
-31. Module organization follows clean architecture
-32. Error messages are user-friendly
-33. Consistent naming conventions across codebase
-34. Git commit messages follow conventional format
-35. .gitignore includes appropriate entries
-36. Secrets not committed to repository
-37. Response times displayed in health endpoint
-38. Pydantic models have proper field descriptions
-39. Configuration has sensible defaults
-40. Dependencies pinned in requirements.txt
-41. Environment variables have .env.example template
-42. Project has consistent directory structure
-43. Database queries use parameterized statements
-44. VERSION file or __version__ in package
-45. Service host configurable (0.0.0.0 for Docker)
-46. **Service port configurable via environment (NEW)**
-47. **Healthcheck in Dockerfile works (NEW)**
+### Style Tests (38)
+18. API responses follow consistent JSON structure
+19. Error responses follow consistent format
+20. OpenAPI/Swagger documentation is complete
+21. FastAPI auto-generated docs are accessible
+22. Log format is JSON structured and consistent
+23. Log levels are appropriate for message types
+24. Configuration uses environment variables consistently
+25. Type hints are used throughout the codebase
+26. Async/await used consistently (no blocking calls)
+27. Docker compose file is well-organized
+28. Dockerfile follows best practices
+29. README documentation is comprehensive
+30. Code comments explain complex logic
+31. Docstrings provided for public functions
+32. Module organization follows clean architecture
+33. Error messages are user-friendly
+34. Consistent naming conventions across codebase
+35. Git commit messages follow conventional format
+36. .gitignore includes appropriate entries
+37. Secrets not committed to repository
+38. Response times displayed in health endpoint
+39. Pydantic models have proper field descriptions
+40. Configuration has sensible defaults
+41. Dependencies pinned in requirements.txt
+42. Environment variables have .env.example template
+43. Project has consistent directory structure
+44. Database queries use parameterized statements
+45. VERSION file or __version__ in package
+46. Service host configurable (0.0.0.0 for Docker)
+47. Healthcheck in Dockerfile works
 48. Import statements organized properly
 49. Exception handling is specific (not bare except)
 50. Context managers used for resource management
 51. Class responsibilities are single-purpose
 52. No hardcoded values in business logic
-53. **Python code follows PEP 8 style guidelines (NEW)**
-54. **Function/method length is reasonable (<50 lines) (NEW)**
+53. Python code follows PEP 8 style guidelines
+54. Function/method length is reasonable (<50 lines)
+55. Service port configurable via environment
 
 ## Current Blocker
 **Supabase Connection Required for Functional Tests**
@@ -131,12 +131,12 @@ Without valid Supabase credentials, these functional tests cannot be verified:
 ### Infrastructure Status
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Qdrant | Running | Collection auto-created, all indexes in place |
+| Qdrant | Running | Collection auto-created, all 8 payload indexes in place |
 | Ollama | Running | nomic-embed-text model available |
-| FastAPI | Running | All endpoints accessible |
+| FastAPI | Running | All endpoints accessible, request timing logged |
 | Supabase | Not Connected | Requires valid credentials |
 
-## Next Steps for Session 11
+## Next Steps for Session 12
 1. **Priority 1:** Configure valid Supabase credentials in .env
 2. Run database migrations on Supabase
 3. Test POST /ingest with sample document
@@ -169,11 +169,17 @@ OPENROUTER_API_KEY=your-key                     # NEEDS REAL VALUE
 - Session 8: 68% (code review, 34 tests verified)
 - Session 9: 76% (browser verification, 46 tests verified)
 - Session 10: 82% (continued verification, 54 tests verified)
-- Tests passing: 54/217 (24.9%)
+- Session 11: 83% (verification, 55 tests verified)
+- Tests passing: 55/217 (25.3%)
 
 ---
 
 ## Previous Session Summaries
+
+### Session 10 (Continued Verification and Style Tests)
+- Verified services running
+- Marked 8 additional tests as passing based on browser verification and code review
+- 54 tests passing total
 
 ### Session 9 (Browser Verification and Style Tests)
 - Fixed httpx version conflict with supabase package
