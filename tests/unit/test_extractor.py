@@ -201,6 +201,21 @@ class TestMetadataExtractor:
         speaker = self.extractor.detect_speaker(text)
         assert speaker is None
 
+    def test_extract_no_detectable_entities(self):
+        """Test extracting from content with no detectable symbols, entities, or topics."""
+        text = "The quick brown fox jumps over the lazy dog. This is a simple sentence."
+        metadata = self.extractor.extract(text)
+
+        # Should return empty arrays, not errors
+        assert isinstance(metadata.symbols, list)
+        assert isinstance(metadata.entities, list)
+        assert isinstance(metadata.topics, list)
+        assert len(metadata.symbols) == 0
+        assert len(metadata.entities) == 0
+        assert len(metadata.topics) == 0
+        # Quality score should still be calculated
+        assert 0.0 <= metadata.quality_score <= 1.0
+
 
 class TestValidTickers:
     """Tests for valid tickers set."""

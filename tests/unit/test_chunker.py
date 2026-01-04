@@ -229,3 +229,64 @@ class TestChunkerConfiguration:
         chunks = chunker.chunk_text(text)
         for chunk in chunks:
             assert chunk.token_count <= 50
+
+
+class TestChunkingContentIntegrity:
+    """Tests for verifying chunking preserves content integrity."""
+
+    def test_short_content_fully_preserved(self):
+        """Test that short content is fully preserved in single chunk."""
+        text = "The quick brown fox jumps over the lazy dog."
+        chunker = Chunker(max_tokens=512)
+        chunks = chunker.chunk_text(text)
+        assert len(chunks) == 1
+        assert chunks[0].content == text
+
+    def test_long_content_all_words_present(self):
+        """Test that all words from long content appear in at least one chunk."""
+        words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+        text = " ".join(words * 50)  # Create long text
+        chunker = Chunker(max_tokens=50, overlap_tokens=10)
+        chunks = chunker.chunk_text(text)
+
+        # Concatenate all chunk content
+        all_chunk_content = " ".join(chunk.content for chunk in chunks)
+
+        # All original words should be present
+        for word in words:
+            assert word in all_chunk_content
+
+    def test_timestamped_content_all_segments_preserved(self):
+        """Test that all timestamped segment texts appear in chunks."""
+        segments = [
+            {"text": "First unique segment content", "start": 0.0, "end": 10.0},
+            {"text": "Second segment with different words", "start": 10.0, "end": 20.0},
+            {"text": "Third segment contains more text", "start": 20.0, "end": 30.0},
+        ]
+        chunker = Chunker(max_tokens=512)
+        chunks = chunker.chunk_timestamped_content(segments)
+
+        # Concatenate all chunk content
+        all_chunk_content = " ".join(chunk.content for chunk in chunks)
+
+        # All segment texts should appear
+        for segment in segments:
+            # Check that key words from each segment are present
+            for word in segment["text"].split():
+                assert word in all_chunk_content
+
+    def test_unicode_content_preserved(self):
+        """Test that unicode content is preserved correctly."""
+        text = "日本語テスト émojis 🎉 ñoño café"
+        chunker = Chunker(max_tokens=512)
+        chunks = chunker.chunk_text(text)
+        assert len(chunks) == 1
+        assert chunks[0].content == text
+
+    def test_special_characters_preserved(self):
+        """Test that special characters are preserved."""
+        text = "Price: $100.50 (discount 10%) - use code: TEST#2024!"
+        chunker = Chunker(max_tokens=512)
+        chunks = chunker.chunk_text(text)
+        assert len(chunks) == 1
+        assert chunks[0].content == text
