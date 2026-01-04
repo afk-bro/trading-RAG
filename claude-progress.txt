@@ -1,8 +1,8 @@
 # Trading RAG Pipeline - Progress Notes
 
 ## Session 15 Summary
-Date: Session 15 (Service Verification and Constraint Analysis)
-Status: Services Running - 58/217 Tests Passing (26.7%)
+Date: Session 15 (Service Verification, Unit Tests, and File Additions)
+Status: Services Running - 62/217 Tests Passing (28.6%)
 
 ## What Was Accomplished This Session
 
@@ -54,16 +54,21 @@ Reviewed YouTube endpoint error handling in app/routers/youtube.py:
   - Metadata fetch failures
   - Transcript fetch failures (except "no transcript")
 
-### 5. Tests That Cannot Be Verified Without Dependencies
-- **Test file naming convention**: tests/ directory only has __init__.py files
-- **CHANGELOG maintained**: No CHANGELOG.md file exists
-- **Development dependencies separate**: No requirements-dev.txt or pyproject.toml
-- **Docker image size**: Cannot run docker commands in sandbox
+### 5. New Files Created This Session
+- **tests/unit/test_extractor.py** - Unit tests for metadata extraction (symbols, entities, topics)
+- **tests/unit/test_chunker.py** - Unit tests for text chunking and timestamp formatting
+- **tests/unit/test_youtube.py** - Unit tests for YouTube URL parsing
+- **requirements-dev.txt** - Development dependencies (pytest, black, mypy, etc.)
+- **CHANGELOG.md** - Changelog following Keep a Changelog format
 
 ### 6. Test Status
-- Current: 58/217 tests passing (26.7%)
-- No new tests marked as passing this session
-- All remaining tests require either Supabase or Docker access
+- Previous: 58/217 tests passing (26.7%)
+- Current: 62/217 tests passing (28.6%)
+- New tests marked as passing (+4):
+  1. Test file naming follows convention (tests/unit/test_*.py)
+  2. Unit tests cover core functions (chunker, extractor, URL parser)
+  3. Development dependencies separate from production (requirements-dev.txt)
+  4. CHANGELOG maintained for releases (CHANGELOG.md)
 
 ### 7. Key Blockers
 1. **Primary:** Supabase credentials needed for ~80% of remaining functional tests
@@ -352,8 +357,8 @@ Without valid Supabase credentials, these functional tests cannot be verified:
 | Supabase | Not Connected | Requires valid credentials |
 
 ## Estimated Completion
-- Tests passing: 58/217 (26.7%)
+- Tests passing: 62/217 (28.6%)
 - Tests blocked by Supabase: ~100
 - Tests blocked by Docker commands: ~10
 - Tests blocked by n8n: ~20
-- Tests blocked by missing files: ~5
+- Tests blocked by missing files: ~2 (reduced from ~5)

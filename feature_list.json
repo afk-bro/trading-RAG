@@ -1976,7 +1976,7 @@
       "Step 1: Check requirements-dev.txt or pyproject.toml dev deps",
       "Step 2: Verify test/lint deps not in production requirements"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2230,7 +2230,7 @@
       "Step 2: Verify test files named test_*.py",
       "Step 3: Verify test functions named test_*"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2252,7 +2252,7 @@
       "Step 3: Verify metadata extractor tested",
       "Step 4: Verify URL parser tested"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2291,7 +2291,7 @@
       "Step 1: Check for CHANGELOG.md",
       "Step 2: Verify recent changes documented"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
