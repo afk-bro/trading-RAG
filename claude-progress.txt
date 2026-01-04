@@ -1,5 +1,64 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 32 Summary
+Date: Session 32 (Rate Limiter Bug Fix)
+Status: Services Running - 106/217 Tests Passing (48.8%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured
+
+#### 2. FIXED: Rate Limiter Bug Causing 500 Errors
+
+**Root Cause Identified:**
+The local `@limiter.limit` decorators in youtube.py, ingest.py, and query.py were causing 500 Internal Server Errors. Each router was creating its own local `Limiter` instance that was NOT connected to the FastAPI app state, causing the slowapi decorator to fail when trying to access `request.app.state.limiter`.
+
+**Fix Applied:**
+- Removed local `Limiter` instances and `@limiter.limit` decorators from:
+  - `app/routers/youtube.py`
+  - `app/routers/ingest.py`
+  - `app/routers/query.py`
+- Removed unused `http_request: Request` parameters from endpoint functions
+- Global rate limiting still works via the limiter in `main.py`
+
+**Verification:**
+- Tested YouTube endpoint with invalid URL: `{"url": "string", "workspace_id": "..."}`
+- Before fix: **500 Internal Server Error**
+- After fix: **200 OK** with proper error response:
+  ```json
+  {
+    "status": "error",
+    "retryable": false,
+    "error_reason": "Could not extract video ID from URL"
+  }
+  ```
+
+#### 3. Test Status
+- Current: 106/217 tests passing (48.8%)
+- The rate limiter fix improves service stability but doesn't directly enable new tests
+- Most remaining tests still require Supabase database operations
+
+#### 4. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+- **Secondary:** Docker commands restricted in sandbox
+- **Tertiary:** n8n workflow not configured
+
+#### 5. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+
+---
+
 ## Session 31 Summary
 Date: Session 31 (Service Verification and Blocker Analysis)
 Status: Services Running - 106/217 Tests Passing (48.8%)
