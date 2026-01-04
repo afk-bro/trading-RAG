@@ -2170,7 +2170,7 @@
       "Step 2: Verify configurable values use config",
       "Step 3: Verify constants defined appropriately"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2220,7 +2220,7 @@
       "Step 2: Verify each class has clear single responsibility",
       "Step 3: Verify no god classes"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
