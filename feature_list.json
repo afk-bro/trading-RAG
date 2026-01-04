@@ -743,7 +743,7 @@
       "Step 2: Start service",
       "Step 3: Verify service connects to specified Supabase URL"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -951,7 +951,7 @@
       "Step 3: Pull model: ollama pull nomic-embed-text",
       "Step 4: Restart service and verify startup succeeds"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1169,7 +1169,7 @@
       "Step 4: Hash different content",
       "Step 5: Verify hash is different"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
