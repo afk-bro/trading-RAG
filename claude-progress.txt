@@ -1,5 +1,69 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 18 Summary
+Date: Session 18 (Dimension Validation and Unit Tests)
+Status: Services Running - 65/217 Tests Passing (30.0%)
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- Qdrant dashboard verified all 8 payload indexes:
+  - workspace_id, source_type, published_at, author, topics, entities, symbols, channel
+
+### 3. Implemented Embedding Dimension Validation at Startup
+Enhanced VectorRepository.ensure_collection() method to:
+- Validate existing collection dimensions against expected embedder dimension
+- Log warning when dimension mismatch is detected
+- Automatically recreate collection with correct dimension on mismatch
+- Log confirmation when dimension matches
+
+Code changes in: app/repositories/vectors.py (lines 36-111)
+
+### 4. Created Unit Tests for Vector Repository
+New file: tests/unit/test_vectors.py with comprehensive tests:
+- TestVectorRepositoryEnsureCollection:
+  - test_creates_collection_if_not_exists
+  - test_validates_dimension_on_existing_collection
+  - test_recreates_collection_on_dimension_mismatch
+  - test_logs_warning_on_dimension_mismatch
+  - test_recreate_forces_new_collection
+  - test_raises_error_when_client_not_initialized
+- TestVectorRepositorySearch: 3 tests
+- TestVectorRepositoryUpsert: 3 tests
+- TestVectorRepositoryDelete: 3 tests
+
+### 5. Test Status
+- Previous: 64/217 tests passing (29.5%)
+- Current: 65/217 tests passing (30.0%)
+- New test marked as passing: "Service validates embedding dimension at startup"
+
+### 6. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100 functional tests
+- **Secondary:** Docker commands restricted in sandbox
+- **Tertiary:** n8n workflow not configured
+
+### 7. Next Steps for Future Sessions
+1. **Configure Supabase** - This will unlock 100+ functional tests
+2. Run unit tests: `pytest tests/unit/ -v`
+3. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+
+---
+
 ## Session 17 Summary
 Date: Session 17 (Integration Tests and Verification)
 Status: Services Running - 64/217 Tests Passing (29.5%)

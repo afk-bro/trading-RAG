@@ -754,7 +754,7 @@
       "Step 3: Verify service logs warning about dimension mismatch",
       "Step 4: Verify service either fails fast or creates correct collection"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

@@ -41,6 +41,9 @@ class VectorRepository:
         """
         Ensure collection exists with correct configuration.
 
+        Validates dimension matches if collection already exists.
+        Logs warning and creates correct collection if mismatch detected.
+
         Args:
             dimension: Vector dimension
             recreate: If True, recreate collection
@@ -50,6 +53,40 @@ class VectorRepository:
 
         collections = await self.client.get_collections()
         exists = any(c.name == self.collection for c in collections.collections)
+
+        if exists and not recreate:
+            # Validate existing collection dimension
+            try:
+                collection_info = await self.client.get_collection(self.collection)
+                existing_dim = collection_info.config.params.vectors.size
+
+                if existing_dim != dimension:
+                    logger.warning(
+                        "Collection dimension mismatch detected",
+                        collection=self.collection,
+                        expected_dimension=dimension,
+                        existing_dimension=existing_dim,
+                    )
+                    # Delete and recreate with correct dimension
+                    logger.info(
+                        "Recreating collection with correct dimension",
+                        collection=self.collection,
+                        dimension=dimension,
+                    )
+                    await self.client.delete_collection(self.collection)
+                    exists = False
+                else:
+                    logger.info(
+                        "Collection dimension validated",
+                        collection=self.collection,
+                        dimension=dimension,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to validate collection dimension",
+                    collection=self.collection,
+                    error=str(e),
+                )
 
         if exists and recreate:
             await self.client.delete_collection(self.collection)
