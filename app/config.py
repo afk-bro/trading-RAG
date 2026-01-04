@@ -92,6 +92,12 @@ class Settings(BaseSettings):
         default=10, description="Burst limit for rate limiting"
     )
 
+    # Request size limits
+    max_request_body_size: int = Field(
+        default=10 * 1024 * 1024,  # 10 MB
+        description="Maximum request body size in bytes"
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""

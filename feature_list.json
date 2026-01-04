@@ -1833,7 +1833,7 @@
       "Step 2: Verify appropriate error response",
       "Step 3: Verify service doesn't crash"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

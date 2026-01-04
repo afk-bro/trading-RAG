@@ -223,7 +223,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_middleware(request: Request, call_next):
-    """Add request ID and timing to all requests."""
+    """Add request ID, timing, and size limits to all requests."""
     # Get or generate request ID
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
@@ -234,6 +234,26 @@ async def request_middleware(request: Request, call_next):
         method=request.method,
         path=request.url.path,
     )
+
+    # Check request body size limit
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > settings.max_request_body_size:
+        logger.warning(
+            "Request body too large",
+            content_length=int(content_length),
+            max_size=settings.max_request_body_size,
+        )
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": f"Request body too large. Maximum size is {settings.max_request_body_size // (1024 * 1024)}MB",
+                "retryable": False,
+            },
+            headers={
+                "X-Request-ID": request_id,
+                "X-API-Version": __version__,
+            },
+        )
 
     # Time the request
     start_time = time.perf_counter()
