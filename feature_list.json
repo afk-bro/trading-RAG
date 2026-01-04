@@ -929,7 +929,7 @@
       "Step 4: Verify FastAPI service container is healthy",
       "Step 5: Verify rag-net network created"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
