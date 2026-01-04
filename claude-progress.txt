@@ -1,5 +1,86 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 35 Summary
+Date: Session 35 (Service Verification and Blocker Analysis)
+Status: Services Running - 110/217 Tests Passing (50.7%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+#### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~22ms)
+  - ollama: "ok" (latency ~17ms)
+  - supabase: "error" (expected - not configured)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- Qdrant dashboard verified collection configuration:
+  - Vector dimension: 768, Distance: Cosine
+  - Status: GREEN, Points: 0
+  - All 8 payload indexes confirmed: workspace_id, published_at, source_type, author, channel, topics, entities, symbols
+
+#### 3. Query Endpoint Testing
+Tested POST /query via Swagger UI:
+- Request: Simple retrieve query with workspace_id and question
+- Response: **503 Service Unavailable** - `{"detail": "Database connection not available"}`
+- This is expected behavior - the query endpoint correctly reports that Supabase is required
+- Confirms that remaining query-related tests require Supabase to be configured
+
+#### 4. Code Review Analysis
+Reviewed chunker and extractor implementations:
+- **chunker.py**: Solid implementation using tiktoken for token counting
+  - Content integrity preserved via encode/decode round-trip
+  - Overlap handling correct for context preservation
+  - Unit tests exist in TestChunkingContentIntegrity class
+- **extractor.py**: Proper metadata extraction
+  - Returns empty arrays when no entities/symbols/topics found
+  - Unit test exists: test_extract_no_detectable_entities
+
+#### 5. Failing Test Analysis
+Analyzed remaining 107 failing tests:
+- **~100 tests** require Supabase database operations (POST /ingest, POST /query, etc.)
+- **~5 tests** require Docker container management (stop/restart Qdrant/Ollama)
+- **~2 tests** require n8n workflow configuration
+- **1 style test** "API endpoints use RESTful conventions" is a valid failure:
+  - API uses action-based endpoints (/ingest, /query, /reembed)
+  - Not pure RESTful (/documents, /queries)
+  - This is an intentional design decision, not a bug
+
+#### 6. Test Status
+- Current: 110/217 tests passing (50.7%)
+- No new tests marked as passing this session
+- Reason: All remaining verifiable tests require Supabase database
+
+#### 7. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+  - Query endpoint returns 503 without database
+  - Ingest endpoint returns 500 without database
+- **Secondary:** Docker commands restricted in sandbox
+- **Tertiary:** n8n workflow not configured
+
+#### 8. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search (empty results, filtering, etc.)
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+   - Workspace isolation tests
+   - Content integrity tests (chunking preserves content)
+
+---
+
 ## Session 34 Summary
 Date: Session 34 (YouTube Error Handling Verification)
 Status: Services Running - 110/217 Tests Passing (50.7%)
