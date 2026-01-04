@@ -245,7 +245,10 @@ async def request_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error", "retryable": True},
-            headers={"X-Request-ID": request_id},
+            headers={
+                "X-Request-ID": request_id,
+                "X-API-Version": __version__,
+            },
         )
 
     # Calculate duration
@@ -255,6 +258,7 @@ async def request_middleware(request: Request, call_next):
     # Add headers to response
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time-Ms"] = f"{duration_ms:.2f}"
+    response.headers["X-API-Version"] = __version__
 
     # Record metrics (skip /metrics endpoint to avoid recursion)
     if request.url.path != "/metrics":
