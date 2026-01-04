@@ -25,6 +25,9 @@ tiktoken==0.6.0
 python-dotenv==1.0.1
 structlog==24.1.0
 
+# Metrics
+prometheus-client==0.19.0
+
 # Testing (dev dependencies)
 # pytest==8.0.0
 # pytest-asyncio==0.23.4

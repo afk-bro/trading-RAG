@@ -14,7 +14,7 @@ from qdrant_client import AsyncQdrantClient
 
 from app import __version__
 from app.config import get_settings
-from app.routers import health, ingest, jobs, query, reembed, youtube
+from app.routers import health, ingest, jobs, metrics, query, reembed, youtube
 
 # Configure structured logging
 structlog.configure(
@@ -235,10 +235,20 @@ async def request_middleware(request: Request, call_next):
 
     # Calculate duration
     duration_ms = (time.perf_counter() - start_time) * 1000
+    duration_seconds = duration_ms / 1000
 
     # Add headers to response
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time-Ms"] = f"{duration_ms:.2f}"
+
+    # Record metrics (skip /metrics endpoint to avoid recursion)
+    if request.url.path != "/metrics":
+        metrics.record_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code,
+            duration=duration_seconds,
+        )
 
     # Log request completion
     logger.info(
@@ -257,6 +267,7 @@ app.include_router(youtube.router, prefix="/sources/youtube", tags=["YouTube"])
 app.include_router(query.router, tags=["Query"])
 app.include_router(reembed.router, tags=["Re-embed"])
 app.include_router(jobs.router, tags=["Jobs"])
+app.include_router(metrics.router)  # Metrics endpoint (excluded from OpenAPI)
 
 
 @app.get("/")

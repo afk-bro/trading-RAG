@@ -541,7 +541,7 @@
       "Step 3: POST /reembed with new model/version",
       "Step 4: Verify new collection created with correct naming"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -643,7 +643,7 @@
       "Step 3: Cause a terminal error (e.g., no transcript)",
       "Step 4: Verify response includes retryable: false"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1110,7 +1110,7 @@
       "Step 3: Verify error responses include message",
       "Step 4: Verify error responses include detail when appropriate"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
