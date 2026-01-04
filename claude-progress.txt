@@ -1,5 +1,77 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 20 Summary
+Date: Session 20 (Prometheus Metrics Verification)
+Status: Services Running - 73/217 Tests Passing (33.6%)
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services (rebuilt trading-rag-svc container)
+- All services running and verified:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+### 2. Verified Core Functionality
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~40ms)
+  - ollama: "ok" (latency ~32ms)
+  - supabase: "error" (expected - not configured)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- Qdrant dashboard shows collection with:
+  - Vector dimension: 768, Distance: Cosine
+  - Status: GREEN, Points: 0
+  - All 8 payload indexes: workspace_id, source_type, published_at, author, topics, entities, symbols, channel
+
+### 3. Verified Prometheus Metrics Endpoint (NEW!)
+GET /metrics verified via browser automation:
+- Returns Prometheus format with proper `# HELP` and `# TYPE` annotations
+- Request count metrics: `trading_rag_requests_total{endpoint="/health",method="GET",status_code="200"}`
+- Latency histogram: `trading_rag_request_latency_seconds_bucket{endpoint="/health",...}`
+- Per-endpoint breakdown with labels for endpoint, method, and status_code
+
+### 4. YouTube Error Handling Verified
+POST /sources/youtube/ingest with invalid URL returns:
+```json
+{
+  "status": "error",
+  "retryable": false,
+  "error_reason": "Could not extract video ID from URL"
+}
+```
+- Terminal errors correctly return `retryable: false`
+
+### 5. Tests Marked as Passing (+2)
+1. **"Service exposes Prometheus metrics endpoint"** - GET /metrics returns Prometheus format with request count and latency histogram
+2. **"Metrics include per-endpoint breakdown"** - Metrics labeled by endpoint, method, and status_code
+
+### 6. Test Status
+- Previous: 71/217 tests passing (32.7%)
+- Current: 73/217 tests passing (33.6%)
+- Remaining: 144 tests
+
+### 7. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+- **Secondary:** Docker commands restricted in sandbox
+- **Tertiary:** n8n workflow not configured
+
+### 8. Next Steps for Future Sessions
+1. **Configure Supabase** - This will unlock 100+ functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+
+---
+
 ## Session 19 Summary
 Date: Session 19 (Prometheus Metrics Implementation)
 Status: Services Running - 71/217 Tests Passing (32.7%)

@@ -2129,7 +2129,7 @@
       "Step 3: Verify request count metrics",
       "Step 4: Verify latency histogram metrics"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2139,7 +2139,7 @@
       "Step 2: GET /metrics",
       "Step 3: Verify metrics labeled by endpoint"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
