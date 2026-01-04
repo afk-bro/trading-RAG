@@ -286,7 +286,7 @@
       "Step 3: Verify [Music] markers are removed or normalized",
       "Step 4: Verify repeated phrases are collapsed"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -297,7 +297,7 @@
       "Step 3: Verify status is terminal (retryable: false)",
       "Step 4: Verify error_reason indicates no_transcript"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -308,7 +308,7 @@
       "Step 3: Verify service retries with increasing delays",
       "Step 4: Verify eventual success on third attempt"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
