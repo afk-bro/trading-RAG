@@ -1,5 +1,110 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 40 Summary
+Date: Session 40 (Service Verification - Blocker Remains)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services (all started successfully)
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials in .env)
+
+#### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~16ms)
+  - ollama: "ok" (latency ~11ms)
+  - supabase: "error" (expected - "[Errno -3] Temporary failure in name resolution")
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups:
+  - Health, Ingestion, YouTube, Query, Re-embed, Jobs, Metrics
+
+#### 3. Qdrant Dashboard Deep Verification
+- Navigated to http://localhost:6333/dashboard
+- Collection: kb_nomic_embed_text_v1
+  - Status: GREEN
+  - Points: 0 (empty - no documents ingested)
+  - Vector config: 768 dimensions, Cosine distance
+  - Segments: 3, Shards: 1
+- Verified ALL payload indexes exist in payload_schema:
+  - workspace_id: keyword (critical for multi-tenancy)
+  - author: keyword
+  - topics: keyword
+  - entities: keyword
+  - channel: keyword
+  - source_type: keyword
+  - published_at: integer
+  - symbols: keyword
+
+#### 4. Code Review
+- Reviewed ingest.py (lines 210-215): PDF locator labels correctly implemented
+  - Single page: "p. X"
+  - Multi-page spans: "pp. X-Y"
+- Confirmed this functionality requires Supabase to test end-to-end
+
+#### 5. Jobs Endpoint Verification
+- GET /jobs/00000000-0000-0000-0000-000000000000 returns 404 (correct)
+- Confirms "GET /jobs/{job_id} returns 404 for unknown job_id" test (already passing)
+
+#### 6. Test Status Analysis
+- Current: 113/217 tests passing (52%)
+- No new tests marked as passing this session
+- Reason: ALL remaining tests require one of:
+  - Supabase database (~100 tests) - PRIMARY BLOCKER
+  - Docker container management (~3-4 tests) - sandbox restricted
+  - n8n workflow configuration (~2-3 tests)
+  - Intentional design decision (1 test - RESTful conventions)
+
+#### 7. Key Blocker Analysis
+- **PRIMARY: Supabase credentials not configured**
+  - .env file still has placeholder values
+  - All database-dependent tests blocked:
+    - POST /ingest returns 503 "Database connection not available"
+    - POST /query returns 503 "Database connection not available"
+    - POST /sources/youtube/ingest (real videos) requires DB
+    - POST /reembed requires DB for chunk retrieval
+- **SECONDARY: Docker commands restricted in sandbox**
+  - Cannot run `docker` commands directly
+  - Cannot test recovery scenarios (stop/restart services)
+  - Cannot verify Docker image size test
+- **TERTIARY: n8n workflow not configured**
+  - All n8n-related tests blocked (~7 tests)
+
+#### 8. Test Categories Breakdown (104 Remaining)
+- ~100 tests: Require Supabase (ingest, query, reembed, etc.)
+- ~4 tests: Require Docker container management
+- ~7 tests: Require n8n workflow
+- 1 test: "API endpoints use RESTful conventions" - intentional design (action-based endpoints)
+
+#### 9. Services Health Summary
+All local services are functioning correctly:
+- FastAPI → Qdrant: OK (~16ms)
+- FastAPI → Ollama: OK (~11ms)
+- FastAPI → Supabase: ERROR (not configured)
+
+#### 10. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock ~100 functional tests
+   - Need valid SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env
+   - Run database migrations
+2. Once Supabase is configured, test:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest with real video
+   - POST /reembed model migration
+   - Workspace isolation tests
+   - Content integrity tests
+3. Consider n8n workflow setup if time permits
+
+---
+
 ## Session 39 Summary
 Date: Session 39 (Service Verification - Blocker Remains)
 Status: Services Running - 113/217 Tests Passing (52%)
