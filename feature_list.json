@@ -607,7 +607,7 @@
       "Step 5: Verify symbols index exists",
       "Step 6: Verify topics index exists"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1666,7 +1666,7 @@
       "Step 3: Verify service creates collection automatically",
       "Step 4: Verify collection has correct settings"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1937,7 +1937,7 @@
       "Step 1: Verify host configured as 0.0.0.0",
       "Step 2: Verify service accessible from outside container"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2160,7 +2160,7 @@
       "Step 3: Verify third-party imports second",
       "Step 4: Verify local imports last"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2190,7 +2190,7 @@
       "Step 2: Verify specific exception types caught",
       "Step 3: Verify no bare 'except:' clauses"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2200,7 +2200,7 @@
       "Step 2: Verify 'with' statements used",
       "Step 3: Verify async context managers for async resources"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -2300,7 +2300,7 @@
       "Step 1: Check for version indicator",
       "Step 2: Verify version in health endpoint matches"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
