@@ -2310,7 +2310,7 @@
       "Step 2: Verify 400 or 422 error response",
       "Step 3: Verify error message is helpful"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2319,7 +2319,7 @@
       "Step 1: Send POST without Content-Type header",
       "Step 2: Verify appropriate error or handling"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
