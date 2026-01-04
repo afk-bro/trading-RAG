@@ -275,7 +275,7 @@
       "Step 4: Verify time_end_secs is populated",
       "Step 5: Verify locator_label contains timestamp format (e.g., '12:34')"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
