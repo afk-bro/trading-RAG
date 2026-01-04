@@ -1,5 +1,102 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 38 Summary
+Date: Session 38 (Service Verification and Blocker Confirmation)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+#### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~22ms)
+  - ollama: "ok" (latency ~16ms)
+  - supabase: "error" (expected - not configured)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- GET /metrics returns Prometheus format with:
+  - trading_rag_requests_total by endpoint, method, status_code
+  - Per-endpoint request counts tracked
+  - Python process metrics (memory, CPU, file descriptors)
+- Qdrant dashboard verified:
+  - Collection: kb_nomic_embed_text_v1
+  - Vector dimension: 768, Distance: Cosine
+  - Status: GREEN, Points: 0
+  - All payload indexes configured
+
+#### 3. YouTube Endpoint Error Handling Verified
+Tested POST /sources/youtube/ingest with invalid URL via Swagger UI:
+- Request: `{"workspace_id": "...", "url": "string", "idempotency_key": "string"}`
+- Response (200 OK - not 500!):
+  ```json
+  {
+    "doc_id": null,
+    "video_id": null,
+    "playlist_id": null,
+    "status": "error",
+    "retryable": false,
+    "chunks_created": 0,
+    "is_playlist": false,
+    "video_urls": null,
+    "error_reason": "Could not extract video ID from URL"
+  }
+  ```
+- Confirms rate limiter bug fix from Session 32 is still working
+
+#### 4. Query Endpoint Testing
+Tested POST /query via Swagger UI:
+- Request: Query with workspace_id and question
+- Response: **503 Service Unavailable** - `{"detail": "Database connection not available"}`
+- This confirms Supabase is required for query operations
+
+#### 5. OpenAPI Schema Verified
+- GET /openapi.json returns valid OpenAPI 3.1.0 schema
+- All endpoints documented with proper descriptions
+- Request/response schemas properly defined
+- Status codes correctly documented (200, 201, 422, 429, 500)
+
+#### 6. Test Status
+- Current: 113/217 tests passing (52%)
+- No new tests marked as passing this session
+- Reason: All remaining verifiable tests require Supabase database or Docker commands
+
+#### 7. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+  - Query endpoint returns 503 without database
+  - Ingest endpoint requires database for document storage
+- **Secondary:** Docker commands restricted in sandbox (cannot run docker directly)
+- **Tertiary:** n8n workflow not configured
+
+#### 8. Analysis of Remaining Tests
+Of the 104 failing tests:
+- ~100 tests require Supabase database operations (ingest, query, reembed, etc.)
+- ~3-4 tests require Docker container management (stop/restart services)
+- ~2-3 tests require n8n workflow configuration
+- 1 style test "API endpoints use RESTful conventions" - intentional design decision (API uses action-based endpoints)
+
+#### 9. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search (empty results, filtering, etc.)
+   - POST /sources/youtube/ingest (with real video)
+   - POST /reembed (model migration)
+   - Workspace isolation tests
+   - Content integrity tests
+
+---
+
 ## Session 37 Summary
 Date: Session 37 (Code Review Verification)
 Status: Services Running - 113/217 Tests Passing (52%)
