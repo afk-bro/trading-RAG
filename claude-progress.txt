@@ -1,10 +1,90 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 14 Summary
+Date: Session 14 (Service Verification and Test Assessment)
+Status: Services Running - 58/217 Tests Passing (26.7%)
+
+## What Was Accomplished This Session
+
+### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~26ms)
+  - ollama: "ok" (latency ~18ms)
+  - supabase: "error" (expected - not configured)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- Qdrant dashboard confirms collection kb_nomic_embed_text_v1 with correct settings:
+  - Vector dimension: 768
+  - Distance: Cosine
+  - Status: GREEN
+  - Points: 0 (no data ingested yet)
+
+### 3. Test Assessment
+Analyzed remaining 159 failing tests:
+- ~100+ tests require Supabase database operations
+- ~10 tests require Docker commands (stop/start services)
+- ~20 tests are n8n workflow tests
+- Remaining tests require actual data operations
+
+### 4. Code Analysis
+Reviewed key implementation files:
+- **extractor.py**: Symbol extraction uses regex + VALID_TICKERS allowlist (80+ tickers)
+  - Normalizes to uppercase
+  - Entity extraction is case-insensitive keyword matching
+  - Topic classification uses keyword lists for 7 categories
+- **chunker.py**: Token-aware chunking with max_tokens=512
+  - Uses tiktoken (cl100k_base encoding)
+  - Timestamp-aware chunking for YouTube content
+  - normalize_transcript() removes [Music], [Applause], repeated phrases
+- **query.py**: Returns 503 when database unavailable (proper error handling)
+
+### 5. API Endpoint Assessment
+Evaluated "API endpoints use RESTful conventions" test:
+- `/jobs/{job_id}` - ✓ Uses noun "jobs"
+- `/health` - ✓ Noun for health resource
+- HTTP methods correct (GET for reads, POST for actions) - ✓
+- `/sources/youtube` uses plural "sources" - ✓
+- `/ingest`, `/query`, `/reembed` use verbs instead of nouns - ✗
+Test remains failing due to verb-based endpoints (pragmatic design but not strict REST)
+
+### 6. Test Status
+- Current: 58/217 tests passing (26.7%)
+- No new tests marked as passing (all remaining require database or Docker operations)
+
+### 7. Key Blockers
+1. **Primary:** Supabase credentials needed for ~80% of remaining functional tests
+2. **Secondary:** Docker commands restricted in sandbox (connectivity tests)
+3. **Tertiary:** n8n workflow not configured
+
+### 8. Next Steps for Future Sessions
+1. **Configure Supabase** - This will unlock ~100 functional tests
+2. Tests ready to verify once Supabase is configured:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - Symbol/entity/topic extraction verification
+   - YouTube transcript ingestion
+   - Reembed jobs
+3. Review n8n workflow configuration
+
+---
+
 ## Session 13 Summary
 Date: Session 13 (Code Review and URL Parser Verification)
 Status: Services Running - 58/217 Tests Passing
 
-## What Was Accomplished This Session
+## What Was Accomplished (Session 13)
 
 ### 1. Started Services
 - Ran init.sh to start Docker services
