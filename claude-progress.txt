@@ -70,7 +70,14 @@ Updated tests/unit/test_youtube.py with TestUrlEncoding class:
 - **Secondary:** Docker commands restricted in sandbox
 - **Tertiary:** n8n workflow not configured
 
-### 9. Next Steps for Future Sessions
+### 9. Verified via Browser Automation
+- GET /health returns proper JSON with all service statuses
+- Swagger UI (/docs) loads correctly
+- Qdrant dashboard shows collection with correct settings
+- POST /query returns 503 "Database connection not available" (expected)
+- Response times are fast (~1.8ms for error response)
+
+### 10. Next Steps for Future Sessions
 1. **Configure Supabase** - This will unlock 100+ functional tests
 2. Run unit tests: `pytest tests/unit/ -v`
 3. Tests ready to verify once Supabase is configured:
