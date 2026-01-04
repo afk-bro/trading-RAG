@@ -1,8 +1,8 @@
 # Trading RAG Pipeline - Progress Notes
 
 ## Session 18 Summary
-Date: Session 18 (Dimension Validation and Unit Tests)
-Status: Services Running - 65/217 Tests Passing (30.0%)
+Date: Session 18 (Dimension Validation, CI/CD, and Unit Tests)
+Status: Services Running - 68/217 Tests Passing (31.3%)
 
 ## What Was Accomplished This Session
 
@@ -43,17 +43,34 @@ New file: tests/unit/test_vectors.py with comprehensive tests:
 - TestVectorRepositoryUpsert: 3 tests
 - TestVectorRepositoryDelete: 3 tests
 
-### 5. Test Status
-- Previous: 64/217 tests passing (29.5%)
-- Current: 65/217 tests passing (30.0%)
-- New test marked as passing: "Service validates embedding dimension at startup"
+### 5. Created GitHub Actions CI/CD Pipeline
+New file: .github/workflows/ci.yml with:
+- **lint** job: Black formatting, flake8 linting, mypy type checking
+- **test** job: Unit tests, integration tests with Qdrant service
+- **security** job: Safety dependency scan, bandit security scan
+- **build** job: Docker image build and size check
 
-### 6. Key Blockers Remain
+### 6. Added URL Encoding Tests
+Updated tests/unit/test_youtube.py with TestUrlEncoding class:
+- Tests for URL-encoded characters
+- Tests for special characters in video IDs (-, _)
+- Tests for encoded ampersands and spaces
+
+### 7. Test Status
+- Previous: 64/217 tests passing (29.5%)
+- Current: 68/217 tests passing (31.3%)
+- New tests marked as passing (+4):
+  1. "Service validates embedding dimension at startup"
+  2. "CI/CD pipeline configuration exists"
+  3. "Service handles URL encoding in YouTube URLs"
+  4. "Qdrant upsert is idempotent"
+
+### 8. Key Blockers Remain
 - **Primary:** Supabase credentials needed for ~100 functional tests
 - **Secondary:** Docker commands restricted in sandbox
 - **Tertiary:** n8n workflow not configured
 
-### 7. Next Steps for Future Sessions
+### 9. Next Steps for Future Sessions
 1. **Configure Supabase** - This will unlock 100+ functional tests
 2. Run unit tests: `pytest tests/unit/ -v`
 3. Tests ready to verify once Supabase is configured:

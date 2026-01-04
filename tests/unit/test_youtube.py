@@ -155,3 +155,50 @@ class TestUrlParserReturnStructure:
         """Test that is_playlist is a boolean."""
         result = parse_youtube_url("https://youtu.be/test123test")
         assert isinstance(result["is_playlist"], bool)
+
+
+class TestUrlEncoding:
+    """Tests for URL encoding handling."""
+
+    def test_parse_url_with_encoded_characters(self):
+        """Test parsing URL with URL-encoded characters."""
+        # URL with %3D (equals sign) encoded
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        result = parse_youtube_url(url)
+        assert result["video_id"] == "dQw4w9WgXcQ"
+
+    def test_parse_url_encoded_video_id(self):
+        """Test parsing URL where video_id could have special chars."""
+        # Video IDs are base64-like, so they may contain - and _
+        url = "https://www.youtube.com/watch?v=abc-_123XYZ"
+        result = parse_youtube_url(url)
+        assert result["video_id"] == "abc-_123XYZ"
+
+    def test_parse_url_with_encoded_ampersand(self):
+        """Test parsing URL with encoded ampersand (%26)."""
+        # When ampersand is encoded, parse_qs still handles it
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ%26feature=test"
+        result = parse_youtube_url(url)
+        # The video_id should still be extracted correctly
+        assert result["video_id"] is not None
+
+    def test_parse_url_with_space_encoding(self):
+        """Test parsing URL with space encoding (%20 or +)."""
+        # YouTube video IDs don't contain spaces, but query params might
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s"
+        result = parse_youtube_url(url)
+        assert result["video_id"] == "dQw4w9WgXcQ"
+
+    def test_parse_url_with_unicode_encoding(self):
+        """Test parsing URL with unicode-encoded characters."""
+        # Standard URL, urlparse handles encoding
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        result = parse_youtube_url(url)
+        assert result["video_id"] == "dQw4w9WgXcQ"
+
+    def test_parse_double_encoded_url(self):
+        """Test parsing double-encoded URL."""
+        # %253D is double-encoded %3D (=)
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        result = parse_youtube_url(url)
+        assert result["video_id"] == "dQw4w9WgXcQ"

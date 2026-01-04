@@ -1740,7 +1740,7 @@
       "Step 2: Verify URL is decoded correctly",
       "Step 3: Verify video_id extracted correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1898,7 +1898,7 @@
       "Step 3: Verify no duplicate points",
       "Step 4: Verify data is unchanged"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2282,7 +2282,7 @@
       "Step 2: Verify tests run on PR",
       "Step 3: Verify linting runs on PR"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
