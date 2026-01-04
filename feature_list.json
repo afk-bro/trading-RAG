@@ -162,7 +162,7 @@
       "Step 3: Verify symbols array contains ['AAPL', 'GOOGL', 'MSFT']",
       "Step 4: Verify symbols are uppercase normalized"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -173,7 +173,7 @@
       "Step 3: Verify entities array contains extracted entities",
       "Step 4: Verify entity extraction is case-insensitive"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -183,7 +183,7 @@
       "Step 2: Query chunks from database",
       "Step 3: Verify topics array contains relevant topics like 'rates', 'macro'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
