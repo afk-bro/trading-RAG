@@ -1,5 +1,98 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 36 Summary
+Date: Session 36 (Service Verification - Blocker Confirmation)
+Status: Services Running - 110/217 Tests Passing (50.7%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials)
+
+#### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~17ms)
+  - ollama: "ok" (latency ~12ms)
+  - supabase: "error" (expected - "[Errno -3] Temporary failure in name resolution")
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- GET /metrics returns Prometheus format with request counts and latency histograms
+  - trading_rag_requests_total by endpoint, method, status_code
+  - trading_rag_request_latency_seconds_bucket histograms
+
+#### 3. YouTube Error Handling Verification
+Tested POST /sources/youtube/ingest with invalid URL via Swagger UI:
+- Request: `{"workspace_id": "...", "url": "string", "idempotency_key": "string"}`
+- Response (200 OK):
+  ```json
+  {
+    "doc_id": null,
+    "video_id": null,
+    "playlist_id": null,
+    "status": "error",
+    "retryable": false,
+    "chunks_created": 0,
+    "is_playlist": false,
+    "video_urls": null,
+    "error_reason": "Could not extract video ID from URL"
+  }
+  ```
+- Confirms graceful error handling with `retryable: false` and clear `error_reason`
+
+#### 4. Code Review Analysis
+Reviewed key components:
+- **app/main.py**: Clean FastAPI setup with lifespan manager, CORS, rate limiting, request middleware
+- **app/schemas.py**: Well-defined Pydantic models with proper Field descriptions
+- **app/routers/query.py**: Query pipeline with empty results handling (line 159-160 returns `QueryResponse(results=[], answer=None)`)
+- **tests/unit/test_chunker.py**: Comprehensive unit tests for chunking including unicode and content integrity
+
+#### 5. Environment Limitations
+This session confirmed restrictions in the sandbox environment:
+- Cannot run `curl`, `docker`, `python`, `source` commands directly
+- All testing must be done through browser automation (Puppeteer)
+- Unit tests cannot be run directly
+
+#### 6. Test Status Analysis
+- Current: 110/217 tests passing (50.7%)
+- No new tests marked as passing this session
+- All remaining verifiable tests require Supabase database connection
+
+#### 7. Key Blockers Remain
+- **Primary:** Supabase credentials needed for ~100+ functional tests
+  - Query endpoint returns 503 "Database connection not available"
+  - Ingest endpoint returns 503 without database
+  - All data persistence tests blocked
+- **Secondary:** Docker commands restricted in sandbox
+- **Tertiary:** Python/pytest commands restricted in sandbox
+
+#### 8. Tests Ready to Verify Once Supabase is Configured
+1. POST /ingest document creation
+2. POST /query semantic search (empty results, filtering, etc.)
+3. POST /sources/youtube/ingest (with real video)
+4. POST /reembed (model migration)
+5. Workspace isolation tests
+6. Content integrity tests (chunking preserves content)
+7. Metadata extraction verification (symbols, entities, topics)
+
+### Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock 100+ functional tests
+2. Once Supabase is configured, focus on:
+   - POST /ingest verification
+   - POST /query with various filters
+   - Content integrity verification
+3. Consider whether any style tests need attention
+
+---
+
 ## Session 35 Summary
 Date: Session 35 (Service Verification and Blocker Analysis)
 Status: Services Running - 110/217 Tests Passing (50.7%)
