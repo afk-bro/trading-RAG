@@ -31,6 +31,8 @@
     <button onclick="testPublishedAtNullHandling()">Test Published_at Null Filter</button>
     <button onclick="testJobFailureCapture()">Test Job Failure Capture</button>
     <button onclick="testLanguageField()">Test Language Field</button>
+    <button onclick="testQueryLatency()">Test Query Latency (p95)</button>
+    <button onclick="testIngestThroughput()">Test Ingest Throughput</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -1404,6 +1406,189 @@
                     if (!esLangCorrect) {
                         output += "ISSUE: Spanish document language field is not 'es'\n";
                     }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testQueryLatency() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== QUERY LATENCY TEST (p95 < 2000ms) ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const NUM_QUERIES = 100;
+                const latencies = [];
+                const questions = [
+                    "What are the latest market trends?",
+                    "How does interest rate policy affect stocks?",
+                    "What is the Fed's stance on inflation?",
+                    "Discuss technology sector performance",
+                    "Analyze macro economic indicators"
+                ];
+
+                output += `Running ${NUM_QUERIES} queries...\n\n`;
+                document.getElementById('result').textContent = output;
+
+                for (let i = 0; i < NUM_QUERIES; i++) {
+                    const question = questions[i % questions.length];
+                    const startTime = performance.now();
+
+                    const res = await fetch(`${BASE_URL}/query`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            "workspace_id": WORKSPACE_A,
+                            "question": question,
+                            "mode": "retrieve",
+                            "top_k": 5
+                        })
+                    });
+                    await res.json();
+
+                    const endTime = performance.now();
+                    const latency = endTime - startTime;
+                    latencies.push(latency);
+
+                    // Update progress every 10 queries
+                    if ((i + 1) % 10 === 0) {
+                        document.getElementById('result').textContent = output + `Progress: ${i + 1}/${NUM_QUERIES} queries completed...`;
+                    }
+                }
+
+                // Calculate statistics
+                latencies.sort((a, b) => a - b);
+                const min = latencies[0];
+                const max = latencies[latencies.length - 1];
+                const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                const p50 = latencies[Math.floor(latencies.length * 0.5)];
+                const p95 = latencies[Math.floor(latencies.length * 0.95)];
+                const p99 = latencies[Math.floor(latencies.length * 0.99)];
+
+                output += `Completed ${NUM_QUERIES} queries.\n\n`;
+                output += "=== LATENCY STATISTICS ===\n\n";
+                output += `Min:    ${min.toFixed(2)} ms\n`;
+                output += `Max:    ${max.toFixed(2)} ms\n`;
+                output += `Avg:    ${avg.toFixed(2)} ms\n`;
+                output += `p50:    ${p50.toFixed(2)} ms\n`;
+                output += `p95:    ${p95.toFixed(2)} ms\n`;
+                output += `p99:    ${p99.toFixed(2)} ms\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+                const p95Target = 2000; // 2 seconds
+                const testPassed = p95 < p95Target;
+
+                output += `Target: p95 < ${p95Target}ms\n`;
+                output += `Actual: p95 = ${p95.toFixed(2)}ms\n`;
+                output += `Result: ${testPassed ? "PASS" : "FAIL"}\n\n`;
+
+                output += `=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Query latency p95 (${p95.toFixed(2)}ms) is below target (${p95Target}ms).\n`;
+                } else {
+                    output += `ISSUE: Query latency p95 (${p95.toFixed(2)}ms) exceeds target (${p95Target}ms).\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testIngestThroughput() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== INGEST THROUGHPUT TEST (>10 docs/minute) ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const NUM_DOCS = 20;
+                const timestamp = Date.now();
+                const startTime = performance.now();
+
+                output += `Ingesting ${NUM_DOCS} documents...\n\n`;
+                document.getElementById('result').textContent = output;
+
+                const results = [];
+                for (let i = 0; i < NUM_DOCS; i++) {
+                    const payload = {
+                        "workspace_id": WORKSPACE_A,
+                        "idempotency_key": `throughput-test-${timestamp}-doc${i}`,
+                        "source": {
+                            "url": `https://example.com/throughput-test-${timestamp}-doc${i}`,
+                            "type": "article"
+                        },
+                        "content": `Document ${i} for throughput testing. This content discusses various market topics including stocks, bonds, and commodities. The analysis covers multiple sectors and provides insights into current trends. Additional context about economic indicators and policy decisions.`,
+                        "metadata": {
+                            "title": `Throughput Test Document ${i}`
+                        }
+                    };
+
+                    const docStart = performance.now();
+                    const res = await fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    const docEnd = performance.now();
+
+                    results.push({
+                        index: i,
+                        status: data.status,
+                        latency: docEnd - docStart,
+                        chunks: data.chunks_created
+                    });
+
+                    // Update progress every 5 docs
+                    if ((i + 1) % 5 === 0) {
+                        document.getElementById('result').textContent = output + `Progress: ${i + 1}/${NUM_DOCS} documents ingested...`;
+                    }
+                }
+
+                const endTime = performance.now();
+                const totalTimeMs = endTime - startTime;
+                const totalTimeMinutes = totalTimeMs / 60000;
+                const docsPerMinute = NUM_DOCS / totalTimeMinutes;
+
+                output += `Completed ${NUM_DOCS} documents.\n\n`;
+                output += "=== TIMING STATISTICS ===\n\n";
+                output += `Total time: ${(totalTimeMs / 1000).toFixed(2)} seconds (${totalTimeMinutes.toFixed(2)} minutes)\n`;
+                output += `Throughput: ${docsPerMinute.toFixed(1)} docs/minute\n\n`;
+
+                // Per-document latencies
+                const latencies = results.map(r => r.latency);
+                latencies.sort((a, b) => a - b);
+                const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                const minLatency = latencies[0];
+                const maxLatency = latencies[latencies.length - 1];
+
+                output += "=== PER-DOCUMENT LATENCY ===\n\n";
+                output += `Min:    ${minLatency.toFixed(2)} ms\n`;
+                output += `Max:    ${maxLatency.toFixed(2)} ms\n`;
+                output += `Avg:    ${avgLatency.toFixed(2)} ms\n\n`;
+
+                // Count new vs existing docs
+                const newDocs = results.filter(r => r.status === 'indexed').length;
+                const existingDocs = results.filter(r => r.status === 'exists').length;
+                output += `New documents created: ${newDocs}\n`;
+                output += `Existing documents (deduplicated): ${existingDocs}\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+                const targetDocsPerMin = 10;
+                const testPassed = docsPerMinute > targetDocsPerMin;
+
+                output += `Target: > ${targetDocsPerMin} docs/minute\n`;
+                output += `Actual: ${docsPerMinute.toFixed(1)} docs/minute\n`;
+                output += `Result: ${testPassed ? "PASS" : "FAIL"}\n\n`;
+
+                output += `=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Ingest throughput (${docsPerMinute.toFixed(1)} docs/min) exceeds target (${targetDocsPerMin} docs/min).\n`;
+                } else {
+                    output += `ISSUE: Ingest throughput (${docsPerMinute.toFixed(1)} docs/min) is below target (${targetDocsPerMin} docs/min).\n`;
                 }
 
                 document.getElementById('result').textContent = output;

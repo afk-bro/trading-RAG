@@ -1709,7 +1709,7 @@
       "Step 2: Time ingestion of all 20",
       "Step 3: Verify throughput > 10 docs/minute"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1720,7 +1720,7 @@
       "Step 3: Calculate p95 latency",
       "Step 4: Verify p95 < 2000ms"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
