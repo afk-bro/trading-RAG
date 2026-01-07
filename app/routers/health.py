@@ -162,3 +162,87 @@ async def debug_db_pool(settings: Settings = Depends(get_settings)):
         "pool_size": pool.get_size() if pool else None,
         "pool_free_size": pool.get_idle_size() if pool else None,
     }
+
+
+@router.get("/debug/db/test")
+async def debug_db_test(settings: Settings = Depends(get_settings)):
+    """Test database connection on-demand."""
+    import asyncpg
+    import traceback
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        # Try to connect directly
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+        )
+        # Test the connection
+        result = await conn.fetchval("SELECT 1")
+        await conn.close()
+        return {"success": True, "test_result": result}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }
+
+
+@router.get("/debug/network")
+async def debug_network(settings: Settings = Depends(get_settings)):
+    """Debug network connectivity from container."""
+    import socket
+    import re
+
+    results = {
+        "dns_resolv_conf": None,
+        "dns_tests": {},
+        "tcp_tests": {},
+    }
+
+    # Read resolv.conf
+    try:
+        with open("/etc/resolv.conf") as f:
+            results["dns_resolv_conf"] = f.read()
+    except Exception as e:
+        results["dns_resolv_conf"] = f"Error: {e}"
+
+    # Extract host from database URL
+    db_host = None
+    if settings.database_url:
+        match = re.search(r"@([^:/@]+)", settings.database_url)
+        if match:
+            db_host = match.group(1)
+
+    # Test hosts
+    test_hosts = [
+        ("google.com", 443),
+        ("8.8.8.8", 53),
+    ]
+    if db_host:
+        test_hosts.append((db_host, 5432))
+
+    for host, port in test_hosts:
+        # DNS test
+        try:
+            ip = socket.gethostbyname(host)
+            results["dns_tests"][host] = {"resolved": True, "ip": ip}
+        except Exception as e:
+            results["dns_tests"][host] = {"resolved": False, "error": str(e)}
+
+        # TCP test
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect((host, port))
+            sock.close()
+            results["tcp_tests"][f"{host}:{port}"] = {"connected": True}
+        except Exception as e:
+            results["tcp_tests"][f"{host}:{port}"] = {"connected": False, "error": str(e)}
+
+    return results

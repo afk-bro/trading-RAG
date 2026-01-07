@@ -119,28 +119,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
 
         if postgres_url:
-            # Supabase requires SSL connections
-            import ssl
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
             logger.info(
                 "Attempting database connection",
                 url_prefix=postgres_url[:50] + "...",
             )
 
+            # Try with short timeout - don't block startup if DB is unreachable
+            # The service can still operate in degraded mode without DB
             _db_pool = await asyncpg.create_pool(
                 postgres_url,
-                min_size=settings.db_pool_min_size,
+                min_size=0,  # Don't require any connections at startup
                 max_size=settings.db_pool_max_size,
-                ssl=ssl_context,
-                timeout=60,  # Connection timeout
-                command_timeout=60,  # Query timeout
+                ssl='require',
+                timeout=10,  # Short connection timeout to avoid blocking startup
+                command_timeout=30,  # Query timeout
             )
             logger.info(
                 "Database pool initialized",
-                min_size=settings.db_pool_min_size,
+                min_size=0,
                 max_size=settings.db_pool_max_size,
             )
 

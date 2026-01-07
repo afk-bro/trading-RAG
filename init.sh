@@ -111,7 +111,11 @@ fi
 # Step 3: Create Docker network if it doesn't exist
 echo -e "${BLUE}Step 3: Setting up Docker network...${NC}"
 
-if ! docker network ls | grep -q "rag-net"; then
+# Clean up any prefixed network from previous docker-compose runs
+docker network rm trading-rag_rag-net 2>/dev/null || true
+
+# Create the external network if it doesn't exist
+if ! docker network ls --format '{{.Name}}' | grep -q "^rag-net$"; then
     docker network create rag-net
     echo -e "${GREEN}Created rag-net Docker network.${NC}"
 else
@@ -172,7 +176,21 @@ echo -e "${BLUE}Step 8: Starting FastAPI service...${NC}"
 
 $DOCKER_COMPOSE -f docker-compose.rag.yml up -d --build trading-rag-svc
 
-wait_for_service "Trading RAG Service" "http://localhost:8000/health" 30
+# Give service a moment to start and produce logs
+sleep 5
+
+# Show diagnostic info before waiting
+echo -e "${YELLOW}=== DIAGNOSTIC INFO ===${NC}"
+echo "Container status:"
+docker ps -a --filter "name=trading-rag" --format "table {{.Names}}\t{{.Status}}"
+echo ""
+echo "Container logs (last 100 lines):"
+docker logs trading-rag-svc --tail 100 2>&1
+echo ""
+echo "=== END DIAGNOSTIC INFO ==="
+echo ""
+
+wait_for_service "Trading RAG Service" "http://localhost:8000/health" 60
 
 # Print summary
 echo ""
