@@ -2,9 +2,9 @@
 
 ## Session 48 Summary
 Date: Session 48 (Pre-chunked Content and Source Types)
-Status: Services Running - 140/217 Tests Passing (64.5%)
+Status: Services Running - 141/217 Tests Passing (65.0%)
 
-### Tests Verified This Session (+5 tests)
+### Tests Verified This Session (+6 tests)
 1. **POST /ingest handles pre-chunked content correctly** ✅
    - Sent 3 pre-defined chunks with page info
    - Verified chunks_created=3 (matches provided chunks)
@@ -32,10 +32,14 @@ Status: Services Running - 140/217 Tests Passing (64.5%)
    - locator_label formatted correctly as "0:00", "0:10"
    - Metadata extraction (symbols, topics) works on transcript chunks
 
+6. **Citation URL builder creates generic URLs for non-YouTube content** ✅
+   - Article with source_url="https://example.com/article-test"
+   - Query returns citation_url matching source_url exactly
+
 ### Progress Summary
 - Previous: 135/217 tests passing (62.2%)
-- This session: 140/217 tests passing (64.5%)
-- Improvement: +5 tests
+- This session: 141/217 tests passing (65.0%)
+- Improvement: +6 tests
 
 ### Key Verifications
 - Pre-chunked content bypasses automatic chunking
@@ -43,6 +47,7 @@ Status: Services Running - 140/217 Tests Passing (64.5%)
 - Multi-page spans show "pp. X-Y" format
 - Unicode content fully preserved through ingestion and retrieval
 - All source types (youtube, pdf, article, note, transcript) working
+- Citation URLs for non-YouTube content match source_url
 
 ### Next Steps for Future Sessions
 1. Test chunk_vectors table tracking

@@ -733,7 +733,7 @@
       "Step 2: POST /query for that article's content",
       "Step 3: Verify citation URL matches source_url"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
