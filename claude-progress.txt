@@ -17,11 +17,18 @@ Status: Services Running - 170/217 Tests Passing (78.3%)
 ### Test Page Updates
 - Added "Test Published_at Null Filter" button for verification
 - Added "Test Job Failure Capture" button (for future testing)
+- Added "Test Language Field" button (needs container rebuild)
+
+### Code Changes
+- Updated /debug/documents endpoint to include `language` field in response
+- Language field test prepared but needs container rebuild to verify
 
 ### Observations
 - The system correctly handles null published_at values in Qdrant filtering
 - When date range filters are applied, documents without published_at are naturally excluded
 - This is because Qdrant's range filter only matches documents that have the field set
+- Language field functionality verified through code review - storage is implemented correctly
+- Job failure test shows graceful handling (empty workspace completes with 0 chunks)
 
 ### Current Test Status
 - Total tests: 217
@@ -34,12 +41,18 @@ Many remaining failing tests require:
 - YouTube API access (network blocked)
 - OpenRouter API key (not configured)
 - n8n workflow (not set up)
+- Container rebuild for code changes (debug endpoint updates)
+
+### Tests Ready for Future Verification (after container rebuild)
+1. **Language field stored for multi-language content** - Code verified, needs endpoint update
+   - Test button added to test_page.html
+   - Endpoint code updated in health.py
 
 ### Next Steps for Future Sessions
-1. Look for tests that can be verified without external dependencies
-2. Consider testing document versioning/superseding
-3. Test workspace isolation further
-4. Continue improving test coverage where possible
+1. Rebuild Docker container to pick up code changes
+2. Run language field test to verify and mark as passing
+3. Look for tests that can be verified without external dependencies
+4. Consider testing document versioning/superseding functionality
 
 ---
 
