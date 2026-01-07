@@ -23,6 +23,7 @@ class MockSettings:
         llm_required=False,
         llm_enabled=True,
         anthropic_api_key=None,
+        claude_code_oauth_token=None,
         openrouter_api_key=None,
         answer_model="claude-sonnet-4",
         rerank_model="claude-haiku-3-5",
@@ -32,6 +33,7 @@ class MockSettings:
         self.llm_required = llm_required
         self.llm_enabled = llm_enabled
         self.anthropic_api_key = anthropic_api_key
+        self.claude_code_oauth_token = claude_code_oauth_token
         self.openrouter_api_key = openrouter_api_key
         self.answer_model = answer_model
         self.rerank_model = rerank_model
@@ -95,7 +97,7 @@ class TestResolveProvider:
         )
         with pytest.raises(LLMStartupError) as exc:
             _resolve_provider(settings)
-        assert "ANTHROPIC_API_KEY not set" in str(exc.value)
+        assert "ANTHROPIC_API_KEY" in str(exc.value)
 
     def test_explicit_openrouter_requires_key(self):
         """Test that explicit openrouter provider requires its key."""

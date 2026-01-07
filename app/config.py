@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = Field(
         default=None, description="Anthropic API key (preferred provider)"
     )
+    claude_code_oauth_token: Optional[str] = Field(
+        default=None, description="Claude Code OAuth token (alternative to API key)"
+    )
     openrouter_api_key: Optional[str] = Field(
         default=None, description="OpenRouter API key (fallback provider)"
     )

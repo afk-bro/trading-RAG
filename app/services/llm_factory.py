@@ -57,12 +57,20 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
 
     provider = settings.llm_provider
 
+    # Helper to get Anthropic key (API key or OAuth token)
+    def get_anthropic_key() -> str | None:
+        key = (settings.anthropic_api_key or "").strip() or None
+        if key:
+            return key
+        # Fall back to Claude Code OAuth token
+        return (settings.claude_code_oauth_token or "").strip() or None
+
     # Explicit provider selection
     if provider == "anthropic":
-        key = (settings.anthropic_api_key or "").strip() or None
+        key = get_anthropic_key()
         if not key:
             raise LLMStartupError(
-                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY not set"
+                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) not set"
             )
         return "anthropic", key
 
@@ -75,7 +83,7 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
         return "openrouter", key
 
     # Auto: prefer Anthropic, fall back to OpenRouter
-    anthropic_key = (settings.anthropic_api_key or "").strip() or None
+    anthropic_key = get_anthropic_key()
     if anthropic_key:
         return "anthropic", anthropic_key
 
@@ -87,7 +95,7 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
     if settings.llm_required:
         raise LLMStartupError(
             "LLM_REQUIRED=true but no API key configured. "
-            "Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY"
+            "Set ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or OPENROUTER_API_KEY"
         )
 
     return None, None
