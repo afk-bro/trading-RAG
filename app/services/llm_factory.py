@@ -11,8 +11,8 @@ from app.services.llm_base import BaseLLMClient, LLMNotConfiguredError
 logger = structlog.get_logger(__name__)
 
 # Type aliases
-ProviderConfig = Literal["auto", "anthropic", "openrouter"]
-ProviderResolved = Literal["anthropic", "openrouter"]
+ProviderConfig = Literal["auto", "anthropic", "openai", "openrouter"]
+ProviderResolved = Literal["anthropic", "openai", "openrouter"]
 
 
 @dataclass
@@ -74,6 +74,14 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
             )
         return "anthropic", key
 
+    if provider == "openai":
+        key = (settings.openai_api_key or "").strip() or None
+        if not key:
+            raise LLMStartupError(
+                "LLM_PROVIDER=openai but OPENAI_API_KEY not set"
+            )
+        return "openai", key
+
     if provider == "openrouter":
         key = (settings.openrouter_api_key or "").strip() or None
         if not key:
@@ -82,10 +90,14 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
             )
         return "openrouter", key
 
-    # Auto: prefer Anthropic, fall back to OpenRouter
+    # Auto: prefer Anthropic > OpenAI > OpenRouter
     anthropic_key = get_anthropic_key()
     if anthropic_key:
         return "anthropic", anthropic_key
+
+    openai_key = (settings.openai_api_key or "").strip() or None
+    if openai_key:
+        return "openai", openai_key
 
     openrouter_key = (settings.openrouter_api_key or "").strip() or None
     if openrouter_key:
@@ -95,7 +107,7 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
     if settings.llm_required:
         raise LLMStartupError(
             "LLM_REQUIRED=true but no API key configured. "
-            "Set ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or OPENROUTER_API_KEY"
+            "Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY"
         )
 
     return None, None
@@ -109,6 +121,15 @@ def _create_client(
         from app.services.llm_anthropic import AnthropicLLMClient
 
         return AnthropicLLMClient(
+            api_key=api_key,
+            answer_model=settings.answer_model,
+            rerank_model=settings.rerank_model,
+            timeout=settings.llm_timeout,
+        )
+    elif provider == "openai":
+        from app.services.llm_openai import OpenAILLMClient
+
+        return OpenAILLMClient(
             api_key=api_key,
             answer_model=settings.answer_model,
             rerank_model=settings.rerank_model,

@@ -24,6 +24,7 @@ class MockSettings:
         llm_enabled=True,
         anthropic_api_key=None,
         claude_code_oauth_token=None,
+        openai_api_key=None,
         openrouter_api_key=None,
         answer_model="claude-sonnet-4",
         rerank_model="claude-haiku-3-5",
@@ -34,6 +35,7 @@ class MockSettings:
         self.llm_enabled = llm_enabled
         self.anthropic_api_key = anthropic_api_key
         self.claude_code_oauth_token = claude_code_oauth_token
+        self.openai_api_key = openai_api_key
         self.openrouter_api_key = openrouter_api_key
         self.answer_model = answer_model
         self.rerank_model = rerank_model

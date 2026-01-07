@@ -35,9 +35,9 @@ class Settings(BaseSettings):
     )
 
     # LLM Provider Configuration
-    llm_provider: Literal["auto", "anthropic", "openrouter"] = Field(
+    llm_provider: Literal["auto", "anthropic", "openai", "openrouter"] = Field(
         default="auto",
-        description="LLM provider: auto prefers Anthropic when key is available",
+        description="LLM provider: auto prefers Anthropic > OpenAI > OpenRouter",
     )
     llm_required: bool = Field(
         default=False,
@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     )
     claude_code_oauth_token: Optional[str] = Field(
         default=None, description="Claude Code OAuth token (alternative to API key)"
+    )
+    openai_api_key: Optional[str] = Field(
+        default=None, description="OpenAI API key (second preference)"
     )
     openrouter_api_key: Optional[str] = Field(
         default=None, description="OpenRouter API key (fallback provider)"
