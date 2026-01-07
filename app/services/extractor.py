@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 # Common stock ticker patterns
 TICKER_PATTERN = re.compile(r"\b([A-Z]{1,5})\b")
-TICKER_WITH_DOLLAR = re.compile(r"\$([A-Z]{1,5})\b")
+TICKER_WITH_DOLLAR = re.compile(r"\$([A-Za-z]{1,5})\b")
 
 # Known valid tickers (expandable allowlist)
 VALID_TICKERS = {

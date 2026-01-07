@@ -17,11 +17,18 @@ class MockCollectionInfo:
         self.config.params.vectors.size = dimension
 
 
+class MockCollectionDescription:
+    """Mock Qdrant collection description."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+
 class MockCollectionList:
     """Mock Qdrant collection list."""
 
     def __init__(self, collections: list):
-        self.collections = [MagicMock(name=c) for c in collections]
+        self.collections = [MockCollectionDescription(c) for c in collections]
 
 
 class TestVectorRepositoryEnsureCollection:
