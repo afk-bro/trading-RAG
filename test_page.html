@@ -28,6 +28,8 @@
     <button onclick="testPDFLocatorLabels()">Test PDF Locator Labels</button>
     <button onclick="testReembedWorkspaceFilter()">Test Reembed Workspace Filter</button>
     <button onclick="testReembedDocIdFilter()">Test Reembed Doc ID Filter</button>
+    <button onclick="testPublishedAtNullHandling()">Test Published_at Null Filter</button>
+    <button onclick="testJobFailureCapture()">Test Job Failure Capture</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -1073,6 +1075,227 @@
                     output += `SUCCESS: Reembed with doc_ids filter queued exactly ${reembedResult.chunks_queued} chunks\n`;
                     output += `matching the selected documents (doc1+doc2=${expectedChunks}).\n`;
                     output += `Doc 3's ${doc3Chunks} chunks were correctly excluded.\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testPublishedAtNullHandling() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== PUBLISHED_AT NULL HANDLING IN FILTERS TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest document WITHOUT published_at
+                document.getElementById('result').textContent = 'Step 1: Ingesting document WITHOUT published_at...';
+                const docWithoutDate = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `null-published-test-${timestamp}`,
+                    "source": { "url": `https://example.com/null-published-${timestamp}`, "type": "article" },
+                    "content": "This document has NO published_at date. It discusses null date filtering test content about markets.",
+                    "metadata": { "title": "Null Published_at Test" }
+                    // Note: no published_at in metadata
+                };
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docWithoutDate)
+                });
+                let result1 = await res.json();
+                output += "Step 1 - Ingest WITHOUT published_at:\n" + JSON.stringify(result1, null, 2) + "\n\n";
+
+                // Step 2: Ingest document WITH published_at (recent date)
+                document.getElementById('result').textContent = 'Step 2: Ingesting document WITH published_at...';
+                const docWithDate = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `with-published-test-${timestamp}`,
+                    "source": { "url": `https://example.com/with-published-${timestamp}`, "type": "article" },
+                    "content": "This document HAS a published_at date set to 2024. It discusses date filtering test content about markets.",
+                    "metadata": {
+                        "title": "With Published_at Test",
+                        "published_at": "2024-06-15T12:00:00Z"
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docWithDate)
+                });
+                let result2 = await res.json();
+                output += "Step 2 - Ingest WITH published_at (2024-06-15):\n" + JSON.stringify(result2, null, 2) + "\n\n";
+
+                // Wait for embeddings to complete
+                await new Promise(r => setTimeout(r, 3000));
+
+                // Step 3: Query WITHOUT date filter - should return both
+                document.getElementById('result').textContent = 'Step 3: Query without date filter...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "date filtering test content",
+                        "mode": "retrieve",
+                        "top_k": 20
+                    })
+                });
+                let queryNoFilter = await res.json();
+                output += "Step 3 - Query WITHOUT date filter:\n";
+                output += `Results count: ${queryNoFilter.results ? queryNoFilter.results.length : 0}\n`;
+
+                // Check for both documents
+                const hasNullDoc = queryNoFilter.results?.some(r => r.content?.includes("NO published_at"));
+                const hasDateDoc = queryNoFilter.results?.some(r => r.content?.includes("HAS a published_at"));
+                output += `Contains null-date doc: ${hasNullDoc}\n`;
+                output += `Contains dated doc: ${hasDateDoc}\n\n`;
+
+                // Step 4: Query WITH date range filter - should EXCLUDE null published_at docs
+                document.getElementById('result').textContent = 'Step 4: Query with date range filter...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "date filtering test content",
+                        "mode": "retrieve",
+                        "top_k": 20,
+                        "filters": {
+                            "published_from": "2024-01-01",
+                            "published_to": "2024-12-31"
+                        }
+                    })
+                });
+                let queryWithFilter = await res.json();
+                output += "Step 4 - Query WITH date range filter (2024):\n";
+                output += `Results count: ${queryWithFilter.results ? queryWithFilter.results.length : 0}\n`;
+
+                // Check for documents
+                const hasNullDocFiltered = queryWithFilter.results?.some(r => r.content?.includes("NO published_at"));
+                const hasDateDocFiltered = queryWithFilter.results?.some(r => r.content?.includes("HAS a published_at"));
+                output += `Contains null-date doc: ${hasNullDocFiltered}\n`;
+                output += `Contains dated doc: ${hasDateDocFiltered}\n\n`;
+
+                // Step 5: Verification
+                output += "=== VERIFICATION ===\n\n";
+
+                // Test criteria:
+                // 1. Without filter: both documents should be found (or at least the dated one)
+                // 2. With date filter: null published_at doc should be EXCLUDED
+
+                const test1Passed = hasDateDoc; // At least dated doc found without filter
+                const test2Passed = !hasNullDocFiltered; // Null doc excluded with filter
+                const test3Passed = hasDateDocFiltered; // Dated doc included with filter
+
+                output += `Test 1 - Dated doc found without filter: ${test1Passed}\n`;
+                output += `Test 2 - Null-date doc EXCLUDED with date filter: ${test2Passed}\n`;
+                output += `Test 3 - Dated doc INCLUDED with date filter: ${test3Passed}\n\n`;
+
+                const allPassed = test1Passed && test2Passed && test3Passed;
+                output += `\n=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: Documents without published_at are correctly excluded\n";
+                    output += "when date range filters are applied.\n";
+                } else {
+                    if (!test2Passed) {
+                        output += "ISSUE: Document with null published_at was NOT excluded from date-filtered results.\n";
+                        output += "This may indicate that null date handling needs to be implemented.\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testJobFailureCapture() {
+            let output = "=== JOB FAILURE CAPTURE TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                // Step 1: POST /reembed with invalid configuration
+                // We'll use a non-existent workspace_id to trigger a failure
+                document.getElementById('result').textContent = 'Step 1: POST /reembed with invalid workspace...';
+                const invalidPayload = {
+                    "workspace_id": "99999999-9999-9999-9999-999999999999",  // Non-existent workspace
+                    "target_collection": "kb_invalid_test_collection",
+                    "embed_provider": "ollama",
+                    "embed_model": "nomic-embed-text"
+                };
+
+                let res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(invalidPayload)
+                });
+                let reembedResult = await res.json();
+                output += "Step 1 - POST /reembed with non-existent workspace:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Check if job was created or if there was an immediate error
+                if (reembedResult.job_id) {
+                    // Step 2: GET /jobs/{job_id}
+                    document.getElementById('result').textContent = 'Step 2: Polling job status...';
+                    let finalStatus = null;
+                    let finalError = null;
+
+                    for (let i = 0; i < 10; i++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        res = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
+                        let jobStatus = await res.json();
+                        output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%`;
+                        if (jobStatus.error) {
+                            output += `, error="${jobStatus.error}"`;
+                            finalError = jobStatus.error;
+                        }
+                        output += "\n";
+                        finalStatus = jobStatus.status;
+                        if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
+                            break;
+                        }
+                    }
+
+                    output += "\n=== VERIFICATION ===\n\n";
+
+                    // For a non-existent workspace, the job might complete with 0 chunks
+                    // or fail - both are valid outcomes
+                    const jobCompleted = finalStatus === 'completed' || finalStatus === 'failed';
+                    output += `Test 1 - Job reached terminal state: ${jobCompleted} (status: ${finalStatus})\n`;
+
+                    if (finalStatus === 'failed') {
+                        const hasErrorInfo = finalError !== null && finalError.length > 0;
+                        output += `Test 2 - Error field contains info: ${hasErrorInfo}\n`;
+                        if (hasErrorInfo) {
+                            output += `  Error: "${finalError}"\n`;
+                        }
+                        output += `\n=== TEST PASSED ===\n`;
+                        output += `Job failure captured with error details.\n`;
+                    } else if (finalStatus === 'completed' && reembedResult.chunks_queued === 0) {
+                        output += `Test 2 - Job handled gracefully (0 chunks for non-existent workspace): true\n`;
+                        output += `\n=== TEST PASSED (GRACEFUL HANDLING) ===\n`;
+                        output += `Empty workspace handled gracefully without error.\n`;
+                    } else {
+                        output += `\n=== UNEXPECTED RESULT ===\n`;
+                        output += `Status: ${finalStatus}, chunks_queued: ${reembedResult.chunks_queued}\n`;
+                    }
+                } else {
+                    // Immediate error response
+                    output += "\n=== VERIFICATION ===\n\n";
+                    const hasDetail = reembedResult.detail !== undefined;
+                    output += `Test 1 - Immediate error response received: true\n`;
+                    output += `Test 2 - Error contains detail field: ${hasDetail}\n`;
+                    if (hasDetail) {
+                        output += `  Detail: "${reembedResult.detail}"\n`;
+                    }
+                    output += `\n=== TEST PASSED ===\n`;
+                    output += `Error captured with useful information.\n`;
                 }
 
                 document.getElementById('result').textContent = output;

@@ -1908,7 +1908,7 @@
       "Step 2: Query with date range filter",
       "Step 3: Verify null published_at documents excluded from date-filtered results"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
