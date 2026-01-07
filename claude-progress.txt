@@ -1,10 +1,12 @@
 # Trading RAG Pipeline - Progress Notes
 
 ## Session 49 Summary
-Date: Session 49 (Database Table Verification)
-Status: Services Running - 145/217 Tests Passing (66.8%)
+Date: Session 49 (Database Table Verification + Reembed Jobs)
+Status: Services Running - 148/217 Tests Passing (68.2%)
 
-### Tests Verified This Session (+4 tests)
+### Tests Verified This Session (+7 tests)
+
+#### Database Table Tests (+4)
 
 1. **chunk_vectors table tracks embedding records correctly** ✅
    - Verified records exist for each chunk
@@ -41,18 +43,37 @@ Status: Services Running - 145/217 Tests Passing (66.8%)
    - Same doc_id returned for both requests
    - No duplicate chunks/vectors created
 
+#### Reembed & Jobs Tests (+3)
+
+5. **POST /reembed starts async re-embedding job** ✅
+   - job_id: returned correctly ✓
+   - chunks_queued: 23 ✓
+   - status: "started" ✓
+
+6. **GET /jobs/{job_id} returns job status correctly** ✅
+   - Returns job_id, status, progress, error fields
+   - status transitions: started → completed
+
+7. **GET /jobs/{job_id} shows job completion** ✅
+   - Polled job until completion
+   - Final status: "completed"
+   - Final progress: 100%
+
 ### Code Changes
 - Added debug endpoints to health.py:
   - GET /debug/chunk_vectors - Lists chunk_vectors records
   - GET /debug/documents - Lists documents records
   - GET /debug/chunks - Lists chunks records
-- Added test_page.html for browser-based API testing
+- Added test_page.html for browser-based API testing with buttons for:
+  - Health check, Ingest, Query, Duplicate test
+  - Check Chunk Vectors, Documents, Chunks
+  - YouTube test, Reembed test (with job polling)
 
 ### Progress Summary
 - Previous: 141/217 tests passing (65.0%)
-- This session: 145/217 tests passing (66.8%)
-- Improvement: +4 tests
-- Remaining: 72 tests
+- This session: 148/217 tests passing (68.2%)
+- Improvement: +7 tests
+- Remaining: 69 tests
 
 ### Service Status
 All services healthy:
@@ -62,11 +83,17 @@ All services healthy:
 - active_collection: kb_nomic_embed_text_v1
 - embed_model: nomic-embed-text
 
+### Blockers Identified
+- YouTube ingestion tests failing due to transcript fetch errors from Docker container
+  - Error: "Failed to fetch transcript: no element found"
+  - Likely due to YouTube rate limiting or blocking automated requests
+  - YouTube URL parsing and video_id extraction works correctly
+
 ### Next Steps
-1. Verify YouTube ingestion tests (POST /sources/youtube/ingest)
-2. Verify reembed job tests (POST /reembed, GET /jobs/{job_id})
-3. Verify answer generation with LLM (mode='answer')
-4. n8n workflow tests (requires n8n configuration)
+1. Investigate YouTube transcript fetching from Docker (may need proxy or API key)
+2. Verify answer generation with LLM (mode='answer') - requires OPENROUTER_API_KEY
+3. n8n workflow tests (requires n8n configuration)
+4. Verify remaining functional tests (concurrent requests, large content, etc.)
 
 ---
 
