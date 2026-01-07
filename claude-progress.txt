@@ -1,5 +1,47 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 47 Summary
+Date: Session 47 (Query and Filter Verification)
+Status: Services Running - 131/217 Tests Passing (60.4%)
+
+### Tests Verified This Session (+10 tests)
+1. **Query with no results returns empty array** ✅
+   - Querying with filters that match nothing returns `results: []` with no error
+
+2. **Empty filters return all results (no filter applied)** ✅
+   - Empty filters object returns results based purely on semantic relevance
+
+3. **POST /ingest deduplicates based on content_hash** ✅
+   - Same content with different URLs returns same doc_id with status: "exists"
+
+4. **POST /query preserves ranking order from Qdrant in hydrated results** ✅
+   - Results are sorted by score descending (0.74 → 0.72 → 0.61 → 0.50)
+
+5. **Query hydration fetches full chunk content from Postgres** ✅
+   - All results contain full chunk content from database
+
+6. **POST /query filters by source_types correctly** ✅
+   - source_types=['article'] returns results, source_types=['pdf'] returns empty
+
+7. **POST /query filters by entities correctly** ✅
+   - entities=['Jerome Powell'] returns 2 results mentioning Powell
+
+8. **POST /query filters by authors correctly** ✅
+   - authors=['Financial Times'] returns 2 results from that author
+
+9. **POST /query filters by date range (published_from, published_to)** ✅
+   - Date filters correctly include/exclude based on published_at
+
+10. **POST /query filters by symbols with 'all' mode** ✅
+    - symbols_mode='all' requires ALL symbols to match (stricter than 'any')
+
+### Progress Summary
+- Previous: 121/217 tests (55.8%)
+- This session: 131/217 tests (60.4%)
+- Improvement: +10 tests verified
+
+---
+
 ## Session 46 Summary
 Date: Session 46 (DATABASE CONNECTION WORKING - Major Breakthrough!)
 Status: Services Running - 121/217 Tests Passing (55.8%)

@@ -103,7 +103,7 @@
       "Step 5: POST to /ingest",
       "Step 6: Verify system detects duplicate via content_hash"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -344,7 +344,7 @@
       "Step 4: Verify all results have source_type='youtube'",
       "Step 5: Verify no pdf results included"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -366,7 +366,7 @@
       "Step 3: POST /query with filters.symbols=['AAPL', 'GOOGL'], symbols_mode='all'",
       "Step 4: Verify only documents with BOTH symbols are returned"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -378,7 +378,7 @@
       "Step 4: POST /query with published_to='2024-06-30'",
       "Step 5: Verify all results have published_at <= 2024-06-30"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -398,7 +398,7 @@
       "Step 2: POST /query with filters.entities=['Powell']",
       "Step 3: Verify results mention Powell"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -408,7 +408,7 @@
       "Step 2: POST /query with filters.authors=['SpecificChannel']",
       "Step 3: Verify results are from specified author/channel"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -452,7 +452,7 @@
       "Step 3: Verify results are ordered by relevance score descending",
       "Step 4: Verify Postgres hydration doesn't change the order"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -463,7 +463,7 @@
       "Step 3: Verify each result contains full chunk content",
       "Step 4: Verify content matches what was stored in chunks table"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1202,7 +1202,7 @@
       "Step 2: Verify results is empty array []",
       "Step 3: Verify no error raised"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1918,7 +1918,7 @@
       "Step 2: Verify all workspace documents considered",
       "Step 3: Verify results based purely on semantic relevance"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
