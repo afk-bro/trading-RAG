@@ -6,7 +6,13 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.config import Settings, get_settings
-from app.schemas import ChunkResult, QueryMode, QueryRequest, QueryResponse
+from app.schemas import (
+    ChunkResult,
+    KnowledgeExtractionStats,
+    QueryMode,
+    QueryRequest,
+    QueryResponse,
+)
 from app.services.embedder import get_embedder
 from app.services.llm_factory import get_llm, get_llm_status
 
@@ -79,6 +85,7 @@ async def query(
     Query modes:
     - retrieve: Returns only matching chunks (no LLM call)
     - answer: Returns chunks + LLM-generated answer with citations
+    - learn: Extract → verify → persist → synthesize (builds truth store)
 
     Filter capabilities:
     - source_types: Filter by document source (youtube, pdf, article, etc.)
@@ -303,7 +310,92 @@ async def query(
                 # Don't fail the whole request, just return without answer
                 answer = f"[Error generating answer: {str(e)}]"
 
+    # Step 8: If mode=learn, run KB pipeline (extract → verify → persist → synthesize)
+    knowledge_stats = None
+
+    if request.mode == QueryMode.LEARN and results:
+        if not llm or not llm_status.enabled:
+            logger.info("LLM not configured, cannot run learn mode")
+            answer = (
+                "[LLM generation is disabled] "
+                "Learn mode requires an LLM provider. "
+                "Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY in .env to enable learn mode."
+            )
+        else:
+            try:
+                from app.services.kb_pipeline import KBPipeline
+                from app.repositories.kb import KnowledgeBaseRepository
+
+                # Prepare context chunks for pipeline
+                context_chunks = [
+                    {
+                        "content": r.content,
+                        "title": r.title,
+                        "source_url": r.source_url,
+                        "doc_id": str(r.doc_id),
+                        "chunk_id": str(r.chunk_id),
+                    }
+                    for r in results
+                ]
+
+                # Run KB pipeline
+                pipeline = KBPipeline(llm=llm)
+                pipeline_result = await pipeline.run(
+                    chunks=context_chunks,
+                    question=request.question,
+                    synthesize=True,
+                )
+
+                # Persist to truth store
+                kb_repo = KnowledgeBaseRepository(_db_pool)
+                chunk_ids = [r.chunk_id for r in results]
+                doc_id = results[0].doc_id if results else None
+
+                if doc_id and pipeline_result.extraction.claims:
+                    persistence_stats = await kb_repo.persist_extraction(
+                        workspace_id=request.workspace_id,
+                        entities=pipeline_result.extraction.entities,
+                        claims=pipeline_result.extraction.claims,
+                        relations=pipeline_result.extraction.relations,
+                        verdicts=pipeline_result.verification.verdicts,
+                        chunk_ids=chunk_ids,
+                        doc_id=doc_id,
+                        extraction_model=pipeline.extraction_model,
+                        verification_model=pipeline.verification_model,
+                    )
+                else:
+                    from app.services.kb_types import PersistenceStats
+                    persistence_stats = PersistenceStats()
+
+                # Use synthesized answer from pipeline
+                answer = pipeline_result.synthesized_answer
+
+                # Build stats
+                knowledge_stats = KnowledgeExtractionStats(
+                    entities_extracted=len(pipeline_result.extraction.entities),
+                    claims_extracted=len(pipeline_result.extraction.claims),
+                    relations_extracted=len(pipeline_result.extraction.relations),
+                    claims_verified=pipeline_result.verified_claims_count,
+                    claims_weak=pipeline_result.weak_claims_count,
+                    claims_rejected=pipeline_result.rejected_claims_count,
+                    entities_persisted=persistence_stats.entities_created + persistence_stats.entities_updated,
+                    claims_persisted=persistence_stats.claims_created,
+                )
+
+                logger.info(
+                    "Learn mode complete",
+                    entities=knowledge_stats.entities_extracted,
+                    claims=knowledge_stats.claims_extracted,
+                    verified=knowledge_stats.claims_verified,
+                    persisted=knowledge_stats.claims_persisted,
+                )
+
+            except Exception as e:
+                logger.error("Learn mode failed", error=str(e))
+                answer = f"[Error in learn mode: {str(e)}]"
+
     return QueryResponse(
         results=results,
         answer=answer,
+        knowledge_stats=knowledge_stats,
     )

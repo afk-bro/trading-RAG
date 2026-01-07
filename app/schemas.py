@@ -40,6 +40,7 @@ class QueryMode(str, Enum):
 
     RETRIEVE = "retrieve"
     ANSWER = "answer"
+    LEARN = "learn"  # Extract → verify → persist → synthesize
 
 
 class SymbolsMode(str, Enum):
@@ -264,11 +265,27 @@ class ChunkResult(BaseModel):
     topics: list[str] = Field(default_factory=list, description="Detected topics")
 
 
+class KnowledgeExtractionStats(BaseModel):
+    """Statistics from knowledge extraction pipeline (mode=learn)."""
+
+    entities_extracted: int = Field(default=0, description="Entities extracted")
+    claims_extracted: int = Field(default=0, description="Claims extracted")
+    relations_extracted: int = Field(default=0, description="Relations extracted")
+    claims_verified: int = Field(default=0, description="Claims verified (high confidence)")
+    claims_weak: int = Field(default=0, description="Claims with weak support")
+    claims_rejected: int = Field(default=0, description="Claims rejected")
+    entities_persisted: int = Field(default=0, description="Entities persisted to truth store")
+    claims_persisted: int = Field(default=0, description="Claims persisted to truth store")
+
+
 class QueryResponse(BaseModel):
     """Response for query endpoint."""
 
     results: list[ChunkResult] = Field(..., description="Matching chunks")
-    answer: Optional[str] = Field(None, description="Generated answer if mode=answer")
+    answer: Optional[str] = Field(None, description="Generated answer if mode=answer/learn")
+    knowledge_stats: Optional[KnowledgeExtractionStats] = Field(
+        None, description="Knowledge extraction stats if mode=learn"
+    )
 
 
 class ReembedResponse(BaseModel):
