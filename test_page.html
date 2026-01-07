@@ -35,6 +35,7 @@
     <button onclick="testQueryLatency()">Test Query Latency (p95)</button>
     <button onclick="testIngestThroughput()">Test Ingest Throughput</button>
     <button onclick="testSectionTracking()">Test Section Tracking</button>
+    <button onclick="testYouTubeCitationUrl()">Test YouTube Citation URL</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -1919,6 +1920,181 @@ Investors should consider these factors when making investment decisions.`;
                     }
                     if (!hasSections) {
                         output += "ISSUE: Section field is not being populated in chunks\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testYouTubeCitationUrl() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== YOUTUBE CITATION URL TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+                const TEST_VIDEO_ID = "dQw4w9WgXcQ";  // Famous video ID for testing
+
+                // Step 1: Ingest a YouTube-type document with video_id and pre-chunked content with timestamps
+                document.getElementById('result').textContent = 'Step 1: Ingesting YouTube document with timestamps...';
+
+                const payload = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `youtube-citation-test-${timestamp}`,
+                    "source": {
+                        "url": `https://www.youtube.com/watch?v=${TEST_VIDEO_ID}`,
+                        "type": "youtube"
+                    },
+                    "video_id": TEST_VIDEO_ID,
+                    "content": "This is a test video transcript about market analysis and trading strategies. We discuss AAPL, MSFT, and other tech stocks. The Federal Reserve policy impacts are analyzed.",
+                    "metadata": {
+                        "title": "YouTube Citation Test Video",
+                        "author": "Test Channel"
+                    },
+                    "chunks": [
+                        {
+                            "content": "Welcome to our market analysis video. Today we'll discuss AAPL stock performance and quarterly earnings.",
+                            "time_start_secs": 0,
+                            "time_end_secs": 45
+                        },
+                        {
+                            "content": "Moving on to Microsoft MSFT. The cloud business continues strong growth with Azure leading.",
+                            "time_start_secs": 45,
+                            "time_end_secs": 120
+                        },
+                        {
+                            "content": "The Federal Reserve announced policy changes. Chairman Powell discussed inflation targets and rate decisions.",
+                            "time_start_secs": 120,
+                            "time_end_secs": 200
+                        }
+                    ]
+                };
+
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let ingestResult = await res.json();
+                output += "Step 1 - Ingest YouTube document:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(ingestResult, null, 2) + "\n\n";
+
+                if (res.status !== 200 && res.status !== 201) {
+                    output += "ERROR: Failed to ingest document\n";
+                    output += "\n=== TEST FAILED ===\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const docId = ingestResult.doc_id;
+                output += `Document created with ID: ${docId}\n\n`;
+
+                // Wait for indexing
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 2: Query for the content to get citation URLs
+                document.getElementById('result').textContent = 'Step 2: Querying to get citation URLs...';
+
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "What did the Federal Reserve announce?",
+                        "mode": "retrieve",
+                        "top_k": 5
+                    })
+                });
+                let queryResult = await res.json();
+                output += "Step 2 - Query Results:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += `Results count: ${queryResult.results ? queryResult.results.length : 0}\n\n`;
+
+                // Step 3: Find results from our test video and verify citation URL format
+                const videoResults = queryResult.results ?
+                    queryResult.results.filter(r => r.doc_id === docId) : [];
+
+                output += `Step 3 - Results from test video: ${videoResults.length}\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+
+                // Check if citation URLs have the correct format
+                let citationUrlsCorrect = true;
+                let foundTimestamp = false;
+
+                if (videoResults.length > 0) {
+                    for (const result of videoResults) {
+                        output += `Chunk: "${result.content.substring(0, 50)}..."\n`;
+                        output += `  citation_url: ${result.citation_url}\n`;
+                        output += `  source_url: ${result.source_url}\n`;
+                        output += `  locator_label: ${result.locator_label}\n\n`;
+
+                        // Check citation URL format: should be youtube.com/watch?v=XXX&t=YYY
+                        if (result.citation_url) {
+                            const expectedBase = `https://www.youtube.com/watch?v=${TEST_VIDEO_ID}`;
+                            const hasCorrectBase = result.citation_url.startsWith(expectedBase);
+                            const hasTimestamp = result.citation_url.includes('&t=');
+
+                            if (!hasCorrectBase) {
+                                citationUrlsCorrect = false;
+                                output += `  ERROR: Citation URL doesn't start with ${expectedBase}\n`;
+                            }
+                            if (hasTimestamp) {
+                                foundTimestamp = true;
+                                // Extract and verify timestamp
+                                const match = result.citation_url.match(/&t=(\d+)/);
+                                if (match) {
+                                    output += `  Timestamp: ${match[1]} seconds\n`;
+                                }
+                            }
+                        } else {
+                            output += `  WARNING: No citation_url\n`;
+                        }
+                        output += "\n";
+                    }
+                } else {
+                    output += "No results from test video found in query results.\n";
+                    output += "This could mean the embeddings haven't finished or the query didn't match.\n\n";
+
+                    // Show all results for debugging
+                    if (queryResult.results && queryResult.results.length > 0) {
+                        output += "All query results:\n";
+                        for (const r of queryResult.results.slice(0, 3)) {
+                            output += `  doc_id: ${r.doc_id}\n`;
+                            output += `  content: "${r.content.substring(0, 50)}..."\n`;
+                            output += `  citation_url: ${r.citation_url}\n\n`;
+                        }
+                    }
+                }
+
+                // Test results
+                const test1Pass = videoResults.length > 0;
+                const test2Pass = citationUrlsCorrect;
+                const test3Pass = foundTimestamp;
+
+                output += "Test 1 - Query returns YouTube document results: " + test1Pass + "\n";
+                output += "Test 2 - Citation URLs have correct base format: " + test2Pass + "\n";
+                output += "Test 3 - Citation URLs include &t= timestamp: " + test3Pass + "\n\n";
+
+                const allPassed = test1Pass && test2Pass && test3Pass;
+                output += `=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: YouTube citation URLs correctly include video ID and timestamp!\n";
+                    output += `Format verified: https://www.youtube.com/watch?v=${TEST_VIDEO_ID}&t=<seconds>\n`;
+                } else {
+                    if (!test1Pass) {
+                        output += "ISSUE: No results from test video in query\n";
+                    }
+                    if (!test2Pass) {
+                        output += "ISSUE: Citation URL format incorrect\n";
+                    }
+                    if (!test3Pass) {
+                        output += "ISSUE: Citation URL missing timestamp parameter\n";
                     }
                 }
 

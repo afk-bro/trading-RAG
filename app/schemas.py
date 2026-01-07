@@ -102,6 +102,9 @@ class IngestRequest(BaseModel):
     chunks: Optional[list[ChunkInput]] = Field(
         default=None, description="Pre-chunked content"
     )
+    video_id: Optional[str] = Field(
+        default=None, description="YouTube video ID (for youtube source type)"
+    )
 
 
 class YouTubeIngestRequest(BaseModel):

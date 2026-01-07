@@ -410,6 +410,7 @@ async def ingest_document(
             published_at=request.metadata.published_at if request.metadata else None,
             language=request.metadata.language if request.metadata else "en",
             duration_secs=request.metadata.duration_secs if request.metadata else None,
+            video_id=request.video_id,
             pre_chunks=request.chunks,
             settings=settings,
         )

@@ -723,7 +723,7 @@
       "Step 3: Verify citation URL format is youtube.com/watch?v=XXX&t=YYY",
       "Step 4: Verify timestamp parameter matches chunk's time_start_secs"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
