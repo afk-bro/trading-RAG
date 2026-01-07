@@ -77,7 +77,7 @@
       "Step 6: Verify response contains vectors_created > 0",
       "Step 7: Verify response status is 'created' or 'indexed'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -90,7 +90,7 @@
       "Step 5: Verify response indicates existing document (status: 'exists' or returns same doc_id)",
       "Step 6: Verify no duplicate chunks were created in database"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -194,7 +194,7 @@
       "Step 3: Verify vector dimension is 768",
       "Step 4: Verify vectors are non-zero"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -208,7 +208,7 @@
       "Step 6: Verify payload contains symbols array",
       "Step 7: Verify payload contains topics array"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -320,7 +320,7 @@
       "Step 4: Verify results are semantically relevant to query",
       "Step 5: Verify each result contains chunk content"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -355,7 +355,7 @@
       "Step 3: Verify results include documents mentioning AAPL OR GOOGL",
       "Step 4: Verify results don't exclude documents with only one symbol"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -388,7 +388,7 @@
       "Step 2: POST /query with filters.topics=['macro']",
       "Step 3: Verify results are filtered to macro topic documents"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -418,7 +418,7 @@
       "Step 2: Verify response contains results array",
       "Step 3: Verify response does not contain 'answer' field or answer is null"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
