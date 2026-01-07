@@ -1,5 +1,55 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 53 Summary
+Date: Session 53 (PDF Locator Labels & Reembed Filtering)
+Status: Services Running - 169/217 Tests Passing (77.9%)
+
+### Tests Verified This Session (+4 tests)
+
+All tests verified through browser automation with comprehensive UI testing:
+
+1. **Locator label for PDF uses page numbers** - PASSED
+   - Ingested PDF with page information via pre-chunked content
+   - Single page chunks use "p. X" format (e.g., "p. 1", "p. 2")
+   - Test confirmed locator_label format is correct
+   - Verified via test_page.html "Test PDF Locator Labels" button
+
+2. **Multi-page PDF chunk spans tracked correctly** - PASSED
+   - Chunk spanning pages 3-5 uses "pp. 3-5" format
+   - Chunk spanning pages 6-7 uses "pp. 6-7" format
+   - page_start and page_end fields stored correctly
+   - Test showed: page_start: 3, page_end: 5 for multi-page chunk
+
+3. **POST /reembed filters by workspace_id** - PASSED
+   - Created Workspace A (161 chunks) and Workspace B (1 chunk)
+   - Reembed for Workspace A queued exactly 161 chunks
+   - Workspace B's 1 chunk was NOT included
+   - Proves workspace_id filtering works correctly
+
+4. **POST /reembed filters by doc_ids when provided** - PASSED
+   - Ingested 3 documents (1 chunk each)
+   - Reembed with doc_ids=[doc1, doc2] queued exactly 2 chunks
+   - Doc 3's chunk was correctly excluded
+   - Job completed successfully (status=completed, progress=100%)
+
+### Code Changes
+- Added /debug/chunks/count endpoint for accurate workspace chunk counting
+- Added workspace_id filtering support to /debug/chunks endpoint
+- Added test buttons: "Test Reembed Workspace Filter", "Test Reembed Doc ID Filter"
+
+### Current Test Status
+- Total tests: 217
+- Passing: 169 (77.9%)
+- Failing: 48
+
+### Next Steps for Future Sessions
+1. Review remaining failing tests for quick wins
+2. Focus on tests that don't require external APIs
+3. Consider testing document superseding functionality
+4. Test workspace isolation for queries
+
+---
+
 ## Session 52 Summary
 Date: Session 52 (Performance & Concurrency Tests)
 Status: Services Running - 165/217 Tests Passing (76.0%)
