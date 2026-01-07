@@ -444,7 +444,7 @@ async def list_documents(settings: Settings = Depends(get_settings)):
             """
             SELECT
                 id, workspace_id, source_url, canonical_url, source_type,
-                content_hash, title, author, language, status, version, created_at, updated_at
+                content_hash, title, author, language, status, version, created_at, updated_at, last_indexed_at
             FROM documents
             ORDER BY created_at DESC
             LIMIT 20
@@ -467,6 +467,7 @@ async def list_documents(settings: Settings = Depends(get_settings)):
                 "version": row["version"],
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "last_indexed_at": row["last_indexed_at"].isoformat() if row["last_indexed_at"] else None,
             }
             for row in rows
         ]
