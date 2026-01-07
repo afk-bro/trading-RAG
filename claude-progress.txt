@@ -1,5 +1,75 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 49 Summary
+Date: Session 49 (Database Table Verification)
+Status: Services Running - 145/217 Tests Passing (66.8%)
+
+### Tests Verified This Session (+4 tests)
+
+1. **chunk_vectors table tracks embedding records correctly** ✅
+   - Verified records exist for each chunk
+   - embed_provider: "ollama" ✓
+   - embed_model: "nomic-embed-text" ✓
+   - collection: "kb_nomic_embed_text_v1" (follows kb_{model}_{version} pattern) ✓
+   - vector_dim: 768 ✓
+   - status: "indexed" ✓
+   - qdrant_point_id matches chunk_id
+
+2. **Database documents table stores all required fields** ✅
+   - id: UUID ✓
+   - workspace_id: stored ✓
+   - source_url, canonical_url: stored ✓
+   - source_type: stored ✓
+   - content_hash: stored ✓
+   - title, author: stored ✓
+   - status: "active", version: 1 ✓
+   - created_at, updated_at: both set ✓
+
+3. **Database chunks table stores all required fields** ✅
+   - id: UUID ✓
+   - doc_id: references documents table ✓
+   - chunk_index: 0 (sequential) ✓
+   - content: stored ✓
+   - token_count: stored (53, 96) ✓
+   - symbols: ["AAPL", "GOOGL", "MSFT"] ✓
+   - entities: ["Federal Reserve", "Jerome Powell"] ✓
+   - topics: ["earnings", "macro", "markets", "rates", "tech"] ✓
+
+4. **Database unique constraint on (workspace_id, source_type, canonical_url)** ✅
+   - First request: status="indexed", chunks_created=1
+   - Second request (duplicate): status="exists", chunks_created=0
+   - Same doc_id returned for both requests
+   - No duplicate chunks/vectors created
+
+### Code Changes
+- Added debug endpoints to health.py:
+  - GET /debug/chunk_vectors - Lists chunk_vectors records
+  - GET /debug/documents - Lists documents records
+  - GET /debug/chunks - Lists chunks records
+- Added test_page.html for browser-based API testing
+
+### Progress Summary
+- Previous: 141/217 tests passing (65.0%)
+- This session: 145/217 tests passing (66.8%)
+- Improvement: +4 tests
+- Remaining: 72 tests
+
+### Service Status
+All services healthy:
+- Qdrant: ok (~15ms latency)
+- Supabase: ok (~724ms latency)
+- Ollama: ok (~11ms latency)
+- active_collection: kb_nomic_embed_text_v1
+- embed_model: nomic-embed-text
+
+### Next Steps
+1. Verify YouTube ingestion tests (POST /sources/youtube/ingest)
+2. Verify reembed job tests (POST /reembed, GET /jobs/{job_id})
+3. Verify answer generation with LLM (mode='answer')
+4. n8n workflow tests (requires n8n configuration)
+
+---
+
 ## Session 48 Summary
 Date: Session 48 (Pre-chunked Content and Source Types)
 Status: Services Running - 141/217 Tests Passing (65.0%)
