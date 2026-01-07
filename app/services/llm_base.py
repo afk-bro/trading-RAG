@@ -134,6 +134,16 @@ class BaseLLMClient(ABC):
         )
         return response.text
 
+    # Grounding contract - enforces RAG discipline
+    GROUNDING_CONTRACT = """GROUNDING CONTRACT (you must follow these rules):
+- Use ONLY the provided context chunks as your source of truth.
+- If the answer is not explicitly supported by the context, say: "The provided context does not specify this."
+- Do NOT use general knowledge, assumptions, or outside facts.
+- If the question asks for definitions and the context lacks a definition, state that clearly.
+- Cite sources using [1], [2], etc. to reference the numbered context chunks.
+- Prefer accuracy over completeness. It is OK to answer partially.
+- Be honest about what the context does and does not contain."""
+
     async def generate_answer(
         self,
         question: str,
@@ -142,6 +152,9 @@ class BaseLLMClient(ABC):
     ) -> LLMResponse:
         """
         Generate an answer with citations from context chunks.
+
+        Uses grounding contract to ensure answers are strictly based on
+        provided context, not general knowledge.
 
         Args:
             question: User's question
@@ -155,28 +168,37 @@ class BaseLLMClient(ABC):
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
             source_info = chunk.get("title", chunk.get("source_url", f"Source {i}"))
+            locator = chunk.get("locator_label", "")
+            if locator:
+                source_info = f"{source_info} ({locator})"
             context_parts.append(f"[{i}] {source_info}:\n{chunk['content']}\n")
 
         context = "\n".join(context_parts)
 
-        system = """You are a knowledgeable analyst assistant.
-Answer questions based on the provided context. Always cite your sources using
-the format [1], [2], etc. to reference the numbered sources.
+        system = f"""{self.GROUNDING_CONTRACT}
 
-If the context doesn't contain enough information to fully answer the question,
-say so and provide what information you can from the available sources.
+You are a research assistant analyzing provided documents.
+Your job is to answer questions using ONLY the context chunks below.
+Always cite your sources using [1], [2], etc."""
 
-Be concise but thorough. Focus on actionable insights when relevant."""
-
-        prompt = f"""Context:
+        prompt = f"""Context chunks:
 {context}
 
 Question: {question}
 
-Answer the question based on the context above. Use citations like [1], [2] to reference sources."""
+Provide your response in this format:
+
+**Answer:**
+[Your answer based strictly on the context, with citations]
+
+**Supported by context:**
+- [Key facts from the context that support your answer]
+
+**Not specified in context:**
+- [Aspects of the question the context does not address, if any]"""
 
         logger.info(
-            "Generating answer",
+            "Generating grounded answer",
             question=question[:50],
             num_chunks=len(chunks),
             model=self.answer_model,
