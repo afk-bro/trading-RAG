@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 from app import __version__
 from app.config import get_settings
 from app.routers import health, ingest, jobs, kb, metrics, pdf, query, reembed, youtube
+from app.admin import router as admin_router
 
 # Configure structured logging
 structlog.configure(
@@ -146,6 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             query.set_db_pool(_db_pool)
             reembed.set_db_pool(_db_pool)
             kb.set_db_pool(_db_pool)
+            admin_router.set_db_pool(_db_pool)
 
     except Exception as e:
         import traceback
@@ -377,6 +379,7 @@ app.include_router(kb.router)  # KB endpoints with /kb prefix
 app.include_router(reembed.router, tags=["Re-embed"])
 app.include_router(jobs.router, tags=["Jobs"])
 app.include_router(metrics.router)  # Metrics endpoint (excluded from OpenAPI)
+app.include_router(admin_router.router)  # Admin UI (not in OpenAPI docs)
 
 
 @app.get("/")

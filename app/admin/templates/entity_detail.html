@@ -1,0 +1,124 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ entity.name }} - KB Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/admin/kb/entities?workspace_id={{ entity.workspace_id }}">Entities</a> / {{ entity.name }}
+</div>
+
+<div class="detail-header">
+    <h1>{{ entity.name }}</h1>
+    <div class="detail-meta">
+        <span class="badge badge-type">{{ entity.type }}</span>
+        {% if entity.aliases %}
+        <div class="aliases">
+            {% for alias in entity.aliases %}
+            <span class="alias">{{ alias }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% if entity.description %}
+    <p class="description" style="margin-top: 12px;">{{ entity.description }}</p>
+    {% endif %}
+</div>
+
+<div class="stats">
+    <div class="stat">
+        <div class="stat-value" style="color: var(--success)">{{ entity.verified_claims or 0 }}</div>
+        <div class="stat-label">Verified</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" style="color: var(--warning)">{{ entity.weak_claims or 0 }}</div>
+        <div class="stat-label">Weak</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ entity.total_claims or 0 }}</div>
+        <div class="stat-label">Total Claims</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ entity.relations_count or 0 }}</div>
+        <div class="stat-label">Relations</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Claims</h2>
+        <span class="pagination-info">{{ total_claims }} claims</span>
+    </div>
+
+    <form class="filters" method="get">
+        <select name="status_filter">
+            {% for s in claim_statuses %}
+            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <select name="claim_type">
+            <option value="">All types</option>
+            {% for t in claim_types %}
+            <option value="{{ t }}" {% if claim_type == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+    </form>
+
+    {% if claims %}
+    <table>
+        <thead>
+            <tr>
+                <th>Claim</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for claim in claims %}
+            <tr>
+                <td>
+                    <a href="/admin/kb/claims/{{ claim.id }}" class="claim-text truncate" style="display: block;">
+                        {{ claim.text[:150] }}{% if claim.text|length > 150 %}...{% endif %}
+                    </a>
+                </td>
+                <td><span class="badge badge-type">{{ claim.claim_type }}</span></td>
+                <td>
+                    <span class="badge badge-{{ claim.status }}">{{ claim.status }}</span>
+                </td>
+                <td>
+                    <div class="confidence">
+                        <div class="confidence-bar">
+                            <div class="confidence-fill {% if claim.confidence >= 0.7 %}confidence-high{% elif claim.confidence >= 0.4 %}confidence-medium{% else %}confidence-low{% endif %}"
+                                 style="width: {{ (claim.confidence * 100)|int }}%"></div>
+                        </div>
+                        <span style="font-size: 12px; color: var(--text-muted)">{{ (claim.confidence * 100)|int }}%</span>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="pagination">
+        <span class="pagination-info">
+            Showing {{ offset + 1 }}-{{ [offset + limit, total_claims]|min }} of {{ total_claims }}
+        </span>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?status_filter={{ status_filter }}&claim_type={{ claim_type }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?status_filter={{ status_filter }}&claim_type={{ claim_type }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <h3>No claims found</h3>
+        <p>{% if status_filter != 'all' or claim_type %}Try adjusting your filters{% else %}No claims extracted for this entity{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

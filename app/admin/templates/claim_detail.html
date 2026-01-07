@@ -1,0 +1,113 @@
+{% extends "layout.html" %}
+
+{% block title %}Claim - KB Admin{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    {% if claim.entity_id %}
+    <a href="/admin/kb/entities">Entities</a> /
+    <a href="/admin/kb/entities/{{ claim.entity_id }}">{{ claim.entity_name or 'Entity' }}</a> / Claim
+    {% else %}
+    <a href="/admin/kb/claims">Claims</a> / Claim
+    {% endif %}
+</div>
+
+<div class="detail-header">
+    <div class="detail-meta" style="margin-bottom: 12px;">
+        <span class="badge badge-type">{{ claim.claim_type }}</span>
+        <span class="badge badge-{{ claim.status }}">{{ claim.status }}</span>
+        <div class="confidence" style="display: inline-flex;">
+            <div class="confidence-bar">
+                <div class="confidence-fill {% if claim.confidence >= 0.7 %}confidence-high{% elif claim.confidence >= 0.4 %}confidence-medium{% else %}confidence-low{% endif %}"
+                     style="width: {{ (claim.confidence * 100)|int }}%"></div>
+            </div>
+            <span style="font-size: 12px; color: var(--text-muted)">{{ (claim.confidence * 100)|int }}% confidence</span>
+        </div>
+    </div>
+    <h1 style="font-size: 20px; line-height: 1.5;">{{ claim.text }}</h1>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Metadata</h2>
+    </div>
+    <table>
+        <tr>
+            <th style="width: 150px;">ID</th>
+            <td><code style="font-size: 12px;">{{ claim.id }}</code></td>
+        </tr>
+        {% if claim.entity_name %}
+        <tr>
+            <th>Entity</th>
+            <td>
+                <a href="/admin/kb/entities/{{ claim.entity_id }}">{{ claim.entity_name }}</a>
+                <span class="badge badge-type" style="margin-left: 8px;">{{ claim.entity_type }}</span>
+            </td>
+        </tr>
+        {% endif %}
+        <tr>
+            <th>Extraction Model</th>
+            <td>{{ claim.extraction_model or '-' }}</td>
+        </tr>
+        <tr>
+            <th>Verification Model</th>
+            <td>{{ claim.verification_model or '-' }}</td>
+        </tr>
+        <tr>
+            <th>Created</th>
+            <td>{{ claim.created_at.strftime('%Y-%m-%d %H:%M:%S') if claim.created_at else '-' }}</td>
+        </tr>
+        <tr>
+            <th>Updated</th>
+            <td>{{ claim.updated_at.strftime('%Y-%m-%d %H:%M:%S') if claim.updated_at else '-' }}</td>
+        </tr>
+    </table>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Evidence</h2>
+        <span class="pagination-info">{{ claim.evidence|length if claim.evidence else 0 }} sources</span>
+    </div>
+
+    {% if claim.evidence %}
+    <div class="evidence-list">
+        {% for ev in claim.evidence %}
+        <div class="evidence-item">
+            <div class="evidence-quote">"{{ ev.quote }}"</div>
+            <div class="evidence-meta">
+                <strong>Source:</strong> {{ ev.doc_title or 'Unknown document' }}
+                <span style="margin-left: 16px;"><strong>Relevance:</strong> {{ (ev.relevance_score * 100)|int }}%</span>
+            </div>
+            <div class="evidence-meta" style="margin-top: 4px;">
+                <code style="font-size: 11px; color: var(--text-muted);">
+                    doc: {{ ev.doc_id }} | chunk: {{ ev.chunk_id }}
+                </code>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No evidence recorded for this claim.</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Debug JSON</h2>
+        <button onclick="copyJson()" class="btn btn-secondary" style="font-size: 12px; padding: 4px 12px;">Copy</button>
+    </div>
+    <div class="code-block" id="claim-json">{{ claim | tojson(indent=2) }}</div>
+</div>
+
+<script>
+function copyJson() {
+    const text = document.getElementById('claim-json').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard');
+    });
+}
+</script>
+{% endblock %}

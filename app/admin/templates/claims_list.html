@@ -1,0 +1,108 @@
+{% extends "layout.html" %}
+
+{% block title %}Claims - KB Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Claims</h2>
+        <span class="pagination-info">{{ total }} total</span>
+    </div>
+
+    {% if error %}
+    <div class="empty-state">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+    {% else %}
+
+    <form class="filters" method="get">
+        {% if workspace_id %}
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        {% endif %}
+        <input type="text" name="q" placeholder="Search claims..." value="{{ q }}">
+        <select name="status_filter">
+            {% for s in claim_statuses %}
+            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <select name="claim_type">
+            <option value="">All types</option>
+            {% for t in claim_types %}
+            <option value="{{ t }}" {% if claim_type == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+        {% if q or claim_type or status_filter != 'verified' %}
+        <a href="/admin/kb/claims{% if workspace_id %}?workspace_id={{ workspace_id }}{% endif %}" class="btn btn-secondary">Clear</a>
+        {% endif %}
+    </form>
+
+    {% if claims %}
+    <table>
+        <thead>
+            <tr>
+                <th>Claim</th>
+                <th>Entity</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for claim in claims %}
+            <tr>
+                <td>
+                    <a href="/admin/kb/claims/{{ claim.id }}" class="claim-text truncate" style="display: block;">
+                        {{ claim.text[:120] }}{% if claim.text|length > 120 %}...{% endif %}
+                    </a>
+                </td>
+                <td>
+                    {% if claim.entity_name %}
+                    <a href="/admin/kb/entities/{{ claim.entity_id }}">{{ claim.entity_name }}</a>
+                    {% else %}
+                    <span style="color: var(--text-muted)">-</span>
+                    {% endif %}
+                </td>
+                <td><span class="badge badge-type">{{ claim.claim_type }}</span></td>
+                <td>
+                    <span class="badge badge-{{ claim.status }}">{{ claim.status }}</span>
+                </td>
+                <td>
+                    <div class="confidence">
+                        <div class="confidence-bar">
+                            <div class="confidence-fill {% if claim.confidence >= 0.7 %}confidence-high{% elif claim.confidence >= 0.4 %}confidence-medium{% else %}confidence-low{% endif %}"
+                                 style="width: {{ (claim.confidence * 100)|int }}%"></div>
+                        </div>
+                        <span style="font-size: 12px; color: var(--text-muted)">{{ (claim.confidence * 100)|int }}%</span>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="pagination">
+        <span class="pagination-info">
+            Showing {{ offset + 1 }}-{{ [offset + limit, total]|min }} of {{ total }}
+        </span>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter={{ status_filter }}&claim_type={{ claim_type }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter={{ status_filter }}&claim_type={{ claim_type }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <h3>No claims found</h3>
+        <p>{% if q or claim_type or status_filter != 'verified' %}Try adjusting your filters{% else %}Run mode=learn queries to extract knowledge{% endif %}</p>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}

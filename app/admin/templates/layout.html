@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}KB Admin{% endblock %}</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --bg-secondary: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --link: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --danger: #f85149;
+            --info: #58a6ff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Navigation */
+        nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            margin-bottom: 20px;
+        }
+
+        nav .nav-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        nav .logo {
+            font-weight: 600;
+            font-size: 18px;
+            color: var(--text);
+            text-decoration: none;
+        }
+
+        nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        nav a:hover, nav a.active {
+            color: var(--text);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            font-weight: 500;
+            color: var(--text-muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        tr:hover {
+            background: rgba(56, 139, 253, 0.1);
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-verified {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--success);
+        }
+
+        .badge-weak {
+            background: rgba(210, 153, 34, 0.2);
+            color: var(--warning);
+        }
+
+        .badge-rejected {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--danger);
+        }
+
+        .badge-pending {
+            background: rgba(139, 148, 158, 0.2);
+            color: var(--text-muted);
+        }
+
+        .badge-type {
+            background: rgba(88, 166, 255, 0.2);
+            color: var(--info);
+        }
+
+        /* Confidence bar */
+        .confidence {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .confidence-bar {
+            width: 60px;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        .confidence-high { background: var(--success); }
+        .confidence-medium { background: var(--warning); }
+        .confidence-low { background: var(--danger); }
+
+        /* Forms */
+        .filters {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        input, select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--link);
+        }
+
+        input[type="text"] {
+            min-width: 200px;
+        }
+
+        button, .btn {
+            background: var(--link);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        button:hover, .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        /* Links */
+        a {
+            color: var(--link);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .pagination-info {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* Stats */
+        .stats {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 20px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* Evidence */
+        .evidence-list {
+            margin-top: 16px;
+        }
+
+        .evidence-item {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .evidence-quote {
+            font-style: italic;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            padding-left: 12px;
+            border-left: 3px solid var(--border);
+        }
+
+        .evidence-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Detail header */
+        .detail-header {
+            margin-bottom: 24px;
+        }
+
+        .detail-header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .detail-meta {
+            display: flex;
+            gap: 16px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Aliases */
+        .aliases {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .alias {
+            background: var(--bg);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Claim text */
+        .claim-text {
+            font-size: 15px;
+            line-height: 1.5;
+        }
+
+        /* Truncate */
+        .truncate {
+            max-width: 400px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 48px;
+            color: var(--text-muted);
+        }
+
+        .empty-state h3 {
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        /* Breadcrumb */
+        .breadcrumb {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .breadcrumb a {
+            color: var(--text-muted);
+        }
+
+        .breadcrumb a:hover {
+            color: var(--link);
+        }
+
+        /* Code/JSON */
+        .code-block {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* Description */
+        .description {
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-content">
+            <a href="/admin" class="logo">KB Admin</a>
+            <a href="/admin/kb/entities" {% if request.url.path.startswith('/admin/kb/entities') %}class="active"{% endif %}>Entities</a>
+            <a href="/admin/kb/claims" {% if request.url.path == '/admin/kb/claims' %}class="active"{% endif %}>Claims</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

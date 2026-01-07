@@ -1,0 +1,115 @@
+{% extends "layout.html" %}
+
+{% block title %}Entities - KB Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Entities</h2>
+        <span class="pagination-info">{{ total }} total</span>
+    </div>
+
+    {% if error %}
+    <div class="empty-state">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+    {% else %}
+
+    <form class="filters" method="get">
+        {% if workspace_id %}
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        {% endif %}
+        <input type="text" name="q" placeholder="Search entities..." value="{{ q }}">
+        <select name="type">
+            <option value="">All types</option>
+            {% for t in entity_types %}
+            <option value="{{ t }}" {% if type == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+        {% if q or type %}
+        <a href="/admin/kb/entities{% if workspace_id %}?workspace_id={{ workspace_id }}{% endif %}" class="btn btn-secondary">Clear</a>
+        {% endif %}
+    </form>
+
+    {% if entities %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Aliases</th>
+                <th>Verified Claims</th>
+                <th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entity in entities %}
+            <tr>
+                <td>
+                    <a href="/admin/kb/entities/{{ entity.id }}">{{ entity.name }}</a>
+                    {% if entity.description %}
+                    <div class="description truncate">{{ entity.description[:100] }}{% if entity.description|length > 100 %}...{% endif %}</div>
+                    {% endif %}
+                </td>
+                <td><span class="badge badge-type">{{ entity.type }}</span></td>
+                <td>
+                    {% if entity.aliases %}
+                    <div class="aliases">
+                        {% for alias in entity.aliases[:3] %}
+                        <span class="alias">{{ alias }}</span>
+                        {% endfor %}
+                        {% if entity.aliases|length > 3 %}
+                        <span class="alias">+{{ entity.aliases|length - 3 }} more</span>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if entity.verified_claim_count %}
+                    <span class="badge badge-verified">{{ entity.verified_claim_count }}</span>
+                    {% else %}
+                    <span style="color: var(--text-muted)">0</span>
+                    {% endif %}
+                </td>
+                <td style="color: var(--text-muted); font-size: 13px;">
+                    {% if entity.updated_at %}
+                    {{ entity.updated_at.strftime('%Y-%m-%d') if entity.updated_at else '-' }}
+                    {% elif entity.created_at %}
+                    {{ entity.created_at.strftime('%Y-%m-%d') if entity.created_at else '-' }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="pagination">
+        <span class="pagination-info">
+            Showing {{ offset + 1 }}-{{ [offset + limit, total]|min }} of {{ total }}
+        </span>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&q={{ q }}&type={{ type }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&q={{ q }}&type={{ type }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <h3>No entities found</h3>
+        <p>{% if q or type %}Try adjusting your filters{% else %}Run mode=learn queries to extract knowledge{% endif %}</p>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}
