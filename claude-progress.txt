@@ -12,26 +12,39 @@ Status: Services Running - 173/217 Tests Passing (79.7%)
    - Verified Spanish document stores 'es' when explicitly provided
    - Test now creates new documents each run instead of matching existing ones
 
-### Test Updates
+### Code Updates
 - Modified test_page.html Language Field test to include timestamp in content
   - This prevents content hash collisions with previously created test documents
   - Ensures each test run creates fresh documents for accurate verification
+- Added `last_indexed_at` field to `/debug/documents` endpoint (requires service restart)
+- Added "Test Last Indexed At" button to test page for verifying timestamp updates
 
 ### Current Test Status
 - Total tests: 217
 - Passing: 173 (79.7%)
 - Failing: 44
 
+### Remaining Failing Tests Analysis
+Most remaining tests fall into categories that require:
+1. **Docker/Container manipulation** - Health endpoint tests requiring stopping containers
+2. **YouTube/External APIs** - Tests requiring YouTube transcript access (blocked)
+3. **OpenRouter/LLM** - Tests requiring OPENROUTER_API_KEY for answer generation
+4. **n8n workflow** - Tests requiring n8n setup and configuration
+5. **Document versioning** - Tests requiring update/supersede functionality
+6. **Performance profiling** - Memory usage tests
+7. **Index verification** - Tests requiring EXPLAIN queries
+
 ### Observations
 - The ingest pipeline correctly handles the language field
 - Content hash deduplication was causing test failures (documents already existed)
 - YouTube ingestion tests fail due to external network restrictions
-- Many remaining tests require external services (OpenRouter, YouTube, n8n) or Docker manipulation
+- Job failure test shows graceful handling rather than explicit failure capture
 
 ### Next Steps for Future Sessions
-1. Consider implementing document version tracking/supersede functionality
-2. Look for tests that can be verified without external dependencies
-3. Review section-aware chunking implementation
+1. Restart service to enable `/debug/documents` with last_indexed_at field
+2. Run "Test Last Indexed At" to verify and mark test as passing
+3. Consider implementing document version tracking/supersede functionality
+4. Look for tests that can be verified without external dependencies
 
 ---
 
