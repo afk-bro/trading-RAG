@@ -79,12 +79,17 @@ if [ ! -f "$PROJECT_DIR/.env" ]; then
     else
         echo -e "${YELLOW}No .env file found. Creating template...${NC}"
         cat > "$PROJECT_DIR/.env" << 'EOF'
-# Supabase Configuration
+# Supabase Configuration (REQUIRED)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# OpenRouter Configuration
-OPENROUTER_API_KEY=your-openrouter-api-key
+# Database Connection (REQUIRED)
+# Get from Supabase Dashboard: Project Settings > Database > Connection string
+# Use transaction pooler (port 6543) for most deployments
+# DATABASE_URL=postgresql://postgres.your-project-ref:your-password@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+
+# OpenRouter Configuration (OPTIONAL - only needed for mode=answer queries)
+# OPENROUTER_API_KEY=your-openrouter-api-key
 
 # Qdrant Configuration
 QDRANT_HOST=qdrant
@@ -212,7 +217,10 @@ echo -e "  - Restart service:     $DOCKER_COMPOSE -f docker-compose.rag.yml rest
 echo -e "  - Check health:        curl http://localhost:8000/health"
 echo ""
 echo -e "${YELLOW}Remember to:${NC}"
-echo -e "  1. Update .env with your Supabase and OpenRouter credentials"
-echo -e "  2. Run database migrations (if applicable)"
-echo -e "  3. Configure n8n workflow for YouTube ingestion"
+echo -e "  1. Update .env with your Supabase credentials and DATABASE_URL"
+echo -e "     - Get DATABASE_URL from Supabase Dashboard > Project Settings > Database"
+echo -e "     - Use transaction pooler URL (port 6543) for most deployments"
+echo -e "  2. Create a workspace in Supabase (required before ingesting documents)"
+echo -e "  3. (Optional) Add OPENROUTER_API_KEY for LLM answer generation"
+echo -e "  4. Configure n8n workflow for YouTube ingestion (optional)"
 echo ""

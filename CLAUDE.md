@@ -63,11 +63,17 @@ mypy app/ --ignore-missing-imports          # Types
 Required environment variables (set in `.env`):
 - `SUPABASE_URL` - Supabase project URL
 - `SUPABASE_SERVICE_ROLE_KEY` - Database credentials
+- `DATABASE_URL` - PostgreSQL connection string (get from Supabase Dashboard)
 
 Optional environment variables:
 - `OPENROUTER_API_KEY` - LLM API access (enables `mode=answer` queries)
 
 Services default to Docker network hostnames: `qdrant:6333`, `ollama:11434`
+
+**Database Connection Notes:**
+- Use Supabase transaction pooler (port 6543) for most deployments
+- asyncpg configured with `statement_cache_size=0` for pgbouncer compatibility
+- Direct connections (`db.[project].supabase.co`) may not be available on all plans
 
 **Query Mode Architecture:**
 ```
