@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.config import Settings, get_settings
 from app.schemas import ChunkResult, QueryMode, QueryRequest, QueryResponse
 from app.services.embedder import get_embedder
-from app.services.llm import get_llm, LLMNotConfiguredError
+from app.services.llm_factory import get_llm, get_llm_status
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -160,15 +160,9 @@ async def query(
         return QueryResponse(results=[], answer=None)
 
     # Step 3: Optional reranking
-    if request.rerank and len(search_results) > request.top_k:
+    llm = get_llm()
+    if request.rerank and llm and len(search_results) > request.top_k:
         try:
-            llm = get_llm()
-            # Prepare chunks for reranking
-            rerank_chunks = [
-                {"content": "", "score": r["score"], **r}
-                for r in search_results
-            ]
-
             # We need content for reranking - fetch it first
             chunk_ids = [r["id"] for r in search_results]
             chunks_data = await chunk_repo.get_by_ids(chunk_ids, preserve_order=True)
@@ -179,7 +173,7 @@ async def query(
                 result["content"] = content_map.get(result["id"], "")
 
             rerank_chunks = [
-                {"content": r.get("content", ""), "score": r["score"], **r}
+                {"content": r.get("content", ""), "score": r["score"], "id": r["id"]}
                 for r in search_results
             ]
 
@@ -188,7 +182,11 @@ async def query(
                 chunks=rerank_chunks,
                 top_k=request.top_k,
             )
-            search_results = reranked
+            # Convert RankedChunk back to search_results format
+            search_results = [
+                {"id": rc.chunk["id"], "score": rc.score, "content": rc.chunk.get("content", "")}
+                for rc in reranked
+            ]
             logger.info(
                 "Reranked results",
                 original_count=len(rerank_chunks),
@@ -260,46 +258,50 @@ async def query(
 
     # Step 7: If mode=answer, generate LLM response
     answer = None
+    llm_status = get_llm_status()
+
     if request.mode == QueryMode.ANSWER and results:
-        try:
-            llm = get_llm()
-
-            # Prepare context for LLM
-            context_chunks = [
-                {
-                    "content": r.content,
-                    "title": r.title,
-                    "source_url": r.source_url,
-                    "author": r.author,
-                    "locator_label": r.locator_label,
-                }
-                for r in results
-            ]
-
-            answer = await llm.generate_answer(
-                question=request.question,
-                context_chunks=context_chunks,
-                max_context_tokens=request.max_context_tokens or settings.max_context_tokens,
-                model=request.answer_model or settings.answer_model,
-            )
-
-            logger.info(
-                "Generated answer",
-                answer_length=len(answer),
-            )
-
-        except LLMNotConfiguredError as e:
+        if not llm or not llm_status.enabled:
             logger.info("LLM not configured, returning retrieval-only results")
             answer = (
                 "[LLM generation is disabled] "
                 "Retrieval is working, but no LLM provider is configured. "
-                "Set OPENROUTER_API_KEY in .env to enable answer mode. "
+                "Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY in .env to enable answer mode. "
                 f"Retrieved {len(results)} relevant chunks below."
             )
-        except Exception as e:
-            logger.error("Answer generation failed", error=str(e))
-            # Don't fail the whole request, just return without answer
-            answer = f"[Error generating answer: {str(e)}]"
+        else:
+            try:
+                # Prepare context for LLM
+                context_chunks = [
+                    {
+                        "content": r.content,
+                        "title": r.title,
+                        "source_url": r.source_url,
+                        "author": r.author,
+                        "locator_label": r.locator_label,
+                    }
+                    for r in results
+                ]
+
+                response = await llm.generate_answer(
+                    question=request.question,
+                    chunks=context_chunks,
+                    max_context_tokens=request.max_context_tokens or settings.max_context_tokens,
+                )
+                answer = response.text
+
+                logger.info(
+                    "Generated answer",
+                    answer_length=len(answer),
+                    provider=response.provider,
+                    model=response.model,
+                    latency_ms=response.latency_ms,
+                )
+
+            except Exception as e:
+                logger.error("Answer generation failed", error=str(e))
+                # Don't fail the whole request, just return without answer
+                answer = f"[Error generating answer: {str(e)}]"
 
     return QueryResponse(
         results=results,

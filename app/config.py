@@ -1,7 +1,7 @@
 """Configuration management using Pydantic Settings."""
 
 from functools import lru_cache
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,16 +34,42 @@ class Settings(BaseSettings):
         default=None, description="Direct PostgreSQL connection URL (overrides Supabase URL construction)"
     )
 
-    # OpenRouter Configuration
-    openrouter_api_key: Optional[str] = Field(
-        default=None, description="OpenRouter API key (required for LLM answer generation)"
+    # LLM Provider Configuration
+    llm_provider: Literal["auto", "anthropic", "openrouter"] = Field(
+        default="auto",
+        description="LLM provider: auto prefers Anthropic when key is available",
     )
+    llm_required: bool = Field(
+        default=False,
+        description="If true, fail startup when no LLM provider key configured",
+    )
+    llm_enabled: bool = Field(
+        default=True,
+        description="Kill switch to disable LLM regardless of keys",
+    )
+
+    # LLM API Keys
+    anthropic_api_key: Optional[str] = Field(
+        default=None, description="Anthropic API key (preferred provider)"
+    )
+    openrouter_api_key: Optional[str] = Field(
+        default=None, description="OpenRouter API key (fallback provider)"
+    )
+
+    # LLM Model Configuration
     answer_model: str = Field(
-        default="anthropic/claude-sonnet-4",
-        description="Default model for answer generation",
+        default="claude-sonnet-4",
+        description="Model for answer generation (user-facing output)",
+    )
+    rerank_model: Optional[str] = Field(
+        default="claude-haiku-3-5",
+        description="Model for reranking/scoring (set to null/empty to reuse answer_model)",
     )
     max_context_tokens: int = Field(
         default=8000, description="Maximum context tokens for LLM"
+    )
+    llm_timeout: int = Field(
+        default=60, description="LLM request timeout in seconds"
     )
 
     # Qdrant Configuration
@@ -72,10 +98,6 @@ class Settings(BaseSettings):
         default=None, description="YouTube Data API key"
     )
 
-    # OpenRouter timeout
-    openrouter_timeout: int = Field(
-        default=60, description="OpenRouter timeout in seconds"
-    )
 
     # Chunking configuration
     chunk_max_tokens: int = Field(

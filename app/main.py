@@ -195,6 +195,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("Failed to validate Qdrant collection", error=str(e))
 
+    # Initialize LLM subsystem and log configuration
+    try:
+        from app.services.llm_factory import get_llm_status, LLMStartupError
+
+        llm_status = get_llm_status()
+        logger.info(
+            "LLM configuration",
+            provider_config=llm_status.provider_config,
+            provider_resolved=llm_status.provider_resolved,
+            answer_model=llm_status.answer_model,
+            rerank_model_effective=llm_status.rerank_model_effective,
+            llm_enabled=llm_status.enabled,
+        )
+    except LLMStartupError as e:
+        logger.error("LLM startup failed", error=str(e))
+        raise
+    except Exception as e:
+        logger.warning("Failed to initialize LLM subsystem", error=str(e))
+
     yield
 
     # Cleanup on shutdown

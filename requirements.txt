@@ -7,6 +7,9 @@ pydantic-settings==2.1.0
 # Async HTTP client
 httpx>=0.24.0,<0.26.0
 
+# LLM providers
+anthropic>=0.40.0
+
 # Database
 asyncpg==0.29.0
 supabase==2.3.4
