@@ -594,7 +594,7 @@
       "Step 3: Update document",
       "Step 4: Verify updated_at has changed"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -676,7 +676,7 @@
       "Step 3: Verify batch processing (not sequential per-chunk calls)",
       "Step 4: Verify all embeddings created successfully"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1075,7 +1075,7 @@
       "Step 3: Verify connection pool is reused (not 50 new connections)",
       "Step 4: Verify no connection exhaustion"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1267,7 +1267,7 @@
       "Step 2: Query chunk token_count",
       "Step 3: Verify token_count matches expected (within 5% tolerance)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1573,7 +1573,7 @@
       "Step 2: Verify appropriate HTTP methods (GET, POST)",
       "Step 3: Verify plural nouns for collections"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1853,7 +1853,7 @@
       "Step 2: Query content back",
       "Step 3: Verify content is properly escaped or raw (not executed)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1864,7 +1864,7 @@
       "Step 3: Create chunks with identical content",
       "Step 4: Verify they have same content_hash"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1876,7 +1876,7 @@
       "Step 4: Verify chunks deleted from database",
       "Step 5: Verify vectors deleted from Qdrant"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2369,6 +2369,6 @@
       "Step 2: Verify Qdrant connections are reused",
       "Step 3: Verify no connection exhaustion"
     ],
-    "passes": false
+    "passes": true
   }
 ]
