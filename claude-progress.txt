@@ -1,5 +1,55 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 59 Summary
+Date: Session 59 (Job Failure Capture Test)
+Status: Services Running - 176/217 Tests Passing (81.1%)
+
+### Tests Verified This Session (+1 test)
+
+1. **Job failure captured with error details** - PASSED
+   - Updated testJobFailureCapture() to properly trigger job failure
+   - Used invalid embed_model ("nonexistent-model-xyz-12345") instead of empty workspace
+   - Test flow:
+     1. Ensure test document exists in workspace
+     2. POST /reembed with invalid embed_model (model doesn't exist in Ollama)
+     3. Poll job status until terminal state
+     4. Verify status is 'failed'
+     5. Verify error field contains useful information
+   - Result: Job failed with error "Client error '404 Not Found' for url 'http://ollama:11434/api/embed'"
+   - Error message includes helpful information about the failure
+
+### Code Changes
+1. **test_page.html**:
+   - Rewrote `testJobFailureCapture()` function
+   - Now creates test document first to ensure chunks exist
+   - Uses invalid embed_model to trigger actual failure in background task
+   - Improved test output with clear verification steps
+
+### Current Test Status
+- Total tests: 217
+- Passing: 176 (81.1%)
+- Failing: 41
+
+### Remaining Failing Tests Analysis
+The 41 remaining failing tests fall into blocked categories:
+1. **Docker/Container manipulation** (~3 tests) - Health endpoint tests requiring stopping containers
+2. **YouTube/External APIs** (~3 tests) - Tests requiring YouTube transcript access
+3. **OpenRouter/LLM** (~5 tests) - Tests requiring OPENROUTER_API_KEY for answer generation
+4. **n8n workflow** (~8 tests) - Tests requiring n8n setup and configuration
+5. **Document versioning** (~4 tests) - Write-new-first, supersede flow, version tracking
+6. **Service recovery** (~2 tests) - Temporary outage recovery tests
+7. **Database testing** (~3 tests) - FK constraints, GIN indexes, EXPLAIN queries
+8. **Performance** (~3 tests) - Memory usage, query timeout, Docker image size
+9. **Multiple providers** (~2 tests) - Multi-embed providers, reranking
+10. **Other** (~8 tests) - Migrations, test coverage, large playlists, transcript languages
+
+### Next Steps for Future Sessions
+1. Consider implementing document versioning/supersede flow
+2. Review if any FK constraint tests can be done via API
+3. Most remaining tests require external services or infrastructure changes
+
+---
+
 ## Session 58 Summary
 Date: Session 58 (Section Tracking Implementation)
 Status: Services Running - 175/217 Tests Passing (80.6%)
