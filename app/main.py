@@ -17,7 +17,7 @@ from slowapi.util import get_remote_address
 
 from app import __version__
 from app.config import get_settings
-from app.routers import health, ingest, jobs, metrics, query, reembed, youtube
+from app.routers import health, ingest, jobs, metrics, pdf, query, reembed, youtube
 
 # Configure structured logging
 structlog.configure(
@@ -91,42 +91,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize asyncpg connection pool for Supabase
     try:
-        # Parse Supabase URL to get connection string
-        # Supabase URLs are like: https://xxx.supabase.co
-        # The Postgres connection is: postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
-        supabase_url = settings.supabase_url
+        import re
+        postgres_url = None
 
-        # Try to construct Postgres URL if not provided directly
-        # This assumes the user has set up the database connection string
-        # For now, we'll try to connect using the Supabase REST API format
-        if supabase_url.startswith("https://"):
-            # Extract project ID from URL
-            import re
-            match = re.match(r"https://([^.]+)\.supabase\.co", supabase_url)
-            if match:
-                project_id = match.group(1)
-                # Supabase Postgres connection format
-                postgres_url = f"postgresql://postgres:{settings.supabase_service_role_key}@db.{project_id}.supabase.co:5432/postgres"
-
-                _db_pool = await asyncpg.create_pool(
-                    postgres_url,
-                    min_size=settings.db_pool_min_size,
-                    max_size=settings.db_pool_max_size,
-                )
-                logger.info(
-                    "Database pool initialized",
-                    min_size=settings.db_pool_min_size,
-                    max_size=settings.db_pool_max_size,
-                )
-
-                # Wire up database pool to routers
-                ingest.set_db_pool(_db_pool)
-                query.set_db_pool(_db_pool)
-                reembed.set_db_pool(_db_pool)
+        # Option 1: Direct DATABASE_URL takes precedence
+        if settings.database_url:
+            postgres_url = settings.database_url
+            logger.info("Using direct DATABASE_URL for database connection")
+        # Option 2: Construct URL from Supabase settings with DB password
+        elif settings.supabase_db_password:
+            supabase_url = settings.supabase_url
+            if supabase_url.startswith("https://"):
+                # Extract project ID from URL
+                match = re.match(r"https://([^.]+)\.supabase\.co", supabase_url)
+                if match:
+                    project_id = match.group(1)
+                    # Supabase Postgres connection format with actual DB password
+                    postgres_url = f"postgresql://postgres:{settings.supabase_db_password}@db.{project_id}.supabase.co:5432/postgres"
+                    logger.info("Constructed database URL from Supabase project settings")
+        # Option 3: If supabase_url is already a postgres URL, use it directly
+        elif settings.supabase_url.startswith("postgresql://"):
+            postgres_url = settings.supabase_url
+            logger.info("Using supabase_url as direct PostgreSQL connection")
         else:
-            # Assume it's already a Postgres connection string
+            logger.warning(
+                "Database connection not configured. Set DATABASE_URL or SUPABASE_DB_PASSWORD in .env"
+            )
+
+        if postgres_url:
             _db_pool = await asyncpg.create_pool(
-                supabase_url,
+                postgres_url,
+                min_size=settings.db_pool_min_size,
+                max_size=settings.db_pool_max_size,
+            )
+            logger.info(
+                "Database pool initialized",
                 min_size=settings.db_pool_min_size,
                 max_size=settings.db_pool_max_size,
             )
@@ -135,8 +134,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ingest.set_db_pool(_db_pool)
             query.set_db_pool(_db_pool)
             reembed.set_db_pool(_db_pool)
-
-            logger.info("Database pool initialized")
 
     except Exception as e:
         logger.warning(
@@ -341,6 +338,7 @@ async def request_middleware(request: Request, call_next):
 app.include_router(health.router, tags=["Health"])
 app.include_router(ingest.router, tags=["Ingestion"])
 app.include_router(youtube.router, prefix="/sources/youtube", tags=["YouTube"])
+app.include_router(pdf.router, tags=["PDF"])
 app.include_router(query.router, tags=["Query"])
 app.include_router(reembed.router, tags=["Re-embed"])
 app.include_router(jobs.router, tags=["Jobs"])

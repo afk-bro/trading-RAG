@@ -112,6 +112,51 @@ class YouTubeIngestRequest(BaseModel):
     idempotency_key: Optional[str] = Field(None, description="Idempotency key")
 
 
+class PDFBackendType(str, Enum):
+    """Available PDF extraction backends."""
+
+    PYMUPDF = "pymupdf"
+    PDFPLUMBER = "pdfplumber"
+
+
+class PDFConfig(BaseModel):
+    """Configuration for PDF extraction.
+
+    Matches workspace.config.pdf schema.
+    """
+
+    backend: PDFBackendType = Field(
+        default=PDFBackendType.PYMUPDF, description="PDF extraction backend"
+    )
+    max_pages: Optional[int] = Field(None, description="Max pages to extract (None=all)")
+    min_chars_per_page: int = Field(10, description="Skip pages with fewer chars")
+    join_pages_with: str = Field("\n\n", description="Separator between pages")
+    enable_ocr: bool = Field(False, description="Enable OCR (reserved for future)")
+
+
+class PDFIngestRequest(BaseModel):
+    """Request body for PDF ingestion (JSON metadata, file via multipart)."""
+
+    workspace_id: UUID = Field(..., description="Workspace identifier")
+    idempotency_key: Optional[str] = Field(None, description="Idempotency key")
+    title: Optional[str] = Field(None, description="Document title (auto-detected if not set)")
+    author: Optional[str] = Field(None, description="Author name")
+    pdf_config: Optional[PDFConfig] = Field(None, description="PDF extraction config")
+
+
+class PDFIngestResponse(BaseModel):
+    """Response for PDF ingestion."""
+
+    doc_id: Optional[UUID] = Field(None, description="Created document ID")
+    status: str = Field(..., description="Ingestion status")
+    chunks_created: int = Field(default=0, description="Number of chunks created")
+    vectors_created: int = Field(default=0, description="Number of vectors created")
+    pages_extracted: int = Field(default=0, description="Number of pages extracted")
+    total_pages: int = Field(default=0, description="Total pages in PDF")
+    warnings: list[str] = Field(default_factory=list, description="Extraction warnings")
+    error_reason: Optional[str] = Field(None, description="Error reason if failed")
+
+
 class QueryFilters(BaseModel):
     """Filters for query endpoint."""
 

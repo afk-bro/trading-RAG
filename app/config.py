@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = Field(
         ..., description="Supabase service role key"
     )
+    supabase_db_password: Optional[str] = Field(
+        default=None, description="Supabase database password for direct PostgreSQL connection"
+    )
+    database_url: Optional[str] = Field(
+        default=None, description="Direct PostgreSQL connection URL (overrides Supabase URL construction)"
+    )
 
     # OpenRouter Configuration
     openrouter_api_key: str = Field(..., description="OpenRouter API key")

@@ -1,5 +1,126 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 43 Summary
+Date: Session 43 (Database Connection Fix)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. CRITICAL FIX: DATABASE_URL Configuration Error
+- **IDENTIFIED BUG**: The DATABASE_URL in .env had brackets around the password:
+  - WRONG: `postgresql://postgres:[X1T1hsdh7iVuLpqR]@db.sypwqiozmpjhtthkjmvq.supabase.co:5432/postgres`
+  - CORRECT: `postgresql://postgres:X1T1hsdh7iVuLpqR@db.sypwqiozmpjhtthkjmvq.supabase.co:5432/postgres`
+- **FIX APPLIED**: Removed brackets from password in DATABASE_URL
+- This was causing asyncpg connection pool to fail during server startup
+
+#### 2. Service Health Verification
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all dependencies healthy:
+  - status: "ok"
+  - qdrant: "ok" (latency ~30ms)
+  - supabase: "ok" (latency ~168ms) - NOW CONNECTED!
+  - ollama: "ok" (latency ~22ms)
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+
+#### 3. POST /ingest Test Attempt
+- Tested via Swagger UI with valid payload
+- **Result**: 503 "Database connection not available"
+- **Root Cause**: Server was started with malformed DATABASE_URL, so asyncpg pool never initialized
+- **Solution**: Server needs restart to pick up corrected .env file
+
+#### 4. Key Finding: Health Check vs Database Pool
+- Health check for Supabase uses REST API with service role key (works)
+- Actual database operations use asyncpg connection pool (was broken)
+- These are separate connection methods with different failure modes
+
+#### 5. Next Steps (CRITICAL)
+1. **Restart the FastAPI server** to load corrected DATABASE_URL
+   - Docker: `docker-compose -f docker-compose.rag.yml restart trading-rag-svc`
+   - Or restart container: `docker restart trading-rag-svc`
+2. Once server restarts, test POST /ingest endpoint
+3. This should unlock ~100 database-dependent tests
+
+#### 6. Files Modified
+- `.env` - Fixed DATABASE_URL (removed brackets from password)
+
+---
+
+## Session 42 Summary
+Date: Session 42 (Service Verification - Blocker Remains)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. Started Services
+- Ran init.sh to start Docker services (all started successfully)
+- All services running and verified via browser automation:
+  - FastAPI service on port 8000 (healthy)
+  - Qdrant on port 6333 (healthy, status GREEN)
+  - Ollama on port 11434 (healthy)
+  - Supabase still not configured (placeholder credentials in .env)
+
+#### 2. Verification Tests Performed
+Via browser automation (Puppeteer):
+- GET /health returns 200 with all required fields:
+  - status: "degraded"
+  - qdrant: "ok" (latency ~21ms)
+  - ollama: "ok" (latency ~15ms)
+  - supabase: "error" (expected - "[Errno -3] Temporary failure in name resolution")
+  - active_collection: "kb_nomic_embed_text_v1"
+  - embed_model: "nomic-embed-text"
+  - version: "0.1.0"
+- Swagger UI (/docs) loads correctly with all 7 endpoint groups
+- GET /metrics returns valid Prometheus format with:
+  - trading_rag_requests_total (counter with endpoint/method/status labels)
+  - trading_rag_request_latency_seconds (histogram with bucket distribution)
+
+#### 3. Query Endpoint Testing
+- Tested POST /query via Swagger UI
+- Response: **503 Service Unavailable** - `{"detail": "Database connection not available"}`
+- Response headers include: x-api-version, x-request-id, x-response-time-ms
+- Confirms Supabase is required for query operations
+
+#### 4. Code Review
+- Reviewed query.py: Correctly returns empty array `[]` when no results found (line 159-160)
+- Citation URL builder creates proper YouTube URLs with timestamps (lines 49-53)
+- PDF citations include #page= fragment (line 57)
+
+#### 5. Test Status Analysis
+- Current: 113/217 tests passing (52%)
+- No new tests marked as passing this session
+- Reason: ALL remaining tests require one of:
+  - Supabase database (~100 tests) - PRIMARY BLOCKER
+  - Docker container management (~4 tests) - sandbox restricted
+  - n8n workflow configuration (~7 tests)
+  - Intentional design decision (1 test - RESTful conventions)
+
+#### 6. Key Blocker Analysis (Unchanged)
+- **PRIMARY: Supabase credentials not configured**
+  - .env file still has placeholder values:
+    - `SUPABASE_URL=https://your-project.supabase.co`
+    - `SUPABASE_SERVICE_ROLE_KEY=your-service-role-key`
+  - All database-dependent tests blocked
+
+#### 7. Services Health Summary
+All local services are functioning correctly:
+- FastAPI → Qdrant: OK (~21ms)
+- FastAPI → Ollama: OK (~15ms)
+- FastAPI → Supabase: ERROR (not configured)
+
+#### 8. Next Steps for Future Sessions
+1. **CRITICAL: Configure Supabase** - This will unlock ~100 functional tests
+   - Need valid SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env
+   - Run database migrations
+2. Once Supabase is configured, test:
+   - POST /ingest document creation
+   - POST /query semantic search
+   - POST /sources/youtube/ingest with real video
+   - POST /reembed model migration
+
+---
+
 ## Session 41 Summary
 Date: Session 41 (Service Verification - Blocker Remains)
 Status: Services Running - 113/217 Tests Passing (52%)
