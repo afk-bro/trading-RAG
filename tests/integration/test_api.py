@@ -125,16 +125,26 @@ class TestIngestEndpoint:
         })
         assert response.status_code == 422
 
-    def test_ingest_returns_503_without_db(self, client):
+    def test_ingest_returns_503_without_db(self):
         """Test that ingest returns 503 when DB is not available."""
-        response = client.post("/ingest", json={
-            "workspace_id": str(uuid.uuid4()),
-            "source": {"type": "article", "url": "https://example.com"},
-            "content": "Test content for ingestion",
-            "metadata": {"title": "Test Article"}
-        })
-        assert response.status_code == 503
-        assert "Database" in response.json().get("detail", "")
+        import app.routers.ingest as ingest_module
+
+        from app.main import app
+        with TestClient(app, raise_server_exceptions=False) as client:
+            # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
+            original_pool = ingest_module._db_pool
+            ingest_module._db_pool = None
+            try:
+                response = client.post("/ingest", json={
+                    "workspace_id": str(uuid.uuid4()),
+                    "source": {"type": "article", "url": "https://example.com"},
+                    "content": "Test content for ingestion",
+                    "metadata": {"title": "Test Article"}
+                })
+                assert response.status_code == 503
+                assert "Database" in response.json().get("detail", "")
+            finally:
+                ingest_module._db_pool = original_pool
 
 
 class TestYouTubeEndpoint:
@@ -256,15 +266,25 @@ class TestReembedEndpoint:
         })
         assert response.status_code == 422
 
-    def test_reembed_returns_503_without_db(self, client):
+    def test_reembed_returns_503_without_db(self):
         """Test that reembed returns 503 when DB is not available."""
-        response = client.post("/reembed", json={
-            "workspace_id": str(uuid.uuid4()),
-            "target_collection": "test_collection",
-            "embed_provider": "ollama",
-            "embed_model": "nomic-embed-text"
-        })
-        assert response.status_code == 503
+        import app.routers.reembed as reembed_module
+
+        from app.main import app
+        with TestClient(app, raise_server_exceptions=False) as client:
+            # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
+            original_pool = reembed_module._db_pool
+            reembed_module._db_pool = None
+            try:
+                response = client.post("/reembed", json={
+                    "workspace_id": str(uuid.uuid4()),
+                    "target_collection": "test_collection",
+                    "embed_provider": "ollama",
+                    "embed_model": "nomic-embed-text"
+                })
+                assert response.status_code == 503
+            finally:
+                reembed_module._db_pool = original_pool
 
 
 class TestCORSHeaders:
