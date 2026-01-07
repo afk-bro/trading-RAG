@@ -31,6 +31,7 @@
     <button onclick="testPublishedAtNullHandling()">Test Published_at Null Filter</button>
     <button onclick="testJobFailureCapture()">Test Job Failure Capture</button>
     <button onclick="testLanguageField()">Test Language Field</button>
+    <button onclick="testLastIndexedAt()">Test Last Indexed At</button>
     <button onclick="testQueryLatency()">Test Query Latency (p95)</button>
     <button onclick="testIngestThroughput()">Test Ingest Throughput</button>
     <div class="result">
@@ -1589,6 +1590,100 @@
                     output += `SUCCESS: Ingest throughput (${docsPerMinute.toFixed(1)} docs/min) exceeds target (${targetDocsPerMin} docs/min).\n`;
                 } else {
                     output += `ISSUE: Ingest throughput (${docsPerMinute.toFixed(1)} docs/min) is below target (${targetDocsPerMin} docs/min).\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testLastIndexedAt() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== LAST_INDEXED_AT UPDATE TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest a new document
+                document.getElementById('result').textContent = 'Step 1: Ingesting new document...';
+                const payload = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `last-indexed-test-${timestamp}`,
+                    "source": {
+                        "url": `https://example.com/last-indexed-test-${timestamp}`,
+                        "type": "article"
+                    },
+                    "content": `Test document for last_indexed_at verification. Timestamp: ${timestamp}. This document tests that the last_indexed_at field is set when vectors are created.`,
+                    "metadata": {
+                        "title": "Last Indexed At Test"
+                    }
+                };
+
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let ingestResult = await res.json();
+                output += "Step 1 - Ingest document:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(ingestResult, null, 2) + "\n\n";
+
+                if (ingestResult.status !== 'indexed') {
+                    output += `\n=== TEST SKIPPED ===\n`;
+                    output += `Document status is '${ingestResult.status}', expected 'indexed'.\n`;
+                    output += `This may happen if the document already exists.\n`;
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // Step 2: Fetch documents and check last_indexed_at
+                document.getElementById('result').textContent = 'Step 2: Fetching documents to verify last_indexed_at...';
+                res = await fetch(`${BASE_URL}/debug/documents`);
+                let docsData = await res.json();
+                output += "Step 2 - Fetch documents:\n";
+
+                // Find our test document
+                let testDoc = null;
+                if (docsData.documents) {
+                    testDoc = docsData.documents.find(d => d.id === ingestResult.doc_id);
+                }
+
+                output += `Document found: ${testDoc !== null && testDoc !== undefined}\n`;
+                if (testDoc) {
+                    output += `  last_indexed_at: "${testDoc.last_indexed_at}"\n`;
+                    output += `  created_at: "${testDoc.created_at}"\n`;
+                }
+
+                output += "\n=== VERIFICATION ===\n\n";
+
+                // Verify last_indexed_at is set and is a valid timestamp
+                const hasLastIndexedAt = testDoc && testDoc.last_indexed_at !== null && testDoc.last_indexed_at !== undefined;
+                output += `Test 1 - last_indexed_at is set: ${hasLastIndexedAt}\n`;
+
+                let timestampValid = false;
+                if (hasLastIndexedAt) {
+                    const indexedDate = new Date(testDoc.last_indexed_at);
+                    timestampValid = !isNaN(indexedDate.getTime());
+                    output += `Test 2 - last_indexed_at is valid timestamp: ${timestampValid}\n`;
+
+                    // Check that last_indexed_at is recent (within last 5 minutes)
+                    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+                    const isRecent = indexedDate.getTime() > fiveMinutesAgo;
+                    output += `Test 3 - last_indexed_at is recent: ${isRecent}\n`;
+                }
+
+                const testPassed = hasLastIndexedAt && timestampValid;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (testPassed) {
+                    output += "SUCCESS: last_indexed_at is set when vectors are created.\n";
+                } else {
+                    if (!hasLastIndexedAt) {
+                        output += "ISSUE: last_indexed_at field is not set (may need service restart for API update)\n";
+                    }
                 }
 
                 document.getElementById('result').textContent = output;
