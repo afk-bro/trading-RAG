@@ -487,7 +487,7 @@
       "Step 4: Verify only workspace A chunks are queued",
       "Step 5: Verify workspace B chunks are not affected"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -498,7 +498,7 @@
       "Step 3: Verify only chunks from doc1 and doc2 are re-embedded",
       "Step 4: Verify doc3 chunks are not affected"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2079,7 +2079,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify locator_label format is 'p. X' or 'pp. X-Y'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2089,7 +2089,7 @@
       "Step 2: Query chunk",
       "Step 3: Verify page_start=5 and page_end=7"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

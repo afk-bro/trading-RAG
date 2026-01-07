@@ -1,7 +1,7 @@
 """Health check endpoint."""
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 import structlog
@@ -479,9 +479,12 @@ async def list_documents(settings: Settings = Depends(get_settings)):
         }
 
 
-@router.get("/debug/chunks")
-async def list_chunks(settings: Settings = Depends(get_settings)):
-    """List chunks table to verify chunking."""
+@router.get("/debug/chunks/count")
+async def count_chunks_by_workspace(
+    workspace_id: str,
+    settings: Settings = Depends(get_settings)
+):
+    """Count chunks for a specific workspace."""
     import asyncpg
     import traceback
 
@@ -495,19 +498,87 @@ async def list_chunks(settings: Settings = Depends(get_settings)):
             timeout=30,
             statement_cache_size=0,
         )
-        rows = await conn.fetch(
-            """
-            SELECT
-                id, doc_id, workspace_id, chunk_index,
-                LEFT(content, 100) as content_preview, content_hash, token_count,
-                section, time_start_secs, time_end_secs, page_start, page_end,
-                locator_label, speaker, symbols, entities, topics,
-                quality_score, created_at
-            FROM chunks
-            ORDER BY created_at DESC
-            LIMIT 20
-            """
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM chunks WHERE workspace_id = $1::uuid",
+            workspace_id
         )
+        await conn.close()
+        return {"success": True, "workspace_id": workspace_id, "count": count}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }
+
+
+@router.get("/debug/chunks")
+async def list_chunks(
+    doc_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    settings: Settings = Depends(get_settings)
+):
+    """List chunks table to verify chunking. Optionally filter by doc_id or workspace_id."""
+    import asyncpg
+    import traceback
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+            statement_cache_size=0,
+        )
+
+        if doc_id:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id, doc_id, workspace_id, chunk_index,
+                    LEFT(content, 100) as content_preview, content_hash, token_count,
+                    section, time_start_secs, time_end_secs, page_start, page_end,
+                    locator_label, speaker, symbols, entities, topics,
+                    quality_score, created_at
+                FROM chunks
+                WHERE doc_id = $1::uuid
+                ORDER BY chunk_index
+                """,
+                doc_id
+            )
+        elif workspace_id:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id, doc_id, workspace_id, chunk_index,
+                    LEFT(content, 100) as content_preview, content_hash, token_count,
+                    section, time_start_secs, time_end_secs, page_start, page_end,
+                    locator_label, speaker, symbols, entities, topics,
+                    quality_score, created_at
+                FROM chunks
+                WHERE workspace_id = $1::uuid
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                workspace_id
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id, doc_id, workspace_id, chunk_index,
+                    LEFT(content, 100) as content_preview, content_hash, token_count,
+                    section, time_start_secs, time_end_secs, page_start, page_end,
+                    locator_label, speaker, symbols, entities, topics,
+                    quality_score, created_at
+                FROM chunks
+                ORDER BY created_at DESC
+                LIMIT 20
+                """
+            )
         await conn.close()
 
         chunks = [
@@ -518,6 +589,10 @@ async def list_chunks(settings: Settings = Depends(get_settings)):
                 "chunk_index": row["chunk_index"],
                 "content_preview": row["content_preview"],
                 "token_count": row["token_count"],
+                "page_start": row["page_start"],
+                "page_end": row["page_end"],
+                "time_start_secs": row["time_start_secs"],
+                "time_end_secs": row["time_end_secs"],
                 "locator_label": row["locator_label"],
                 "symbols": row["symbols"],
                 "entities": row["entities"],

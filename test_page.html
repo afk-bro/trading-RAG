@@ -25,6 +25,9 @@
     <button onclick="testReembedEmptyWorkspace()">Test Reembed Empty Workspace</button>
     <button onclick="testLargeContent()">Test Large Content (10k+ tokens)</button>
     <button onclick="testConcurrentRequests()">Test Concurrent Requests</button>
+    <button onclick="testPDFLocatorLabels()">Test PDF Locator Labels</button>
+    <button onclick="testReembedWorkspaceFilter()">Test Reembed Workspace Filter</button>
+    <button onclick="testReembedDocIdFilter()">Test Reembed Doc ID Filter</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -698,6 +701,379 @@
 
                 const testPassed = allSucceeded && noErrors && uniqueDocIds && reasonableTime;
                 output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testPDFLocatorLabels() {
+            let output = "=== PDF LOCATOR LABELS AND PAGE SPANS TEST ===\n\n";
+            document.getElementById('result').textContent = 'Testing PDF with page information...';
+
+            try {
+                // Create PDF document with pre-chunked content including page numbers
+                const timestamp = Date.now();
+                const payload = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "idempotency_key": "pdf-page-test-" + timestamp,
+                    "source": {
+                        "url": "https://example.com/test-pdf-pages-" + timestamp + ".pdf",
+                        "type": "pdf"
+                    },
+                    "content": "Full document content placeholder for PDF testing.",
+                    "metadata": {
+                        "title": "PDF Page Test Document",
+                        "author": "Test PDF Author"
+                    },
+                    "chunks": [
+                        {
+                            "content": "This is page 1 content about market analysis and introduction to trading strategies.",
+                            "page_start": 1,
+                            "page_end": 1
+                        },
+                        {
+                            "content": "Page 2 covers detailed analysis of stock performance metrics and valuation methods.",
+                            "page_start": 2,
+                            "page_end": 2
+                        },
+                        {
+                            "content": "This chunk spans pages 3 to 5 covering comprehensive risk management approaches, portfolio diversification strategies, and advanced hedging techniques across multiple chapters.",
+                            "page_start": 3,
+                            "page_end": 5
+                        },
+                        {
+                            "content": "Pages 6 through 7 discuss regulatory compliance and market structure considerations.",
+                            "page_start": 6,
+                            "page_end": 7
+                        }
+                    ]
+                };
+
+                output += "Sending pre-chunked PDF request with page info...\n\n";
+
+                const res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                output += "Ingest Response:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += `Doc ID: ${data.doc_id}\n`;
+                output += `Chunks Created: ${data.chunks_created}\n`;
+                output += `Vectors Created: ${data.vectors_created}\n`;
+                output += `Status: ${data.status}\n\n`;
+
+                if (data.status === 'exists') {
+                    output += "Note: Document already exists. Using existing doc_id.\n\n";
+                }
+
+                // Fetch chunks with page info
+                output += "Fetching chunks with page info...\n";
+                const chunksRes = await fetch(`${BASE_URL}/debug/chunks?doc_id=${data.doc_id}`);
+                const chunksData = await chunksRes.json();
+
+                output += `\nFound ${chunksData.count} chunks:\n\n`;
+
+                if (chunksData.success && chunksData.chunks) {
+                    chunksData.chunks.forEach((chunk, i) => {
+                        output += `Chunk ${i + 1}:\n`;
+                        output += `  chunk_index: ${chunk.chunk_index}\n`;
+                        output += `  page_start: ${chunk.page_start}\n`;
+                        output += `  page_end: ${chunk.page_end}\n`;
+                        output += `  locator_label: "${chunk.locator_label}"\n`;
+                        output += `  content: "${chunk.content_preview}..."\n\n`;
+                    });
+
+                    // Verification
+                    output += "=== VERIFICATION ===\n\n";
+
+                    // Test 1: Locator label for single page uses "p. X" format
+                    const singlePageChunks = chunksData.chunks.filter(c => c.page_start === c.page_end && c.page_start !== null);
+                    const singlePageLabelsCorrect = singlePageChunks.every(c => c.locator_label && c.locator_label.startsWith("p. "));
+                    output += `Test 1 - Single page uses 'p. X' format: ${singlePageLabelsCorrect}\n`;
+                    if (singlePageChunks.length > 0) {
+                        output += `  Examples: ${singlePageChunks.map(c => c.locator_label).join(", ")}\n`;
+                    }
+
+                    // Test 2: Multi-page spans use "pp. X-Y" format
+                    const multiPageChunks = chunksData.chunks.filter(c => c.page_start !== null && c.page_end !== null && c.page_end > c.page_start);
+                    const multiPageLabelsCorrect = multiPageChunks.every(c => c.locator_label && c.locator_label.startsWith("pp. "));
+                    output += `\nTest 2 - Multi-page spans use 'pp. X-Y' format: ${multiPageLabelsCorrect}\n`;
+                    if (multiPageChunks.length > 0) {
+                        output += `  Examples: ${multiPageChunks.map(c => c.locator_label).join(", ")}\n`;
+                    }
+
+                    // Test 3: Page numbers are stored correctly
+                    const chunk3 = chunksData.chunks.find(c => c.page_start === 3 && c.page_end === 5);
+                    const pageSpanCorrect = chunk3 !== undefined;
+                    output += `\nTest 3 - Page span (3-5) tracked correctly: ${pageSpanCorrect}\n`;
+                    if (chunk3) {
+                        output += `  page_start: ${chunk3.page_start}, page_end: ${chunk3.page_end}\n`;
+                    }
+
+                    const allTestsPassed = singlePageLabelsCorrect && multiPageLabelsCorrect && pageSpanCorrect;
+                    output += `\n=== TEST ${allTestsPassed ? "PASSED" : "FAILED"} ===\n`;
+                } else {
+                    output += "Error fetching chunks: " + JSON.stringify(chunksData) + "\n";
+                    output += "\n=== TEST FAILED ===\n";
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testReembedWorkspaceFilter() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let WORKSPACE_B = null;
+            let output = "=== REEMBED WORKSPACE FILTER TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                // Step 1: Create Workspace B if it doesn't exist
+                document.getElementById('result').textContent = 'Step 1: Creating Workspace B...';
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Reembed Test Workspace B",
+                        slug: "reembed-test-workspace-b"
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create/Get Workspace B:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                if (data.success && data.workspace && data.workspace.id) {
+                    WORKSPACE_B = data.workspace.id;
+                } else if (data.workspace_id) {
+                    WORKSPACE_B = data.workspace_id;
+                } else {
+                    output += "ERROR: Could not get workspace B ID\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+                output += "Using Workspace B ID: " + WORKSPACE_B + "\n\n";
+
+                // Step 2: Ingest documents into both workspaces
+                document.getElementById('result').textContent = 'Step 2: Ingesting documents...';
+                const timestamp = Date.now();
+
+                // Ingest to Workspace A
+                const docA = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": "reembed-test-a-" + timestamp,
+                    "source": { "url": "https://example.com/reembed-test-a-" + timestamp, "type": "article" },
+                    "content": "Workspace A content for reembed filtering test. Contains unique data about alpha market analysis.",
+                    "metadata": { "title": "Reembed Test A" }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docA)
+                });
+                let resultA = await res.json();
+                output += "Step 2a - Ingest to Workspace A:\n" + JSON.stringify(resultA, null, 2) + "\n\n";
+
+                // Ingest to Workspace B
+                const docB = {
+                    "workspace_id": WORKSPACE_B,
+                    "idempotency_key": "reembed-test-b-" + timestamp,
+                    "source": { "url": "https://example.com/reembed-test-b-" + timestamp, "type": "article" },
+                    "content": "Workspace B content for reembed filtering test. Contains unique data about beta strategy review.",
+                    "metadata": { "title": "Reembed Test B" }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docB)
+                });
+                let resultB = await res.json();
+                output += "Step 2b - Ingest to Workspace B:\n" + JSON.stringify(resultB, null, 2) + "\n\n";
+
+                // Wait for embeddings
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 3: Get chunk counts using the count endpoint
+                document.getElementById('result').textContent = 'Step 3: Counting chunks per workspace...';
+                res = await fetch(`${BASE_URL}/debug/chunks/count?workspace_id=${WORKSPACE_A}`);
+                let countAResult = await res.json();
+                res = await fetch(`${BASE_URL}/debug/chunks/count?workspace_id=${WORKSPACE_B}`);
+                let countBResult = await res.json();
+
+                const countA = countAResult.success ? countAResult.count : 0;
+                const countB = countBResult.success ? countBResult.count : 0;
+                output += `Step 3 - Chunk counts (from count endpoint):\n`;
+                output += `  Workspace A: ${countA} chunks\n`;
+                output += `  Workspace B: ${countB} chunks\n\n`;
+
+                // Step 4: Run reembed for Workspace A only
+                document.getElementById('result').textContent = 'Step 4: Running reembed for Workspace A only...';
+                const reembedPayload = {
+                    "workspace_id": WORKSPACE_A,
+                    "target_collection": "kb_reembed_test_v1_" + timestamp,
+                    "embed_provider": "ollama",
+                    "embed_model": "nomic-embed-text"
+                };
+                res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reembedPayload)
+                });
+                let reembedResult = await res.json();
+                output += "Step 4 - Reembed for Workspace A:\n" + JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Step 5: Verify chunks_queued matches Workspace A count (not A+B)
+                output += "=== VERIFICATION ===\n\n";
+                const chunksQueuedMatchesA = reembedResult.chunks_queued === countA;
+                const totalChunks = countA + countB;
+                const notIncludingBoth = reembedResult.chunks_queued !== totalChunks || countB === 0;
+
+                output += `Test 1 - Reembed only queues Workspace A chunks:\n`;
+                output += `  chunks_queued: ${reembedResult.chunks_queued}\n`;
+                output += `  Workspace A chunk count: ${countA}\n`;
+                output += `  Workspace B chunk count: ${countB}\n`;
+                output += `  Total chunks (A+B): ${totalChunks}\n`;
+                output += `  Exact match with Workspace A: ${chunksQueuedMatchesA}\n`;
+                output += `  Not including both workspaces: ${notIncludingBoth}\n\n`;
+
+                // Step 6: Poll job status to verify completion
+                if (reembedResult.job_id) {
+                    document.getElementById('result').textContent = 'Step 5: Polling job status...';
+                    for (let i = 0; i < 15; i++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        res = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
+                        let jobStatus = await res.json();
+                        output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%\n`;
+                        if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
+                            break;
+                        }
+                    }
+                }
+
+                // The key verification: chunks_queued should equal Workspace A count exactly
+                // This proves that workspace filtering is working
+                const testPassed = chunksQueuedMatchesA && reembedResult.chunks_queued > 0;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Reembed for Workspace A queued exactly ${reembedResult.chunks_queued} chunks,\n`;
+                    output += `which matches the count of chunks in Workspace A (${countA}).\n`;
+                    output += `Workspace B's ${countB} chunks were NOT included - workspace filtering works!\n`;
+                } else {
+                    output += `ISSUE: chunks_queued (${reembedResult.chunks_queued}) != Workspace A count (${countA})\n`;
+                    output += `This could indicate a timing issue or workspace filtering problem.\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testReembedDocIdFilter() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== REEMBED DOC_ID FILTER TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest 3 documents
+                document.getElementById('result').textContent = 'Step 1: Ingesting 3 documents...';
+                const docs = [];
+                for (let i = 1; i <= 3; i++) {
+                    const payload = {
+                        "workspace_id": WORKSPACE_A,
+                        "idempotency_key": `docid-filter-test-${timestamp}-doc${i}`,
+                        "source": { "url": `https://example.com/docid-test-${timestamp}-doc${i}`, "type": "article" },
+                        "content": `Document ${i} content for doc_id filtering test. This is document number ${i} with unique content for testing purposes.`,
+                        "metadata": { "title": `Doc ID Filter Test ${i}` }
+                    };
+                    const res = await fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    docs.push({ index: i, doc_id: data.doc_id, chunks_created: data.chunks_created });
+                    output += `Doc ${i}: doc_id=${data.doc_id}, chunks=${data.chunks_created}, status=${data.status}\n`;
+                }
+                output += "\n";
+
+                // Wait for embeddings
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 2: Count chunks per document
+                document.getElementById('result').textContent = 'Step 2: Counting chunks per document...';
+                let totalChunksSelected = 0;
+                for (const doc of docs.slice(0, 2)) { // Only first 2 docs
+                    const res = await fetch(`${BASE_URL}/debug/chunks?doc_id=${doc.doc_id}`);
+                    const data = await res.json();
+                    doc.chunk_count = data.count || 0;
+                    totalChunksSelected += doc.chunk_count;
+                    output += `Doc ${doc.index} (${doc.doc_id}): ${doc.chunk_count} chunks\n`;
+                }
+                // Count doc 3 chunks
+                const res3 = await fetch(`${BASE_URL}/debug/chunks?doc_id=${docs[2].doc_id}`);
+                const data3 = await res3.json();
+                docs[2].chunk_count = data3.count || 0;
+                output += `Doc 3 (${docs[2].doc_id}): ${docs[2].chunk_count} chunks (NOT selected)\n\n`;
+
+                // Step 3: Run reembed with only doc_ids for doc1 and doc2
+                document.getElementById('result').textContent = 'Step 3: Running reembed with doc_ids filter...';
+                const reembedPayload = {
+                    "workspace_id": WORKSPACE_A,
+                    "target_collection": "kb_docid_test_v1_" + timestamp,
+                    "embed_provider": "ollama",
+                    "embed_model": "nomic-embed-text",
+                    "doc_ids": [docs[0].doc_id, docs[1].doc_id]
+                };
+                const reembedRes = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reembedPayload)
+                });
+                const reembedResult = await reembedRes.json();
+                output += "Reembed Response:\n" + JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Step 4: Verify
+                output += "=== VERIFICATION ===\n\n";
+                const expectedChunks = docs[0].chunk_count + docs[1].chunk_count;
+                const doc3Chunks = docs[2].chunk_count;
+                const chunksQueuedMatchesSelected = reembedResult.chunks_queued === expectedChunks;
+                const notIncludingDoc3 = reembedResult.chunks_queued !== (expectedChunks + doc3Chunks) || doc3Chunks === 0;
+
+                output += `Doc 1 chunks: ${docs[0].chunk_count}\n`;
+                output += `Doc 2 chunks: ${docs[1].chunk_count}\n`;
+                output += `Expected total (doc1+doc2): ${expectedChunks}\n`;
+                output += `Doc 3 chunks (not selected): ${doc3Chunks}\n`;
+                output += `chunks_queued: ${reembedResult.chunks_queued}\n\n`;
+                output += `Exact match with selected docs: ${chunksQueuedMatchesSelected}\n`;
+                output += `Not including doc3: ${notIncludingDoc3}\n\n`;
+
+                // Poll job status
+                if (reembedResult.job_id) {
+                    document.getElementById('result').textContent = 'Polling job status...';
+                    for (let i = 0; i < 10; i++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        const jobRes = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
+                        const jobStatus = await jobRes.json();
+                        output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%\n`;
+                        if (jobStatus.status === 'completed' || jobStatus.status === 'failed') break;
+                    }
+                }
+
+                const testPassed = chunksQueuedMatchesSelected && reembedResult.chunks_queued > 0;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Reembed with doc_ids filter queued exactly ${reembedResult.chunks_queued} chunks\n`;
+                    output += `matching the selected documents (doc1+doc2=${expectedChunks}).\n`;
+                    output += `Doc 3's ${doc3Chunks} chunks were correctly excluded.\n`;
+                }
 
                 document.getElementById('result').textContent = output;
             } catch(e) {
