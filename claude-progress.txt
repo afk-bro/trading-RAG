@@ -1,5 +1,68 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 61 Summary
+Date: Session 61 (Verification and Document Versioning Investigation)
+Status: Services Running - 176/217 Tests Passing (81.1%)
+
+### Session Goals
+- Verify core functionality after fresh context window
+- Investigate if any blocked tests can be unblocked
+- Update progress documentation
+
+### Verification Tests Run
+1. **Health Endpoint** - PASSED
+   - All services healthy: qdrant (ok ~23ms), supabase (ok ~189ms), ollama (ok ~16ms)
+   - active_collection: "kb_nomic_embed_text_v1"
+   - embed_model: "nomic-embed-text"
+   - version: "0.1.0"
+
+2. **Ingest Test** - PASSED
+   - Status 201
+   - Idempotency working (status: "exists" for previously ingested content)
+
+3. **Query Test** - PASSED
+   - Status 200
+   - Semantic search returning relevant results with scores (~0.63)
+   - Metadata hydration working (symbols, topics, author, title, locator_label)
+   - Citation URLs with timestamps working
+
+### Document Versioning Investigation
+
+Attempted to run the "Test Document Versioning" test. Found:
+
+1. **Code IS implemented**:
+   - `update_existing: bool` parameter exists in ingest schema
+   - `supersede_and_create()` method exists in documents repository
+   - Code properly handles: get old version → mark superseded → create new version
+
+2. **Migration NOT applied**:
+   - Migration 003 (`003_partial_unique_constraint.sql`) creates a partial unique index
+   - This migration changes the unique constraint to only apply to `status = 'active'` documents
+   - Current error: "duplicate key value violates unique constraint \"documents_workspace_source_canonical_unique\""
+   - The old constraint doesn't allow multiple documents with same canonical_url regardless of status
+
+3. **Resolution needed**:
+   - Apply migration 003 to Supabase database via Supabase Dashboard or MCP
+   - This will enable the supersede/versioning pattern to work
+
+### Updated Blockers for Document Versioning Tests (4 tests)
+Previously listed as "requires implementing update/supersede API" - CORRECTED to:
+- Code is implemented but migration 003 needs to be applied to database
+- This is a database schema change, not a code change
+
+### Current Test Status
+- Total tests: 217
+- Passing: 176 (81.1%)
+- Blocked: 40 (18.9%)
+- New findings: Document versioning tests blocked by missing database migration, not missing code
+
+### Recommendations
+1. Apply migration `migrations/003_partial_unique_constraint.sql` to Supabase
+2. After migration, re-run "Test Document Versioning" - should pass
+3. This would potentially unblock 4 tests (document versioning related)
+
+---
+
 ## Session 60 Summary
 Date: Session 60 (Blocked Tests Analysis)
 Status: Services Running - 176/217 Tests Passing (81.1%)
@@ -36,7 +99,7 @@ All remaining tests are blocked by external dependencies:
 | YouTube/External APIs | 3 | Network restrictions |
 | OpenRouter/LLM | 5 | Requires OPENROUTER_API_KEY |
 | n8n workflow | 8 | Requires n8n setup and configuration |
-| Document versioning | 4 | Requires implementing update/supersede API |
+| Document versioning | 4 | Migration 003 not applied (code exists) |
 | Service recovery | 2 | Requires stopping services |
 | Database testing | 3 | Requires EXPLAIN queries / FK testing |
 | Performance | 3 | Memory profiling, Docker access |
@@ -65,14 +128,14 @@ All remaining tests are blocked by external dependencies:
 The remaining 40 tests (18.9%) are genuinely blocked by:
 1. Infrastructure constraints (Docker/container access)
 2. External service dependencies (YouTube API, OpenRouter)
-3. Missing features that need implementation (document versioning)
+3. Missing database migration (document versioning - code exists but migration 003 needed)
 4. n8n workflow setup (separate infrastructure)
 
 ### Recommendations for Unblocking
 1. **For YouTube tests**: Requires network access or mock server
 2. **For OpenRouter tests**: Add OPENROUTER_API_KEY to environment
 3. **For n8n tests**: Complete n8n workflow setup
-4. **For document versioning**: Implement PATCH /documents/{id} endpoint
+4. **For document versioning**: Apply migration 003 to Supabase (code already exists)
 5. **For Docker tests**: Would need elevated container permissions
 
 ### Current Test Status
