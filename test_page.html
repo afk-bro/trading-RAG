@@ -23,6 +23,8 @@
     <button onclick="testWorkspaceIsolation()">Test Workspace Isolation</button>
     <button onclick="testEmptyWorkspaceQuery()">Test Empty Workspace Query</button>
     <button onclick="testReembedEmptyWorkspace()">Test Reembed Empty Workspace</button>
+    <button onclick="testLargeContent()">Test Large Content (10k+ tokens)</button>
+    <button onclick="testConcurrentRequests()">Test Concurrent Requests</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -511,6 +513,191 @@
                 output += "Job completed successfully: " + isCompleted + "\n";
                 output += "Chunks queued is 0 or progress is 0: " + hasZeroChunks + "\n";
                 output += "\n=== TEST " + (isCompleted ? "PASSED" : "FAILED") + " ===\n";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testLargeContent() {
+            let output = "=== LARGE CONTENT INGESTION TEST (10000+ tokens) ===\n\n";
+            document.getElementById('result').textContent = 'Generating large content (10000+ tokens)...';
+
+            try {
+                // Generate content with 10000+ tokens (approximately 40000+ characters)
+                // Each paragraph is about 100 words (~133 tokens)
+                const baseParagraphs = [
+                    "The Federal Reserve announced significant changes to monetary policy affecting global markets. Chairman Powell emphasized the importance of maintaining price stability while supporting maximum employment. Interest rate decisions will be data-dependent, with careful monitoring of inflation indicators and labor market conditions. The committee remains vigilant about upside risks to inflation and is prepared to adjust policy stance as appropriate. Financial conditions have tightened considerably over the past year, and the full effects of policy tightening are yet to be felt.",
+                    "Apple Inc (AAPL) reported strong quarterly earnings, beating analyst expectations on both revenue and earnings per share. The company's services segment showed remarkable growth, contributing significantly to overall revenue. iPhone sales remained robust despite challenging macroeconomic conditions. Management provided optimistic guidance for the upcoming quarter, citing strong demand for premium devices. The stock rallied following the earnings announcement, reaching new all-time highs.",
+                    "Microsoft Corporation (MSFT) continues to dominate the cloud computing market with Azure showing impressive growth rates. The company's artificial intelligence initiatives are gaining traction across enterprise customers. Office 365 subscription revenue grew steadily, demonstrating strong recurring revenue streams. Gaming division performed well with Xbox Game Pass subscriber growth accelerating. Management highlighted significant investments in AI infrastructure and partnerships.",
+                    "Google (GOOGL) faces increased regulatory scrutiny as antitrust investigations continue globally. Search advertising revenue showed resilience despite competitive pressures from social media platforms. YouTube's advertising business demonstrated strong performance with increased watch time. Cloud Platform growth remained robust, though still trailing competitors in market share. The company announced ambitious AI product roadmaps across consumer and enterprise segments.",
+                    "Amazon (AMZN) navigates challenging retail environment while AWS continues to drive profitability. E-commerce growth normalized after pandemic-driven surge, leading to operational efficiency measures. Third-party seller services showed healthy growth, contributing to marketplace ecosystem strength. Prime membership retention remained strong with expanded benefits and content offerings. Management emphasizes long-term investments in logistics and fulfillment capabilities.",
+                    "Tesla (TSLA) expands production capacity with new gigafactories coming online globally. Electric vehicle demand remains strong despite increasing competition from traditional automakers. Energy storage and solar businesses show promising growth trajectories. Full self-driving technology continues to progress through beta testing phases. The company maintains cost leadership through vertical integration and manufacturing innovations.",
+                    "NVIDIA (NVDA) dominates AI chip market with unprecedented demand for data center GPUs. Gaming segment performs well with new graphics card generations driving upgrade cycles. Automotive business shows steady growth with autonomous driving partnerships expanding. Data center revenue exceeds expectations as AI training workloads surge. Management projects continued strong demand from cloud service providers and enterprises.",
+                    "Meta Platforms (META) focuses on metaverse investments while maintaining advertising revenue strength. Instagram Reels shows strong engagement competing effectively with TikTok platform. Reality Labs division continues significant investments despite ongoing losses. AI-driven content recommendations improve user engagement metrics across platforms. Advertising efficiency tools help small businesses optimize marketing spend.",
+                    "Netflix (NFLX) adapts to streaming market maturation with ad-supported tier launch. Content investment strategy shifts toward quality over quantity approach. Password sharing crackdown shows initial positive impact on subscriber growth. International expansion continues with localized content production increasing. The company explores gaming and live events as growth vectors.",
+                    "JPMorgan Chase (JPM) benefits from rising interest rate environment boosting net interest income. Investment banking activity remains subdued amid market volatility and uncertainty. Consumer banking shows resilience with strong deposit growth and loan demand. Credit quality metrics remain healthy despite economic headwinds concerns. Management maintains cautious outlook on commercial real estate exposure."
+                ];
+
+                // Repeat paragraphs to get to 10000+ tokens (need about 75+ paragraphs)
+                let largeContent = "";
+                for (let i = 0; i < 80; i++) {
+                    const paragraph = baseParagraphs[i % baseParagraphs.length];
+                    // Add variation to prevent exact duplicates
+                    largeContent += `[Section ${i + 1}] ${paragraph} Market conditions as of iteration ${i + 1} show continued volatility.\n\n`;
+                }
+
+                const estimatedTokens = Math.ceil(largeContent.length / 4);  // Rough estimate: 4 chars per token
+                output += `Generated content length: ${largeContent.length} characters\n`;
+                output += `Estimated tokens: ~${estimatedTokens}\n\n`;
+
+                const payload = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "idempotency_key": "large-content-test-" + Date.now(),
+                    "source": {
+                        "url": "https://example.com/large-document-" + Date.now(),
+                        "type": "article"
+                    },
+                    "content": largeContent,
+                    "metadata": {
+                        "title": "Large Content Test Document",
+                        "author": "Test Author"
+                    }
+                };
+
+                document.getElementById('result').textContent = 'Sending large content request...';
+                output += "Sending request to /ingest...\n";
+
+                const startTime = performance.now();
+                const res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const endTime = performance.now();
+                const duration = (endTime - startTime) / 1000;  // Convert to seconds
+
+                const data = await res.json();
+
+                output += `\nResponse received!\n`;
+                output += `HTTP Status: ${res.status}\n`;
+                output += `Duration: ${duration.toFixed(2)} seconds\n`;
+                output += `Response:\n${JSON.stringify(data, null, 2)}\n\n`;
+
+                // Verification
+                output += "=== VERIFICATION ===\n";
+                const isSuccess = res.status === 200 || res.status === 201;
+                const hasDocId = !!data.doc_id;
+                const hasChunks = data.chunks_created > 0;
+                const isWithinTime = duration < 60;  // Should complete within 60 seconds
+                const hasMultipleChunks = data.chunks_created >= 10;  // Large content should create many chunks
+
+                output += `Request successful (200/201): ${isSuccess}\n`;
+                output += `Has doc_id: ${hasDocId}\n`;
+                output += `Created chunks: ${data.chunks_created}\n`;
+                output += `Has multiple chunks (>=10): ${hasMultipleChunks}\n`;
+                output += `Created vectors: ${data.vectors_created}\n`;
+                output += `Completed within 60s: ${isWithinTime} (${duration.toFixed(2)}s)\n`;
+
+                const testPassed = isSuccess && hasDocId && hasMultipleChunks && isWithinTime;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testConcurrentRequests() {
+            let output = "=== CONCURRENT REQUESTS TEST ===\n\n";
+            document.getElementById('result').textContent = 'Preparing 10 concurrent requests...';
+
+            try {
+                const CONCURRENT_COUNT = 10;
+                const requests = [];
+
+                // Prepare 10 different payloads
+                for (let i = 0; i < CONCURRENT_COUNT; i++) {
+                    const timestamp = Date.now();
+                    requests.push({
+                        "workspace_id": "00000000-0000-0000-0000-000000000001",
+                        "idempotency_key": `concurrent-test-${timestamp}-${i}`,
+                        "source": {
+                            "url": `https://example.com/concurrent-${timestamp}-${i}`,
+                            "type": "article"
+                        },
+                        "content": `Concurrent test document ${i + 1}. This tests the service's ability to handle multiple simultaneous ingestion requests. Each document contains unique content about request number ${i + 1} with different metadata to ensure proper isolation. Stock symbols mentioned: AAPL, MSFT, GOOGL.`,
+                        "metadata": {
+                            "title": `Concurrent Test ${i + 1}`,
+                            "author": `Author ${i + 1}`
+                        }
+                    });
+                }
+
+                output += `Prepared ${CONCURRENT_COUNT} requests\n\n`;
+                document.getElementById('result').textContent = 'Sending 10 concurrent requests...';
+
+                const startTime = performance.now();
+
+                // Send all requests concurrently
+                const promises = requests.map((payload, index) =>
+                    fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).then(async res => {
+                        const data = await res.json();
+                        return { index, status: res.status, data };
+                    }).catch(err => {
+                        return { index, status: 'error', error: err.message };
+                    })
+                );
+
+                const results = await Promise.all(promises);
+                const endTime = performance.now();
+                const totalDuration = (endTime - startTime) / 1000;
+
+                output += "=== RESULTS ===\n\n";
+
+                let successCount = 0;
+                let errorCount = 0;
+                const docIds = new Set();
+
+                results.forEach(result => {
+                    output += `Request ${result.index + 1}: `;
+                    if (result.status === 200 || result.status === 201) {
+                        successCount++;
+                        if (result.data.doc_id) {
+                            docIds.add(result.data.doc_id);
+                        }
+                        output += `Status ${result.status}, doc_id: ${result.data.doc_id}, chunks: ${result.data.chunks_created}\n`;
+                    } else if (result.status === 'error') {
+                        errorCount++;
+                        output += `ERROR: ${result.error}\n`;
+                    } else {
+                        errorCount++;
+                        output += `Status ${result.status}: ${JSON.stringify(result.data)}\n`;
+                    }
+                });
+
+                output += `\nTotal duration: ${totalDuration.toFixed(2)} seconds\n`;
+                output += `Average per request: ${(totalDuration / CONCURRENT_COUNT).toFixed(2)} seconds\n\n`;
+
+                // Verification
+                output += "=== VERIFICATION ===\n";
+                const allSucceeded = successCount === CONCURRENT_COUNT;
+                const noErrors = errorCount === 0;
+                const uniqueDocIds = docIds.size === CONCURRENT_COUNT;
+                const reasonableTime = totalDuration < 60;
+
+                output += `All requests succeeded: ${allSucceeded} (${successCount}/${CONCURRENT_COUNT})\n`;
+                output += `No errors: ${noErrors}\n`;
+                output += `Unique doc_ids: ${uniqueDocIds} (${docIds.size}/${CONCURRENT_COUNT})\n`;
+                output += `Completed within 60s: ${reasonableTime} (${totalDuration.toFixed(2)}s)\n`;
+
+                const testPassed = allSucceeded && noErrors && uniqueDocIds && reasonableTime;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
 
                 document.getElementById('result').textContent = output;
             } catch(e) {

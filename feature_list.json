@@ -654,7 +654,7 @@
       "Step 3: Verify no duplicate documents created",
       "Step 4: Verify database state is consistent"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -665,7 +665,7 @@
       "Step 3: Verify request completes within reasonable time (<60s)",
       "Step 4: Verify all chunks created correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -940,7 +940,7 @@
       "Step 3: Verify FastAPI can reach Ollama on rag-net",
       "Step 4: Verify FastAPI can reach external Supabase"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1625,7 +1625,7 @@
       "Step 4: Verify appropriate number of chunks created",
       "Step 5: Verify no memory issues or timeouts"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1781,7 +1781,7 @@
       "Step 2: Verify all complete successfully",
       "Step 3: Verify data isolated per workspace"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
