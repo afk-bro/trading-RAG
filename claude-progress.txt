@@ -1,5 +1,73 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 44 Summary
+Date: Session 44 (Database Connection Investigation)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. Services Restarted Successfully
+- All services started via init.sh
+- Health endpoint shows all dependencies healthy:
+  - qdrant: "ok" (~36ms)
+  - supabase: "ok" (~186ms) - REST API works
+  - ollama: "ok" (~29ms)
+
+#### 2. Database Connection Investigation
+- **ISSUE IDENTIFIED**: asyncpg connection pool fails to initialize during startup
+- Added debug endpoint `/debug/db` to diagnose:
+  - `database_url_configured`: true
+  - `pool_initialized`: false (THE ISSUE!)
+- The health check for Supabase uses REST API (works), but asyncpg pool doesn't connect
+
+#### 3. Attempted Fixes (Not Yet Successful)
+1. Added SSL context to asyncpg.create_pool():
+   - `ssl=ssl_context` with CERT_NONE verification
+2. Tried Supabase pooler URL format:
+   - `postgresql://postgres.{project}:{password}@aws-0-us-west-1.pooler.supabase.com:6543/postgres`
+3. Reverted to direct connection URL:
+   - `postgresql://postgres:{password}@db.{project}.supabase.co:5432/postgres`
+4. Added connection timeout parameters (60s)
+5. Enhanced error logging with traceback
+
+#### 4. Code Changes Made
+- `app/main.py`:
+  - Added SSL context for asyncpg connection
+  - Added connection timeout and command timeout
+  - Enhanced error logging with traceback
+- `app/routers/health.py`:
+  - Added `/debug/db` endpoint to check pool status
+- `.env`:
+  - Tested various DATABASE_URL formats
+
+#### 5. Key Blocker Analysis
+- **PRIMARY**: asyncpg connection pool fails silently during startup
+- The error is being caught and logged but we can't see container logs in sandbox
+- Possible causes:
+  1. DNS resolution from Docker container
+  2. SSL/TLS handshake issues
+  3. Supabase IPv6 vs IPv4 resolution
+  4. Connection timeout during startup
+
+#### 6. Remaining Tests Breakdown (104 failing)
+- ~100 tests: Require Supabase database (blocked by connection issue)
+- ~4 tests: Require Docker container management (sandbox restricted)
+- ~7 tests: Require n8n workflow configuration
+
+#### 7. Next Steps for Future Sessions
+1. **DEBUG**: View container logs to see actual connection error:
+   - `docker compose -f docker-compose.rag.yml logs trading-rag-svc`
+2. **TRY**: Test database connection locally (outside Docker)
+3. **TRY**: Use supabase-py client instead of asyncpg for DB operations
+4. **VERIFY**: Supabase project allows connections from external IPs
+
+#### 8. Files Modified
+- `app/main.py` - SSL and timeout configuration for asyncpg
+- `app/routers/health.py` - Added /debug/db endpoint
+- `.env` - Various DATABASE_URL formats tested
+
+---
+
 ## Session 43 Summary
 Date: Session 43 (Database Connection Fix)
 Status: Services Running - 113/217 Tests Passing (52%)

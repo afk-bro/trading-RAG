@@ -119,10 +119,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
 
         if postgres_url:
+            # Supabase requires SSL connections
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            logger.info(
+                "Attempting database connection",
+                url_prefix=postgres_url[:50] + "...",
+            )
+
             _db_pool = await asyncpg.create_pool(
                 postgres_url,
                 min_size=settings.db_pool_min_size,
                 max_size=settings.db_pool_max_size,
+                ssl=ssl_context,
+                timeout=60,  # Connection timeout
+                command_timeout=60,  # Query timeout
             )
             logger.info(
                 "Database pool initialized",
@@ -136,9 +150,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             reembed.set_db_pool(_db_pool)
 
     except Exception as e:
-        logger.warning(
+        import traceback
+        logger.error(
             "Failed to initialize database pool - endpoints requiring DB will be unavailable",
             error=str(e),
+            traceback=traceback.format_exc(),
         )
         _db_pool = None
 

@@ -145,3 +145,20 @@ async def health_check(settings: Settings = Depends(get_settings)) -> HealthResp
     )
 
     return response
+
+
+@router.get("/debug/db")
+async def debug_db_pool(settings: Settings = Depends(get_settings)):
+    """Debug endpoint to check database pool status."""
+    from app.routers import ingest as ingest_router
+
+    pool = ingest_router._db_pool
+
+    return {
+        "database_url_configured": bool(settings.database_url),
+        "database_url_prefix": settings.database_url[:50] + "..." if settings.database_url else None,
+        "supabase_db_password_configured": bool(settings.supabase_db_password),
+        "pool_initialized": pool is not None,
+        "pool_size": pool.get_size() if pool else None,
+        "pool_free_size": pool.get_idle_size() if pool else None,
+    }
