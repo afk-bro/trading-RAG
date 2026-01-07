@@ -16,16 +16,26 @@
     </div>
     {% else %}
 
+    <!-- Quick status pills -->
+    <div class="status-pills" style="margin-bottom: 12px; display: flex; gap: 8px;">
+        <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter=all&claim_type={{ claim_type }}"
+           class="pill {% if status_filter == 'all' %}pill-active{% endif %}">All</a>
+        <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter=verified&claim_type={{ claim_type }}"
+           class="pill pill-verified {% if status_filter == 'verified' %}pill-active{% endif %}">Verified</a>
+        <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter=weak&claim_type={{ claim_type }}"
+           class="pill pill-weak {% if status_filter == 'weak' %}pill-active{% endif %}">Weak</a>
+        <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter=pending&claim_type={{ claim_type }}"
+           class="pill pill-pending {% if status_filter == 'pending' %}pill-active{% endif %}">Pending</a>
+        <a href="?workspace_id={{ workspace_id }}&q={{ q }}&status_filter=rejected&claim_type={{ claim_type }}"
+           class="pill pill-rejected {% if status_filter == 'rejected' %}pill-active{% endif %}">Rejected</a>
+    </div>
+
     <form class="filters" method="get">
         {% if workspace_id %}
         <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
         {% endif %}
+        <input type="hidden" name="status_filter" value="{{ status_filter }}">
         <input type="text" name="q" placeholder="Search claims..." value="{{ q }}">
-        <select name="status_filter">
-            {% for s in claim_statuses %}
-            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-        </select>
         <select name="claim_type">
             <option value="">All types</option>
             {% for t in claim_types %}
@@ -33,8 +43,8 @@
             {% endfor %}
         </select>
         <button type="submit">Filter</button>
-        {% if q or claim_type or status_filter != 'verified' %}
-        <a href="/admin/kb/claims{% if workspace_id %}?workspace_id={{ workspace_id }}{% endif %}" class="btn btn-secondary">Clear</a>
+        {% if q or claim_type %}
+        <a href="/admin/kb/claims?workspace_id={{ workspace_id }}&status_filter={{ status_filter }}" class="btn btn-secondary">Clear</a>
         {% endif %}
     </form>
 
@@ -46,16 +56,22 @@
                 <th>Entity</th>
                 <th>Type</th>
                 <th>Status</th>
-                <th>Confidence</th>
+                <th>Conf</th>
+                <th>Evidence</th>
             </tr>
         </thead>
         <tbody>
             {% for claim in claims %}
             <tr>
-                <td>
+                <td style="max-width: 400px;">
                     <a href="/admin/kb/claims/{{ claim.id }}" class="claim-text truncate" style="display: block;">
-                        {{ claim.text[:120] }}{% if claim.text|length > 120 %}...{% endif %}
+                        {{ claim.text[:100] }}{% if claim.text|length > 100 %}...{% endif %}
                     </a>
+                    {% if claim.first_quote %}
+                    <div class="quote-preview" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; font-style: italic;">
+                        "{{ claim.first_quote }}{% if claim.first_quote|length >= 100 %}...{% endif %}"
+                    </div>
+                    {% endif %}
                 </td>
                 <td>
                     {% if claim.entity_name %}
@@ -69,13 +85,15 @@
                     <span class="badge badge-{{ claim.status }}">{{ claim.status }}</span>
                 </td>
                 <td>
-                    <div class="confidence">
-                        <div class="confidence-bar">
-                            <div class="confidence-fill {% if claim.confidence >= 0.7 %}confidence-high{% elif claim.confidence >= 0.4 %}confidence-medium{% else %}confidence-low{% endif %}"
-                                 style="width: {{ (claim.confidence * 100)|int }}%"></div>
-                        </div>
-                        <span style="font-size: 12px; color: var(--text-muted)">{{ (claim.confidence * 100)|int }}%</span>
-                    </div>
+                    <span class="{% if claim.confidence >= 0.7 %}confidence-high{% elif claim.confidence >= 0.4 %}confidence-medium{% else %}confidence-low{% endif %}"
+                          style="font-size: 12px;">{{ (claim.confidence * 100)|int }}%</span>
+                </td>
+                <td style="text-align: center;">
+                    {% if claim.evidence_count > 0 %}
+                    <span class="badge" style="background: var(--info); color: white;">{{ claim.evidence_count }}</span>
+                    {% else %}
+                    <span style="color: var(--text-muted)">-</span>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -99,10 +117,49 @@
     {% else %}
     <div class="empty-state">
         <h3>No claims found</h3>
-        <p>{% if q or claim_type or status_filter != 'verified' %}Try adjusting your filters{% else %}Run mode=learn queries to extract knowledge{% endif %}</p>
+        <p>{% if q or claim_type or status_filter not in ['all', 'verified'] %}Try adjusting your filters{% else %}Run mode=learn queries to extract knowledge{% endif %}</p>
     </div>
     {% endif %}
 
     {% endif %}
 </div>
+
+<style>
+.pill {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    text-decoration: none;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    transition: all 0.15s ease;
+}
+.pill:hover {
+    border-color: var(--text-muted);
+    color: var(--text);
+}
+.pill-active {
+    background: var(--link);
+    border-color: var(--link);
+    color: white;
+}
+.pill-verified.pill-active {
+    background: var(--success);
+    border-color: var(--success);
+}
+.pill-weak.pill-active {
+    background: var(--warning);
+    border-color: var(--warning);
+    color: black;
+}
+.pill-pending.pill-active {
+    background: var(--info);
+    border-color: var(--info);
+}
+.pill-rejected.pill-active {
+    background: var(--danger);
+    border-color: var(--danger);
+}
+</style>
 {% endblock %}

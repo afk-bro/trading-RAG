@@ -43,6 +43,27 @@
     </div>
 </div>
 
+{% if strategy_spec %}
+<div class="card" style="border-color: var(--info);">
+    <div class="card-header">
+        <h2 class="card-title" style="color: var(--info);">StrategySpec Preview</h2>
+        <button onclick="copySpec()" class="btn btn-secondary" style="font-size: 12px; padding: 4px 12px;">Copy JSON</button>
+    </div>
+    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+        Auto-generated from verified claims. Shows rules, parameters, equations, warnings, and assumptions.
+    </p>
+    <div class="code-block" id="strategy-spec">{{ strategy_spec }}</div>
+</div>
+<script>
+function copySpec() {
+    const text = document.getElementById('strategy-spec').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard');
+    });
+}
+</script>
+{% endif %}
+
 <div class="card">
     <div class="card-header">
         <h2 class="card-title">Claims</h2>

@@ -641,11 +641,15 @@ class KnowledgeBaseRepository:
             WHERE {where_clause}
         """
 
-        # Main query with entity join
+        # Main query with entity join and evidence stats
         select_query = f"""
             SELECT c.*,
                    e.name as entity_name,
-                   e.type as entity_type
+                   e.type as entity_type,
+                   (SELECT COUNT(*) FROM kb_evidence ev WHERE ev.claim_id = c.id) as evidence_count,
+                   (SELECT LEFT(ev.quote, 100) FROM kb_evidence ev
+                    WHERE ev.claim_id = c.id
+                    ORDER BY ev.relevance_score DESC LIMIT 1) as first_quote
             FROM kb_claims c
             LEFT JOIN kb_entities e ON c.entity_id = e.id
             WHERE {where_clause}

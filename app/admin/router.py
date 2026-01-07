@@ -252,6 +252,45 @@ async def admin_entity_detail(
         offset=offset,
     )
 
+    # Build StrategySpec preview for strategy entities
+    strategy_spec = None
+    if entity.get("type") == "strategy":
+        # Gather all verified claims with spec-relevant types
+        spec_types = ["rule", "parameter", "equation", "warning", "assumption"]
+        spec_claims, _ = await kb_repo.list_claims(
+            workspace_id=entity["workspace_id"],
+            entity_id=entity_id,
+            status="verified",
+            limit=100,
+        )
+
+        # Group by claim type
+        spec_draft = {
+            "name": entity["name"],
+            "description": entity.get("description"),
+            "rules": [],
+            "parameters": [],
+            "equations": [],
+            "warnings": [],
+            "assumptions": [],
+        }
+
+        for c in spec_claims:
+            ctype = c.get("claim_type", "other")
+            if ctype == "rule":
+                spec_draft["rules"].append(c["text"])
+            elif ctype == "parameter":
+                spec_draft["parameters"].append(c["text"])
+            elif ctype == "equation":
+                spec_draft["equations"].append(c["text"])
+            elif ctype == "warning":
+                spec_draft["warnings"].append(c["text"])
+            elif ctype == "assumption":
+                spec_draft["assumptions"].append(c["text"])
+
+        # Remove empty sections
+        strategy_spec = {k: v for k, v in spec_draft.items() if v}
+
     return templates.TemplateResponse(
         "entity_detail.html",
         {
@@ -269,6 +308,7 @@ async def admin_entity_detail(
             "has_next": offset + limit < total_claims,
             "prev_offset": max(0, offset - limit),
             "next_offset": offset + limit,
+            "strategy_spec": json.dumps(strategy_spec, indent=2) if strategy_spec else None,
         },
     )
 
