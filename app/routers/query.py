@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.config import Settings, get_settings
 from app.schemas import ChunkResult, QueryMode, QueryRequest, QueryResponse
 from app.services.embedder import get_embedder
-from app.services.llm import get_llm
+from app.services.llm import get_llm, LLMNotConfiguredError
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -288,6 +288,14 @@ async def query(
                 answer_length=len(answer),
             )
 
+        except LLMNotConfiguredError as e:
+            logger.info("LLM not configured, returning retrieval-only results")
+            answer = (
+                "[LLM generation is disabled] "
+                "Retrieval is working, but no LLM provider is configured. "
+                "Set OPENROUTER_API_KEY in .env to enable answer mode. "
+                f"Retrieved {len(results)} relevant chunks below."
+            )
         except Exception as e:
             logger.error("Answer generation failed", error=str(e))
             # Don't fail the whole request, just return without answer

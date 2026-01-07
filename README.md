@@ -28,7 +28,7 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 | Primary DB | Supabase Postgres | Documents, chunks, metadata (source of truth) |
 | Vector DB | Qdrant (Docker) | Embedding vectors, similarity search |
 | Embeddings | Ollama (local) | nomic-embed-text (768 dimensions) |
-| LLM | OpenRouter API | Answer generation (Claude Sonnet 4) |
+| LLM | OpenRouter API | Answer generation (optional) |
 
 ## Features
 
@@ -37,8 +37,17 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Smart Chunking**: Token-aware (~512 tokens), timestamp preservation
 - **Metadata Extraction**: Symbols, entities, topics, speakers
 - **Semantic Search**: Qdrant vector search with payload filtering
-- **Answer Generation**: LLM synthesis with citations
+- **Answer Generation**: Optional LLM synthesis with citations (graceful degradation)
 - **Model Migration**: Re-embed support for model upgrades
+
+### Query Modes
+
+| Mode | LLM Required | Description |
+|------|--------------|-------------|
+| `retrieve` | No | Semantic search only - returns ranked chunks |
+| `answer` | Optional | LLM synthesis - returns chunks + generated answer |
+
+When `mode=answer` is used without an LLM provider configured, the system returns retrieved chunks with a helpful message indicating that generation is disabled.
 
 ## Quick Start
 
@@ -46,7 +55,7 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 
 - Docker and Docker Compose
 - Supabase project with Postgres database
-- OpenRouter API key
+- OpenRouter API key (optional - only needed for `mode=answer` queries)
 - n8n instance (optional, for automated ingestion)
 
 ### Setup
@@ -63,9 +72,12 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 
 3. Configure environment variables in `.env`:
    ```bash
+   # Required
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-   OPENROUTER_API_KEY=your-openrouter-api-key
+
+   # Optional - enables LLM answer generation
+   # OPENROUTER_API_KEY=your-openrouter-api-key
    ```
 
 4. Access the services:
@@ -208,13 +220,15 @@ trading-RAG/
 |----------|-------------|----------|
 | `SUPABASE_URL` | Supabase project URL | Yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes |
-| `OPENROUTER_API_KEY` | OpenRouter API key | Yes |
+| `OPENROUTER_API_KEY` | OpenRouter API key (enables `mode=answer`) | No |
 | `QDRANT_HOST` | Qdrant host (default: qdrant) | No |
 | `QDRANT_PORT` | Qdrant port (default: 6333) | No |
 | `OLLAMA_HOST` | Ollama host (default: ollama) | No |
 | `OLLAMA_PORT` | Ollama port (default: 11434) | No |
 | `EMBED_MODEL` | Embedding model (default: nomic-embed-text) | No |
 | `SERVICE_PORT` | Service port (default: 8000) | No |
+
+**Note:** Without `OPENROUTER_API_KEY`, semantic search (`mode=retrieve`) works fully. LLM answer generation (`mode=answer`) will return retrieved chunks with a message indicating generation is disabled.
 
 ## Development
 

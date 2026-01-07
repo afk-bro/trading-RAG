@@ -37,9 +37,14 @@
       <benefits>Zero marginal cost, data stays local, re-embed freely</benefits>
     </embeddings>
     <llm>
-      <provider>OpenRouter API</provider>
+      <provider>OpenRouter API (optional)</provider>
       <model>anthropic/claude-sonnet-4 (configurable per workspace)</model>
       <use_cases>Query answering, reranking, entity extraction</use_cases>
+      <graceful_degradation>
+        Service starts and runs without LLM configuration.
+        mode=retrieve always works (semantic search only).
+        mode=answer returns retrieved chunks with helpful message when LLM not configured.
+      </graceful_degradation>
     </llm>
     <extraction>
       <pdf>PyMuPDF (default) | pdfplumber | MinerU (future) | StudyG (future)</pdf>
@@ -60,12 +65,12 @@
       - Supabase project with Postgres database
       - Google Cloud project with Sheets API enabled (for n8n YouTube queue)
       - n8n instance running (existing docker-compose in ~/dev/automation-infra/n8n)
-      - OpenRouter API key for LLM generation
+      - OpenRouter API key (optional - only required for mode=answer queries)
       - YouTube Data API key (optional, for metadata enrichment)
     </environment_setup>
     <configuration>
-      - .env file with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-      - .env file with OPENROUTER_API_KEY
+      - .env file with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (required)
+      - .env file with OPENROUTER_API_KEY (optional - enables LLM answer generation)
       - Google Sheets OAuth credentials configured in n8n
       - Ollama model pulled: `ollama pull nomic-embed-text`
     </configuration>
@@ -238,6 +243,11 @@
       - Source attribution with clickable URLs
       - Guardrails: "I don't know" if evidence insufficient
       - Markdown output, bullet summaries, quote blocks
+      - Graceful degradation: without OPENROUTER_API_KEY configured:
+        * mode=retrieve works normally (semantic search only)
+        * mode=answer returns retrieved chunks + helpful message
+        * Confirms system is working, shows retrieval results
+        * No vendor lock-in, service starts without external LLM
     </answer_generation>
 
     <conversation_support>
@@ -802,6 +812,7 @@
       - Write-new-first prevents data loss on failures
       - Retryable vs terminal errors clearly distinguished
       - Job status accurately tracks async operations
+      - Graceful degradation when optional services unavailable (LLM)
     </reliability>
 
     <performance>

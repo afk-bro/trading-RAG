@@ -10,6 +10,11 @@ from app.config import Settings, get_settings
 logger = structlog.get_logger(__name__)
 
 
+class LLMNotConfiguredError(Exception):
+    """Raised when LLM generation is requested but no API key is configured."""
+    pass
+
+
 class OpenRouterLLM:
     """LLM service using OpenRouter API."""
 
@@ -54,7 +59,15 @@ class OpenRouterLLM:
 
         Returns:
             Generated text response
+
+        Raises:
+            LLMNotConfiguredError: If no API key is configured
         """
+        if not self.api_key:
+            raise LLMNotConfiguredError(
+                "LLM generation is disabled. Set OPENROUTER_API_KEY in .env to enable answer mode."
+            )
+
         messages = []
 
         if system_prompt:
@@ -160,7 +173,14 @@ Answer the question based on the context above. Use citations like [1], [2] to r
 
         Returns:
             Reranked and filtered chunks
+
+        Raises:
+            LLMNotConfiguredError: If no API key is configured
         """
+        if not self.api_key:
+            logger.info("LLM not configured, skipping rerank")
+            return chunks[:top_k]
+
         if len(chunks) <= top_k:
             return chunks
 

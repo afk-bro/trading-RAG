@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: `OPENROUTER_API_KEY` is now optional (was required)
+  - Service starts and runs without LLM configuration
+  - `mode=retrieve` (semantic search) always works
+  - `mode=answer` returns retrieved chunks with helpful message when LLM not configured
+  - Enables graceful degradation and avoids vendor lock-in
+
 ### Added
+- `LLMNotConfiguredError` exception for clear error handling when LLM is not available
+- Graceful degradation for `mode=answer` queries without OpenRouter API key
 - Initial release of Trading RAG Pipeline
 - Document ingestion endpoint (`POST /ingest`)
 - YouTube transcript ingestion (`POST /sources/youtube/ingest`)

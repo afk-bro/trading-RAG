@@ -35,7 +35,9 @@ class Settings(BaseSettings):
     )
 
     # OpenRouter Configuration
-    openrouter_api_key: str = Field(..., description="OpenRouter API key")
+    openrouter_api_key: Optional[str] = Field(
+        default=None, description="OpenRouter API key (required for LLM answer generation)"
+    )
     answer_model: str = Field(
         default="anthropic/claude-sonnet-4",
         description="Default model for answer generation",
