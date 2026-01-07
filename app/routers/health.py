@@ -166,7 +166,7 @@ async def debug_db_pool(settings: Settings = Depends(get_settings)):
 
 @router.get("/debug/db/test")
 async def debug_db_test(settings: Settings = Depends(get_settings)):
-    """Test database connection on-demand."""
+    """Test database connection and list workspaces."""
     import asyncpg
     import traceback
 
@@ -183,8 +183,22 @@ async def debug_db_test(settings: Settings = Depends(get_settings)):
         )
         # Test the connection
         result = await conn.fetchval("SELECT 1")
+
+        # Also query workspaces
+        workspaces = []
+        try:
+            rows = await conn.fetch(
+                "SELECT id, name, slug, is_active FROM workspaces WHERE is_active = true LIMIT 5"
+            )
+            workspaces = [
+                {"id": str(row["id"]), "name": row["name"], "slug": row["slug"]}
+                for row in rows
+            ]
+        except Exception as ws_err:
+            workspaces = [{"error": str(ws_err)}]
+
         await conn.close()
-        return {"success": True, "test_result": result}
+        return {"success": True, "test_result": result, "workspaces": workspaces}
     except Exception as e:
         return {
             "success": False,
@@ -247,3 +261,260 @@ async def debug_network(settings: Settings = Depends(get_settings)):
             results["tcp_tests"][f"{host}:{port}"] = {"connected": False, "error": str(e)}
 
     return results
+
+
+@router.get("/debug/workspaces")
+async def list_workspaces(settings: Settings = Depends(get_settings)):
+    """List all workspaces in the database."""
+    import asyncpg
+    import traceback
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+            statement_cache_size=0,
+        )
+        rows = await conn.fetch(
+            "SELECT id, name, slug, is_active, ingestion_enabled, created_at FROM workspaces ORDER BY created_at DESC LIMIT 10"
+        )
+        await conn.close()
+
+        workspaces = [
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "slug": row["slug"],
+                "is_active": row["is_active"],
+                "ingestion_enabled": row["ingestion_enabled"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            }
+            for row in rows
+        ]
+        return {"success": True, "workspaces": workspaces, "count": len(workspaces)}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }
+
+
+@router.post("/debug/workspaces")
+async def create_workspace(settings: Settings = Depends(get_settings)):
+    """Create a test workspace for testing."""
+    import asyncpg
+    import traceback
+    import uuid
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+            statement_cache_size=0,
+        )
+
+        workspace_id = uuid.uuid4()
+        result = await conn.fetchrow(
+            """
+            INSERT INTO workspaces (id, name, slug, is_active, ingestion_enabled)
+            VALUES ($1, 'Test Workspace', 'test-workspace', true, true)
+            ON CONFLICT (slug) DO UPDATE SET name = 'Test Workspace'
+            RETURNING id, name, slug
+            """,
+            workspace_id,
+        )
+        await conn.close()
+
+        return {
+            "success": True,
+            "workspace": {
+                "id": str(result["id"]),
+                "name": result["name"],
+                "slug": result["slug"],
+            }
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }
+
+
+@router.get("/debug/chunk_vectors")
+async def list_chunk_vectors(settings: Settings = Depends(get_settings)):
+    """List chunk_vectors records to verify the table tracking."""
+    import asyncpg
+    import traceback
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+            statement_cache_size=0,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT
+                cv.id, cv.chunk_id, cv.workspace_id,
+                cv.embed_provider, cv.embed_model, cv.collection,
+                cv.vector_dim, cv.qdrant_point_id, cv.status,
+                cv.indexed_at, cv.created_at
+            FROM chunk_vectors cv
+            ORDER BY cv.created_at DESC
+            LIMIT 20
+            """
+        )
+        await conn.close()
+
+        chunk_vectors = [
+            {
+                "id": str(row["id"]),
+                "chunk_id": str(row["chunk_id"]),
+                "workspace_id": str(row["workspace_id"]),
+                "embed_provider": row["embed_provider"],
+                "embed_model": row["embed_model"],
+                "collection": row["collection"],
+                "vector_dim": row["vector_dim"],
+                "qdrant_point_id": row["qdrant_point_id"],
+                "status": row["status"],
+                "indexed_at": row["indexed_at"].isoformat() if row["indexed_at"] else None,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            }
+            for row in rows
+        ]
+        return {"success": True, "chunk_vectors": chunk_vectors, "count": len(chunk_vectors)}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }
+
+
+@router.get("/debug/documents")
+async def list_documents(settings: Settings = Depends(get_settings)):
+    """List documents table to verify ingestion."""
+    import asyncpg
+    import traceback
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+            statement_cache_size=0,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT
+                id, workspace_id, source_url, canonical_url, source_type,
+                content_hash, title, author, status, version, created_at, updated_at
+            FROM documents
+            ORDER BY created_at DESC
+            LIMIT 20
+            """
+        )
+        await conn.close()
+
+        documents = [
+            {
+                "id": str(row["id"]),
+                "workspace_id": str(row["workspace_id"]),
+                "source_url": row["source_url"],
+                "canonical_url": row["canonical_url"],
+                "source_type": row["source_type"],
+                "content_hash": row["content_hash"],
+                "title": row["title"],
+                "author": row["author"],
+                "status": row["status"],
+                "version": row["version"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+            for row in rows
+        ]
+        return {"success": True, "documents": documents, "count": len(documents)}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }
+
+
+@router.get("/debug/chunks")
+async def list_chunks(settings: Settings = Depends(get_settings)):
+    """List chunks table to verify chunking."""
+    import asyncpg
+    import traceback
+
+    if not settings.database_url:
+        return {"success": False, "error": "DATABASE_URL not configured"}
+
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=30,
+            statement_cache_size=0,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT
+                id, doc_id, workspace_id, chunk_index,
+                LEFT(content, 100) as content_preview, content_hash, token_count,
+                section, time_start_secs, time_end_secs, page_start, page_end,
+                locator_label, speaker, symbols, entities, topics,
+                quality_score, created_at
+            FROM chunks
+            ORDER BY created_at DESC
+            LIMIT 20
+            """
+        )
+        await conn.close()
+
+        chunks = [
+            {
+                "id": str(row["id"]),
+                "doc_id": str(row["doc_id"]),
+                "workspace_id": str(row["workspace_id"]),
+                "chunk_index": row["chunk_index"],
+                "content_preview": row["content_preview"],
+                "token_count": row["token_count"],
+                "locator_label": row["locator_label"],
+                "symbols": row["symbols"],
+                "entities": row["entities"],
+                "topics": row["topics"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            }
+            for row in rows
+        ]
+        return {"success": True, "chunks": chunks, "count": len(chunks)}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[:1000],
+        }

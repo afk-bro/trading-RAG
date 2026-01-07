@@ -223,7 +223,7 @@
       "Step 7: Verify vector_dim is 768",
       "Step 8: Verify status is 'indexed'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -558,7 +558,7 @@
       "Step 9: Verify title is stored",
       "Step 10: Verify created_at and updated_at are set"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -573,7 +573,7 @@
       "Step 7: Verify token_count is stored",
       "Step 8: Verify symbols, entities, topics arrays are stored"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -583,7 +583,7 @@
       "Step 2: Attempt POST /ingest with same values",
       "Step 3: Verify constraint prevents duplicate or returns existing doc"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

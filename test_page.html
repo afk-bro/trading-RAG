@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        pre { background: #f0f0f0; padding: 10px; overflow: auto; max-height: 600px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .result { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>RAG API Test</h1>
+    <button onclick="testIngest()">Test Ingest</button>
+    <button onclick="testQuery()">Test Query</button>
+    <button onclick="checkHealth()">Check Health</button>
+    <button onclick="checkChunkVectors()">Check Chunk Vectors</button>
+    <button onclick="checkDocuments()">Check Documents</button>
+    <button onclick="checkChunks()">Check Chunks</button>
+    <button onclick="testDuplicateIngest()">Test Duplicate</button>
+    <div class="result">
+        <h3>Result:</h3>
+        <pre id="result">Click a button to test</pre>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://localhost:8000';
+
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${BASE_URL}/health`);
+                const data = await res.json();
+                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testIngest() {
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "idempotency_key": "test-" + Date.now(),
+                "source": {
+                    "url": "https://example.com/test-" + Date.now(),
+                    "type": "article"
+                },
+                "content": "The Federal Reserve has announced a significant change in monetary policy. Chairman Powell discussed the implications for AAPL, GOOGL, and MSFT stock prices. The interest rate decision will impact the macro economic outlook. Inflation concerns remain elevated while employment data shows resilience.",
+                "metadata": {
+                    "title": "Fed Policy Analysis",
+                    "author": "Test Author"
+                }
+            };
+
+            document.getElementById('result').textContent = 'Sending request...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testDuplicateIngest() {
+            // Use fixed URL to test unique constraint
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "source": {
+                    "url": "https://example.com/duplicate-test-fixed",
+                    "type": "article"
+                },
+                "content": "This is a test document for unique constraint testing.",
+                "metadata": {
+                    "title": "Duplicate Test",
+                    "author": "Test Author"
+                }
+            };
+
+            document.getElementById('result').textContent = 'Sending first request...';
+
+            try {
+                // First request
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let data1 = await res.json();
+
+                // Second request with same URL
+                document.getElementById('result').textContent = 'Sending second request (duplicate)...';
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let data2 = await res.json();
+
+                document.getElementById('result').textContent =
+                    'First Request:\nStatus: ' + res.status + '\n' + JSON.stringify(data1, null, 2) +
+                    '\n\nSecond Request (duplicate):\nStatus: ' + res.status + '\n' + JSON.stringify(data2, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testQuery() {
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "question": "What did the Federal Reserve announce?",
+                "mode": "retrieve",
+                "top_k": 5
+            };
+
+            document.getElementById('result').textContent = 'Sending query...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function checkChunkVectors() {
+            document.getElementById('result').textContent = 'Fetching chunk_vectors...';
+            try {
+                const res = await fetch(`${BASE_URL}/debug/chunk_vectors`);
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function checkDocuments() {
+            document.getElementById('result').textContent = 'Fetching documents...';
+            try {
+                const res = await fetch(`${BASE_URL}/debug/documents`);
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function checkChunks() {
+            document.getElementById('result').textContent = 'Fetching chunks...';
+            try {
+                const res = await fetch(`${BASE_URL}/debug/chunks`);
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+    </script>
+</body>
+</html>
