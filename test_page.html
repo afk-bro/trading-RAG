@@ -18,6 +18,8 @@
     <button onclick="checkDocuments()">Check Documents</button>
     <button onclick="checkChunks()">Check Chunks</button>
     <button onclick="testDuplicateIngest()">Test Duplicate</button>
+    <button onclick="testYouTubeIngest()">Test YouTube</button>
+    <button onclick="testReembed()">Test Reembed</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -160,6 +162,67 @@
                 const res = await fetch(`${BASE_URL}/debug/chunks`);
                 const data = await res.json();
                 document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testYouTubeIngest() {
+            // Test with a TED talk (should have transcripts)
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "url": "https://www.youtube.com/watch?v=8jPQjjsBbIc"
+            };
+
+            document.getElementById('result').textContent = 'Testing YouTube ingestion...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/sources/youtube/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testReembed() {
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "target_collection": "kb_nomic_embed_text_v2",
+                "embed_provider": "ollama",
+                "embed_model": "nomic-embed-text"
+            };
+
+            document.getElementById('result').textContent = 'Testing reembed...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                const jobId = data.job_id;
+
+                let output = 'Reembed Response:\nStatus: ' + res.status + '\n' + JSON.stringify(data, null, 2);
+
+                // If job created, poll for status
+                if (jobId) {
+                    output += '\n\n--- Polling job status ---';
+                    for (let i = 0; i < 5; i++) {
+                        await new Promise(r => setTimeout(r, 2000));
+                        const jobRes = await fetch(`${BASE_URL}/jobs/${jobId}`);
+                        const jobData = await jobRes.json();
+                        output += `\n\nPoll ${i+1}:\n` + JSON.stringify(jobData, null, 2);
+                        if (jobData.status === 'completed' || jobData.status === 'failed') break;
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
             } catch(e) {
                 document.getElementById('result').textContent = 'Error: ' + e.message;
             }

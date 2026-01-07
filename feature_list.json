@@ -475,7 +475,7 @@
       "Step 4: Verify response status is 'started'",
       "Step 5: Verify chunks_queued matches expected count"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -510,7 +510,7 @@
       "Step 4: Verify response contains status (started/running/completed/failed)",
       "Step 5: Verify response contains progress percentage"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -521,7 +521,7 @@
       "Step 3: Verify final status is 'completed'",
       "Step 4: Verify progress is 100%"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
