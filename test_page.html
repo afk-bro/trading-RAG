@@ -30,6 +30,7 @@
     <button onclick="testReembedDocIdFilter()">Test Reembed Doc ID Filter</button>
     <button onclick="testPublishedAtNullHandling()">Test Published_at Null Filter</button>
     <button onclick="testJobFailureCapture()">Test Job Failure Capture</button>
+    <button onclick="testLanguageField()">Test Language Field</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -1296,6 +1297,113 @@
                     }
                     output += `\n=== TEST PASSED ===\n`;
                     output += `Error captured with useful information.\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testLanguageField() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== LANGUAGE FIELD TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest English document (default language)
+                document.getElementById('result').textContent = 'Step 1: Ingesting English document (default)...';
+                const docEn = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `lang-test-en-${timestamp}`,
+                    "source": { "url": `https://example.com/lang-test-en-${timestamp}`, "type": "article" },
+                    "content": "This is an English document for language field testing. Hello world!",
+                    "metadata": {
+                        "title": "English Document Test"
+                        // No explicit language - should default to 'en'
+                    }
+                };
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docEn)
+                });
+                let resultEn = await res.json();
+                output += "Step 1 - Ingest English doc (no explicit language):\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(resultEn, null, 2) + "\n\n";
+
+                // Step 2: Ingest Spanish document (explicit language)
+                document.getElementById('result').textContent = 'Step 2: Ingesting Spanish document (explicit)...';
+                const docEs = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `lang-test-es-${timestamp}`,
+                    "source": { "url": `https://example.com/lang-test-es-${timestamp}`, "type": "article" },
+                    "content": "Este es un documento en español para la prueba de campo de idioma. ¡Hola mundo!",
+                    "metadata": {
+                        "title": "Spanish Document Test",
+                        "language": "es"  // Explicit Spanish
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docEs)
+                });
+                let resultEs = await res.json();
+                output += "Step 2 - Ingest Spanish doc (language='es'):\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(resultEs, null, 2) + "\n\n";
+
+                // Step 3: Fetch documents and verify language fields
+                document.getElementById('result').textContent = 'Step 3: Fetching documents to verify language fields...';
+                res = await fetch(`${BASE_URL}/debug/documents`);
+                let docsData = await res.json();
+                output += "Step 3 - Fetch documents:\n";
+
+                // Find our test documents
+                let enDoc = null;
+                let esDoc = null;
+                if (docsData.documents) {
+                    enDoc = docsData.documents.find(d => d.id === resultEn.doc_id);
+                    esDoc = docsData.documents.find(d => d.id === resultEs.doc_id);
+                }
+
+                output += `\nEnglish document found: ${enDoc !== null && enDoc !== undefined}\n`;
+                if (enDoc) {
+                    output += `  language field: "${enDoc.language}"\n`;
+                }
+
+                output += `Spanish document found: ${esDoc !== null && esDoc !== undefined}\n`;
+                if (esDoc) {
+                    output += `  language field: "${esDoc.language}"\n`;
+                }
+
+                output += "\n=== VERIFICATION ===\n\n";
+
+                // Verify language fields
+                const enLangCorrect = enDoc && enDoc.language === 'en';
+                const esLangCorrect = esDoc && esDoc.language === 'es';
+
+                output += `Test 1 - English doc has language='en': ${enLangCorrect}\n`;
+                output += `Test 2 - Spanish doc has language='es': ${esLangCorrect}\n\n`;
+
+                const allPassed = enLangCorrect && esLangCorrect;
+                output += `\n=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: Language field stored correctly for multi-language content.\n";
+                    output += "- Default 'en' applied when not specified\n";
+                    output += "- Explicit 'es' stored when provided\n";
+                } else {
+                    if (!enLangCorrect) {
+                        output += "ISSUE: English document language field is not 'en'\n";
+                    }
+                    if (!esLangCorrect) {
+                        output += "ISSUE: Spanish document language field is not 'es'\n";
+                    }
                 }
 
                 document.getElementById('result').textContent = output;
