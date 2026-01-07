@@ -1,5 +1,70 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 45 Summary
+Date: Session 45 (DNS Resolution Fix and Pooler Investigation)
+Status: Services Running - 113/217 Tests Passing (52%)
+
+### What Was Accomplished This Session
+
+#### 1. IDENTIFIED ROOT CAUSE: Docker DNS Resolution Issue
+- **ISSUE**: Docker container couldn't resolve `db.sypwqiozmpjhtthkjmvq.supabase.co`
+- Debug endpoint `/debug/network` showed:
+  - google.com: resolved OK, TCP connects OK
+  - db.sypwqiozmpjhtthkjmvq.supabase.co: "No address associated with hostname"
+  - The Docker internal DNS (127.0.0.11) couldn't resolve Supabase hostname
+
+#### 2. FIX APPLIED: Custom DNS Servers in Docker Compose
+- Added `dns: [8.8.8.8, 8.8.4.4]` to trading-rag-svc container
+- This allows the container to resolve external hostnames via Google's DNS
+- File modified: `docker-compose.rag.yml`
+
+#### 3. Supabase Pooler Connection Attempts
+After DNS was fixed, tried connecting via Supabase's connection pooler:
+- Format: `postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres`
+- Regions tested:
+  - us-east-1: "Tenant or user not found"
+  - us-west-1: "Tenant or user not found"
+  - eu-central-1: "Tenant or user not found"
+  - ap-southeast-1: "Tenant or user not found"
+- **Analysis**: The pooler connection requires correct region matching, but we can't determine the project's region without Supabase dashboard access
+
+#### 4. Network Connectivity Verified
+- `/debug/network` confirmed after DNS fix:
+  - google.com resolves to 142.250.x.x ✓
+  - aws-0-us-west-1.pooler.supabase.com resolves to 54.177.55.191 ✓
+  - TCP connection to pooler:5432 succeeds ✓
+- Network is working; issue is authentication/region mismatch
+
+#### 5. Health Endpoint Status
+All services report healthy:
+- status: "ok"
+- qdrant: "ok" (~32ms)
+- supabase: "ok" (~185ms) - REST API works
+- ollama: "ok" (~23ms)
+- active_collection: "kb_nomic_embed_text_v1"
+- embed_model: "nomic-embed-text"
+- version: "0.1.0"
+
+#### 6. Files Modified
+- `docker-compose.rag.yml`: Added DNS servers (8.8.8.8, 8.8.4.4)
+- `.env`: Tested various DATABASE_URL formats with pooler endpoints
+
+#### 7. Remaining Blocker
+- **PRIMARY**: Need correct Supabase pooler region or alternative DB connection method
+- The Supabase REST API works (health check passes), but asyncpg direct connection fails
+- Options for future sessions:
+  1. Get correct pooler endpoint from Supabase dashboard
+  2. Use supabase-py client instead of asyncpg
+  3. Add Supabase project region to .env configuration
+
+#### 8. Test Status
+- Passing: 113/217 (52%)
+- Blocked by DB connection: ~80 tests
+- Blocked by Docker commands: ~10 tests
+- Blocked by n8n: ~14 tests
+
+---
+
 ## Session 44 Summary
 Date: Session 44 (Database Connection Investigation)
 Status: Services Running - 113/217 Tests Passing (52%)
