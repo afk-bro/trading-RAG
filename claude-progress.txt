@@ -49,19 +49,49 @@ All services report healthy:
 - `docker-compose.rag.yml`: Added DNS servers (8.8.8.8, 8.8.4.4)
 - `.env`: Tested various DATABASE_URL formats with pooler endpoints
 
-#### 7. Remaining Blocker
-- **PRIMARY**: Need correct Supabase pooler region or alternative DB connection method
-- The Supabase REST API works (health check passes), but asyncpg direct connection fails
-- Options for future sessions:
-  1. Get correct pooler endpoint from Supabase dashboard
-  2. Use supabase-py client instead of asyncpg
-  3. Add Supabase project region to .env configuration
+#### 7. Remaining Blocker - CRITICAL
+**PRIMARY BLOCKER**: Supabase pooler region cannot be determined
+
+Regions tested (all failed with "Tenant or user not found"):
+- us-east-1
+- us-west-1
+- eu-central-1
+- ap-southeast-1
+- sa-east-1
+
+The error "Tenant or user not found" indicates the pooler is rejecting the connection because the project doesn't exist in that region's pooler.
+
+**To resolve this, the user needs to:**
+1. Go to Supabase Dashboard → Project Settings → Database
+2. Copy the "Connection Pooler" URI (not the direct URI)
+3. The URI will contain the correct region, e.g., `aws-0-us-east-2.pooler.supabase.com`
+4. Update DATABASE_URL in .env with the complete pooler URI
+
+**Alternative solutions:**
+1. Use supabase-py REST API client instead of asyncpg (already installed)
+2. Get the exact pooler connection string from Supabase dashboard
+3. If on a paid plan, the project might use a different pooler format
 
 #### 8. Test Status
 - Passing: 113/217 (52%)
-- Blocked by DB connection: ~80 tests
+- Blocked by DB connection: ~80 tests (requires working asyncpg connection)
 - Blocked by Docker commands: ~10 tests
 - Blocked by n8n: ~14 tests
+
+#### 9. What's Working
+- Health endpoint: All dependencies show "ok"
+- Qdrant: Collection created, payload indexes configured
+- Ollama: nomic-embed-text model available
+- Supabase REST API: Works (health check uses this)
+- DNS resolution: Fixed with custom DNS servers in Docker
+- Network connectivity: TCP connections to pooler succeed
+
+#### 10. Action Required from User
+Please provide the correct Supabase pooler connection string from your dashboard:
+1. Go to https://app.supabase.com/project/sypwqiozmpjhtthkjmvq/settings/database
+2. Find "Connection Pooler" section
+3. Copy the "URI" (should look like: postgresql://postgres.sypwqiozmpjhtthkjmvq:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres)
+4. Update .env with the correct DATABASE_URL
 
 ---
 
