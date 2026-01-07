@@ -303,6 +303,84 @@ If claims don't fully answer the question, acknowledge what's missing."""
 
 
 # ===========================================
+# KB Answer Prompt (for mode=kb_answer)
+# ===========================================
+
+KB_ANSWER_SYSTEM_PROMPT = """You are a knowledge base answer assistant. Your task is to answer questions using ONLY verified claims from a truth store.
+
+## OUTPUT FORMAT
+You must respond with valid JSON matching this schema:
+```json
+{
+  "answer": "Synthesized answer text with [C1], [C2] claim citations",
+  "supported": ["Statement 1 [C1]", "Statement 2 [C2]"],
+  "not_specified": ["Aspect the claims don't cover"]
+}
+```
+
+## GROUNDING CONTRACT
+1. **Truth-First**: Use ONLY the verified claims provided. These are pre-verified facts.
+2. **Cite Everything**: Every factual statement needs a [C<number>] citation.
+3. **No Inference**: Don't extrapolate beyond what claims explicitly state.
+4. **Acknowledge Gaps**: If claims don't fully answer, list gaps in not_specified.
+5. **Be Concise**: Keep the answer focused and direct.
+
+## CITATION FORMAT
+- Use [C1], [C2] etc. to reference claim numbers from the provided list
+- Place citations immediately after the statement they support
+- Multiple claims can support one statement: "X is true [C1, C3]"
+
+## QUALITY RULES
+- If fewer than 2-3 relevant claims, acknowledge limited knowledge
+- Prefer accuracy over comprehensiveness
+- Group related claims logically in the answer
+- The 'supported' array should list the key facts with their citations
+- The 'not_specified' array should list aspects of the question not covered"""
+
+
+def build_kb_answer_prompt(
+    question: str,
+    claims: list[dict],
+) -> str:
+    """Build the user prompt for kb_answer synthesis.
+
+    Args:
+        question: User's question
+        claims: Verified claims from truth store with id, text, confidence, entity info
+
+    Returns:
+        Formatted user prompt
+    """
+    # Format claims with reference IDs
+    claims_parts = []
+    for i, claim in enumerate(claims):
+        confidence = claim.get("confidence", 0.5)
+        entity = claim.get("entity_name", "")
+        claim_type = claim.get("claim_type", "unknown")
+        entity_str = f" (about: {entity})" if entity else ""
+        claims_parts.append(
+            f"[C{i+1}] [{claim_type}]{entity_str}\n"
+            f"     {claim.get('text', '')}\n"
+            f"     Confidence: {confidence:.0%}"
+        )
+
+    claims_text = "\n".join(claims_parts) if claims_parts else "(No verified claims available)"
+
+    return f"""## VERIFIED CLAIMS FROM TRUTH STORE
+{claims_text}
+
+## QUESTION
+{question}
+
+## TASK
+Answer the question using ONLY the verified claims above.
+Cite specific claims [C1], [C2] etc. when making statements.
+
+## RESPONSE
+Return valid JSON with answer, supported, and not_specified fields. No markdown code fences."""
+
+
+# ===========================================
 # JSON Parsing Helpers
 # ===========================================
 

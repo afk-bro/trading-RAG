@@ -444,6 +444,318 @@ class KnowledgeBaseRepository:
             return await conn.fetch(query, entity_id)
 
     # ===========================================
+    # List/Search Operations (for KB endpoints)
+    # ===========================================
+
+    async def list_entities(
+        self,
+        workspace_id: UUID,
+        q: Optional[str] = None,
+        entity_type: Optional[EntityType] = None,
+        limit: int = 50,
+        offset: int = 0,
+        include_counts: bool = False,
+    ) -> tuple[list[dict], int]:
+        """
+        List entities with optional search and filtering.
+
+        Args:
+            workspace_id: Workspace ID
+            q: Optional text search (ILIKE on name)
+            entity_type: Optional filter by entity type
+            limit: Max results (default 50, max 200)
+            offset: Pagination offset
+            include_counts: Include verified claim counts
+
+        Returns:
+            Tuple of (entities, total_count)
+        """
+        limit = min(limit, 200)  # Cap at 200
+
+        # Build WHERE conditions
+        conditions = ["e.workspace_id = $1"]
+        params: list = [workspace_id]
+        param_idx = 2
+
+        if q:
+            conditions.append(f"(e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})")
+            params.append(f"%{q}%")
+            param_idx += 1
+
+        if entity_type:
+            conditions.append(f"e.type = ${param_idx}")
+            params.append(entity_type.value)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions)
+
+        # Count query
+        count_query = f"""
+            SELECT COUNT(*) FROM kb_entities e
+            WHERE {where_clause}
+        """
+
+        # Main query with optional claim count
+        if include_counts:
+            select_query = f"""
+                SELECT e.*,
+                       COALESCE(claim_counts.verified_count, 0) as verified_claim_count
+                FROM kb_entities e
+                LEFT JOIN (
+                    SELECT entity_id, COUNT(*) as verified_count
+                    FROM kb_claims
+                    WHERE status = 'verified'
+                    GROUP BY entity_id
+                ) claim_counts ON claim_counts.entity_id = e.id
+                WHERE {where_clause}
+                ORDER BY e.name ASC
+                LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            """
+        else:
+            select_query = f"""
+                SELECT e.*, NULL as verified_claim_count
+                FROM kb_entities e
+                WHERE {where_clause}
+                ORDER BY e.name ASC
+                LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            """
+
+        params.extend([limit, offset])
+
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval(count_query, *params[:-2])
+            rows = await conn.fetch(select_query, *params)
+
+        return [dict(r) for r in rows], total
+
+    async def get_entity_by_id(
+        self,
+        entity_id: UUID,
+    ) -> Optional[dict]:
+        """Get a single entity by ID with stats."""
+        query = """
+            SELECT e.*,
+                   COALESCE(verified.count, 0) as verified_claims,
+                   COALESCE(weak.count, 0) as weak_claims,
+                   COALESCE(total.count, 0) as total_claims,
+                   COALESCE(rels.count, 0) as relations_count
+            FROM kb_entities e
+            LEFT JOIN (
+                SELECT entity_id, COUNT(*) as count
+                FROM kb_claims WHERE status = 'verified'
+                GROUP BY entity_id
+            ) verified ON verified.entity_id = e.id
+            LEFT JOIN (
+                SELECT entity_id, COUNT(*) as count
+                FROM kb_claims WHERE status = 'weak'
+                GROUP BY entity_id
+            ) weak ON weak.entity_id = e.id
+            LEFT JOIN (
+                SELECT entity_id, COUNT(*) as count
+                FROM kb_claims
+                GROUP BY entity_id
+            ) total ON total.entity_id = e.id
+            LEFT JOIN (
+                SELECT from_entity_id as entity_id, COUNT(*) as count
+                FROM kb_relations GROUP BY from_entity_id
+                UNION ALL
+                SELECT to_entity_id as entity_id, COUNT(*) as count
+                FROM kb_relations GROUP BY to_entity_id
+            ) rels ON rels.entity_id = e.id
+            WHERE e.id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, entity_id)
+            return dict(row) if row else None
+
+    async def list_claims(
+        self,
+        workspace_id: UUID,
+        q: Optional[str] = None,
+        status: Optional[str] = "verified",
+        claim_type: Optional[ClaimType] = None,
+        entity_id: Optional[UUID] = None,
+        source_id: Optional[UUID] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """
+        List claims with optional search and filtering.
+
+        Args:
+            workspace_id: Workspace ID
+            q: Optional text search (ILIKE on claim text)
+            status: Filter by status (default 'verified')
+            claim_type: Optional filter by claim type
+            entity_id: Optional filter by entity
+            source_id: Optional filter by source document
+            limit: Max results (default 50, max 200)
+            offset: Pagination offset
+
+        Returns:
+            Tuple of (claims, total_count)
+        """
+        limit = min(limit, 200)  # Cap at 200
+
+        # Build WHERE conditions
+        conditions = ["c.workspace_id = $1"]
+        params: list = [workspace_id]
+        param_idx = 2
+
+        if q:
+            conditions.append(f"c.text ILIKE ${param_idx}")
+            params.append(f"%{q}%")
+            param_idx += 1
+
+        if status:
+            conditions.append(f"c.status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        if claim_type:
+            conditions.append(f"c.claim_type = ${param_idx}")
+            params.append(claim_type.value)
+            param_idx += 1
+
+        if entity_id:
+            conditions.append(f"c.entity_id = ${param_idx}")
+            params.append(entity_id)
+            param_idx += 1
+
+        if source_id:
+            conditions.append(f"""
+                EXISTS (
+                    SELECT 1 FROM kb_evidence e
+                    WHERE e.claim_id = c.id AND e.doc_id = ${param_idx}
+                )
+            """)
+            params.append(source_id)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions)
+
+        # Count query
+        count_query = f"""
+            SELECT COUNT(*) FROM kb_claims c
+            WHERE {where_clause}
+        """
+
+        # Main query with entity join
+        select_query = f"""
+            SELECT c.*,
+                   e.name as entity_name,
+                   e.type as entity_type
+            FROM kb_claims c
+            LEFT JOIN kb_entities e ON c.entity_id = e.id
+            WHERE {where_clause}
+            ORDER BY c.confidence DESC, c.created_at DESC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+
+        params.extend([limit, offset])
+
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval(count_query, *params[:-2])
+            rows = await conn.fetch(select_query, *params)
+
+        return [dict(r) for r in rows], total
+
+    async def get_claim_by_id(
+        self,
+        claim_id: UUID,
+        include_evidence: bool = True,
+    ) -> Optional[dict]:
+        """Get a single claim by ID with optional evidence."""
+        query = """
+            SELECT c.*,
+                   e.name as entity_name,
+                   e.type as entity_type
+            FROM kb_claims c
+            LEFT JOIN kb_entities e ON c.entity_id = e.id
+            WHERE c.id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, claim_id)
+            if not row:
+                return None
+
+            result = dict(row)
+
+            if include_evidence:
+                evidence_query = """
+                    SELECT ev.id, ev.doc_id, ev.chunk_id, ev.quote,
+                           ev.relevance_score, d.title as doc_title
+                    FROM kb_evidence ev
+                    JOIN documents d ON ev.doc_id = d.id
+                    WHERE ev.claim_id = $1
+                    ORDER BY ev.relevance_score DESC
+                """
+                evidence_rows = await conn.fetch(evidence_query, claim_id)
+                result["evidence"] = [dict(e) for e in evidence_rows]
+
+            return result
+
+    async def search_claims_for_answer(
+        self,
+        workspace_id: UUID,
+        query_text: str,
+        limit: int = 20,
+        min_confidence: float = 0.5,
+    ) -> list[dict]:
+        """
+        Search verified claims for kb_answer mode.
+
+        Uses text search (ILIKE) on claim text and entity names.
+        Ranks by confidence and recency.
+
+        Args:
+            workspace_id: Workspace ID
+            query_text: Search query
+            limit: Max results
+            min_confidence: Minimum confidence threshold
+
+        Returns:
+            List of matching claims with entity info
+        """
+        # Split query into words for better matching
+        words = query_text.lower().split()
+        word_conditions = []
+        params: list = [workspace_id, min_confidence]
+        param_idx = 3
+
+        for word in words[:5]:  # Limit to first 5 words
+            word_conditions.append(f"""
+                (c.text ILIKE ${param_idx} OR e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})
+            """)
+            params.append(f"%{word}%")
+            param_idx += 1
+
+        # At least one word must match
+        word_clause = " OR ".join(word_conditions) if word_conditions else "TRUE"
+
+        query = f"""
+            SELECT c.*,
+                   e.name as entity_name,
+                   e.type as entity_type
+            FROM kb_claims c
+            LEFT JOIN kb_entities e ON c.entity_id = e.id
+            WHERE c.workspace_id = $1
+              AND c.status = 'verified'
+              AND c.confidence >= $2
+              AND ({word_clause})
+            ORDER BY c.confidence DESC, c.created_at DESC
+            LIMIT ${param_idx}
+        """
+        params.append(limit)
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        return [dict(r) for r in rows]
+
+    # ===========================================
     # Batch Persistence
     # ===========================================
 

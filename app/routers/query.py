@@ -9,6 +9,8 @@ from app.config import Settings, get_settings
 from app.schemas import (
     ChunkResult,
     KnowledgeExtractionStats,
+    KBAnswerResponse,
+    KBAnswerClaimRef,
     QueryMode,
     QueryRequest,
     QueryResponse,
@@ -86,6 +88,7 @@ async def query(
     - retrieve: Returns only matching chunks (no LLM call)
     - answer: Returns chunks + LLM-generated answer with citations
     - learn: Extract → verify → persist → synthesize (builds truth store)
+    - kb_answer: Answer from verified claims (truth store), falls back to chunk RAG if insufficient claims
 
     Filter capabilities:
     - source_types: Filter by document source (youtube, pdf, article, etc.)
@@ -396,8 +399,158 @@ async def query(
                 logger.error("Learn mode failed", error=str(e))
                 answer = f"[Error in learn mode: {str(e)}]"
 
+    # Step 9: If mode=kb_answer, answer from truth store
+    kb_answer_response = None
+    MIN_CLAIMS_FOR_KB_ANSWER = 3
+
+    if request.mode == QueryMode.KB_ANSWER:
+        if not llm or not llm_status.enabled:
+            logger.info("LLM not configured, cannot run kb_answer mode")
+            answer = (
+                "[LLM generation is disabled] "
+                "KB answer mode requires an LLM provider. "
+                "Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY in .env to enable kb_answer mode."
+            )
+        else:
+            try:
+                from app.repositories.kb import KnowledgeBaseRepository
+                from app.services.kb_prompts import (
+                    KB_ANSWER_SYSTEM_PROMPT,
+                    build_kb_answer_prompt,
+                    extract_json_from_response,
+                )
+
+                kb_repo = KnowledgeBaseRepository(_db_pool)
+
+                # Search verified claims using text search
+                verified_claims = await kb_repo.search_claims_for_answer(
+                    workspace_id=request.workspace_id,
+                    query_text=request.question,
+                    limit=20,
+                    min_confidence=0.5,
+                )
+
+                logger.info(
+                    "KB answer: retrieved claims",
+                    claim_count=len(verified_claims),
+                    min_required=MIN_CLAIMS_FOR_KB_ANSWER,
+                )
+
+                # Check if we have enough claims
+                if len(verified_claims) >= MIN_CLAIMS_FOR_KB_ANSWER:
+                    # Synthesize answer from claims
+                    prompt = build_kb_answer_prompt(
+                        question=request.question,
+                        claims=verified_claims,
+                    )
+
+                    response = await llm.generate(
+                        messages=[
+                            {"role": "system", "content": KB_ANSWER_SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        max_tokens=2000,
+                    )
+
+                    # Parse JSON response
+                    try:
+                        data = extract_json_from_response(response.text)
+                        answer = data.get("answer", "")
+                        supported = data.get("supported", [])
+                        not_specified = data.get("not_specified", [])
+                    except ValueError as e:
+                        logger.warning("Failed to parse kb_answer JSON", error=str(e))
+                        answer = response.text
+                        supported = []
+                        not_specified = []
+
+                    # Build claim references
+                    claims_used = [
+                        KBAnswerClaimRef(
+                            id=f"C{i+1}",
+                            claim_id=claim["id"],
+                            confidence=claim.get("confidence", 0.5),
+                        )
+                        for i, claim in enumerate(verified_claims)
+                    ]
+
+                    kb_answer_response = KBAnswerResponse(
+                        mode="kb_answer",
+                        llm_enabled=True,
+                        answer=answer,
+                        supported=supported,
+                        not_specified=not_specified,
+                        claims_used=claims_used,
+                        fallback_used=False,
+                    )
+
+                    logger.info(
+                        "KB answer synthesized",
+                        claims_used=len(claims_used),
+                        answer_length=len(answer),
+                    )
+
+                else:
+                    # Not enough claims - fallback to chunk RAG or indicate insufficient knowledge
+                    logger.info(
+                        "KB answer: insufficient claims, falling back to chunk RAG",
+                        claim_count=len(verified_claims),
+                    )
+
+                    # Fallback: use chunk RAG if we have results
+                    if results:
+                        context_chunks = [
+                            {
+                                "content": r.content,
+                                "title": r.title,
+                                "source_url": r.source_url,
+                                "author": r.author,
+                                "locator_label": r.locator_label,
+                            }
+                            for r in results
+                        ]
+
+                        response = await llm.generate_answer(
+                            question=request.question,
+                            chunks=context_chunks,
+                            max_context_tokens=request.max_context_tokens or settings.max_context_tokens,
+                        )
+                        answer = response.text
+
+                        kb_answer_response = KBAnswerResponse(
+                            mode="kb_answer",
+                            llm_enabled=True,
+                            answer=answer,
+                            supported=[],
+                            not_specified=["Insufficient verified claims in knowledge base, used chunk RAG fallback"],
+                            claims_used=[],
+                            fallback_used=True,
+                            fallback_reason=f"Only {len(verified_claims)} verified claims found (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required)",
+                        )
+                    else:
+                        answer = (
+                            f"Insufficient knowledge in truth store. "
+                            f"Found {len(verified_claims)} verified claims (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required). "
+                            f"Consider using mode=learn to build the knowledge base first."
+                        )
+                        kb_answer_response = KBAnswerResponse(
+                            mode="kb_answer",
+                            llm_enabled=True,
+                            answer=None,
+                            supported=[],
+                            not_specified=[answer],
+                            claims_used=[],
+                            fallback_used=False,
+                            fallback_reason=f"Only {len(verified_claims)} verified claims found, no chunks available for fallback",
+                        )
+
+            except Exception as e:
+                logger.error("KB answer mode failed", error=str(e))
+                answer = f"[Error in kb_answer mode: {str(e)}]"
+
     return QueryResponse(
         results=results,
         answer=answer,
         knowledge_stats=knowledge_stats,
+        kb_answer=kb_answer_response,
     )
