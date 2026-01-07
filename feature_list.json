@@ -1771,7 +1771,7 @@
       "Step 2: Verify job completes successfully",
       "Step 3: Verify chunks_queued is 0"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

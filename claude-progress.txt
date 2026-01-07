@@ -3111,8 +3111,8 @@ Status: Services Running - 150/217 Tests Passing (69.1%)
 
 ### 6. Test Status Update
 - Previous: 148 tests passing
-- This session: 150 tests passing (+2 tests)
-- Remaining: 67 tests
+- This session: 151 tests passing (+3 tests)
+- Remaining: 66 tests
 
 ### 7. Code Changes
 - Modified: app/routers/health.py
@@ -3120,11 +3120,20 @@ Status: Services Running - 150/217 Tests Passing (69.1%)
   - Created CreateWorkspaceRequest class
   - Updated create_workspace endpoint to accept name/slug parameters
   - Added required fields for workspace creation
+- Modified: app/routers/reembed.py
+  - Fixed /reembed endpoint to handle empty workspaces gracefully
+  - Returns status=completed with chunks_queued=0 instead of 400 error
 - Modified: test_page.html
   - Added "Test Workspace Isolation" button and function
   - Added "Test Empty Workspace Query" button and function
+  - Added "Test Reembed Empty Workspace" button and function
 
-### 8. Next Steps for Future Sessions
+### 8. Tests Verified This Session
+1. **Workspace isolation - queries only return workspace data** - PASSED
+2. **Query with workspace_id that has no documents returns empty results** - PASSED
+3. **Reembed job handles empty workspace gracefully** - PASSED (after fix)
+
+### 9. Next Steps for Future Sessions
 1. Test more failing functional tests:
    - POST /sources/youtube/ingest (requires network access to YouTube)
    - POST /query mode='answer' (requires OpenRouter API key)

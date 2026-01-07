@@ -246,10 +246,20 @@ async def reembed(
     )
     chunks_queued = len(chunks)
 
+    # Handle empty workspace gracefully
     if chunks_queued == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No chunks found for workspace",
+        logger.info(
+            "No chunks found for workspace - completing immediately",
+            workspace_id=str(request.workspace_id),
+        )
+        # Create a job that completes immediately
+        job_id = uuid.uuid4()
+        create_job(job_id)
+        complete_job(job_id)
+        return ReembedResponse(
+            job_id=job_id,
+            chunks_queued=0,
+            status=JobStatus.COMPLETED,
         )
 
     # Create job

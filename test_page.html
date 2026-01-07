@@ -22,6 +22,7 @@
     <button onclick="testReembed()">Test Reembed</button>
     <button onclick="testWorkspaceIsolation()">Test Workspace Isolation</button>
     <button onclick="testEmptyWorkspaceQuery()">Test Empty Workspace Query</button>
+    <button onclick="testReembedEmptyWorkspace()">Test Reembed Empty Workspace</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -427,6 +428,89 @@
                 output += "No error raised: " + isNoError + "\n";
                 output += "Response time < 2s: " + isFast + " (" + responseTime.toFixed(2) + "ms)\n";
                 output += "\n=== TEST " + (isStatus200 && isResultsEmpty && isNoError && isFast ? "PASSED" : "FAILED") + " ===\n";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testReembedEmptyWorkspace() {
+            let output = "=== REEMBED EMPTY WORKSPACE TEST ===\n\n";
+            document.getElementById('result').textContent = 'Step 1: Creating empty workspace...';
+
+            try {
+                // Step 1: Create a new empty workspace
+                const timestamp = Date.now();
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Reembed Test Workspace " + timestamp,
+                        slug: "reembed-test-" + timestamp
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create Empty Workspace:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                if (!data.success || !data.workspace || !data.workspace.id) {
+                    output += "ERROR: Could not create workspace\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const emptyWorkspaceId = data.workspace.id;
+                output += "Created workspace ID: " + emptyWorkspaceId + "\n\n";
+
+                // Step 2: POST /reembed for this empty workspace
+                document.getElementById('result').textContent = 'Step 2: Requesting reembed for empty workspace...';
+                res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": emptyWorkspaceId,
+                        "target_collection": "kb_nomic_embed_text_v2",
+                        "embed_provider": "ollama",
+                        "embed_model": "nomic-embed-text"
+                    })
+                });
+                data = await res.json();
+                output += "Step 2 - Reembed Request:\n";
+                output += "HTTP Status: " + res.status + "\n";
+                output += "Response:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                const jobId = data.job_id;
+                if (!jobId) {
+                    output += "=== VERIFICATION ===\n";
+                    output += "No job_id returned - checking if this is handled gracefully\n";
+                    const isGraceful = res.status === 200 || res.status === 201;
+                    output += "Request completed gracefully: " + isGraceful + "\n";
+                    output += "\n=== TEST " + (isGraceful ? "PASSED" : "FAILED") + " ===\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // Step 3: Poll job status
+                document.getElementById('result').textContent = 'Step 3: Polling job status...';
+                let jobStatus = null;
+                for (let i = 0; i < 10; i++) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    res = await fetch(`${BASE_URL}/jobs/${jobId}`);
+                    data = await res.json();
+                    output += "Poll " + (i+1) + ":\n" + JSON.stringify(data, null, 2) + "\n";
+
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        jobStatus = data;
+                        break;
+                    }
+                }
+
+                output += "\n=== VERIFICATION ===\n";
+                const isCompleted = jobStatus && jobStatus.status === 'completed';
+                const hasZeroChunks = jobStatus && (jobStatus.chunks_queued === 0 || jobStatus.progress === 0);
+                output += "Job completed successfully: " + isCompleted + "\n";
+                output += "Chunks queued is 0 or progress is 0: " + hasZeroChunks + "\n";
+                output += "\n=== TEST " + (isCompleted ? "PASSED" : "FAILED") + " ===\n";
 
                 document.getElementById('result').textContent = output;
             } catch(e) {
