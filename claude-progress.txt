@@ -3063,8 +3063,72 @@ Without valid Supabase credentials, these functional tests cannot be verified:
 | Supabase | Not Connected | Requires valid credentials |
 
 ## Estimated Completion
-- Tests passing: 62/217 (28.6%)
-- Tests blocked by Supabase: ~100
+- Tests passing: 150/217 (69.1%)
 - Tests blocked by Docker commands: ~10
 - Tests blocked by n8n: ~20
-- Tests blocked by missing files: ~2 (reduced from ~5)
+- Tests requiring external services (YouTube, OpenRouter): ~20
+
+---
+
+## Session 50 Summary
+Date: Session 50 (Workspace Isolation Verification)
+Status: Services Running - 150/217 Tests Passing (69.1%)
+
+## What Was Accomplished (Session 50)
+
+### 1. Verified Services Running
+- All services healthy (Qdrant, Ollama, Supabase all "ok")
+- FastAPI service responding on port 8000
+
+### 2. Fixed Workspace Creation Endpoint
+- Fixed POST /debug/workspaces to include required fields:
+  - default_collection, default_embed_provider, default_embed_model, default_distance
+- Updated endpoint to accept custom name and slug parameters
+- Added BaseModel import for request validation
+
+### 3. Verified Workspace Isolation (Test Passed!)
+- Created second workspace ("Test Workspace B")
+- Ingested different content to each workspace:
+  - Workspace A: Bitcoin/cryptocurrency content
+  - Workspace B: Ethereum/smart contracts content
+- Queried each workspace and verified:
+  - Workspace A query returns only Bitcoin content
+  - Workspace B query returns only Ethereum content
+- **Test confirms multi-tenant isolation works correctly**
+
+### 4. Verified Empty Workspace Query (Test Passed!)
+- Created new empty workspace
+- Queried empty workspace:
+  - HTTP Status: 200
+  - Response time: 42.50ms (very fast)
+  - Results: [] (empty array)
+  - No errors raised
+- **Test confirms graceful handling of empty workspaces**
+
+### 5. Tests Marked as Passing
+1. **Workspace isolation - queries only return workspace data** (test #117)
+2. **Query with workspace_id that has no documents returns empty results** (test #175)
+
+### 6. Test Status Update
+- Previous: 148 tests passing
+- This session: 150 tests passing (+2 tests)
+- Remaining: 67 tests
+
+### 7. Code Changes
+- Modified: app/routers/health.py
+  - Added BaseModel import
+  - Created CreateWorkspaceRequest class
+  - Updated create_workspace endpoint to accept name/slug parameters
+  - Added required fields for workspace creation
+- Modified: test_page.html
+  - Added "Test Workspace Isolation" button and function
+  - Added "Test Empty Workspace Query" button and function
+
+### 8. Next Steps for Future Sessions
+1. Test more failing functional tests:
+   - POST /sources/youtube/ingest (requires network access to YouTube)
+   - POST /query mode='answer' (requires OpenRouter API key)
+   - Token counting accuracy
+   - Large document handling
+2. Review n8n workflow tests (blocked - requires n8n setup)
+3. Performance tests (batch embedding, concurrent requests)

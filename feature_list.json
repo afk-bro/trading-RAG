@@ -1123,7 +1123,7 @@
       "Step 5: POST /query for workspace B",
       "Step 6: Verify results only from workspace B"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1761,7 +1761,7 @@
       "Step 3: Verify no error raised",
       "Step 4: Verify response time is still fast"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

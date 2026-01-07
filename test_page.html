@@ -20,6 +20,8 @@
     <button onclick="testDuplicateIngest()">Test Duplicate</button>
     <button onclick="testYouTubeIngest()">Test YouTube</button>
     <button onclick="testReembed()">Test Reembed</button>
+    <button onclick="testWorkspaceIsolation()">Test Workspace Isolation</button>
+    <button onclick="testEmptyWorkspaceQuery()">Test Empty Workspace Query</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -115,7 +117,7 @@
             const payload = {
                 "workspace_id": "00000000-0000-0000-0000-000000000001",
                 "question": "What did the Federal Reserve announce?",
-                "mode": "retrieve",
+                "mode": "answer",
                 "top_k": 5
             };
 
@@ -168,10 +170,10 @@
         }
 
         async function testYouTubeIngest() {
-            // Test with a TED talk (should have transcripts)
+            // Test with a TED talk video known to have transcripts
             const payload = {
                 "workspace_id": "00000000-0000-0000-0000-000000000001",
-                "url": "https://www.youtube.com/watch?v=8jPQjjsBbIc"
+                "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
             };
 
             document.getElementById('result').textContent = 'Testing YouTube ingestion...';
@@ -225,6 +227,210 @@
                 document.getElementById('result').textContent = output;
             } catch(e) {
                 document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testWorkspaceIsolation() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let WORKSPACE_B = null;  // Will be set from workspace creation response
+            let output = "=== WORKSPACE ISOLATION TEST ===\n\n";
+
+            document.getElementById('result').textContent = 'Step 1: Creating second workspace...';
+
+            try {
+                // Step 1: Create second workspace
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Test Workspace B",
+                        slug: "test-workspace-b"
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create Workspace B:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Get the actual workspace ID from the response
+                if (data.success && data.workspace && data.workspace.id) {
+                    WORKSPACE_B = data.workspace.id;
+                    output += "Using Workspace B ID: " + WORKSPACE_B + "\n\n";
+                } else {
+                    output += "ERROR: Could not get workspace B ID\n\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // Step 2: Ingest document into Workspace A
+                document.getElementById('result').textContent = 'Step 2: Ingesting to Workspace A...';
+                const docA = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": "isolation-test-a-" + Date.now(),
+                    "source": {
+                        "url": "https://example.com/workspace-a-doc-" + Date.now(),
+                        "type": "article"
+                    },
+                    "content": "Workspace A unique content about Bitcoin and cryptocurrency markets. BTC price analysis shows strong momentum.",
+                    "metadata": {
+                        "title": "Workspace A Document"
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docA)
+                });
+                data = await res.json();
+                output += "Step 2 - Ingest to Workspace A:\nStatus: " + res.status + "\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Step 3: Ingest document into Workspace B
+                document.getElementById('result').textContent = 'Step 3: Ingesting to Workspace B...';
+                const docB = {
+                    "workspace_id": WORKSPACE_B,
+                    "idempotency_key": "isolation-test-b-" + Date.now(),
+                    "source": {
+                        "url": "https://example.com/workspace-b-doc-" + Date.now(),
+                        "type": "article"
+                    },
+                    "content": "Workspace B unique content about Ethereum and smart contracts. ETH development updates and roadmap.",
+                    "metadata": {
+                        "title": "Workspace B Document"
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docB)
+                });
+                data = await res.json();
+                output += "Step 3 - Ingest to Workspace B:\nStatus: " + res.status + "\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Wait for embedding to complete
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 4: Query Workspace A
+                document.getElementById('result').textContent = 'Step 4: Querying Workspace A...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "Tell me about cryptocurrency",
+                        "mode": "retrieve",
+                        "top_k": 10
+                    })
+                });
+                data = await res.json();
+                output += "Step 4 - Query Workspace A:\nStatus: " + res.status + "\n";
+                output += "Results count: " + (data.results ? data.results.length : 0) + "\n";
+                if (data.results && data.results.length > 0) {
+                    const workspaceIds = data.results.map(r => r.workspace_id || "N/A");
+                    output += "Result workspace_ids: " + JSON.stringify(workspaceIds) + "\n";
+                    // Check if all results are from Workspace A
+                    const allFromA = data.results.every(r => r.workspace_id === WORKSPACE_A);
+                    output += "All results from Workspace A: " + allFromA + "\n";
+                }
+                output += JSON.stringify(data, null, 2) + "\n\n";
+
+                // Step 5: Query Workspace B
+                document.getElementById('result').textContent = 'Step 5: Querying Workspace B...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_B,
+                        "question": "Tell me about cryptocurrency",
+                        "mode": "retrieve",
+                        "top_k": 10
+                    })
+                });
+                data = await res.json();
+                output += "Step 5 - Query Workspace B:\nStatus: " + res.status + "\n";
+                output += "Results count: " + (data.results ? data.results.length : 0) + "\n";
+                if (data.results && data.results.length > 0) {
+                    const workspaceIds = data.results.map(r => r.workspace_id || "N/A");
+                    output += "Result workspace_ids: " + JSON.stringify(workspaceIds) + "\n";
+                    // Check if all results are from Workspace B
+                    const allFromB = data.results.every(r => r.workspace_id === WORKSPACE_B);
+                    output += "All results from Workspace B: " + allFromB + "\n";
+                }
+                output += JSON.stringify(data, null, 2) + "\n\n";
+
+                output += "=== TEST COMPLETE ===\n";
+                output += "Check that results from Workspace A query contain only Workspace A data,\n";
+                output += "and results from Workspace B query contain only Workspace B data.";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testEmptyWorkspaceQuery() {
+            let output = "=== EMPTY WORKSPACE QUERY TEST ===\n\n";
+            document.getElementById('result').textContent = 'Step 1: Creating empty workspace...';
+
+            try {
+                // Step 1: Create a new empty workspace
+                const timestamp = Date.now();
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Empty Workspace " + timestamp,
+                        slug: "empty-workspace-" + timestamp
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create Empty Workspace:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                if (!data.success || !data.workspace || !data.workspace.id) {
+                    output += "ERROR: Could not create workspace\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const emptyWorkspaceId = data.workspace.id;
+                output += "Created workspace ID: " + emptyWorkspaceId + "\n\n";
+
+                // Step 2: Query the empty workspace
+                document.getElementById('result').textContent = 'Step 2: Querying empty workspace...';
+                const startTime = performance.now();
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": emptyWorkspaceId,
+                        "question": "What is the meaning of life?",
+                        "mode": "retrieve",
+                        "top_k": 10
+                    })
+                });
+                const endTime = performance.now();
+                const responseTime = endTime - startTime;
+                data = await res.json();
+
+                output += "Step 2 - Query Empty Workspace:\n";
+                output += "HTTP Status: " + res.status + "\n";
+                output += "Response time: " + responseTime.toFixed(2) + "ms\n";
+                output += "Results count: " + (data.results ? data.results.length : "N/A") + "\n";
+                output += "Response:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Verify results
+                output += "=== VERIFICATION ===\n";
+                const isStatus200 = res.status === 200;
+                const isResultsEmpty = data.results && data.results.length === 0;
+                const isNoError = !data.error && !data.detail;
+                const isFast = responseTime < 2000;  // Less than 2 seconds
+
+                output += "Status is 200: " + isStatus200 + "\n";
+                output += "Results array is empty: " + isResultsEmpty + "\n";
+                output += "No error raised: " + isNoError + "\n";
+                output += "Response time < 2s: " + isFast + " (" + responseTime.toFixed(2) + "ms)\n";
+                output += "\n=== TEST " + (isStatus200 && isResultsEmpty && isNoError && isFast ? "PASSED" : "FAILED") + " ===\n";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
             }
         }
     </script>

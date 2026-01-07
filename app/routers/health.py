@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 import structlog
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from app import __version__
 from app.config import Settings, get_settings
@@ -305,8 +306,17 @@ async def list_workspaces(settings: Settings = Depends(get_settings)):
         }
 
 
+class CreateWorkspaceRequest(BaseModel):
+    """Request for creating a workspace."""
+    name: str = "Test Workspace"
+    slug: str = "test-workspace"
+
+
 @router.post("/debug/workspaces")
-async def create_workspace(settings: Settings = Depends(get_settings)):
+async def create_workspace(
+    request: CreateWorkspaceRequest = CreateWorkspaceRequest(),
+    settings: Settings = Depends(get_settings)
+):
     """Create a test workspace for testing."""
     import asyncpg
     import traceback
@@ -326,12 +336,18 @@ async def create_workspace(settings: Settings = Depends(get_settings)):
         workspace_id = uuid.uuid4()
         result = await conn.fetchrow(
             """
-            INSERT INTO workspaces (id, name, slug, is_active, ingestion_enabled)
-            VALUES ($1, 'Test Workspace', 'test-workspace', true, true)
-            ON CONFLICT (slug) DO UPDATE SET name = 'Test Workspace'
+            INSERT INTO workspaces (
+                id, name, slug, is_active, ingestion_enabled,
+                default_collection, default_embed_provider, default_embed_model, default_distance
+            )
+            VALUES ($1, $2, $3, true, true,
+                    'kb_nomic_embed_text_v1', 'ollama', 'nomic-embed-text', 'cosine')
+            ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
             RETURNING id, name, slug
             """,
             workspace_id,
+            request.name,
+            request.slug,
         )
         await conn.close()
 
