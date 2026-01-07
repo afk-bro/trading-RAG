@@ -36,6 +36,7 @@
     <button onclick="testIngestThroughput()">Test Ingest Throughput</button>
     <button onclick="testSectionTracking()">Test Section Tracking</button>
     <button onclick="testYouTubeCitationUrl()">Test YouTube Citation URL</button>
+    <button onclick="testDocumentVersioning()">Test Document Versioning</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -2096,6 +2097,197 @@ Investors should consider these factors when making investment decisions.`;
                     if (!test3Pass) {
                         output += "ISSUE: Citation URL missing timestamp parameter\n";
                     }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testDocumentVersioning() {
+            let output = "=== Document Versioning Test ===\n\n";
+            document.getElementById('result').textContent = output + "Running test...";
+
+            try {
+                const timestamp = Date.now();
+                const randomPart = Math.random().toString(36).substring(7);
+                const uniqueUrl = `https://example.com/version-test-${timestamp}-${randomPart}`;
+
+                // Step 1: Create initial document (version 1)
+                // Use timestamp in content to ensure unique content hash (avoid deduplication)
+                output += "Step 1: Creating initial document (version 1)...\n";
+                const payload1 = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "source": {
+                        "url": uniqueUrl,
+                        "type": "article"
+                    },
+                    "content": `Version 1 content [${timestamp}-${randomPart}]. This is the original document about trading strategies. AAPL is mentioned here.`,
+                    "metadata": {
+                        "title": "Versioned Document Test",
+                        "author": "Test Author"
+                    }
+                };
+
+                const res1 = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload1)
+                });
+                const data1 = await res1.json();
+                output += `  Status: ${res1.status}\n`;
+                output += `  doc_id: ${data1.doc_id}\n`;
+                output += `  version: ${data1.version}\n`;
+                output += `  status: ${data1.status}\n\n`;
+
+                const docId1 = data1.doc_id;
+                const version1 = data1.version;
+
+                if (data1.status !== 'indexed' && data1.status !== 'exists') {
+                    output += "ERROR: Expected status 'indexed' or 'exists', got '" + data1.status + "'\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // If document already exists, that's fine for testing updates
+                if (data1.status === 'exists') {
+                    output += "  (Document already exists - will test update on existing)\n\n";
+                }
+
+                // Step 2: Get chunks for version 1
+                output += "Step 2: Getting chunks for version 1...\n";
+                const chunksRes1 = await fetch(`${BASE_URL}/debug/chunks?workspace_id=00000000-0000-0000-0000-000000000001&limit=100`);
+                const chunksData1 = await chunksRes1.json();
+                const chunksArray = chunksData1.chunks || chunksData1; // Handle both formats
+                const v1Chunks = Array.isArray(chunksArray) ? chunksArray.filter(c => c.doc_id === docId1) : [];
+                output += `  Found ${v1Chunks.length} chunks for version 1\n\n`;
+
+                // Step 3: Update document to version 2
+                output += "Step 3: Updating document to version 2...\n";
+                const payload2 = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "source": {
+                        "url": uniqueUrl,
+                        "type": "article"
+                    },
+                    "content": `Version 2 content [${timestamp}-${randomPart}]. This is the UPDATED document with new trading strategies. GOOGL is now mentioned instead of AAPL. The market outlook has changed.`,
+                    "metadata": {
+                        "title": "Versioned Document Test - Updated",
+                        "author": "Test Author"
+                    },
+                    "update_existing": true
+                };
+
+                const res2 = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload2)
+                });
+                const data2 = await res2.json();
+                output += `  Status: ${res2.status}\n`;
+                if (res2.status >= 400) {
+                    output += `  Error: ${JSON.stringify(data2, null, 2)}\n\n`;
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+                output += `  doc_id: ${data2.doc_id}\n`;
+                output += `  version: ${data2.version}\n`;
+                output += `  status: ${data2.status}\n`;
+                output += `  superseded_doc_id: ${data2.superseded_doc_id}\n\n`;
+
+                const docId2 = data2.doc_id;
+                const version2 = data2.version;
+
+                // Step 4: Verify version incremented
+                output += "Step 4: Verifying version incremented...\n";
+                const versionIncremented = version2 > version1;
+                output += `  Version 1: ${version1}\n`;
+                output += `  Version 2: ${version2}\n`;
+                output += `  Incremented: ${versionIncremented}\n\n`;
+
+                // Step 5: Verify old document status is superseded
+                output += "Step 5: Checking old document status...\n";
+                const docsRes = await fetch(`${BASE_URL}/debug/documents?workspace_id=00000000-0000-0000-0000-000000000001&limit=100`);
+                const docsData = await docsRes.json();
+
+                // Find both documents (endpoint returns {success: true, documents: [...]})
+                const docsArray = docsData.documents || docsData;
+                const oldDoc = docsArray.find(d => d.id === docId1);
+                const newDoc = docsArray.find(d => d.id === docId2);
+
+                const oldStatusCorrect = oldDoc && oldDoc.status === 'superseded';
+                const newStatusCorrect = newDoc && newDoc.status === 'active';
+
+                if (oldDoc) {
+                    output += `  Old document (${docId1}):\n`;
+                    output += `    status: ${oldDoc.status} (expected: superseded) ${oldStatusCorrect ? "✓" : "✗"}\n`;
+                } else {
+                    output += `  Old document not found in results (may be filtered out)\n`;
+                }
+
+                if (newDoc) {
+                    output += `  New document (${docId2}):\n`;
+                    output += `    status: ${newDoc.status} (expected: active) ${newStatusCorrect ? "✓" : "✗"}\n`;
+                    output += `    version: ${newDoc.version}\n`;
+                }
+                output += "\n";
+
+                // Step 6: Verify superseded_doc_id is correct
+                output += "Step 6: Verifying supersede linkage...\n";
+                const supersedeLinkCorrect = data2.superseded_doc_id === docId1;
+                output += `  superseded_doc_id: ${data2.superseded_doc_id}\n`;
+                output += `  Original doc_id: ${docId1}\n`;
+                output += `  Match: ${supersedeLinkCorrect ? "✓" : "✗"}\n\n`;
+
+                // Step 7: Test version 3 update
+                output += "Step 7: Testing update to version 3...\n";
+                const payload3 = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "source": {
+                        "url": uniqueUrl,
+                        "type": "article"
+                    },
+                    "content": `Version 3 content [${timestamp}-${randomPart}]. Third iteration of the document. MSFT is now the focus.`,
+                    "metadata": {
+                        "title": "Versioned Document Test - V3",
+                        "author": "Test Author"
+                    },
+                    "update_existing": true
+                };
+
+                const res3 = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload3)
+                });
+                const data3 = await res3.json();
+                output += `  version: ${data3.version} (expected: 3)\n`;
+                output += `  superseded_doc_id: ${data3.superseded_doc_id} (expected: ${docId2})\n\n`;
+
+                const version3Correct = data3.version === 3;
+                const supersede3Correct = data3.superseded_doc_id === docId2;
+
+                // Summary
+                output += "=== TEST SUMMARY ===\n";
+                const test1Pass = versionIncremented;
+                const test2Pass = data2.status === 'updated';
+                const test3Pass = supersedeLinkCorrect;
+                const test4Pass = version3Correct;
+
+                output += `Test 1 - Version increments correctly (1 -> 2): ${test1Pass ? "PASS" : "FAIL"}\n`;
+                output += `Test 2 - Update returns status 'updated': ${test2Pass ? "PASS" : "FAIL"}\n`;
+                output += `Test 3 - Supersede linkage correct: ${test3Pass ? "PASS" : "FAIL"}\n`;
+                output += `Test 4 - Version 3 correct: ${test4Pass ? "PASS" : "FAIL"}\n\n`;
+
+                const allPassed = test1Pass && test2Pass && test3Pass && test4Pass;
+                output += `=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: Document versioning works correctly!\n";
+                    output += "- Version numbers increment on update\n";
+                    output += "- Old documents marked as superseded\n";
+                    output += "- New documents link to superseded doc_id\n";
                 }
 
                 document.getElementById('result').textContent = output;

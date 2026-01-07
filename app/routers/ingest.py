@@ -56,6 +56,7 @@ async def ingest_pipeline(
     playlist_id: Optional[str] = None,
     pre_chunks: Optional[list] = None,
     settings: Settings = None,
+    update_existing: bool = False,
 ) -> IngestResponse:
     """
     Core ingestion pipeline.
@@ -97,60 +98,108 @@ async def ingest_pipeline(
         canonical_url=canonical_url,
     )
 
+    # Track if we're doing an update (superseding)
+    superseded_doc_id = None
+    doc_version = 1
+    old_chunk_ids = []
+
     if existing:
-        logger.info(
-            "Document already exists",
-            doc_id=str(existing["id"]),
+        if update_existing:
+            # Update mode: supersede the existing document and create new version
+            logger.info(
+                "Superseding existing document",
+                old_doc_id=str(existing["id"]),
+                canonical_url=canonical_url,
+            )
+            # Get old chunk IDs for Qdrant cleanup
+            old_chunk_ids = await doc_repo.get_chunk_ids(existing["id"])
+            superseded_doc_id = existing["id"]
+        else:
+            # Default mode: return existing document
+            logger.info(
+                "Document already exists",
+                doc_id=str(existing["id"]),
+                canonical_url=canonical_url,
+            )
+            return IngestResponse(
+                doc_id=existing["id"],
+                chunks_created=0,
+                vectors_created=0,
+                status="exists",
+                version=existing.get("version", 1),
+            )
+
+    # Also check by content hash (skip if we're updating since content will be different)
+    if not update_existing:
+        existing_by_hash = await doc_repo.get_by_content_hash(
+            workspace_id=workspace_id,
+            content_hash=content_hash,
+        )
+
+        if existing_by_hash:
+            logger.info(
+                "Document with same content exists",
+                doc_id=str(existing_by_hash["id"]),
+                content_hash=content_hash[:16] + "...",
+            )
+            return IngestResponse(
+                doc_id=existing_by_hash["id"],
+                chunks_created=0,
+                vectors_created=0,
+                status="exists",
+                version=existing_by_hash.get("version", 1),
+            )
+
+    # Create document (or supersede existing and create new version)
+    if superseded_doc_id:
+        # Use supersede_and_create for atomic version update
+        doc_id, doc_version = await doc_repo.supersede_and_create(
+            old_doc_id=superseded_doc_id,
+            workspace_id=workspace_id,
+            source_url=source_url,
             canonical_url=canonical_url,
+            source_type=source_type,
+            content_hash=content_hash,
+            title=title,
+            author=author,
+            channel=author,
+            published_at=published_at,
+            language=language,
+            duration_secs=duration_secs,
+            video_id=video_id,
+            playlist_id=playlist_id,
         )
-        return IngestResponse(
-            doc_id=existing["id"],
-            chunks_created=0,
-            vectors_created=0,
-            status="exists",
-        )
-
-    # Also check by content hash
-    existing_by_hash = await doc_repo.get_by_content_hash(
-        workspace_id=workspace_id,
-        content_hash=content_hash,
-    )
-
-    if existing_by_hash:
         logger.info(
-            "Document with same content exists",
-            doc_id=str(existing_by_hash["id"]),
-            content_hash=content_hash[:16] + "...",
+            "Created new document version",
+            doc_id=str(doc_id),
+            version=doc_version,
+            superseded_doc_id=str(superseded_doc_id),
+            source_type=source_type.value,
         )
-        return IngestResponse(
-            doc_id=existing_by_hash["id"],
-            chunks_created=0,
-            vectors_created=0,
-            status="exists",
+    else:
+        # Normal create for new documents
+        doc_id = await doc_repo.create(
+            workspace_id=workspace_id,
+            source_url=source_url,
+            canonical_url=canonical_url,
+            source_type=source_type,
+            content_hash=content_hash,
+            title=title,
+            author=author,
+            channel=author,  # Use author as channel for non-YouTube
+            published_at=published_at,
+            language=language,
+            duration_secs=duration_secs,
+            video_id=video_id,
+            playlist_id=playlist_id,
         )
+        doc_version = 1
 
-    # Create document
-    doc_id = await doc_repo.create(
-        workspace_id=workspace_id,
-        source_url=source_url,
-        canonical_url=canonical_url,
-        source_type=source_type,
-        content_hash=content_hash,
-        title=title,
-        author=author,
-        channel=author,  # Use author as channel for non-YouTube
-        published_at=published_at,
-        language=language,
-        duration_secs=duration_secs,
-        video_id=video_id,
-        playlist_id=playlist_id,
-    )
-
-    logger.info(
-        "Created document",
-        doc_id=str(doc_id),
-        source_type=source_type.value,
-    )
+        logger.info(
+            "Created document",
+            doc_id=str(doc_id),
+            source_type=source_type.value,
+        )
 
     # Chunk content
     chunk_start = time.perf_counter()
@@ -195,6 +244,8 @@ async def ingest_pipeline(
             chunks_created=0,
             vectors_created=0,
             status="created",
+            version=doc_version,
+            superseded_doc_id=superseded_doc_id,
         )
 
     # Extract metadata and prepare chunk records
@@ -276,6 +327,8 @@ async def ingest_pipeline(
             chunks_created=len(chunk_ids),
             vectors_created=0,
             status="partial",
+            version=doc_version,
+            superseded_doc_id=superseded_doc_id,
         )
 
     # Prepare Qdrant points
@@ -318,6 +371,8 @@ async def ingest_pipeline(
             chunks_created=len(chunk_ids),
             vectors_created=0,
             status="partial",
+            version=doc_version,
+            superseded_doc_id=superseded_doc_id,
         )
 
     # Record vectors in chunk_vectors table
@@ -345,11 +400,30 @@ async def ingest_pipeline(
     # Update document last_indexed_at
     await doc_repo.update_last_indexed(doc_id)
 
+    # Clean up old vectors from Qdrant if this was an update
+    if old_chunk_ids:
+        try:
+            await vector_repo.delete_batch(old_chunk_ids)
+            logger.info(
+                "Deleted old vectors from Qdrant",
+                superseded_doc_id=str(superseded_doc_id),
+                deleted_count=len(old_chunk_ids),
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to delete old vectors from Qdrant",
+                superseded_doc_id=str(superseded_doc_id),
+                error=str(e),
+            )
+            # Don't fail the whole operation - old vectors will be orphaned but won't affect queries
+
     return IngestResponse(
         doc_id=doc_id,
         chunks_created=len(chunk_ids),
         vectors_created=len(qdrant_points),
-        status="indexed",
+        status="indexed" if not superseded_doc_id else "updated",
+        version=doc_version,
+        superseded_doc_id=superseded_doc_id,
     )
 
 
@@ -413,6 +487,7 @@ async def ingest_document(
             video_id=request.video_id,
             pre_chunks=request.chunks,
             settings=settings,
+            update_existing=request.update_existing,
         )
 
         logger.info(

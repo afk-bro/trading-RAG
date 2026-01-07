@@ -193,3 +193,114 @@ class DocumentRepository:
 
         async with self.pool.acquire() as conn:
             return await conn.fetch(query, *params)
+
+    async def get_version(self, doc_id: UUID) -> int:
+        """Get the version number of a document."""
+        query = "SELECT version FROM documents WHERE id = $1"
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, doc_id)
+            return row["version"] if row else 1
+
+    async def supersede_and_create(
+        self,
+        old_doc_id: UUID,
+        workspace_id: UUID,
+        source_url: Optional[str],
+        canonical_url: str,
+        source_type: SourceType,
+        content_hash: str,
+        title: Optional[str] = None,
+        author: Optional[str] = None,
+        channel: Optional[str] = None,
+        published_at: Optional[datetime] = None,
+        language: str = "en",
+        duration_secs: Optional[int] = None,
+        video_id: Optional[str] = None,
+        playlist_id: Optional[str] = None,
+    ) -> tuple[UUID, int]:
+        """
+        Supersede an existing document and create a new version.
+
+        Uses write-new-first pattern:
+        1. Get old document's version
+        2. Mark old document as superseded (removes unique constraint conflict)
+        3. Create new document with incremented version
+
+        Returns:
+            Tuple of (new_doc_id, new_version)
+        """
+        async with self.pool.acquire() as conn:
+            # Start transaction for atomicity
+            async with conn.transaction():
+                # Get old document's version
+                old_row = await conn.fetchrow(
+                    "SELECT version FROM documents WHERE id = $1",
+                    old_doc_id
+                )
+                old_version = old_row["version"] if old_row else 1
+                new_version = old_version + 1
+
+                # Mark old document as superseded
+                await conn.execute(
+                    """
+                    UPDATE documents
+                    SET status = 'superseded', updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    old_doc_id
+                )
+
+                logger.info(
+                    "Superseded old document",
+                    old_doc_id=str(old_doc_id),
+                    old_version=old_version,
+                )
+
+                # Create new document with incremented version
+                query = """
+                    INSERT INTO documents (
+                        workspace_id, source_url, canonical_url, source_type,
+                        content_hash, title, author, channel, published_at,
+                        language, duration_secs, video_id, playlist_id,
+                        status, version, created_at, updated_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                        'active', $14, NOW(), NOW()
+                    )
+                    RETURNING id
+                """
+
+                row = await conn.fetchrow(
+                    query,
+                    workspace_id,
+                    source_url,
+                    canonical_url,
+                    source_type.value,
+                    content_hash,
+                    title,
+                    author,
+                    channel,
+                    published_at,
+                    language,
+                    duration_secs,
+                    video_id,
+                    playlist_id,
+                    new_version,
+                )
+                new_doc_id = row["id"]
+
+                logger.info(
+                    "Created new document version",
+                    new_doc_id=str(new_doc_id),
+                    new_version=new_version,
+                    superseded_doc_id=str(old_doc_id),
+                )
+
+                return new_doc_id, new_version
+
+    async def get_chunk_ids(self, doc_id: UUID) -> list[UUID]:
+        """Get all chunk IDs for a document."""
+        query = "SELECT id FROM chunks WHERE doc_id = $1"
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, doc_id)
+            return [row["id"] for row in rows]

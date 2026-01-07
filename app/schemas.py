@@ -105,6 +105,10 @@ class IngestRequest(BaseModel):
     video_id: Optional[str] = Field(
         default=None, description="YouTube video ID (for youtube source type)"
     )
+    update_existing: bool = Field(
+        default=False,
+        description="If true, supersede existing document at same canonical_url and create new version"
+    )
 
 
 class YouTubeIngestRequest(BaseModel):
@@ -221,6 +225,10 @@ class IngestResponse(BaseModel):
     chunks_created: int = Field(..., description="Number of chunks created")
     vectors_created: int = Field(..., description="Number of vectors created")
     status: str = Field(..., description="Ingestion status")
+    version: int = Field(default=1, description="Document version number")
+    superseded_doc_id: Optional[UUID] = Field(
+        default=None, description="ID of superseded document if this was an update"
+    )
 
 
 class YouTubeIngestResponse(BaseModel):
