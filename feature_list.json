@@ -1257,7 +1257,7 @@
       "Step 2: Query chunks",
       "Step 3: Verify section field populated where applicable"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

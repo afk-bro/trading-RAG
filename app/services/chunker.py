@@ -47,9 +47,34 @@ class Chunker:
         """Count tokens in text."""
         return len(self.encoding.encode(text))
 
+    def _detect_section(self, text: str) -> Optional[str]:
+        """
+        Detect section header from text.
+
+        Looks for markdown-style headers (# Header, ## Header, etc.)
+        or ALL CAPS lines that could be section titles.
+
+        Args:
+            text: Text to analyze for section header
+
+        Returns:
+            Section name if found, None otherwise
+        """
+        lines = text.strip().split('\n')
+        for line in lines[:5]:  # Check first 5 lines
+            line = line.strip()
+            # Markdown headers
+            match = re.match(r'^#{1,6}\s+(.+)$', line)
+            if match:
+                return match.group(1).strip()
+            # ALL CAPS lines (common section headers)
+            if line.isupper() and len(line) > 3 and len(line) < 100:
+                return line.title()
+        return None
+
     def chunk_text(self, text: str) -> list[Chunk]:
         """
-        Split text into token-aware chunks.
+        Split text into token-aware chunks with section detection.
 
         Args:
             text: Input text to chunk
@@ -65,17 +90,20 @@ class Chunker:
         total_tokens = len(tokens)
 
         if total_tokens <= self.max_tokens:
+            section = self._detect_section(text)
             return [
                 Chunk(
                     content=text,
                     chunk_index=0,
                     token_count=total_tokens,
+                    section=section,
                 )
             ]
 
         chunks: list[Chunk] = []
         start_idx = 0
         chunk_index = 0
+        current_section: Optional[str] = None
 
         while start_idx < total_tokens:
             # Calculate end index for this chunk
@@ -85,11 +113,17 @@ class Chunker:
             chunk_tokens = tokens[start_idx:end_idx]
             chunk_text = self.encoding.decode(chunk_tokens)
 
+            # Detect section in this chunk
+            detected_section = self._detect_section(chunk_text)
+            if detected_section:
+                current_section = detected_section
+
             chunks.append(
                 Chunk(
                     content=chunk_text,
                     chunk_index=chunk_index,
                     token_count=len(chunk_tokens),
+                    section=current_section,
                 )
             )
 

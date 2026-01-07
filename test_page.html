@@ -34,6 +34,7 @@
     <button onclick="testLastIndexedAt()">Test Last Indexed At</button>
     <button onclick="testQueryLatency()">Test Query Latency (p95)</button>
     <button onclick="testIngestThroughput()">Test Ingest Throughput</button>
+    <button onclick="testSectionTracking()">Test Section Tracking</button>
     <div class="result">
         <h3>Result:</h3>
         <pre id="result">Click a button to test</pre>
@@ -1754,6 +1755,140 @@
                     }
                     if (!timestampUpdated) {
                         output += "ISSUE: last_indexed_at was not updated after reembed\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testSectionTracking() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== SECTION TRACKING TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest document with section headers
+                document.getElementById('result').textContent = 'Step 1: Ingesting document with section headers...';
+
+                const contentWithSections = `# Introduction
+
+This is the introduction section of our document. We will discuss the key concepts
+and provide an overview of the topics covered.
+
+## Market Analysis
+
+The market analysis section covers AAPL, GOOGL, and MSFT stock performance.
+We examine quarterly earnings and growth projections for these technology giants.
+
+## Economic Outlook
+
+MACRO ECONOMIC FACTORS
+
+The Federal Reserve has announced changes to monetary policy. Chairman Powell
+discussed inflation concerns and interest rate decisions. The economic outlook
+remains uncertain given global factors.
+
+### Subsection on Interest Rates
+
+Interest rates are expected to remain elevated through the next quarter.
+This will impact borrowing costs and consumer spending patterns.
+
+## Conclusion
+
+In conclusion, we have covered the key aspects of market analysis and economic outlook.
+Investors should consider these factors when making investment decisions.`;
+
+                const payload = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `section-test-${timestamp}`,
+                    "source": { "url": `https://example.com/section-test-${timestamp}`, "type": "article" },
+                    "content": contentWithSections,
+                    "metadata": { "title": "Section Tracking Test", "author": "Test Author" }
+                };
+
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let ingestResult = await res.json();
+                const docId = ingestResult.doc_id;
+                output += "Step 1 - Ingest result:\n" + JSON.stringify(ingestResult, null, 2) + "\n\n";
+
+                // Wait for processing
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 2: Query chunks for this document
+                document.getElementById('result').textContent = 'Step 2: Querying chunks to check section field...';
+
+                res = await fetch(`${BASE_URL}/debug/chunks?workspace_id=${WORKSPACE_A}`);
+                let chunksData = await res.json();
+                output += "Step 2 - Raw chunks response:\n" + JSON.stringify(chunksData, null, 2) + "\n\n";
+
+                // Step 3: Filter chunks for our document and check sections
+                output += "Step 3 - Analyzing chunks for section field:\n\n";
+
+                let docChunks = [];
+                if (chunksData.chunks) {
+                    docChunks = chunksData.chunks.filter(c => c.doc_id === docId);
+                }
+
+                output += `Found ${docChunks.length} chunks for document ${docId}\n\n`;
+
+                let chunksWithSections = 0;
+                let sectionValues = [];
+                for (const chunk of docChunks) {
+                    const section = chunk.section;
+                    output += `Chunk ${chunk.chunk_index}:\n`;
+                    output += `  section: "${section || 'null'}"\n`;
+                    output += `  content preview: "${chunk.content_preview || chunk.content?.substring(0, 80) || ''}..."\n\n`;
+
+                    if (section) {
+                        chunksWithSections++;
+                        if (!sectionValues.includes(section)) {
+                            sectionValues.push(section);
+                        }
+                    }
+                }
+
+                output += "=== VERIFICATION ===\n\n";
+
+                // Verify chunks were created
+                const chunksCreated = docChunks.length > 0;
+                output += `Test 1 - Chunks created: ${chunksCreated} (${docChunks.length} chunks)\n`;
+
+                // Verify at least some chunks have section populated
+                const hasSections = chunksWithSections > 0;
+                output += `Test 2 - Chunks with section populated: ${chunksWithSections}/${docChunks.length}\n`;
+
+                // Verify detected sections include expected values
+                output += `Test 3 - Detected section names: ${JSON.stringify(sectionValues)}\n`;
+
+                const expectedSections = ['Introduction', 'Market Analysis', 'Economic Outlook', 'Conclusion'];
+                const foundExpected = expectedSections.some(s =>
+                    sectionValues.some(v => v.toLowerCase().includes(s.toLowerCase()))
+                );
+                output += `Test 4 - Found expected section headers: ${foundExpected}\n`;
+
+                const testPassed = chunksCreated && hasSections;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (testPassed) {
+                    output += `SUCCESS: Section tracking is working!\n`;
+                    output += `  - ${docChunks.length} chunks created\n`;
+                    output += `  - ${chunksWithSections} chunks have section field populated\n`;
+                    output += `  - Detected sections: ${sectionValues.join(', ')}\n`;
+                } else {
+                    if (!chunksCreated) {
+                        output += "ISSUE: No chunks were created\n";
+                    }
+                    if (!hasSections) {
+                        output += "ISSUE: Section field is not being populated in chunks\n";
                     }
                 }
 

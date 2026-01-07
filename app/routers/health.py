@@ -591,6 +591,7 @@ async def list_chunks(
                 "chunk_index": row["chunk_index"],
                 "content_preview": row["content_preview"],
                 "token_count": row["token_count"],
+                "section": row["section"],
                 "page_start": row["page_start"],
                 "page_end": row["page_end"],
                 "time_start_secs": row["time_start_secs"],
