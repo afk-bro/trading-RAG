@@ -332,7 +332,7 @@
       "Step 4: POST /query with retrieve_k=10, top_k=10",
       "Step 5: Verify 10 results returned"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1212,7 +1212,7 @@
       "Step 2: POST /query with source_types AND symbols AND date_range filters",
       "Step 3: Verify results match ALL filter criteria"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1311,7 +1311,7 @@
       "Step 3: Verify final response has 5 results",
       "Step 4: Verify reranking selected best 5 from 20"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1635,7 +1635,7 @@
       "Step 2: Verify query executes without error",
       "Step 3: Verify results returned appropriately"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

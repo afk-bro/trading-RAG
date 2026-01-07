@@ -2,9 +2,9 @@
 
 ## Session 47 Summary
 Date: Session 47 (Query and Filter Verification)
-Status: Services Running - 131/217 Tests Passing (60.4%)
+Status: Services Running - 135/217 Tests Passing (62.2%)
 
-### Tests Verified This Session (+10 tests)
+### Tests Verified This Session (+14 tests)
 1. **Query with no results returns empty array** ✅
    - Querying with filters that match nothing returns `results: []` with no error
 
@@ -35,10 +35,22 @@ Status: Services Running - 131/217 Tests Passing (60.4%)
 10. **POST /query filters by symbols with 'all' mode** ✅
     - symbols_mode='all' requires ALL symbols to match (stricter than 'any')
 
+11. **Combined filters work together correctly** ✅
+    - Multiple filter types (source_type + symbols + date) applied together
+
+12. **Query handles special characters in question** ✅
+    - Quotes, brackets, and special chars in query handled without error
+
+13. **POST /query respects retrieve_k and top_k parameters** ✅
+    - top_k=2 returns exactly 2 results, top_k=3 returns exactly 3
+
+14. **Over-fetch pattern retrieves more than top_k** ✅
+    - retrieve_k=20 fetches 20 from Qdrant, top_k=3 returns 3 results
+
 ### Progress Summary
 - Previous: 121/217 tests (55.8%)
-- This session: 131/217 tests (60.4%)
-- Improvement: +10 tests verified
+- This session: 135/217 tests (62.2%)
+- Improvement: +14 tests verified
 
 ---
 
