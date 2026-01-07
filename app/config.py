@@ -50,11 +50,11 @@ class Settings(BaseSettings):
 
     # LLM API Keys
     anthropic_api_key: Optional[str] = Field(
-        default=None, description="Anthropic API key (preferred provider)"
+        default=None, description="Anthropic API key (sk-ant-* format, preferred provider)"
     )
-    claude_code_oauth_token: Optional[str] = Field(
-        default=None, description="Claude Code OAuth token (alternative to API key)"
-    )
+    # NOTE: claude_code_oauth_token does NOT work with Anthropic API.
+    # It's reserved for future Claude Code CLI proxy provider.
+    # Use ANTHROPIC_API_KEY from console.anthropic.com instead.
     openai_api_key: Optional[str] = Field(
         default=None, description="OpenAI API key (second preference)"
     )

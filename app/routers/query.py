@@ -380,6 +380,8 @@ async def query(
                     claims_rejected=pipeline_result.rejected_claims_count,
                     entities_persisted=persistence_stats.entities_created + persistence_stats.entities_updated,
                     claims_persisted=persistence_stats.claims_created,
+                    claims_skipped_duplicate=persistence_stats.claims_skipped_duplicate,
+                    claims_skipped_invalid=persistence_stats.claims_skipped_invalid,
                 )
 
                 logger.info(

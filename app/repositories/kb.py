@@ -16,6 +16,10 @@ from app.services.kb_types import (
     ExtractedRelation,
     ClaimVerdict,
     PersistenceStats,
+    EvidencePointer,
+    compute_claim_fingerprint,
+    validate_claim_evidence,
+    MAX_QUOTE_LENGTH,
 )
 
 logger = structlog.get_logger(__name__)
@@ -158,9 +162,11 @@ class KnowledgeBaseRepository:
         verdict: Optional[ClaimVerdict] = None,
         extraction_model: Optional[str] = None,
         verification_model: Optional[str] = None,
-    ) -> UUID:
+    ) -> tuple[UUID | None, bool]:
         """
-        Create a new claim.
+        Create a new claim with deduplication.
+
+        Uses fingerprint-based deduplication to prevent duplicate claims.
 
         Args:
             workspace_id: Workspace ID
@@ -171,7 +177,7 @@ class KnowledgeBaseRepository:
             verification_model: Model used for verification
 
         Returns:
-            Created claim ID
+            Tuple of (claim_id, created) - claim_id is None if duplicate, created is False if skipped
         """
         # Determine status and confidence from verdict if provided
         if verdict:
@@ -183,11 +189,23 @@ class KnowledgeBaseRepository:
             confidence = claim.confidence
             text = claim.text
 
+        # Compute fingerprint for deduplication
+        fingerprint = compute_claim_fingerprint(
+            claim_text=text,
+            claim_type=claim.claim_type,
+            entity_name=claim.entity_name,
+            workspace_id=workspace_id,
+        )
+
+        # Use INSERT ... ON CONFLICT DO NOTHING for idempotent insert
         query = """
             INSERT INTO kb_claims (
                 workspace_id, entity_id, claim_type, text,
-                confidence, status, extraction_model, verification_model
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                confidence, status, extraction_model, verification_model,
+                fingerprint
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL
+            DO NOTHING
             RETURNING id
         """
 
@@ -202,17 +220,26 @@ class KnowledgeBaseRepository:
                 status,
                 extraction_model,
                 verification_model,
+                fingerprint,
             )
 
-            claim_id = row["id"]
-            logger.debug(
-                "Created claim",
-                claim_id=str(claim_id),
-                claim_type=claim.claim_type.value,
-                status=status,
-            )
-
-            return claim_id
+            if row:
+                claim_id = row["id"]
+                logger.debug(
+                    "Created claim",
+                    claim_id=str(claim_id),
+                    claim_type=claim.claim_type.value,
+                    status=status,
+                    fingerprint=fingerprint[:16] + "...",
+                )
+                return claim_id, True
+            else:
+                logger.debug(
+                    "Skipped duplicate claim",
+                    claim_type=claim.claim_type.value,
+                    fingerprint=fingerprint[:16] + "...",
+                )
+                return None, False
 
     async def update_claim_verdict(
         self,
@@ -437,9 +464,10 @@ class KnowledgeBaseRepository:
 
         Handles:
         1. Upserting entities
-        2. Creating claims (only verified/weak, not rejected)
-        3. Creating evidence links
-        4. Creating relations
+        2. Validating evidence integrity
+        3. Creating claims with fingerprint deduplication (only verified/weak, not rejected)
+        4. Creating evidence links
+        5. Creating relations
 
         Args:
             workspace_id: Workspace ID
@@ -459,6 +487,9 @@ class KnowledgeBaseRepository:
 
         # Build verdict lookup by claim index
         verdict_map = {v.claim_index: v for v in verdicts}
+
+        # Build set of available chunk indices for evidence validation
+        available_chunk_indices = set(range(len(chunk_ids)))
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -482,6 +513,21 @@ class KnowledgeBaseRepository:
                     if verdict.status == VerificationStatus.REJECTED:
                         continue
 
+                    # Validate evidence integrity before persisting
+                    is_valid, validated_evidence, errors = validate_claim_evidence(
+                        claim, available_chunk_indices
+                    )
+
+                    if not is_valid:
+                        # Downgrade to invalid if VERIFIED claim has no valid evidence
+                        logger.warning(
+                            "Skipping claim with invalid evidence",
+                            claim_text=claim.text[:50],
+                            errors=errors,
+                        )
+                        stats.claims_skipped_invalid += 1
+                        continue
+
                     # Find linked entity if specified
                     entity_id = None
                     if claim.entity_name:
@@ -495,8 +541,8 @@ class KnowledgeBaseRepository:
                             )
                             entity_id_map[claim.entity_name.lower()] = entity_id
 
-                    # Create claim
-                    claim_id = await self.create_claim(
+                    # Create claim (with fingerprint deduplication)
+                    claim_id, created = await self.create_claim(
                         workspace_id,
                         claim,
                         entity_id=entity_id,
@@ -504,19 +550,23 @@ class KnowledgeBaseRepository:
                         extraction_model=extraction_model,
                         verification_model=verification_model,
                     )
-                    stats.claims_created += 1
 
-                    # Create evidence for each evidence pointer
-                    for ev in claim.evidence:
-                        if ev.chunk_index < len(chunk_ids):
-                            await self.create_evidence(
-                                claim_id=claim_id,
-                                doc_id=doc_id,
-                                chunk_id=chunk_ids[ev.chunk_index],
-                                quote=ev.quote,
-                                relevance_score=ev.relevance,
-                            )
-                            stats.evidence_created += 1
+                    if created and claim_id:
+                        stats.claims_created += 1
+
+                        # Create evidence for each validated evidence pointer
+                        for ev in validated_evidence:
+                            if ev.chunk_index < len(chunk_ids):
+                                await self.create_evidence(
+                                    claim_id=claim_id,
+                                    doc_id=doc_id,
+                                    chunk_id=chunk_ids[ev.chunk_index],
+                                    quote=ev.quote[:MAX_QUOTE_LENGTH],  # Ensure truncation
+                                    relevance_score=ev.relevance,
+                                )
+                                stats.evidence_created += 1
+                    else:
+                        stats.claims_skipped_duplicate += 1
 
                 # 3. Create relations
                 for relation in relations:

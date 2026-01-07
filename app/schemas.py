@@ -276,6 +276,8 @@ class KnowledgeExtractionStats(BaseModel):
     claims_rejected: int = Field(default=0, description="Claims rejected")
     entities_persisted: int = Field(default=0, description="Entities persisted to truth store")
     claims_persisted: int = Field(default=0, description="Claims persisted to truth store")
+    claims_skipped_duplicate: int = Field(default=0, description="Claims skipped (already in truth store)")
+    claims_skipped_invalid: int = Field(default=0, description="Claims skipped (invalid evidence)")
 
 
 class QueryResponse(BaseModel):

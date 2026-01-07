@@ -57,20 +57,18 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
 
     provider = settings.llm_provider
 
-    # Helper to get Anthropic key (API key or OAuth token)
+    # Helper to get Anthropic key
+    # NOTE: OAuth tokens don't work with Anthropic API - need sk-ant-* format key
     def get_anthropic_key() -> str | None:
-        key = (settings.anthropic_api_key or "").strip() or None
-        if key:
-            return key
-        # Fall back to Claude Code OAuth token
-        return (settings.claude_code_oauth_token or "").strip() or None
+        return (settings.anthropic_api_key or "").strip() or None
 
     # Explicit provider selection
     if provider == "anthropic":
         key = get_anthropic_key()
         if not key:
             raise LLMStartupError(
-                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) not set"
+                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY not set. "
+                "Get an API key from console.anthropic.com"
             )
         return "anthropic", key
 

@@ -13,6 +13,7 @@ import structlog
 
 from app.services.llm_base import BaseLLMClient, LLMNotConfiguredError
 from app.services.llm_factory import get_llm
+
 from app.services.kb_types import (
     ExtractionResult,
     VerificationResult,
@@ -38,6 +39,11 @@ from app.services.kb_prompts import (
 )
 
 logger = structlog.get_logger(__name__)
+
+# Token limits per pass to prevent runaway JSON
+MAX_TOKENS_EXTRACTION = 4000  # Extraction can be verbose with many entities
+MAX_TOKENS_VERIFICATION = 2000  # Verification is more constrained
+MAX_TOKENS_SYNTHESIS = 2000  # Synthesis is answer-focused
 
 
 class KBPipelineError(Exception):
@@ -120,15 +126,20 @@ class KBPipeline:
                 {"role": "user", "content": prompt},
             ],
             model=self.extraction_model,
-            max_tokens=4000,
+            max_tokens=MAX_TOKENS_EXTRACTION,
         )
 
         # Parse JSON response
         try:
             data = extract_json_from_response(response.text)
         except ValueError as e:
-            logger.error("Failed to parse extraction response", error=str(e))
-            return ExtractionResult()
+            logger.error(
+                "Failed to parse extraction response",
+                error=str(e),
+                response_preview=response.text[:500],
+            )
+            # Return empty result with error marker
+            return ExtractionResult()  # Caller should check if empty
 
         # Convert to typed models
         entities = []
@@ -265,7 +276,7 @@ class KBPipeline:
                 {"role": "user", "content": prompt},
             ],
             model=self.verification_model,
-            max_tokens=2000,
+            max_tokens=MAX_TOKENS_VERIFICATION,
         )
 
         # Parse JSON response
@@ -380,7 +391,7 @@ class KBPipeline:
                 {"role": "user", "content": prompt},
             ],
             model=self.synthesis_model,
-            max_tokens=2000,
+            max_tokens=MAX_TOKENS_SYNTHESIS,
         )
 
         logger.info("Synthesis complete", response_length=len(response.text))
@@ -411,11 +422,28 @@ class KBPipeline:
             will_synthesize=synthesize,
         )
 
+        parse_errors = []
+        had_extraction_error = False
+        had_verification_error = False
+
         # Pass 1: Extract
         extraction = await self.extract(chunks, question)
 
+        # Check for extraction failure (empty result suggests parse error)
+        if chunks and not extraction.entities and not extraction.claims:
+            had_extraction_error = True
+            parse_errors.append("Extraction returned no entities or claims (possible JSON parse error)")
+
         # Pass 2: Verify
         verification = await self.verify(chunks, extraction)
+
+        # Check for verification failure (all pending suggests parse error)
+        if extraction.claims and all(
+            v.status == VerificationStatus.PENDING and v.reason == "Verification failed to parse"
+            for v in verification.verdicts
+        ):
+            had_verification_error = True
+            parse_errors.append("Verification failed to parse (all claims marked pending)")
 
         # Count verdicts
         verified_count = 0
@@ -444,6 +472,9 @@ class KBPipeline:
             verified_claims_count=verified_count,
             weak_claims_count=weak_count,
             rejected_claims_count=rejected_count,
+            parse_errors=parse_errors,
+            had_extraction_error=had_extraction_error,
+            had_verification_error=had_verification_error,
         )
 
         logger.info(
