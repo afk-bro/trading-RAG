@@ -1,11 +1,26 @@
 """Admin UI router for KB inspection and curation."""
 
+import json
 import os
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
+
+
+def _json_serializable(obj: Any) -> Any:
+    """Convert object to JSON-serializable form."""
+    if isinstance(obj, dict):
+        return {k: _json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_json_serializable(v) for v in obj]
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, UUID):
+        return str(obj)
+    return obj
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -274,11 +289,15 @@ async def admin_claim_detail(
             detail=f"Claim {claim_id} not found",
         )
 
+    # Convert to JSON-serializable for debug panel
+    claim_json = _json_serializable(claim)
+
     return templates.TemplateResponse(
         "claim_detail.html",
         {
             "request": request,
             "claim": claim,
+            "claim_json": json.dumps(claim_json, indent=2),
         },
     )
 
