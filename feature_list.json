@@ -115,7 +115,7 @@
       "Step 4: Query database to verify chunk order is preserved",
       "Step 5: Verify no automatic chunking was performed on pre-chunked content"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -896,7 +896,7 @@
       "Step 2: Verify document created successfully",
       "Step 3: Query and verify content preserved correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2100,7 +2100,7 @@
       "Step 3: Verify chunks created",
       "Step 4: Verify vectors created"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2109,7 +2109,7 @@
       "Step 1: POST /ingest with source_type='note'",
       "Step 2: Verify document created with note type"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2118,7 +2118,7 @@
       "Step 1: POST /ingest with source_type='transcript'",
       "Step 2: Verify timestamp handling appropriate for transcript"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
