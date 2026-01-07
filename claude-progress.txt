@@ -1,5 +1,60 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 58 Summary
+Date: Session 58 (Section Tracking Implementation)
+Status: Services Running - 175/217 Tests Passing (80.6%)
+
+### Tests Verified This Session (+1 test)
+
+1. **Section field tracks document structure** - PASSED
+   - Implemented section detection in chunker.py:
+     - Added _detect_section() method to detect markdown headers (# Header, ## Header, etc.)
+     - Also detects ALL CAPS section titles as common document structure
+   - Updated chunk_text() to track and propagate section names across chunks
+   - Fixed debug/chunks endpoint to include section field in response
+   - Created comprehensive test in test_page.html
+   - Verified with document containing multiple markdown sections
+   - Section "Introduction" correctly detected from "# Introduction" header
+
+### Code Changes
+1. **app/services/chunker.py**:
+   - Added `_detect_section()` method to detect section headers
+   - Updated `chunk_text()` to use section detection and track current section
+   - Sections persist across chunks until a new section is detected
+
+2. **app/routers/health.py**:
+   - Fixed debug/chunks endpoint to include "section" field in returned data
+
+3. **test_page.html**:
+   - Added "Test Section Tracking" button
+   - Added `testSectionTracking()` function that:
+     - Ingests document with markdown section headers
+     - Queries chunks to verify section field is populated
+     - Validates expected section names are detected
+
+### Current Test Status
+- Total tests: 217
+- Passing: 175 (80.6%)
+- Failing: 42
+
+### Remaining Failing Tests Analysis
+Most remaining tests (42) fall into blocked categories:
+1. **Docker/Container manipulation** (~3 tests) - Health endpoint tests requiring stopping containers
+2. **YouTube/External APIs** (~3 tests) - Tests requiring YouTube transcript access
+3. **OpenRouter/LLM** (~5 tests) - Tests requiring OPENROUTER_API_KEY for answer generation
+4. **n8n workflow** (~8 tests) - Tests requiring n8n setup and configuration
+5. **Document versioning** (~3 tests) - Tests requiring update/supersede functionality
+6. **Performance/infrastructure** (~5 tests) - Memory tests, container size, timeout tests
+7. **Database verification** (~5 tests) - Tests requiring EXPLAIN queries or direct FK testing
+8. **Reranking/Multiple providers** (~3 tests) - Would require additional provider setup
+
+### Next Steps for Future Sessions
+1. Consider implementing document versioning/supersede flow
+2. Review if any remaining tests can be verified without external dependencies
+3. Tests requiring external APIs (YouTube, OpenRouter) may need to be marked as "blocked"
+
+---
+
 ## Session 57 Summary
 Date: Session 57 (last_indexed_at Test)
 Status: Services Running - 174/217 Tests Passing (80.2%)
