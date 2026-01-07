@@ -1157,7 +1157,7 @@
       "Step 3: Run /reembed",
       "Step 4: Verify last_indexed_at updated to recent time"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

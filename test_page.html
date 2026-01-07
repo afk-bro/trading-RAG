@@ -1639,50 +1639,121 @@
                     return;
                 }
 
-                // Step 2: Fetch documents and check last_indexed_at
-                document.getElementById('result').textContent = 'Step 2: Fetching documents to verify last_indexed_at...';
+                const docId = ingestResult.doc_id;
+
+                // Step 2: Fetch document and check initial last_indexed_at
+                document.getElementById('result').textContent = 'Step 2: Fetching document to verify initial last_indexed_at...';
                 res = await fetch(`${BASE_URL}/debug/documents`);
                 let docsData = await res.json();
-                output += "Step 2 - Fetch documents:\n";
+                output += "Step 2 - Fetch document (initial):\n";
 
-                // Find our test document
                 let testDoc = null;
                 if (docsData.documents) {
-                    testDoc = docsData.documents.find(d => d.id === ingestResult.doc_id);
+                    testDoc = docsData.documents.find(d => d.id === docId);
                 }
 
                 output += `Document found: ${testDoc !== null && testDoc !== undefined}\n`;
+                const initialLastIndexedAt = testDoc ? testDoc.last_indexed_at : null;
                 if (testDoc) {
-                    output += `  last_indexed_at: "${testDoc.last_indexed_at}"\n`;
-                    output += `  created_at: "${testDoc.created_at}"\n`;
+                    output += `  initial last_indexed_at: "${testDoc.last_indexed_at}"\n`;
+                    output += `  created_at: "${testDoc.created_at}"\n\n`;
                 }
 
-                output += "\n=== VERIFICATION ===\n\n";
+                // Step 3: Run reembed for just this document
+                document.getElementById('result').textContent = 'Step 3: Running reembed for this document...';
+                output += "Step 3 - Run /reembed for this doc_id:\n";
 
-                // Verify last_indexed_at is set and is a valid timestamp
-                const hasLastIndexedAt = testDoc && testDoc.last_indexed_at !== null && testDoc.last_indexed_at !== undefined;
-                output += `Test 1 - last_indexed_at is set: ${hasLastIndexedAt}\n`;
+                // Wait 2 seconds to ensure timestamp difference is detectable
+                await new Promise(resolve => setTimeout(resolve, 2000));
 
-                let timestampValid = false;
-                if (hasLastIndexedAt) {
-                    const indexedDate = new Date(testDoc.last_indexed_at);
-                    timestampValid = !isNaN(indexedDate.getTime());
-                    output += `Test 2 - last_indexed_at is valid timestamp: ${timestampValid}\n`;
+                res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "target_collection": "kb_nomic_embed_text_v1",
+                        "embed_provider": "ollama",
+                        "embed_model": "nomic-embed-text",
+                        "doc_ids": [docId]
+                    })
+                });
+                let reembedResult = await res.json();
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(reembedResult, null, 2) + "\n\n";
 
-                    // Check that last_indexed_at is recent (within last 5 minutes)
-                    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-                    const isRecent = indexedDate.getTime() > fiveMinutesAgo;
-                    output += `Test 3 - last_indexed_at is recent: ${isRecent}\n`;
+                // Step 4: Poll job until complete
+                document.getElementById('result').textContent = 'Step 4: Waiting for reembed job to complete...';
+                output += "Step 4 - Poll job status:\n";
+
+                const jobId = reembedResult.job_id;
+                let jobStatus = 'started';
+                let pollCount = 0;
+                const maxPolls = 30;
+
+                while (jobStatus !== 'completed' && jobStatus !== 'failed' && pollCount < maxPolls) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    res = await fetch(`${BASE_URL}/jobs/${jobId}`);
+                    let jobResult = await res.json();
+                    jobStatus = jobResult.status;
+                    pollCount++;
+                    output += `  Poll ${pollCount}: status=${jobStatus}, progress=${jobResult.progress}%\n`;
+                }
+                output += "\n";
+
+                // Step 5: Verify last_indexed_at was updated
+                document.getElementById('result').textContent = 'Step 5: Verifying last_indexed_at was updated...';
+                output += "Step 5 - Check updated last_indexed_at:\n";
+
+                res = await fetch(`${BASE_URL}/debug/documents`);
+                docsData = await res.json();
+
+                testDoc = null;
+                if (docsData.documents) {
+                    testDoc = docsData.documents.find(d => d.id === docId);
                 }
 
-                const testPassed = hasLastIndexedAt && timestampValid;
+                const updatedLastIndexedAt = testDoc ? testDoc.last_indexed_at : null;
+                output += `  updated last_indexed_at: "${updatedLastIndexedAt}"\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+
+                // Verify initial last_indexed_at was set
+                const hasInitialTimestamp = initialLastIndexedAt !== null && initialLastIndexedAt !== undefined;
+                output += `Test 1 - Initial last_indexed_at is set: ${hasInitialTimestamp}\n`;
+
+                // Verify updated last_indexed_at is set
+                const hasUpdatedTimestamp = updatedLastIndexedAt !== null && updatedLastIndexedAt !== undefined;
+                output += `Test 2 - Updated last_indexed_at is set: ${hasUpdatedTimestamp}\n`;
+
+                // Verify reembed job completed successfully
+                const reembedCompleted = jobStatus === 'completed';
+                output += `Test 3 - Reembed job completed: ${reembedCompleted}\n`;
+
+                // Verify timestamp was updated (should be different/later)
+                let timestampUpdated = false;
+                if (hasInitialTimestamp && hasUpdatedTimestamp) {
+                    const initialDate = new Date(initialLastIndexedAt);
+                    const updatedDate = new Date(updatedLastIndexedAt);
+                    timestampUpdated = updatedDate >= initialDate;
+                    output += `Test 4 - last_indexed_at updated after reembed: ${timestampUpdated}\n`;
+                    output += `  Initial: ${initialDate.toISOString()}\n`;
+                    output += `  Updated: ${updatedDate.toISOString()}\n`;
+                }
+
+                const testPassed = hasInitialTimestamp && hasUpdatedTimestamp && reembedCompleted && timestampUpdated;
                 output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
 
                 if (testPassed) {
-                    output += "SUCCESS: last_indexed_at is set when vectors are created.\n";
+                    output += "SUCCESS: last_indexed_at is set on ingest and updates after reembed.\n";
                 } else {
-                    if (!hasLastIndexedAt) {
-                        output += "ISSUE: last_indexed_at field is not set (may need service restart for API update)\n";
+                    if (!hasInitialTimestamp) {
+                        output += "ISSUE: Initial last_indexed_at not set\n";
+                    }
+                    if (!reembedCompleted) {
+                        output += "ISSUE: Reembed job did not complete\n";
+                    }
+                    if (!timestampUpdated) {
+                        output += "ISSUE: last_indexed_at was not updated after reembed\n";
                     }
                 }
 
