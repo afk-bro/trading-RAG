@@ -1321,7 +1321,7 @@
                     "workspace_id": WORKSPACE_A,
                     "idempotency_key": `lang-test-en-${timestamp}`,
                     "source": { "url": `https://example.com/lang-test-en-${timestamp}`, "type": "article" },
-                    "content": "This is an English document for language field testing. Hello world!",
+                    "content": `This is an English document for language field testing. Hello world! Timestamp: ${timestamp}`,
                     "metadata": {
                         "title": "English Document Test"
                         // No explicit language - should default to 'en'
@@ -1343,7 +1343,7 @@
                     "workspace_id": WORKSPACE_A,
                     "idempotency_key": `lang-test-es-${timestamp}`,
                     "source": { "url": `https://example.com/lang-test-es-${timestamp}`, "type": "article" },
-                    "content": "Este es un documento en español para la prueba de campo de idioma. ¡Hola mundo!",
+                    "content": `Este es un documento en español para la prueba de campo de idioma. ¡Hola mundo! Timestamp: ${timestamp}`,
                     "metadata": {
                         "title": "Spanish Document Test",
                         "language": "es"  // Explicit Spanish

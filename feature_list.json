@@ -1223,7 +1223,7 @@
       "Step 3: Ingest document with explicit language='es'",
       "Step 4: Verify language stored correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
