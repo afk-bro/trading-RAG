@@ -1222,16 +1222,39 @@
         async function testJobFailureCapture() {
             let output = "=== JOB FAILURE CAPTURE TEST ===\n\n";
             document.getElementById('result').textContent = 'Starting test...';
+            const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 
             try {
-                // Step 1: POST /reembed with invalid configuration
-                // We'll use a non-existent workspace_id to trigger a failure
-                document.getElementById('result').textContent = 'Step 1: POST /reembed with invalid workspace...';
+                // First, ensure we have at least one document in the workspace
+                document.getElementById('result').textContent = 'Step 0: Ensuring document exists for testing...';
+                const docPayload = {
+                    "workspace_id": WORKSPACE_ID,
+                    "idempotency_key": "job-failure-test-doc",
+                    "source": {
+                        "url": "https://example.com/job-failure-test-doc",
+                        "type": "article"
+                    },
+                    "content": "This document is used for job failure testing.",
+                    "metadata": {
+                        "title": "Job Failure Test Doc"
+                    }
+                };
+
+                await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docPayload)
+                });
+                output += "Step 0 - Ensured test document exists\n\n";
+
+                // Step 1: POST /reembed with INVALID embed_model that doesn't exist in Ollama
+                // This will cause the background task to fail when it tries to embed
+                document.getElementById('result').textContent = 'Step 1: POST /reembed with invalid embed_model...';
                 const invalidPayload = {
-                    "workspace_id": "99999999-9999-9999-9999-999999999999",  // Non-existent workspace
-                    "target_collection": "kb_invalid_test_collection",
+                    "workspace_id": WORKSPACE_ID,
+                    "target_collection": "kb_invalid_model_test_" + Date.now(),
                     "embed_provider": "ollama",
-                    "embed_model": "nomic-embed-text"
+                    "embed_model": "nonexistent-model-xyz-12345"  // Invalid model that doesn't exist
                 };
 
                 let res = await fetch(`${BASE_URL}/reembed`, {
@@ -1240,24 +1263,24 @@
                     body: JSON.stringify(invalidPayload)
                 });
                 let reembedResult = await res.json();
-                output += "Step 1 - POST /reembed with non-existent workspace:\n";
+                output += "Step 1 - POST /reembed with invalid embed_model:\n";
                 output += `HTTP Status: ${res.status}\n`;
                 output += JSON.stringify(reembedResult, null, 2) + "\n\n";
 
-                // Check if job was created or if there was an immediate error
+                // Check if job was created
                 if (reembedResult.job_id) {
-                    // Step 2: GET /jobs/{job_id}
-                    document.getElementById('result').textContent = 'Step 2: Polling job status...';
+                    // Step 2: GET /jobs/{job_id} and poll until failure
+                    document.getElementById('result').textContent = 'Step 2: Polling job status (waiting for failure)...';
                     let finalStatus = null;
                     let finalError = null;
 
-                    for (let i = 0; i < 10; i++) {
+                    for (let i = 0; i < 15; i++) {
                         await new Promise(r => setTimeout(r, 1000));
                         res = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
                         let jobStatus = await res.json();
                         output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%`;
                         if (jobStatus.error) {
-                            output += `, error="${jobStatus.error}"`;
+                            output += `, error="${jobStatus.error.substring(0, 80)}..."`;
                             finalError = jobStatus.error;
                         }
                         output += "\n";
@@ -1269,29 +1292,36 @@
 
                     output += "\n=== VERIFICATION ===\n\n";
 
-                    // For a non-existent workspace, the job might complete with 0 chunks
-                    // or fail - both are valid outcomes
-                    const jobCompleted = finalStatus === 'completed' || finalStatus === 'failed';
-                    output += `Test 1 - Job reached terminal state: ${jobCompleted} (status: ${finalStatus})\n`;
+                    // Check if job failed with error
+                    const jobFailed = finalStatus === 'failed';
+                    output += `Test 1 - Job status is 'failed': ${jobFailed} (actual: ${finalStatus})\n`;
 
-                    if (finalStatus === 'failed') {
+                    if (jobFailed) {
                         const hasErrorInfo = finalError !== null && finalError.length > 0;
-                        output += `Test 2 - Error field contains info: ${hasErrorInfo}\n`;
+                        output += `Test 2 - Error field contains useful information: ${hasErrorInfo}\n`;
                         if (hasErrorInfo) {
-                            output += `  Error: "${finalError}"\n`;
+                            output += `  Full error: "${finalError}"\n`;
                         }
-                        output += `\n=== TEST PASSED ===\n`;
-                        output += `Job failure captured with error details.\n`;
-                    } else if (finalStatus === 'completed' && reembedResult.chunks_queued === 0) {
-                        output += `Test 2 - Job handled gracefully (0 chunks for non-existent workspace): true\n`;
-                        output += `\n=== TEST PASSED (GRACEFUL HANDLING) ===\n`;
-                        output += `Empty workspace handled gracefully without error.\n`;
+
+                        if (hasErrorInfo) {
+                            output += `\n=== TEST PASSED ===\n`;
+                            output += `Job failure captured with error details!\n`;
+                            output += `- Status is 'failed' ✓\n`;
+                            output += `- Error field has information ✓\n`;
+                        } else {
+                            output += `\n=== TEST FAILED ===\n`;
+                            output += `Job failed but no error information was captured.\n`;
+                        }
+                    } else if (finalStatus === 'completed') {
+                        output += `\n=== TEST INCOMPLETE ===\n`;
+                        output += `Job completed instead of failing. The invalid model may have been handled gracefully.\n`;
+                        output += `Chunks queued: ${reembedResult.chunks_queued}\n`;
                     } else {
-                        output += `\n=== UNEXPECTED RESULT ===\n`;
-                        output += `Status: ${finalStatus}, chunks_queued: ${reembedResult.chunks_queued}\n`;
+                        output += `\n=== TEST INCOMPLETE ===\n`;
+                        output += `Job did not reach terminal state within timeout. Status: ${finalStatus}\n`;
                     }
                 } else {
-                    // Immediate error response
+                    // Immediate error response (validation error)
                     output += "\n=== VERIFICATION ===\n\n";
                     const hasDetail = reembedResult.detail !== undefined;
                     output += `Test 1 - Immediate error response received: true\n`;
@@ -1299,8 +1329,8 @@
                     if (hasDetail) {
                         output += `  Detail: "${reembedResult.detail}"\n`;
                     }
-                    output += `\n=== TEST PASSED ===\n`;
-                    output += `Error captured with useful information.\n`;
+                    output += `\n=== TEST PASSED (IMMEDIATE ERROR) ===\n`;
+                    output += `Error captured with useful information at request time.\n`;
                 }
 
                 document.getElementById('result').textContent = output;

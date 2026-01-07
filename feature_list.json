@@ -1333,7 +1333,7 @@
       "Step 3: Verify status is 'failed'",
       "Step 4: Verify error field contains useful information"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
