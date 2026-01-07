@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 ssl='require',
                 timeout=10,  # Short connection timeout to avoid blocking startup
                 command_timeout=30,  # Query timeout
+                statement_cache_size=0,  # Disable for pgbouncer transaction mode
             )
             logger.info(
                 "Database pool initialized",

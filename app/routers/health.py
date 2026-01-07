@@ -174,11 +174,12 @@ async def debug_db_test(settings: Settings = Depends(get_settings)):
         return {"success": False, "error": "DATABASE_URL not configured"}
 
     try:
-        # Try to connect directly
+        # Try to connect directly (disable statement cache for pgbouncer)
         conn = await asyncpg.connect(
             settings.database_url,
             ssl='require',
             timeout=30,
+            statement_cache_size=0,
         )
         # Test the connection
         result = await conn.fetchval("SELECT 1")
