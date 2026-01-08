@@ -1,0 +1,102 @@
+{% extends "layout.html" %}
+
+{% block title %}Backtest Run {{ run.id[:8] }}... - KB Admin{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/admin/backtests/tunes">Tunes</a> /
+    <span>Run {{ run.id[:8] }}...</span>
+</div>
+
+<!-- Header -->
+<div class="detail-header">
+    <h1>
+        <span class="badge badge-{{ run.status }}">{{ run.status }}</span>
+        Backtest Run
+    </h1>
+    <div class="detail-meta">
+        <span title="{{ run.id }}">ID: {{ run.id[:12] }}...
+            <button onclick="navigator.clipboard.writeText('{{ run.id }}')" class="copy-btn" title="Copy ID">📋</button>
+        </span>
+        <span>Created: {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') if run.created_at else '-' }}</span>
+        <span>Strategy: {{ run.strategy_entity_id[:8] }}...</span>
+    </div>
+</div>
+
+<!-- Summary Stats -->
+{% if run.summary %}
+<div class="stats">
+    <div class="stat">
+        <div class="stat-value {% if run.summary.return_pct >= 0 %}text-success{% else %}text-danger{% endif %}">
+            {{ "%.2f"|format(run.summary.return_pct) }}%
+        </div>
+        <div class="stat-label">Return</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ "%.2f"|format(run.summary.sharpe or 0) }}</div>
+        <div class="stat-label">Sharpe</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value text-danger">{{ "%.2f"|format(run.summary.max_drawdown_pct) }}%</div>
+        <div class="stat-label">Max DD</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ "%.1f"|format((run.summary.win_rate or 0) * 100) }}%</div>
+        <div class="stat-label">Win Rate</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ run.summary.trades }}</div>
+        <div class="stat-label">Trades</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Parameters -->
+{% if run.params %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Parameters</h3>
+    </div>
+    <div class="code-block">{{ run.params | tojson(indent=2) }}</div>
+</div>
+{% endif %}
+
+<!-- Dataset Info -->
+{% if run.dataset_meta %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Dataset</h3>
+    </div>
+    <div class="code-block">{{ run.dataset_meta | tojson(indent=2) }}</div>
+</div>
+{% endif %}
+
+<!-- Full JSON (expandable) -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Full Run Data</h3>
+        <button onclick="toggleJson()" class="btn btn-secondary">Toggle JSON</button>
+    </div>
+    <div id="full-json" style="display: none;">
+        <div class="code-block" style="max-height: 600px; overflow-y: auto;">{{ run_json }}</div>
+    </div>
+</div>
+
+<script>
+function toggleJson() {
+    const el = document.getElementById('full-json');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+
+<style>
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .text-success { color: var(--success); }
+    .text-danger { color: var(--danger); }
+    .copy-btn { background: none; border: none; cursor: pointer; font-size: 12px; padding: 2px 4px; }
+    .copy-btn:hover { background: var(--bg); border-radius: 4px; }
+</style>
+{% endblock %}

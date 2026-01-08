@@ -236,9 +236,17 @@ class TuneRepository:
         param_space: dict[str, Any],
         objective_metric: str,
         min_trades: int,
+        oos_ratio: Optional[float] = None,
+        objective_type: str = "sharpe",
+        objective_params: Optional[dict[str, Any]] = None,
+        gates: Optional[dict[str, Any]] = None,
     ) -> UUID:
         """
         Create a new tune record (status=queued).
+
+        Args:
+            gates: Gate policy snapshot (e.g., {"max_drawdown_pct": 20, "min_trades": 10, "evaluated_on": "oos"}).
+                   Persisted once at creation for audit/reproducibility.
 
         Returns:
             The new tune ID
@@ -247,9 +255,10 @@ class TuneRepository:
             INSERT INTO backtest_tunes (
                 workspace_id, strategy_entity_id, strategy_spec_id,
                 search_type, n_trials, seed, param_space,
-                objective_metric, min_trades, status
+                objective_metric, min_trades, oos_ratio,
+                objective_type, objective_params, gates, status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'queued')
             RETURNING id
         """
 
@@ -265,6 +274,10 @@ class TuneRepository:
                 json.dumps(param_space),
                 objective_metric,
                 min_trades,
+                oos_ratio,
+                objective_type,
+                json.dumps(objective_params) if objective_params else None,
+                json.dumps(gates) if gates else None,
             )
 
         logger.info(
@@ -321,35 +334,71 @@ class TuneRepository:
         self,
         tune_id: UUID,
         best_run_id: Optional[UUID],
+        best_score: Optional[float],
+        best_params: Optional[dict[str, Any]],
         leaderboard: list[dict[str, Any]],
         trials_completed: int,
     ) -> None:
-        """Mark tune as completed with results."""
-        query = """
-            UPDATE backtest_tunes
-            SET status = 'completed',
-                best_run_id = $2,
-                leaderboard = $3,
-                trials_completed = $4,
-                completed_at = NOW()
-            WHERE id = $1
         """
+        Mark tune as completed with results.
 
+        IMPORTANT: Does NOT overwrite 'canceled' status.
+        A canceled tune remains canceled even if all trials finish.
+        Best results are still persisted for partial results visibility.
+        """
         async with self.pool.acquire() as conn:
+            # First, check if tune is canceled - if so, only update results, not status
+            current = await conn.fetchrow(
+                "SELECT status FROM backtest_tunes WHERE id = $1", tune_id
+            )
+
+            if current and current["status"] == "canceled":
+                # Tune was canceled - preserve status but update best results
+                query = """
+                    UPDATE backtest_tunes
+                    SET best_run_id = $2,
+                        best_score = $3,
+                        best_params = $4,
+                        leaderboard = $5,
+                        trials_completed = $6
+                    WHERE id = $1
+                """
+                logger.info(
+                    "Tune was canceled, preserving status but updating best results",
+                    tune_id=str(tune_id),
+                    best_run_id=str(best_run_id) if best_run_id else None,
+                )
+            else:
+                # Normal completion - set status to completed
+                query = """
+                    UPDATE backtest_tunes
+                    SET status = 'completed',
+                        best_run_id = $2,
+                        best_score = $3,
+                        best_params = $4,
+                        leaderboard = $5,
+                        trials_completed = $6,
+                        completed_at = NOW()
+                    WHERE id = $1
+                """
+
             await conn.execute(
                 query,
                 tune_id,
                 best_run_id,
+                best_score,
+                json.dumps(best_params) if best_params else None,
                 json.dumps(leaderboard),
                 trials_completed,
             )
 
-        logger.info(
-            "Completed tune",
-            tune_id=str(tune_id),
-            best_run_id=str(best_run_id) if best_run_id else None,
-            trials_completed=trials_completed,
-        )
+        if not (current and current["status"] == "canceled"):
+            logger.info(
+                "Completed tune",
+                tune_id=str(tune_id),
+                best_run_id=str(best_run_id) if best_run_id else None,
+                trials_completed=trials_completed,
+            )
 
     async def create_tune_run(
         self,
@@ -390,19 +439,105 @@ class TuneRepository:
         self,
         tune_id: UUID,
         trial_index: int,
-        run_id: UUID,
+        run_id: Optional[UUID],
         score: Optional[float],
         status: str,
+        skip_reason: Optional[str] = None,
+        failed_reason: Optional[str] = None,
+        score_is: Optional[float] = None,
+        score_oos: Optional[float] = None,
+        metrics_is: Optional[dict[str, Any]] = None,
+        metrics_oos: Optional[dict[str, Any]] = None,
+        objective_score: Optional[float] = None,
     ) -> None:
         """Update tune_run with result after backtest completes."""
         query = """
             UPDATE backtest_tune_runs
-            SET run_id = $3, score = $4, status = $5
+            SET run_id = $3, score = $4, status = $5, skip_reason = $6,
+                failed_reason = $7, score_is = $8, score_oos = $9,
+                metrics_is = $10, metrics_oos = $11, objective_score = $12,
+                finished_at = NOW()
             WHERE tune_id = $1 AND trial_index = $2
         """
 
         async with self.pool.acquire() as conn:
-            await conn.execute(query, tune_id, trial_index, run_id, score, status)
+            await conn.execute(
+                query, tune_id, trial_index, run_id, score, status, skip_reason, failed_reason,
+                score_is, score_oos,
+                json.dumps(metrics_is) if metrics_is else None,
+                json.dumps(metrics_oos) if metrics_oos else None,
+                objective_score,
+            )
+
+    async def start_tune_run(
+        self,
+        tune_id: UUID,
+        trial_index: int,
+    ) -> None:
+        """Mark a tune_run as started (running)."""
+        query = """
+            UPDATE backtest_tune_runs
+            SET status = 'running', started_at = NOW()
+            WHERE tune_id = $1 AND trial_index = $2
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, tune_id, trial_index)
+
+    async def cancel_tune(self, tune_id: UUID) -> bool:
+        """
+        Cancel a tune - set status to canceled and skip remaining queued runs.
+
+        Returns:
+            True if tune was canceled, False if not found or already terminal
+        """
+        # Only cancel if queued or running
+        query = """
+            UPDATE backtest_tunes
+            SET status = 'canceled', completed_at = NOW()
+            WHERE id = $1 AND status IN ('queued', 'running')
+            RETURNING id
+        """
+
+        async with self.pool.acquire() as conn:
+            canceled = await conn.fetchval(query, tune_id)
+
+            if canceled:
+                # Mark all queued runs as skipped
+                await conn.execute(
+                    """
+                    UPDATE backtest_tune_runs
+                    SET status = 'skipped', skip_reason = 'canceled', finished_at = NOW()
+                    WHERE tune_id = $1 AND status = 'queued'
+                    """,
+                    tune_id,
+                )
+                logger.info("Canceled tune", tune_id=str(tune_id))
+
+        return canceled is not None
+
+    async def get_queued_trial_indices(self, tune_id: UUID) -> list[int]:
+        """Get list of queued trial indices for a tune."""
+        query = """
+            SELECT trial_index FROM backtest_tune_runs
+            WHERE tune_id = $1 AND status = 'queued'
+            ORDER BY trial_index
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, tune_id)
+
+        return [row["trial_index"] for row in rows]
+
+    async def count_running_trials(self, tune_id: UUID) -> int:
+        """Count currently running trials for a tune."""
+        query = """
+            SELECT COUNT(*) FROM backtest_tune_runs
+            WHERE tune_id = $1 AND status = 'running'
+        """
+
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(query, tune_id)
 
     async def get_tune(self, tune_id: UUID) -> Optional[dict[str, Any]]:
         """Get a tune by ID."""
@@ -422,21 +557,49 @@ class TuneRepository:
             result = dict(row)
 
             # Parse JSONB fields
-            for field in ["param_space", "leaderboard"]:
+            for field in ["param_space", "leaderboard", "objective_params", "gates"]:
                 if result.get(field) and isinstance(result[field], str):
                     result[field] = json.loads(result[field])
 
             return result
 
+    async def get_tune_status_counts(self, tune_id: UUID) -> dict[str, int]:
+        """Get status counts for tune runs."""
+        query = """
+            SELECT status, COUNT(*) as count
+            FROM backtest_tune_runs
+            WHERE tune_id = $1
+            GROUP BY status
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, tune_id)
+
+        counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0, "skipped": 0}
+        for row in rows:
+            if row["status"] in counts:
+                counts[row["status"]] = row["count"]
+
+        return counts
+
     async def list_tunes(
         self,
         workspace_id: UUID,
         strategy_entity_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        valid_only: bool = False,
+        objective_type: Optional[str] = None,
+        oos_enabled: Optional[bool] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         """
         List tunes with optional filtering.
+
+        Args:
+            valid_only: If True, only return tunes with best_run_id IS NOT NULL
+            objective_type: Filter by objective type (e.g., 'sharpe', 'sharpe_dd_penalty')
+            oos_enabled: If True, filter to tunes with OOS split; if False, filter to no split
 
         Returns:
             Tuple of (tunes list, total count)
@@ -450,6 +613,25 @@ class TuneRepository:
             params.append(strategy_entity_id)
             param_idx += 1
 
+        if status:
+            conditions.append(f"t.status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        if valid_only:
+            conditions.append("t.best_run_id IS NOT NULL")
+
+        if objective_type:
+            conditions.append(f"t.objective_type = ${param_idx}")
+            params.append(objective_type)
+            param_idx += 1
+
+        if oos_enabled is not None:
+            if oos_enabled:
+                conditions.append("t.oos_ratio IS NOT NULL AND t.oos_ratio > 0")
+            else:
+                conditions.append("(t.oos_ratio IS NULL OR t.oos_ratio = 0)")
+
         where_clause = " AND ".join(conditions)
 
         count_query = f"SELECT COUNT(*) FROM backtest_tunes t WHERE {where_clause}"
@@ -457,8 +639,9 @@ class TuneRepository:
         list_query = f"""
             SELECT t.id, t.created_at, t.strategy_entity_id, t.search_type,
                    t.n_trials, t.seed, t.objective_metric, t.min_trades,
-                   t.status, t.trials_completed, t.best_run_id, t.leaderboard,
-                   t.started_at, t.completed_at, t.error,
+                   t.status, t.trials_completed, t.best_run_id, t.best_score,
+                   t.best_params, t.leaderboard, t.started_at, t.completed_at, t.error,
+                   t.oos_ratio, t.objective_type, t.objective_params, t.gates,
                    e.name as strategy_name
             FROM backtest_tunes t
             LEFT JOIN kb_entities e ON t.strategy_entity_id = e.id
@@ -475,11 +658,122 @@ class TuneRepository:
         tunes = []
         for row in rows:
             tune = dict(row)
-            if tune.get("leaderboard") and isinstance(tune["leaderboard"], str):
-                tune["leaderboard"] = json.loads(tune["leaderboard"])
+            # Parse JSONB fields
+            for field in ["leaderboard", "objective_params", "gates"]:
+                if tune.get(field) and isinstance(tune[field], str):
+                    tune[field] = json.loads(tune[field])
             tunes.append(tune)
 
         return tunes, total
+
+    async def get_leaderboard(
+        self,
+        workspace_id: UUID,
+        strategy_entity_id: Optional[UUID] = None,
+        valid_only: bool = True,
+        objective_type: Optional[str] = None,
+        oos_enabled: Optional[bool] = None,
+        include_canceled: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """
+        Get leaderboard data: tunes with their best run metrics.
+
+        Joins backtest_tunes with backtest_tune_runs via best_run_id to get
+        the winning trial's objective_score, metrics_oos (return, sharpe, DD,
+        trades), and computes overfit gap (score_is - score_oos).
+
+        Args:
+            valid_only: Only include tunes with best_run_id (default True for leaderboard)
+            include_canceled: Include canceled tunes (default False). Note: canceled
+                tunes CAN have best_run_id if trials completed before cancellation.
+                With valid_only=True + include_canceled=True, you get "canceled but
+                had valid results" tunes. With valid_only=False + include_canceled=True,
+                you get everything including incomplete canceled tunes.
+
+        Returns:
+            Tuple of (leaderboard entries, total count)
+
+        Ordering:
+            Primary: objective_score DESC (or fallback: score_oos, best_score)
+            Tie-breakers: created_at DESC, id ASC (deterministic)
+        """
+        conditions = ["t.workspace_id = $1"]
+        params = [workspace_id]
+        param_idx = 2
+
+        if strategy_entity_id:
+            conditions.append(f"t.strategy_entity_id = ${param_idx}")
+            params.append(strategy_entity_id)
+            param_idx += 1
+
+        if valid_only:
+            conditions.append("t.best_run_id IS NOT NULL")
+
+        if not include_canceled:
+            conditions.append("t.status != 'canceled'")
+
+        if objective_type:
+            conditions.append(f"t.objective_type = ${param_idx}")
+            params.append(objective_type)
+            param_idx += 1
+
+        if oos_enabled is not None:
+            if oos_enabled:
+                conditions.append("t.oos_ratio IS NOT NULL AND t.oos_ratio > 0")
+            else:
+                conditions.append("(t.oos_ratio IS NULL OR t.oos_ratio = 0)")
+
+        where_clause = " AND ".join(conditions)
+
+        count_query = f"SELECT COUNT(*) FROM backtest_tunes t WHERE {where_clause}"
+
+        # Join with best run to get metrics
+        list_query = f"""
+            SELECT t.id, t.created_at, t.strategy_entity_id, t.objective_metric,
+                   t.objective_type, t.objective_params, t.oos_ratio, t.gates,
+                   t.status, t.best_run_id, t.best_score,
+                   e.name as strategy_name,
+                   -- Best run metrics from tune_runs
+                   tr.objective_score as best_objective_score,
+                   tr.score_is, tr.score_oos,
+                   tr.metrics_oos as best_metrics_oos
+            FROM backtest_tunes t
+            LEFT JOIN kb_entities e ON t.strategy_entity_id = e.id
+            LEFT JOIN backtest_tune_runs tr ON t.id = tr.tune_id AND tr.run_id = t.best_run_id
+            WHERE {where_clause}
+            ORDER BY COALESCE(tr.objective_score, tr.score_oos, t.best_score) DESC NULLS LAST,
+                     t.created_at DESC,
+                     t.id ASC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        params.extend([limit, offset])
+
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval(count_query, *params[:-2])
+            rows = await conn.fetch(list_query, *params)
+
+        entries = []
+        for row in rows:
+            entry = dict(row)
+
+            # Parse JSONB fields
+            for field in ["objective_params", "gates", "best_metrics_oos"]:
+                if entry.get(field) and isinstance(entry[field], str):
+                    entry[field] = json.loads(entry[field])
+
+            # Compute overfit gap if both scores available
+            score_is = entry.get("score_is")
+            score_oos = entry.get("score_oos")
+            if score_is is not None and score_oos is not None:
+                entry["overfit_gap"] = round(score_is - score_oos, 4)
+            else:
+                entry["overfit_gap"] = None
+
+            entries.append(entry)
+
+        return entries, total
 
     async def list_tune_runs(
         self,
@@ -507,12 +801,16 @@ class TuneRepository:
 
         count_query = f"SELECT COUNT(*) FROM backtest_tune_runs tr WHERE {where_clause}"
 
+        # Order by: objective_score (composite) → score_oos (OOS) → score (raw)
         list_query = f"""
             SELECT tr.tune_id, tr.run_id, tr.trial_index, tr.params,
-                   tr.score, tr.status, tr.created_at
+                   tr.score, tr.score_is, tr.score_oos, tr.objective_score,
+                   tr.status, tr.skip_reason, tr.failed_reason,
+                   tr.metrics_is, tr.metrics_oos,
+                   tr.started_at, tr.finished_at, tr.created_at
             FROM backtest_tune_runs tr
             WHERE {where_clause}
-            ORDER BY tr.score DESC NULLS LAST, tr.trial_index ASC
+            ORDER BY COALESCE(tr.objective_score, tr.score_oos, tr.score) DESC NULLS LAST, tr.trial_index ASC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
         params.extend([limit, offset])
@@ -524,8 +822,10 @@ class TuneRepository:
         runs = []
         for row in rows:
             run = dict(row)
-            if run.get("params") and isinstance(run["params"], str):
-                run["params"] = json.loads(run["params"])
+            # Parse JSONB fields
+            for field in ["params", "metrics_is", "metrics_oos"]:
+                if run.get(field) and isinstance(run[field], str):
+                    run[field] = json.loads(run[field])
             runs.append(run)
 
         return runs, total

@@ -1,0 +1,350 @@
+{% extends "layout.html" %}
+
+{% block title %}Tune Sessions - KB Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Parameter Tuning Sessions</h2>
+        <div class="header-right">
+            <span id="refresh-indicator" class="refresh-indicator" style="display: none;">
+                <span class="spinner"></span> Auto-refreshing
+            </span>
+            <span class="pagination-info">{{ total }} total</span>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        <select name="status" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            <option value="queued" {% if status_filter == 'queued' %}selected{% endif %}>Queued</option>
+            <option value="running" {% if status_filter == 'running' %}selected{% endif %}>Running</option>
+            <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="canceled" {% if status_filter == 'canceled' %}selected{% endif %}>Canceled</option>
+            <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
+        </select>
+        <label class="filter-checkbox" title="Only show tunes with valid results">
+            <input type="checkbox" name="valid_only" value="true" {% if valid_only %}checked{% endif %} onchange="this.form.submit()">
+            Valid only
+        </label>
+        <select name="objective_type" onchange="this.form.submit()">
+            <option value="">All Objectives</option>
+            <option value="sharpe" {% if objective_type_filter == 'sharpe' %}selected{% endif %}>sharpe</option>
+            <option value="sharpe_dd_penalty" {% if objective_type_filter == 'sharpe_dd_penalty' %}selected{% endif %}>sharpe_dd_penalty</option>
+            <option value="return" {% if objective_type_filter == 'return' %}selected{% endif %}>return</option>
+            <option value="return_dd_penalty" {% if objective_type_filter == 'return_dd_penalty' %}selected{% endif %}>return_dd_penalty</option>
+            <option value="calmar" {% if objective_type_filter == 'calmar' %}selected{% endif %}>calmar</option>
+        </select>
+        <select name="oos_enabled" onchange="this.form.submit()">
+            <option value="">All OOS</option>
+            <option value="true" {% if oos_enabled_filter == 'true' %}selected{% endif %}>With OOS</option>
+            <option value="false" {% if oos_enabled_filter == 'false' %}selected{% endif %}>IS only</option>
+        </select>
+    </form>
+
+    {% if error %}
+    <div class="empty-state">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+    {% elif tunes %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Created</th>
+                    <th>Status</th>
+                    <th>Validity</th>
+                    <th>Strategy</th>
+                    <th>Objective</th>
+                    <th>OOS</th>
+                    <th>Gates</th>
+                    <th>Trials</th>
+                    <th>Best Score</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tune in tunes %}
+                <tr class="clickable-row" data-href="/admin/backtests/tunes/{{ tune.id }}">
+                    <td>
+                        <span class="relative-time" data-timestamp="{{ tune.created_at.isoformat() }}" title="{{ tune.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                            {{ tune.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ tune.status }}">{{ tune.status }}</span>
+                    </td>
+                    <td>
+                        {# Validity badge #}
+                        {% if tune.status == 'canceled' %}
+                        <span class="validity-badge validity-canceled" title="Tune was canceled">Canceled</span>
+                        {% elif tune.status in ['completed', 'failed'] %}
+                            {% if tune.best_run_id %}
+                            <span class="validity-badge validity-valid" title="At least one trial passed gates">Valid</span>
+                            {% else %}
+                            <span class="validity-badge validity-invalid" title="No trials passed gates">Invalid</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if tune.strategy_name %}
+                            <a href="/admin/kb/entities/{{ tune.strategy_entity_id }}" onclick="event.stopPropagation()">{{ tune.strategy_name }}</a>
+                        {% else %}
+                            <span class="text-muted">{{ tune.strategy_entity_id[:8] }}...</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {# Objective badge #}
+                        {% if tune.objective_type and tune.objective_type != 'sharpe' %}
+                        <span class="objective-badge" title="{{ tune.objective_type }}">{{ tune.objective_type }}</span>
+                        {% else %}
+                        <span class="text-muted">sharpe</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {# OOS ratio #}
+                        {% if tune.oos_ratio %}
+                        <span class="oos-badge">{{ "%.0f"|format(tune.oos_ratio * 100) }}%</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {# Gates summary #}
+                        {% if tune.gates %}
+                        <span class="gates-compact" title="DD ≤ {{ tune.gates.max_drawdown_pct }}%, Trades ≥ {{ tune.gates.min_trades }}, Eval: {{ tune.gates.evaluated_on }}">
+                            DD≤{{ tune.gates.max_drawdown_pct }} T≥{{ tune.gates.min_trades }}
+                        </span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if tune.counts %}
+                        <span class="trials-breakdown">
+                            <span class="trial-stat valid" title="Valid (completed)">{{ tune.counts.completed }}</span>
+                            {% if tune.counts.skipped > 0 %}
+                            <span class="trial-stat skipped" title="Skipped">{{ tune.counts.skipped }}</span>
+                            {% endif %}
+                            {% if tune.counts.failed > 0 %}
+                            <span class="trial-stat failed" title="Failed">{{ tune.counts.failed }}</span>
+                            {% endif %}
+                            {% if tune.counts.running > 0 %}
+                            <span class="trial-stat running" title="Running">{{ tune.counts.running }}</span>
+                            {% endif %}
+                            {% if tune.counts.queued > 0 %}
+                            <span class="trial-stat queued" title="Queued">{{ tune.counts.queued }}</span>
+                            {% endif %}
+                            <span class="trial-total">/ {{ tune.n_trials }}</span>
+                        </span>
+                        {% else %}
+                            {{ tune.trials_completed }} / {{ tune.n_trials }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if tune.best_score is not none %}
+                            <strong>{{ "%.4f"|format(tune.best_score) }}</strong>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="row-actions">
+                            <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('{{ tune.id }}')" title="Copy tune ID">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            </button>
+                            <a href="/admin/backtests/tunes/{{ tune.id }}" class="btn btn-secondary" onclick="event.stopPropagation()">View</a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&valid_only={{ 'true' if valid_only else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&valid_only={{ 'true' if valid_only else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No tuning sessions found</h3>
+        <p>{% if valid_only or objective_type_filter or oos_enabled_filter %}No tunes match the current filters.{% else %}Start a parameter tune to see results here.{% endif %}</p>
+        {% if not (valid_only or objective_type_filter or oos_enabled_filter) %}
+        <div class="empty-hint">
+            <code>POST /backtests/tune</code>
+            <pre>{
+  "workspace_id": "{{ workspace_id }}",
+  "strategy_entity_id": "&lt;strategy-uuid&gt;",
+  "search_type": "grid",
+  "n_trials": 10
+}</pre>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .refresh-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--info); }
+    .spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--info); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .filter-checkbox { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+    .filter-checkbox input { cursor: pointer; }
+
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { position: sticky; top: 0; background: var(--bg-secondary); z-index: 10; }
+    thead th { border-bottom: 2px solid var(--border); white-space: nowrap; }
+
+    .clickable-row { cursor: pointer; transition: background 0.15s; }
+    .clickable-row:hover { background: rgba(56, 139, 253, 0.15); }
+
+    .badge-queued { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-skipped { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+    .badge-canceled { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .text-muted { color: var(--text-muted); }
+
+    .validity-badge { padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .validity-valid { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .validity-invalid { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+    .validity-canceled { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+
+    .objective-badge {
+        background: rgba(255, 166, 87, 0.2);
+        color: #f7a141;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .oos-badge {
+        background: rgba(136, 87, 229, 0.2);
+        color: #a371f7;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .gates-compact {
+        font-size: 11px;
+        font-family: 'SF Mono', Consolas, monospace;
+        color: var(--text-muted);
+    }
+
+    .trials-breakdown { display: flex; gap: 4px; align-items: center; }
+    .trial-stat { padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .trial-stat.valid { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .trial-stat.skipped { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+    .trial-stat.failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .trial-stat.running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .trial-stat.queued { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .trial-total { color: var(--text-muted); font-size: 12px; margin-left: 2px; }
+
+    .params-compact { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; }
+
+    .row-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+    .copy-btn { background: none; border: none; cursor: pointer; padding: 4px; color: var(--text-muted); border-radius: 4px; opacity: 0; transition: opacity 0.15s, background 0.15s; }
+    .clickable-row:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { background: var(--bg); color: var(--text); }
+
+    .empty-hint { margin-top: 16px; text-align: left; display: inline-block; }
+    .empty-hint code { background: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+    .empty-hint pre { background: var(--bg); padding: 12px; border-radius: 6px; font-size: 12px; margin-top: 8px; text-align: left; overflow-x: auto; }
+</style>
+
+<script>
+// Clickable rows with Ctrl/Cmd+click for new tab
+document.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const href = row.dataset.href;
+        if (e.ctrlKey || e.metaKey) {
+            window.open(href, '_blank');
+        } else {
+            window.location.href = href;
+        }
+    });
+});
+
+// Copy to clipboard
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback could be added here
+    });
+}
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000); // Update every minute
+
+// Auto-refresh while any tune is running/queued
+const hasRunning = {{ 'true' if tunes and tunes|selectattr('status', 'in', ['running', 'queued'])|list else 'false' }};
+let refreshInterval = null;
+
+if (hasRunning) {
+    document.getElementById('refresh-indicator').style.display = 'flex';
+    refreshInterval = setInterval(() => {
+        window.location.reload();
+    }, 2000);
+}
+
+// Stop refresh on visibility change (tab hidden)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden && refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    } else if (!document.hidden && hasRunning && !refreshInterval) {
+        refreshInterval = setInterval(() => window.location.reload(), 2000);
+    }
+});
+</script>
+{% endblock %}

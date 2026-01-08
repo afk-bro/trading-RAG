@@ -21,8 +21,11 @@ def _json_serializable(obj: Any) -> Any:
     elif isinstance(obj, UUID):
         return str(obj)
     return obj
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings, get_settings
@@ -448,5 +451,858 @@ async def admin_claims_list(
             "has_next": offset + limit < total,
             "prev_offset": max(0, offset - limit),
             "next_offset": offset + limit,
+        },
+    )
+
+
+# ===========================================
+# Backtest Tune Admin Routes
+# ===========================================
+
+
+def _get_tune_repo():
+    """Get TuneRepository instance."""
+    from app.repositories.backtests import TuneRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return TuneRepository(_db_pool)
+
+
+@router.get("/backtests/tunes", response_class=HTMLResponse)
+async def admin_tunes_list(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    status: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    valid_only: bool = Query(False, description="Only show valid tunes"),
+    objective_type: Optional[str] = Query(None, description="Filter by objective type"),
+    oos_enabled: Optional[str] = Query(None, description="Filter by OOS: 'true', 'false', or empty"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(verify_admin_access),
+):
+    """List parameter tuning sessions."""
+    tune_repo = _get_tune_repo()
+
+    # If no workspace specified, get first available
+    if not workspace_id:
+        try:
+            async with _db_pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
+                if row:
+                    workspace_id = row["id"]
+        except Exception as e:
+            logger.warning("Could not fetch default workspace", error=str(e))
+
+    if not workspace_id:
+        return templates.TemplateResponse(
+            "tunes_list.html",
+            {
+                "request": request,
+                "tunes": [],
+                "total": 0,
+                "workspace_id": None,
+                "error": "No workspace found.",
+            },
+        )
+
+    # Convert oos_enabled string to bool (query params come as strings)
+    oos_enabled_bool = None
+    if oos_enabled == "true":
+        oos_enabled_bool = True
+    elif oos_enabled == "false":
+        oos_enabled_bool = False
+
+    tunes, total = await tune_repo.list_tunes(
+        workspace_id=workspace_id,
+        status=status,
+        valid_only=valid_only,
+        objective_type=objective_type if objective_type else None,
+        oos_enabled=oos_enabled_bool,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Get counts for each tune
+    enriched_tunes = []
+    for tune in tunes:
+        counts = await tune_repo.get_tune_status_counts(tune["id"])
+
+        # Parse best_params if needed
+        best_params = tune.get("best_params")
+        if isinstance(best_params, str):
+            try:
+                best_params = json.loads(best_params)
+            except json.JSONDecodeError:
+                best_params = None
+
+        tune["counts"] = counts
+        tune["best_params"] = best_params
+        enriched_tunes.append(tune)
+
+    return templates.TemplateResponse(
+        "tunes_list.html",
+        {
+            "request": request,
+            "tunes": enriched_tunes,
+            "total": total,
+            "workspace_id": str(workspace_id),
+            "status_filter": status or "",
+            "valid_only": valid_only,
+            "objective_type_filter": objective_type or "",
+            "oos_enabled_filter": oos_enabled or "",
+            "limit": limit,
+            "offset": offset,
+            "has_prev": offset > 0,
+            "has_next": offset + limit < total,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
+        },
+    )
+
+
+@router.get("/backtests/leaderboard")
+async def admin_leaderboard(
+    request: Request,
+    workspace_id: UUID = Query(..., description="Workspace UUID"),
+    valid_only: bool = Query(True, description="Only tunes with valid results (default True)"),
+    include_canceled: bool = Query(False, description="Include canceled tunes"),
+    objective_type: Optional[str] = Query(None, description="Filter by objective type"),
+    oos_enabled: Optional[str] = Query(None, description="Filter by OOS: 'true' or 'false'"),
+    format: Optional[str] = Query(None, description="Output format: 'csv' for download"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(verify_admin_access),
+):
+    """Global leaderboard: best tunes ranked by objective score."""
+    tune_repo = _get_tune_repo()
+
+    # Parse oos_enabled filter
+    oos_enabled_bool = None
+    if oos_enabled is not None:
+        oos_enabled_bool = oos_enabled.lower() == "true"
+
+    entries, total = await tune_repo.get_leaderboard(
+        workspace_id=workspace_id,
+        valid_only=valid_only,
+        objective_type=objective_type,
+        oos_enabled=oos_enabled_bool,
+        include_canceled=include_canceled,
+        limit=limit,
+        offset=offset,
+    )
+
+    # CSV Export
+    if format == "csv":
+        return _generate_leaderboard_csv(
+            entries,
+            offset,
+            workspace_id=str(workspace_id)[:8],
+            objective_type=objective_type,
+        )
+
+    # Convert and enrich entries for template
+    enriched_entries = []
+    for entry in entries:
+        e = dict(entry)
+        e["tune_id"] = str(e["id"])
+        e["strategy_entity_id"] = str(e["strategy_entity_id"])
+        if e.get("best_run_id"):
+            e["best_run_id"] = str(e["best_run_id"])
+
+        # Parse gates snapshot if present
+        if e.get("gates") and isinstance(e["gates"], dict):
+            pass  # Already a dict
+        elif e.get("gates") and isinstance(e["gates"], str):
+            try:
+                e["gates"] = json.loads(e["gates"])
+            except json.JSONDecodeError:
+                e["gates"] = None
+
+        # Parse best_metrics_oos to object for template
+        if e.get("best_metrics_oos"):
+            class MetricsObj:
+                def __init__(self, d):
+                    self.return_pct = d.get("return_pct")
+                    self.sharpe = d.get("sharpe")
+                    self.max_drawdown_pct = d.get("max_drawdown_pct")
+                    self.trades = d.get("trades")
+            e["best_metrics_oos"] = MetricsObj(e["best_metrics_oos"])
+
+        enriched_entries.append(e)
+
+    return templates.TemplateResponse(
+        "leaderboard.html",
+        {
+            "request": request,
+            "entries": enriched_entries,
+            "total": total,
+            "workspace_id": str(workspace_id),
+            "valid_only": valid_only,
+            "include_canceled": include_canceled,
+            "objective_type_filter": objective_type or "",
+            "oos_enabled_filter": oos_enabled or "",
+            "limit": limit,
+            "offset": offset,
+            "has_prev": offset > 0,
+            "has_next": offset + limit < total,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
+        },
+    )
+
+
+def _generate_leaderboard_csv(
+    entries: list[dict],
+    offset: int = 0,
+    workspace_id: str = "",
+    objective_type: Optional[str] = None,
+) -> StreamingResponse:
+    """Generate CSV export of leaderboard entries."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # CSV columns as specified
+    headers = [
+        # Core identifiers
+        "rank",
+        "tune_id",
+        "created_at",
+        "status",
+        "strategy_entity_id",
+        "strategy_name",
+        # Config snapshot
+        "objective_type",
+        "objective_params",
+        "oos_ratio",
+        "gates_max_drawdown_pct",
+        "gates_min_trades",
+        "gates_evaluated_on",
+        # Winner fields
+        "best_run_id",
+        "best_params",
+        "best_objective_score",
+        "best_score",
+        # OOS metrics
+        "return_pct",
+        "sharpe",
+        "max_drawdown_pct",
+        "trades",
+        "profit_factor",
+        # Robustness
+        "overfit_gap",
+    ]
+    writer.writerow(headers)
+
+    for idx, entry in enumerate(entries):
+        # Parse JSONB fields if needed
+        gates = entry.get("gates") or {}
+        if isinstance(gates, str):
+            try:
+                gates = json.loads(gates)
+            except json.JSONDecodeError:
+                gates = {}
+
+        metrics_oos = entry.get("best_metrics_oos") or {}
+        if isinstance(metrics_oos, str):
+            try:
+                metrics_oos = json.loads(metrics_oos)
+            except json.JSONDecodeError:
+                metrics_oos = {}
+
+        objective_params = entry.get("objective_params")
+        if isinstance(objective_params, dict):
+            objective_params = json.dumps(objective_params)
+
+        best_params = entry.get("best_params")
+        if isinstance(best_params, dict):
+            best_params = json.dumps(best_params)
+
+        # Compute overfit gap
+        score_is = entry.get("score_is")
+        score_oos = entry.get("score_oos")
+        overfit_gap = None
+        if score_is is not None and score_oos is not None:
+            overfit_gap = round(score_is - score_oos, 4)
+
+        row = [
+            offset + idx + 1,  # rank (1-indexed)
+            str(entry.get("id", "")),
+            entry.get("created_at", "").isoformat() if entry.get("created_at") else "",
+            entry.get("status", ""),
+            str(entry.get("strategy_entity_id", "")),
+            entry.get("strategy_name", ""),
+            entry.get("objective_type", "sharpe"),
+            objective_params or "",
+            entry.get("oos_ratio", ""),
+            gates.get("max_drawdown_pct", ""),
+            gates.get("min_trades", ""),
+            gates.get("evaluated_on", ""),
+            str(entry.get("best_run_id", "")) if entry.get("best_run_id") else "",
+            best_params or "",
+            entry.get("best_objective_score", ""),
+            entry.get("best_score", ""),
+            metrics_oos.get("return_pct", ""),
+            metrics_oos.get("sharpe", ""),
+            metrics_oos.get("max_drawdown_pct", ""),
+            metrics_oos.get("trades", ""),
+            metrics_oos.get("profit_factor", ""),
+            overfit_gap if overfit_gap is not None else "",
+        ]
+        writer.writerow(row)
+
+    output.seek(0)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+    # Build descriptive filename
+    parts = ["leaderboard"]
+    if workspace_id:
+        parts.append(workspace_id)
+    if objective_type:
+        parts.append(objective_type)
+    parts.append(timestamp)
+    filename = "_".join(parts) + ".csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
+
+
+# =============================================================================
+# Tune Compare helpers
+# =============================================================================
+
+def _normalize_compare_value(value: Any, fmt: str = "default") -> str:
+    """Normalize value for display and comparison."""
+    if value is None:
+        return "—"
+    if fmt == "pct":
+        return f"{value:+.2f}%" if isinstance(value, (int, float)) else str(value)
+    if fmt == "pct_neg":
+        # For drawdown (already negative or should show as negative)
+        v = -abs(value) if isinstance(value, (int, float)) else value
+        return f"{v:.1f}%"
+    if fmt == "float2":
+        return f"{value:.2f}" if isinstance(value, (int, float)) else str(value)
+    if fmt == "float4":
+        return f"{value:.4f}" if isinstance(value, (int, float)) else str(value)
+    if fmt == "int":
+        return str(int(value)) if isinstance(value, (int, float)) else str(value)
+    if fmt == "pct_ratio":
+        return f"{value * 100:.0f}%" if isinstance(value, (int, float)) else str(value)
+    return str(value)
+
+
+def _values_differ(values: list[str]) -> bool:
+    """Check if normalized values differ across tunes."""
+    non_missing = [v for v in values if v != "—"]
+    if len(non_missing) <= 1:
+        # All missing or only one has value = differ
+        return len(set(values)) > 1
+    return len(set(non_missing)) > 1
+
+
+def _overfit_class(gap: Optional[float]) -> str:
+    """CSS class for overfit gap severity."""
+    if gap is None:
+        return ""
+    if gap < 0:
+        return "overfit-good"  # OOS better than IS (rare but good)
+    if gap <= 0.3:
+        return ""  # Normal
+    if gap <= 0.5:
+        return "overfit-warning"
+    return "overfit-danger"
+
+
+async def _fetch_tune_for_compare(tune_id: UUID) -> Optional[dict[str, Any]]:
+    """Fetch tune with best run metrics for comparison."""
+    if _db_pool is None:
+        return None
+
+    query = """
+        SELECT t.id, t.created_at, t.status, t.workspace_id,
+               t.strategy_entity_id, t.objective_metric, t.objective_type,
+               t.objective_params, t.oos_ratio, t.gates,
+               t.best_run_id, t.best_score, t.best_params,
+               e.name as strategy_name,
+               -- Best run metrics
+               tr.objective_score as best_objective_score,
+               tr.score_is, tr.score_oos,
+               tr.metrics_oos as best_metrics_oos
+        FROM backtest_tunes t
+        LEFT JOIN kb_entities e ON t.strategy_entity_id = e.id
+        LEFT JOIN backtest_tune_runs tr ON t.id = tr.tune_id AND tr.run_id = t.best_run_id
+        WHERE t.id = $1
+    """
+
+    async with _db_pool.acquire() as conn:
+        row = await conn.fetchrow(query, tune_id)
+        if not row:
+            return None
+
+        result = dict(row)
+
+        # Parse JSONB fields
+        for field in ["objective_params", "gates", "best_params", "best_metrics_oos"]:
+            if result.get(field) and isinstance(result[field], str):
+                try:
+                    result[field] = json.loads(result[field])
+                except json.JSONDecodeError:
+                    result[field] = None
+
+        # Compute overfit gap
+        score_is = result.get("score_is")
+        score_oos = result.get("score_oos")
+        if score_is is not None and score_oos is not None:
+            result["overfit_gap"] = round(score_is - score_oos, 4)
+        else:
+            result["overfit_gap"] = None
+
+        # Convert UUIDs
+        result["id"] = str(result["id"])
+        result["workspace_id"] = str(result["workspace_id"])
+        result["strategy_entity_id"] = str(result["strategy_entity_id"])
+        if result.get("best_run_id"):
+            result["best_run_id"] = str(result["best_run_id"])
+
+        return result
+
+
+@router.get("/backtests/compare")
+async def admin_tune_compare(
+    request: Request,
+    tune_id: list[UUID] = Query(..., description="Tune IDs to compare (2+)"),
+    workspace_id: Optional[UUID] = Query(None, description="Workspace UUID (optional)"),
+    format: Optional[str] = Query(None, description="Output format: 'json' for download"),
+    _: bool = Depends(verify_admin_access),
+):
+    """Compare two or more parameter tuning sessions side-by-side."""
+
+    # Require at least 2 tunes
+    if len(tune_id) < 2:
+        return templates.TemplateResponse(
+            "compare.html",
+            {
+                "request": request,
+                "error": "Compare requires at least 2 tune IDs",
+                "hint": "Example: /admin/backtests/compare?tune_id=<A>&tune_id=<B>",
+                "tunes": [],
+                "rows": [],
+                "workspace_id": str(workspace_id) if workspace_id else "",
+            },
+        )
+
+    # Fetch all tunes
+    tunes = []
+    for tid in tune_id:
+        tune = await _fetch_tune_for_compare(tid)
+        if tune:
+            tunes.append(tune)
+        else:
+            return templates.TemplateResponse(
+                "compare.html",
+                {
+                    "request": request,
+                    "error": f"Tune {tid} not found",
+                    "tunes": [],
+                    "rows": [],
+                    "workspace_id": str(workspace_id) if workspace_id else "",
+                },
+            )
+
+    # Use workspace from first tune if not provided
+    if not workspace_id:
+        workspace_id = tunes[0]["workspace_id"]
+
+    # Build comparison rows
+    rows = []
+
+    # --- Section: Identity ---
+    rows.append({"section": "Identity", "is_header": True})
+
+    rows.append({
+        "label": "Strategy",
+        "values": [t.get("strategy_name") or t["strategy_entity_id"][:8] + "..." for t in tunes],
+        "fmt": "default",
+    })
+    rows.append({
+        "label": "Status",
+        "values": [t["status"] for t in tunes],
+        "fmt": "default",
+    })
+    rows.append({
+        "label": "Objective Type",
+        "values": [t.get("objective_type") or "sharpe" for t in tunes],
+        "fmt": "default",
+    })
+
+    # Extract dd_lambda from objective_params
+    dd_lambdas = []
+    for t in tunes:
+        params = t.get("objective_params") or {}
+        dd_lambdas.append(params.get("dd_lambda"))
+    rows.append({
+        "label": "λ (dd_lambda)",
+        "values": [_normalize_compare_value(v, "float2") for v in dd_lambdas],
+        "raw_values": dd_lambdas,
+        "fmt": "float2",
+    })
+
+    rows.append({
+        "label": "OOS Ratio",
+        "values": [_normalize_compare_value(t.get("oos_ratio"), "pct_ratio") for t in tunes],
+        "raw_values": [t.get("oos_ratio") for t in tunes],
+        "fmt": "pct_ratio",
+    })
+
+    # Gates
+    rows.append({
+        "label": "Gates: Max DD",
+        "values": [_normalize_compare_value((t.get("gates") or {}).get("max_drawdown_pct"), "int") + "%"
+                   if (t.get("gates") or {}).get("max_drawdown_pct") is not None else "—" for t in tunes],
+        "raw_values": [(t.get("gates") or {}).get("max_drawdown_pct") for t in tunes],
+        "fmt": "default",
+    })
+    rows.append({
+        "label": "Gates: Min Trades",
+        "values": [_normalize_compare_value((t.get("gates") or {}).get("min_trades"), "int") for t in tunes],
+        "raw_values": [(t.get("gates") or {}).get("min_trades") for t in tunes],
+        "fmt": "int",
+    })
+    rows.append({
+        "label": "Gates: Evaluated On",
+        "values": [(t.get("gates") or {}).get("evaluated_on") or "—" for t in tunes],
+        "fmt": "default",
+    })
+
+    # --- Section: Winning Metrics ---
+    rows.append({"section": "Winning Metrics", "is_header": True})
+
+    # Extract metrics from best_metrics_oos
+    for t in tunes:
+        t["_metrics"] = t.get("best_metrics_oos") or {}
+
+    rows.append({
+        "label": "Objective Score",
+        "values": [_normalize_compare_value(t.get("best_objective_score") or t.get("score_oos") or t.get("best_score"), "float4") for t in tunes],
+        "fmt": "float4",
+    })
+    rows.append({
+        "label": "Return %",
+        "values": [_normalize_compare_value(t["_metrics"].get("return_pct"), "pct") for t in tunes],
+        "raw_values": [t["_metrics"].get("return_pct") for t in tunes],
+        "fmt": "pct",
+    })
+    rows.append({
+        "label": "Sharpe",
+        "values": [_normalize_compare_value(t["_metrics"].get("sharpe"), "float2") for t in tunes],
+        "raw_values": [t["_metrics"].get("sharpe") for t in tunes],
+        "fmt": "float2",
+    })
+    rows.append({
+        "label": "Max DD %",
+        "values": [_normalize_compare_value(t["_metrics"].get("max_drawdown_pct"), "pct_neg") for t in tunes],
+        "raw_values": [t["_metrics"].get("max_drawdown_pct") for t in tunes],
+        "fmt": "pct_neg",
+    })
+    rows.append({
+        "label": "Trades",
+        "values": [_normalize_compare_value(t["_metrics"].get("trades"), "int") for t in tunes],
+        "raw_values": [t["_metrics"].get("trades") for t in tunes],
+        "fmt": "int",
+    })
+
+    # Overfit gap with special styling
+    overfit_gaps = [t.get("overfit_gap") for t in tunes]
+    rows.append({
+        "label": "Overfit Gap",
+        "values": [_normalize_compare_value(g, "float4") for g in overfit_gaps],
+        "raw_values": overfit_gaps,
+        "classes": [_overfit_class(g) for g in overfit_gaps],
+        "fmt": "float4",
+    })
+
+    # --- Section: Best Params ---
+    rows.append({"section": "Best Params", "is_header": True})
+
+    # Union of all param keys
+    all_param_keys = set()
+    for t in tunes:
+        params = t.get("best_params") or {}
+        all_param_keys.update(params.keys())
+
+    for key in sorted(all_param_keys):
+        param_values = []
+        for t in tunes:
+            params = t.get("best_params") or {}
+            val = params.get(key)
+            if val is None:
+                param_values.append("—")
+            elif isinstance(val, float):
+                param_values.append(f"{val:.4g}")
+            else:
+                param_values.append(str(val))
+        rows.append({
+            "label": key,
+            "values": param_values,
+            "is_param": True,
+            "fmt": "default",
+        })
+
+    # Mark differing rows
+    for row in rows:
+        if row.get("is_header"):
+            continue
+        row["differs"] = _values_differ(row.get("values", []))
+
+    # JSON Export
+    if format == "json":
+        return _generate_compare_json(tunes, rows)
+
+    return templates.TemplateResponse(
+        "compare.html",
+        {
+            "request": request,
+            "tunes": tunes,
+            "rows": rows,
+            "tune_ids": [str(tid) for tid in tune_id],
+            "workspace_id": str(workspace_id) if workspace_id else tunes[0]["workspace_id"],
+        },
+    )
+
+
+def _generate_compare_json(tunes: list[dict], rows: list[dict]) -> JSONResponse:
+    """Generate JSON export of compare data."""
+    labels = ["A", "B", "C", "D", "E", "F", "G", "H"]  # Support up to 8 tunes
+
+    tune_exports = []
+    for idx, tune in enumerate(tunes):
+        metrics_oos = tune.get("best_metrics_oos") or {}
+        if isinstance(metrics_oos, str):
+            try:
+                metrics_oos = json.loads(metrics_oos)
+            except json.JSONDecodeError:
+                metrics_oos = {}
+
+        tune_export = {
+            "tune_id": tune.get("id"),
+            "label": labels[idx] if idx < len(labels) else str(idx + 1),
+            "status": tune.get("status"),
+            "strategy": {
+                "entity_id": tune.get("strategy_entity_id"),
+                "name": tune.get("strategy_name"),
+            },
+            "objective": {
+                "type": tune.get("objective_type") or "sharpe",
+                "params": tune.get("objective_params"),
+            },
+            "oos_ratio": tune.get("oos_ratio"),
+            "gates": tune.get("gates"),
+            "best": {
+                "run_id": tune.get("best_run_id"),
+                "objective_score": tune.get("best_objective_score"),
+                "score": tune.get("best_score"),
+                "score_is": tune.get("score_is"),
+                "score_oos": tune.get("score_oos"),
+                "overfit_gap": tune.get("overfit_gap"),
+                "metrics_oos": metrics_oos,
+                "params": tune.get("best_params"),
+            },
+            "created_at": tune.get("created_at").isoformat() if tune.get("created_at") else None,
+        }
+        tune_exports.append(tune_export)
+
+    # Build simplified rows for JSON (skip is_header rows, convert to diff format)
+    row_exports = []
+    current_section = None
+    for row in rows:
+        if row.get("is_header"):
+            current_section = row.get("section")
+            continue
+
+        row_export = {
+            "section": current_section,
+            "field": row.get("label"),
+            "values": row.get("values", []),
+            "diff": row.get("differs", False),
+        }
+        row_exports.append(row_export)
+
+    export_data = {
+        "generated_at": datetime.now().isoformat(),
+        "tunes": tune_exports,
+        "rows": row_exports,
+    }
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+    # Build filename with tune ID prefixes (e.g., compare_abc123_def456_20240115_1430.json)
+    tune_id_parts = [t.get("id", "")[:8] for t in tunes[:3]]  # First 3 tune IDs, 8 chars each
+    filename = f"compare_{'_'.join(tune_id_parts)}_{timestamp}.json"
+
+    return JSONResponse(
+        content=_json_serializable(export_data),
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
+
+
+@router.get("/backtests/tunes/{tune_id}", response_class=HTMLResponse)
+async def admin_tune_detail(
+    request: Request,
+    tune_id: UUID,
+    run_status: Optional[str] = Query(None, description="Filter trials by status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(verify_admin_access),
+):
+    """View tune session details with trials."""
+    tune_repo = _get_tune_repo()
+
+    # Get tune
+    tune = await tune_repo.get_tune(tune_id)
+    if not tune:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tune {tune_id} not found",
+        )
+
+    # Convert UUIDs to strings for template
+    tune["id"] = str(tune["id"])
+    tune["workspace_id"] = str(tune["workspace_id"])
+    tune["strategy_entity_id"] = str(tune["strategy_entity_id"])
+    if tune.get("best_run_id"):
+        tune["best_run_id"] = str(tune["best_run_id"])
+
+    # Get counts
+    counts = await tune_repo.get_tune_status_counts(tune_id)
+
+    # Parse best_params if needed
+    best_params = tune.get("best_params")
+    if isinstance(best_params, str):
+        try:
+            best_params = json.loads(best_params)
+        except json.JSONDecodeError:
+            best_params = None
+    tune["best_params"] = best_params
+
+    # Get trials
+    runs, total_runs = await tune_repo.list_tune_runs(
+        tune_id=tune_id,
+        status=run_status,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Parse params, convert UUIDs, and compute derived fields for each run
+    for run in runs:
+        if run.get("run_id"):
+            run["run_id"] = str(run["run_id"])
+        if run.get("tune_id"):
+            run["tune_id"] = str(run["tune_id"])
+        if isinstance(run.get("params"), str):
+            try:
+                run["params"] = json.loads(run["params"])
+            except json.JSONDecodeError:
+                run["params"] = {}
+
+        # Compute overfit_gap when both IS and OOS scores available
+        score_is = run.get("score_is")
+        score_oos = run.get("score_oos")
+        if score_is is not None and score_oos is not None:
+            run["overfit_gap"] = round(score_is - score_oos, 4)
+        else:
+            run["overfit_gap"] = None
+
+    # Aggregate skip reasons for "Why trials skipped?" callout
+    skip_reasons_summary = []
+    if counts.get("skipped", 0) > 0:
+        async with _db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT skip_reason, COUNT(*) as count
+                FROM backtest_tune_runs
+                WHERE tune_id = $1 AND skip_reason IS NOT NULL
+                GROUP BY skip_reason
+                ORDER BY count DESC
+                """,
+                tune_id,
+            )
+            skip_reasons_summary = [
+                {"reason": row["skip_reason"], "count": row["count"]}
+                for row in rows
+            ]
+
+    return templates.TemplateResponse(
+        "tune_detail.html",
+        {
+            "request": request,
+            "tune": tune,
+            "counts": counts,
+            "runs": runs,
+            "total_runs": total_runs,
+            "run_status": run_status or "",
+            "limit": limit,
+            "offset": offset,
+            "has_prev": offset > 0,
+            "has_next": offset + limit < total_runs,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
+            "skip_reasons_summary": skip_reasons_summary,
+        },
+    )
+
+
+@router.get("/backtests/runs/{run_id}", response_class=HTMLResponse)
+async def admin_backtest_run_detail(
+    request: Request,
+    run_id: UUID,
+    _: bool = Depends(verify_admin_access),
+):
+    """View backtest run details."""
+    from app.repositories.backtests import BacktestRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    backtest_repo = BacktestRepository(_db_pool)
+    run = await backtest_repo.get_run(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backtest run {run_id} not found",
+        )
+
+    # Convert UUIDs to strings for template
+    run["id"] = str(run["id"])
+    run["strategy_entity_id"] = str(run["strategy_entity_id"])
+    if run.get("workspace_id"):
+        run["workspace_id"] = str(run["workspace_id"])
+    if run.get("strategy_spec_id"):
+        run["strategy_spec_id"] = str(run["strategy_spec_id"])
+
+    # For now, redirect to API endpoint or show JSON
+    # TODO: Create proper backtest run detail template
+    run_json = _json_serializable(run)
+
+    return templates.TemplateResponse(
+        "backtest_run_detail.html",
+        {
+            "request": request,
+            "run": run,
+            "run_json": json.dumps(run_json, indent=2),
         },
     )

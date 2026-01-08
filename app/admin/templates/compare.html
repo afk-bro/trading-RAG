@@ -1,0 +1,304 @@
+{% extends "layout.html" %}
+
+{% block title %}Tune Compare - KB Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Tune Compare</h2>
+        <div class="header-right">
+            {% if tunes|length >= 2 %}
+            <a href="/admin/backtests/compare?{% for tid in tune_ids %}tune_id={{ tid }}&{% endfor %}{% if workspace_id %}workspace_id={{ workspace_id }}&{% endif %}format=json" class="btn btn-secondary btn-sm" title="Download comparison as JSON">
+                Download JSON
+            </a>
+            <a href="/admin/backtests/compare?tune_id={{ tune_ids[1] }}&tune_id={{ tune_ids[0] }}{% if workspace_id %}&workspace_id={{ workspace_id }}{% endif %}" class="btn btn-secondary btn-sm">Swap A/B</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="empty-state">
+        <h3>Cannot Compare</h3>
+        <p>{{ error }}</p>
+        {% if hint %}
+        <div class="empty-hint">
+            <code>{{ hint }}</code>
+        </div>
+        {% endif %}
+    </div>
+    {% elif tunes %}
+
+    <!-- Diff Table -->
+    <div class="table-container">
+        <table class="compare-table">
+            <thead>
+                <tr>
+                    <th class="field-col">Field</th>
+                    {% for tune in tunes %}
+                    <th class="tune-col">
+                        <div class="tune-header">
+                            <span class="tune-label">Tune {{ loop.index | string | replace('1', 'A') | replace('2', 'B') | replace('3', 'C') }}</span>
+                            <div class="tune-id">
+                                <span title="{{ tune.id }}">{{ tune.id[:8] }}...</span>
+                                <button class="copy-btn" onclick="copyToClipboard('{{ tune.id }}')" title="Copy tune ID">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    {% if row.is_header %}
+                    <tr class="section-header">
+                        <td colspan="{{ tunes|length + 1 }}">{{ row.section }}</td>
+                    </tr>
+                    {% else %}
+                    <tr class="{% if row.differs %}row-differs{% endif %}{% if row.is_param %} param-row{% endif %}">
+                        <td class="field-col">
+                            {% if row.is_param %}<code>{{ row.label }}</code>{% else %}{{ row.label }}{% endif %}
+                        </td>
+                        {% for value in row.values %}
+                        <td class="value-col {% if row.classes %}{{ row.classes[loop.index0] }}{% endif %}">
+                            {% if value == "—" %}
+                            <span class="missing">{{ value }}</span>
+                            {% else %}
+                            {{ value }}
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="compare-actions">
+        {% for tune in tunes %}
+        <div class="action-group">
+            <span class="action-label">Tune {{ loop.index | string | replace('1', 'A') | replace('2', 'B') | replace('3', 'C') }}</span>
+            <a href="/admin/backtests/tunes/{{ tune.id }}?workspace_id={{ workspace_id }}" class="btn btn-secondary">View Tune</a>
+            {% if tune.best_run_id %}
+            <a href="/admin/backtests/runs/{{ tune.best_run_id }}" class="btn btn-secondary">View Best Run</a>
+            {% else %}
+            <button class="btn btn-secondary" disabled title="No valid trials">View Best Run</button>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <h3>No tunes to compare</h3>
+        <p>Provide at least 2 tune IDs in the URL.</p>
+        <div class="empty-hint">
+            <code>/admin/backtests/compare?tune_id=&lt;A&gt;&tune_id=&lt;B&gt;</code>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    .table-container { overflow-x: auto; }
+
+    .compare-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .compare-table th,
+    .compare-table td {
+        padding: 10px 14px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .compare-table thead {
+        position: sticky;
+        top: 0;
+        background: var(--bg-secondary);
+        z-index: 10;
+    }
+
+    .compare-table thead th {
+        border-bottom: 2px solid var(--border);
+    }
+
+    .field-col {
+        width: 180px;
+        font-weight: 500;
+        color: var(--text-muted);
+        white-space: nowrap;
+    }
+
+    .tune-col {
+        min-width: 160px;
+    }
+
+    .tune-header {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .tune-label {
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .tune-id {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: 'SF Mono', Consolas, monospace;
+    }
+
+    .copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px;
+        color: var(--text-muted);
+        border-radius: 3px;
+        opacity: 0.6;
+        transition: opacity 0.15s, background 0.15s;
+    }
+
+    .copy-btn:hover {
+        opacity: 1;
+        background: var(--bg);
+    }
+
+    .section-header td {
+        background: var(--bg);
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        padding: 8px 14px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .row-differs {
+        background: rgba(56, 139, 253, 0.08);
+    }
+
+    .row-differs .field-col {
+        color: var(--info);
+        font-weight: 600;
+    }
+
+    .param-row .field-col code {
+        background: var(--bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
+    .value-col {
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+    }
+
+    .missing {
+        color: var(--text-muted);
+        opacity: 0.6;
+    }
+
+    /* Overfit gap styling */
+    .overfit-good {
+        color: var(--success);
+        background: rgba(63, 185, 80, 0.15);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .overfit-warning {
+        color: var(--warning);
+        background: rgba(210, 153, 34, 0.15);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .overfit-danger {
+        color: var(--danger);
+        background: rgba(248, 81, 73, 0.15);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    /* Action buttons */
+    .compare-actions {
+        display: flex;
+        gap: 24px;
+        padding: 16px 0;
+        border-top: 1px solid var(--border);
+        margin-top: 16px;
+    }
+
+    .action-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .action-label {
+        font-weight: 500;
+        font-size: 13px;
+        color: var(--text-muted);
+        min-width: 60px;
+    }
+
+    .action-group .btn {
+        font-size: 12px;
+        padding: 6px 12px;
+    }
+
+    .action-group .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Empty state */
+    .empty-state {
+        text-align: center;
+        padding: 48px 24px;
+        color: var(--text-muted);
+    }
+
+    .empty-state h3 {
+        color: var(--text);
+        margin-bottom: 8px;
+    }
+
+    .empty-hint {
+        margin-top: 16px;
+    }
+
+    .empty-hint code {
+        background: var(--bg);
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        display: inline-block;
+    }
+</style>
+
+<script>
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback could be added here
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,384 @@
+{% extends "layout.html" %}
+
+{% block title %}Leaderboard - KB Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Global Leaderboard</h2>
+        <div class="header-right">
+            <button id="compare-btn" class="btn btn-primary btn-sm" onclick="compareSelected()" disabled title="Select 2+ tunes to compare">
+                Compare (<span id="selected-count">0</span>)
+            </button>
+            <button id="copy-link-btn" class="btn btn-secondary btn-sm" onclick="copyCompareLink()" disabled title="Copy compare link to clipboard" style="display: none;">
+                Copy Link
+            </button>
+            <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ offset }}&format=csv" class="btn btn-secondary btn-sm" title="Download current view as CSV">
+                Download CSV
+            </a>
+            <span class="pagination-info">{{ total }} entries</span>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        <label class="filter-checkbox" title="Only show tunes with valid results (default)">
+            <input type="checkbox" name="valid_only" value="true" {% if valid_only %}checked{% endif %} onchange="this.form.submit()">
+            Valid only
+        </label>
+        <label class="filter-checkbox" title="Include canceled tunes">
+            <input type="checkbox" name="include_canceled" value="true" {% if include_canceled %}checked{% endif %} onchange="this.form.submit()">
+            Include canceled
+        </label>
+        <select name="objective_type" onchange="this.form.submit()">
+            <option value="">All Objectives</option>
+            <option value="sharpe" {% if objective_type_filter == 'sharpe' %}selected{% endif %}>sharpe</option>
+            <option value="sharpe_dd_penalty" {% if objective_type_filter == 'sharpe_dd_penalty' %}selected{% endif %}>sharpe_dd_penalty</option>
+            <option value="return" {% if objective_type_filter == 'return' %}selected{% endif %}>return</option>
+            <option value="return_dd_penalty" {% if objective_type_filter == 'return_dd_penalty' %}selected{% endif %}>return_dd_penalty</option>
+            <option value="calmar" {% if objective_type_filter == 'calmar' %}selected{% endif %}>calmar</option>
+        </select>
+        <select name="oos_enabled" onchange="this.form.submit()">
+            <option value="">All OOS</option>
+            <option value="true" {% if oos_enabled_filter == 'true' %}selected{% endif %}>With OOS</option>
+            <option value="false" {% if oos_enabled_filter == 'false' %}selected{% endif %}>IS only</option>
+        </select>
+    </form>
+
+    {% if error %}
+    <div class="empty-state">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+    {% elif entries %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th class="select-col">
+                        <input type="checkbox" id="select-all" onclick="toggleSelectAll(this)" title="Select all">
+                    </th>
+                    <th class="rank-col">#</th>
+                    <th>Strategy</th>
+                    <th>Objective Score</th>
+                    <th>Return %</th>
+                    <th>Sharpe</th>
+                    <th>Max DD %</th>
+                    <th>Trades</th>
+                    <th>Overfit Gap</th>
+                    <th>Objective</th>
+                    <th>OOS</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr class="clickable-row" data-href="/admin/backtests/tunes/{{ entry.tune_id }}" data-tune-id="{{ entry.tune_id }}">
+                    <td class="select-col" onclick="event.stopPropagation()">
+                        <input type="checkbox" class="tune-checkbox" value="{{ entry.tune_id }}" onchange="updateSelection()">
+                    </td>
+                    <td class="rank-col">
+                        <span class="rank-badge {% if loop.index <= 3 %}rank-top{% endif %}">{{ loop.index + offset }}</span>
+                    </td>
+                    <td>
+                        {% if entry.strategy_name %}
+                            <a href="/admin/kb/entities/{{ entry.strategy_entity_id }}" onclick="event.stopPropagation()">{{ entry.strategy_name }}</a>
+                        {% else %}
+                            <span class="text-muted">{{ entry.strategy_entity_id[:8] }}...</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.best_objective_score is not none %}
+                            <strong class="score-value">{{ "%.4f"|format(entry.best_objective_score) }}</strong>
+                        {% elif entry.score_oos is not none %}
+                            <strong class="score-value">{{ "%.4f"|format(entry.score_oos) }}</strong>
+                        {% elif entry.best_score is not none %}
+                            <strong class="score-value">{{ "%.4f"|format(entry.best_score) }}</strong>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.best_metrics_oos and entry.best_metrics_oos.return_pct is not none %}
+                            <span class="{{ 'positive' if entry.best_metrics_oos.return_pct > 0 else 'negative' }}">
+                                {{ "%.2f"|format(entry.best_metrics_oos.return_pct) }}%
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.best_metrics_oos and entry.best_metrics_oos.sharpe is not none %}
+                            <span class="{{ 'positive' if entry.best_metrics_oos.sharpe > 0 else 'negative' }}">
+                                {{ "%.2f"|format(entry.best_metrics_oos.sharpe) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.best_metrics_oos and entry.best_metrics_oos.max_drawdown_pct is not none %}
+                            <span class="negative">{{ "%.1f"|format(entry.best_metrics_oos.max_drawdown_pct) }}%</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.best_metrics_oos and entry.best_metrics_oos.trades is not none %}
+                            {{ entry.best_metrics_oos.trades }}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.overfit_gap is not none %}
+                            <span class="overfit-gap {% if entry.overfit_gap > 0.3 %}overfit-warning{% elif entry.overfit_gap > 0.5 %}overfit-danger{% endif %}"
+                                  title="IS - OOS score difference">
+                                {{ "%.3f"|format(entry.overfit_gap) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.objective_type and entry.objective_type != 'sharpe' %}
+                        <span class="objective-badge" title="{{ entry.objective_type }}">{{ entry.objective_type }}</span>
+                        {% else %}
+                        <span class="text-muted">sharpe</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if entry.oos_ratio %}
+                        <span class="oos-badge">{{ "%.0f"|format(entry.oos_ratio * 100) }}%</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="relative-time" data-timestamp="{{ entry.created_at.isoformat() }}" title="{{ entry.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                            {{ entry.created_at.strftime('%Y-%m-%d') }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No entries on leaderboard</h3>
+        <p>{% if valid_only %}No tunes with valid results match the current filters. Try unchecking "Valid only" or changing filters.{% else %}Complete some tuning sessions to see results here.{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-primary { background: var(--info); color: #fff; border: none; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .filter-checkbox { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+    .filter-checkbox input { cursor: pointer; }
+
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { position: sticky; top: 0; background: var(--bg-secondary); z-index: 10; }
+    thead th { border-bottom: 2px solid var(--border); white-space: nowrap; }
+
+    .clickable-row { cursor: pointer; transition: background 0.15s; }
+    .clickable-row:hover { background: rgba(56, 139, 253, 0.15); }
+    .clickable-row.selected { background: rgba(56, 139, 253, 0.2); }
+
+    .select-col { width: 40px; text-align: center; }
+    .select-col input { cursor: pointer; }
+    .rank-col { width: 50px; text-align: center; }
+    .rank-badge {
+        display: inline-block;
+        width: 28px;
+        height: 28px;
+        line-height: 28px;
+        border-radius: 50%;
+        background: var(--bg);
+        font-weight: 500;
+        font-size: 12px;
+    }
+    .rank-badge.rank-top {
+        background: linear-gradient(135deg, #f7a141 0%, #ffd700 100%);
+        color: #000;
+        font-weight: 700;
+    }
+
+    .score-value { font-size: 14px; }
+
+    .positive { color: var(--success); }
+    .negative { color: var(--danger); }
+    .text-muted { color: var(--text-muted); }
+
+    .overfit-gap {
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 12px;
+    }
+    .overfit-warning {
+        color: var(--warning);
+        background: rgba(210, 153, 34, 0.2);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+    .overfit-danger {
+        color: var(--danger);
+        background: rgba(248, 81, 73, 0.2);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .objective-badge {
+        background: rgba(255, 166, 87, 0.2);
+        color: #f7a141;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .oos-badge {
+        background: rgba(136, 87, 229, 0.2);
+        color: #a371f7;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+</style>
+
+<script>
+// Clickable rows with Ctrl/Cmd+click for new tab
+document.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('a, button, input')) return;
+        const href = row.dataset.href;
+        if (e.ctrlKey || e.metaKey) {
+            window.open(href, '_blank');
+        } else {
+            window.location.href = href;
+        }
+    });
+});
+
+// Selection management
+function updateSelection() {
+    const checkboxes = document.querySelectorAll('.tune-checkbox:checked');
+    const count = checkboxes.length;
+    const compareBtn = document.getElementById('compare-btn');
+    const copyLinkBtn = document.getElementById('copy-link-btn');
+    const countSpan = document.getElementById('selected-count');
+
+    countSpan.textContent = count;
+    compareBtn.disabled = count < 2;
+
+    // Show/hide copy link button when 2+ selected
+    if (count >= 2) {
+        copyLinkBtn.style.display = 'inline-block';
+        copyLinkBtn.disabled = false;
+    } else {
+        copyLinkBtn.style.display = 'none';
+    }
+
+    // Update row highlighting
+    document.querySelectorAll('.clickable-row').forEach(row => {
+        const checkbox = row.querySelector('.tune-checkbox');
+        if (checkbox && checkbox.checked) {
+            row.classList.add('selected');
+        } else {
+            row.classList.remove('selected');
+        }
+    });
+
+    // Update select-all checkbox state
+    const allCheckboxes = document.querySelectorAll('.tune-checkbox');
+    const selectAll = document.getElementById('select-all');
+    if (selectAll) {
+        selectAll.checked = count > 0 && count === allCheckboxes.length;
+        selectAll.indeterminate = count > 0 && count < allCheckboxes.length;
+    }
+}
+
+function toggleSelectAll(el) {
+    const checkboxes = document.querySelectorAll('.tune-checkbox');
+    checkboxes.forEach(cb => cb.checked = el.checked);
+    updateSelection();
+}
+
+function getCompareUrl() {
+    const checkboxes = document.querySelectorAll('.tune-checkbox:checked');
+    if (checkboxes.length < 2) return null;
+
+    const tuneIds = Array.from(checkboxes).map(cb => cb.value);
+    const params = tuneIds.map(id => `tune_id=${id}`).join('&');
+    return `${window.location.origin}/admin/backtests/compare?${params}&workspace_id={{ workspace_id }}`;
+}
+
+function compareSelected() {
+    const url = getCompareUrl();
+    if (url) window.location.href = url;
+}
+
+function copyCompareLink() {
+    const url = getCompareUrl();
+    if (!url) return;
+
+    navigator.clipboard.writeText(url).then(() => {
+        const btn = document.getElementById('copy-link-btn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = originalText; }, 1500);
+    });
+}
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000); // Update every minute
+</script>
+{% endblock %}

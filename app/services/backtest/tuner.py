@@ -2,11 +2,15 @@
 
 Coordinates grid/random search over strategy parameters,
 running multiple backtests and tracking results.
+
+Supports IS/OOS (in-sample / out-of-sample) splits for anti-overfit validation.
 """
 
 import asyncio
-import heapq
+import csv
+import io
 import itertools
+import os
 import random
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,6 +23,176 @@ from app.services.backtest.runner import BacktestRunner, BacktestRunError
 from app.services.backtest.scoring import compute_score, rank_trials
 
 logger = structlog.get_logger(__name__)
+
+# Configuration from environment
+TUNER_MAX_CONCURRENCY = int(os.environ.get("TUNER_MAX_CONCURRENCY", "4"))
+TUNER_TRIAL_TIMEOUT = int(os.environ.get("TUNER_TRIAL_TIMEOUT", "120"))  # seconds
+
+# Minimum bars required for IS/OOS windows
+MIN_BARS_IS = int(os.environ.get("TUNER_MIN_BARS_IS", "200"))
+MIN_BARS_OOS = int(os.environ.get("TUNER_MIN_BARS_OOS", "100"))
+
+# Gate thresholds (configurable via environment)
+# Pass if max_drawdown_pct >= -GATE_MAX_DD_PCT (e.g., -20 means DD must be >= -20%)
+GATE_MAX_DD_PCT = float(os.environ.get("TUNER_GATE_MAX_DD_PCT", "20"))
+# Pass if trades >= GATE_MIN_TRADES
+GATE_MIN_TRADES = int(os.environ.get("TUNER_GATE_MIN_TRADES", "10"))
+
+# Canonical metrics keys to persist
+METRICS_KEYS = ["return_pct", "sharpe", "max_drawdown_pct", "win_rate", "trades", "profit_factor"]
+
+
+def serialize_metrics(summary: dict) -> dict:
+    """
+    Serialize backtest summary to canonical metrics format.
+
+    - Filters to allowed keys
+    - Converts Decimal → float
+    - Converts NaN/inf → None
+    - Rounds appropriately
+    - Rejects non-numeric values
+    """
+    import math
+    from decimal import Decimal
+
+    metrics = {}
+    for key in METRICS_KEYS:
+        val = summary.get(key)
+
+        if val is None:
+            metrics[key] = None
+            continue
+
+        # Reject non-numeric values (strings, etc.)
+        if not isinstance(val, (int, float, Decimal)):
+            metrics[key] = None
+            continue
+
+        # Convert Decimal to float
+        if isinstance(val, Decimal):
+            val = float(val)
+
+        # Handle NaN/inf
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            metrics[key] = None
+            continue
+
+        # Round appropriately
+        if key == "trades":
+            metrics[key] = int(val)
+        elif key in ("return_pct", "max_drawdown_pct"):
+            metrics[key] = round(float(val), 2)
+        else:
+            metrics[key] = round(float(val), 4)
+
+    return metrics
+
+
+def evaluate_gates(metrics: dict) -> tuple[bool, list[str]]:
+    """
+    Evaluate gate constraints against metrics.
+
+    Returns:
+        (passed, failures) where:
+        - passed: True if all gates pass
+        - failures: List of failure strings like "gate:max_drawdown_pct (-27.4 < -20.0)"
+    """
+    if not metrics:
+        return False, ["gate:missing_metrics"]
+
+    failures = []
+
+    # Gate: max_drawdown_pct >= -GATE_MAX_DD_PCT
+    dd = metrics.get("max_drawdown_pct")
+    if dd is not None:
+        threshold = -GATE_MAX_DD_PCT
+        if dd < threshold:
+            failures.append(f"gate:max_drawdown_pct ({dd:.1f} < {threshold:.1f})")
+    else:
+        failures.append("gate:max_drawdown_pct (missing)")
+
+    # Gate: trades >= GATE_MIN_TRADES
+    trades = metrics.get("trades")
+    if trades is not None:
+        if trades < GATE_MIN_TRADES:
+            failures.append(f"gate:trades ({trades} < {GATE_MIN_TRADES})")
+    else:
+        failures.append("gate:trades (missing)")
+
+    passed = len(failures) == 0
+    return passed, failures
+
+
+# Default lambda for DD penalty objectives
+DEFAULT_DD_LAMBDA = 0.02  # 10% DD → 0.2 Sharpe penalty
+
+
+def compute_objective_score(
+    metrics: dict,
+    objective_type: str = "sharpe",
+    objective_params: Optional[dict] = None,
+) -> Optional[float]:
+    """
+    Compute composite objective score from metrics.
+
+    Objective types:
+    - "sharpe": Raw Sharpe ratio (default)
+    - "sharpe_dd_penalty": sharpe - λ * abs(max_drawdown_pct)
+    - "return": Raw return percentage
+    - "return_dd_penalty": return_pct - λ * abs(max_drawdown_pct)
+    - "calmar": Calmar ratio (return / max_drawdown)
+
+    Args:
+        metrics: Serialized metrics dict
+        objective_type: Type of objective function
+        objective_params: Parameters like {"dd_lambda": 0.02}
+
+    Returns:
+        Objective score or None if required metrics missing
+    """
+    if not metrics:
+        return None
+
+    params = objective_params or {}
+    dd_lambda = params.get("dd_lambda", DEFAULT_DD_LAMBDA)
+
+    if objective_type == "sharpe":
+        return metrics.get("sharpe")
+
+    elif objective_type == "sharpe_dd_penalty":
+        sharpe = metrics.get("sharpe")
+        dd = metrics.get("max_drawdown_pct")
+        if sharpe is None:
+            return None
+        if dd is None:
+            return sharpe  # No penalty if DD unknown
+        # DD is negative (e.g., -15), abs gives 15, penalty = 15 * 0.02 = 0.3
+        return round(sharpe - dd_lambda * abs(dd), 4)
+
+    elif objective_type == "return":
+        return metrics.get("return_pct")
+
+    elif objective_type == "return_dd_penalty":
+        ret = metrics.get("return_pct")
+        dd = metrics.get("max_drawdown_pct")
+        if ret is None:
+            return None
+        if dd is None:
+            return ret
+        return round(ret - dd_lambda * abs(dd), 4)
+
+    elif objective_type == "calmar":
+        ret = metrics.get("return_pct")
+        dd = metrics.get("max_drawdown_pct")
+        if ret is None or dd is None or dd == 0:
+            return None
+        # Calmar = return / abs(max_dd)
+        return round(ret / abs(dd), 4)
+
+    else:
+        # Unknown type, fallback to sharpe
+        logger.warning("Unknown objective_type, using sharpe", objective_type=objective_type)
+        return metrics.get("sharpe")
 
 
 @dataclass
@@ -43,7 +217,6 @@ class ParamTuner:
     Supports grid and random search with bounded concurrency.
     """
 
-    MAX_CONCURRENCY = 4
     MAX_GRID_SIZE = 200
 
     def __init__(self, kb_repo, backtest_repo, tune_repo):
@@ -51,6 +224,101 @@ class ParamTuner:
         self.backtest_repo = backtest_repo
         self.tune_repo = tune_repo
         self.runner = BacktestRunner(kb_repo, backtest_repo)
+        self.max_concurrency = TUNER_MAX_CONCURRENCY
+        self.trial_timeout = TUNER_TRIAL_TIMEOUT
+        self._canceled = False
+
+    def _compute_oos_split(
+        self,
+        file_content: bytes,
+        oos_ratio: float,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> tuple[Optional[datetime], int, int]:
+        """
+        Compute the IS/OOS split timestamp from CSV data.
+
+        Returns:
+            (split_timestamp, n_bars_is, n_bars_oos) or (None, 0, 0) if insufficient bars
+        """
+        # Parse CSV to get date column
+        try:
+            text = file_content.decode("utf-8")
+            reader = csv.DictReader(io.StringIO(text))
+
+            # Find date column (common aliases)
+            dates = []
+            for row in reader:
+                date_val = row.get("date") or row.get("timestamp") or row.get("datetime")
+                if date_val:
+                    # Parse date string
+                    try:
+                        dt = datetime.fromisoformat(date_val.replace("Z", "+00:00"))
+                    except ValueError:
+                        # Try other formats
+                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S"]:
+                            try:
+                                dt = datetime.strptime(date_val, fmt)
+                                break
+                            except ValueError:
+                                continue
+                        else:
+                            continue  # Skip unparseable dates
+                    dates.append(dt)
+
+            if not dates:
+                logger.warning("No dates found in CSV for OOS split")
+                return None, 0, 0
+
+            # Apply date filters
+            if date_from:
+                dates = [d for d in dates if d >= date_from]
+            if date_to:
+                dates = [d for d in dates if d <= date_to]
+
+            # Sort by time
+            dates.sort()
+            n_total = len(dates)
+
+            if n_total < MIN_BARS_IS + MIN_BARS_OOS:
+                logger.warning(
+                    "Insufficient bars for OOS split",
+                    n_total=n_total,
+                    min_required=MIN_BARS_IS + MIN_BARS_OOS,
+                )
+                return None, 0, 0
+
+            # Compute split index
+            n_oos = int(n_total * oos_ratio)
+            n_is = n_total - n_oos
+
+            # Guard: ensure minimum bars in each window
+            if n_is < MIN_BARS_IS or n_oos < MIN_BARS_OOS:
+                logger.warning(
+                    "OOS split would create windows below minimum",
+                    n_is=n_is,
+                    n_oos=n_oos,
+                    min_is=MIN_BARS_IS,
+                    min_oos=MIN_BARS_OOS,
+                )
+                return None, 0, 0
+
+            # Split timestamp is the date of the first OOS bar
+            split_timestamp = dates[n_is]
+
+            logger.debug(
+                "Computed OOS split",
+                n_total=n_total,
+                n_is=n_is,
+                n_oos=n_oos,
+                split_timestamp=split_timestamp.isoformat(),
+            )
+
+            return split_timestamp, n_is, n_oos
+
+        except Exception as e:
+            logger.error("Failed to compute OOS split", error=str(e))
+            return None, 0, 0
 
     async def run(
         self,
@@ -68,6 +336,9 @@ class ParamTuner:
         slippage_bps: float,
         objective_metric: str,
         min_trades: int,
+        oos_ratio: Optional[float] = None,
+        objective_type: str = "sharpe",
+        objective_params: Optional[dict[str, Any]] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
     ) -> TuneResult:
@@ -89,6 +360,7 @@ class ParamTuner:
             slippage_bps: Slippage in basis points
             objective_metric: Optimization objective
             min_trades: Minimum trades for valid trial
+            oos_ratio: Out-of-sample split ratio (0-0.5). When set, score=score_oos.
             date_from: Optional date filter
             date_to: Optional date filter
 
@@ -104,7 +376,34 @@ class ParamTuner:
             search_type=search_type,
             n_trials=n_trials,
             seed=seed,
+            oos_ratio=oos_ratio,
         )
+
+        # Compute IS/OOS split if requested
+        oos_split_timestamp = None
+        if oos_ratio:
+            oos_split_timestamp, n_is, n_oos = self._compute_oos_split(
+                file_content, oos_ratio, date_from, date_to
+            )
+            if oos_split_timestamp:
+                logger.info(
+                    "IS/OOS split enabled",
+                    tune_id=str(tune_id),
+                    oos_ratio=oos_ratio,
+                    n_is=n_is,
+                    n_oos=n_oos,
+                    split_timestamp=oos_split_timestamp.isoformat(),
+                )
+            else:
+                warnings.append(
+                    f"OOS split requested (ratio={oos_ratio}) but insufficient bars. "
+                    f"Running without split."
+                )
+                logger.warning(
+                    "OOS split requested but could not be computed",
+                    tune_id=str(tune_id),
+                    oos_ratio=oos_ratio,
+                )
 
         # Update tune status to running
         await self.tune_repo.update_tune_status(tune_id, "running", started_at=datetime.utcnow())
@@ -135,78 +434,296 @@ class ParamTuner:
                 )
 
             # Run trials with bounded concurrency
-            semaphore = asyncio.Semaphore(self.MAX_CONCURRENCY)
-            results = []
+            semaphore = asyncio.Semaphore(self.max_concurrency)
             trials_completed = 0
+            gate_failures_count = 0
 
             async def run_trial(idx: int, params: dict) -> Optional[dict]:
-                nonlocal trials_completed
+                nonlocal trials_completed, gate_failures_count
 
                 async with semaphore:
-                    # Update status to running
-                    await self.tune_repo.update_tune_run_status(tune_id, idx, "running")
+                    # Check for cancellation before starting
+                    tune = await self.tune_repo.get_tune(tune_id)
+                    if tune and tune.get("status") == "canceled":
+                        logger.info(
+                            "Tune canceled, skipping trial",
+                            tune_id=str(tune_id),
+                            trial_index=idx,
+                        )
+                        return None
+
+                    # Mark as running with started_at
+                    await self.tune_repo.start_tune_run(tune_id, idx)
 
                     try:
-                        # Run backtest with these params
-                        result = await self.runner.run(
-                            strategy_entity_id=strategy_entity_id,
-                            file_content=file_content,
-                            filename=filename,
-                            params=params,
-                            workspace_id=workspace_id,
-                            initial_cash=initial_cash,
-                            commission_bps=commission_bps,
-                            slippage_bps=slippage_bps,
-                            date_from=date_from,
-                            date_to=date_to,
-                            allow_draft=True,  # Allow draft specs during tuning
-                        )
+                        # IS/OOS split mode: run two backtests
+                        if oos_split_timestamp:
+                            # Run IS backtest (fitting window)
+                            is_result = await asyncio.wait_for(
+                                self.runner.run(
+                                    strategy_entity_id=strategy_entity_id,
+                                    file_content=file_content,
+                                    filename=filename,
+                                    params=params,
+                                    workspace_id=workspace_id,
+                                    initial_cash=initial_cash,
+                                    commission_bps=commission_bps,
+                                    slippage_bps=slippage_bps,
+                                    date_from=date_from,
+                                    date_to=oos_split_timestamp,
+                                    allow_draft=True,
+                                ),
+                                timeout=self.trial_timeout,
+                            )
+                            is_summary = is_result["summary"]
+                            score_is = compute_score(is_summary, objective_metric, min_trades)
 
-                        summary = result["summary"]
-                        run_id = UUID(result["run_id"])
+                            # Run OOS backtest (validation window)
+                            oos_result = await asyncio.wait_for(
+                                self.runner.run(
+                                    strategy_entity_id=strategy_entity_id,
+                                    file_content=file_content,
+                                    filename=filename,
+                                    params=params,
+                                    workspace_id=workspace_id,
+                                    initial_cash=initial_cash,
+                                    commission_bps=commission_bps,
+                                    slippage_bps=slippage_bps,
+                                    date_from=oos_split_timestamp,
+                                    date_to=date_to,
+                                    allow_draft=True,
+                                ),
+                                timeout=self.trial_timeout,
+                            )
+                            oos_summary = oos_result["summary"]
+                            score_oos = compute_score(oos_summary, objective_metric, min_trades)
 
-                        # Compute score
-                        score = compute_score(summary, objective_metric, min_trades)
+                            # Use OOS run_id as the canonical run (per design decision)
+                            run_id = UUID(oos_result["run_id"])
+                            summary = oos_summary
 
-                        if score is None:
-                            # Skipped - insufficient trades or missing metric
+                            # Primary score is OOS score
+                            score = score_oos
+
+                            # Determine skip reason if OOS score invalid
+                            if score_oos is None:
+                                oos_trades = oos_summary.get("trades", 0)
+                                if oos_trades < min_trades:
+                                    skip_reason = f"oos_min_trades_not_met ({oos_trades}<{min_trades})"
+                                elif oos_summary.get(objective_metric) is None:
+                                    skip_reason = f"oos_metric_unavailable ({objective_metric})"
+                                else:
+                                    skip_reason = "oos_score_unavailable"
+
+                                await self.tune_repo.update_tune_run_result(
+                                    tune_id=tune_id,
+                                    trial_index=idx,
+                                    run_id=run_id,
+                                    score=None,
+                                    status="skipped",
+                                    skip_reason=skip_reason,
+                                    score_is=score_is,
+                                    score_oos=None,
+                                )
+                                logger.debug(
+                                    "Trial skipped (OOS)",
+                                    tune_id=str(tune_id),
+                                    trial_index=idx,
+                                    skip_reason=skip_reason,
+                                    score_is=score_is,
+                                )
+                                return None
+
+                            # Serialize metrics
+                            metrics_is_data = serialize_metrics(is_summary)
+                            metrics_oos_data = serialize_metrics(oos_summary)
+
+                            # Evaluate gates on OOS metrics
+                            gates_passed, gate_failures = evaluate_gates(metrics_oos_data)
+
+                            if not gates_passed:
+                                # Gate failure → skipped (not failed)
+                                gate_failures_count += 1
+                                skip_reason = "; ".join(gate_failures)
+                                await self.tune_repo.update_tune_run_result(
+                                    tune_id=tune_id,
+                                    trial_index=idx,
+                                    run_id=run_id,  # Keep run_id for drill-through
+                                    score=score_oos,
+                                    status="skipped",
+                                    skip_reason=skip_reason,
+                                    score_is=score_is,
+                                    score_oos=score_oos,
+                                    metrics_is=metrics_is_data,
+                                    metrics_oos=metrics_oos_data,
+                                )
+                                logger.debug(
+                                    "Trial skipped (gate failure)",
+                                    tune_id=str(tune_id),
+                                    trial_index=idx,
+                                    gate_failures=gate_failures,
+                                )
+                                return None
+
+                            # Compute objective score from OOS metrics
+                            obj_score = compute_objective_score(
+                                metrics_oos_data, objective_type, objective_params
+                            )
+
+                            # Completed with IS/OOS scores (passed gates)
                             await self.tune_repo.update_tune_run_result(
                                 tune_id=tune_id,
                                 trial_index=idx,
                                 run_id=run_id,
-                                score=None,
-                                status="skipped",
+                                score=score_oos,
+                                status="completed",
+                                score_is=score_is,
+                                score_oos=score_oos,
+                                metrics_is=metrics_is_data,
+                                metrics_oos=metrics_oos_data,
+                                objective_score=obj_score,
                             )
-                            logger.debug(
-                                "Trial skipped",
-                                tune_id=str(tune_id),
-                                trial_index=idx,
-                                trades=summary.get("trades", 0),
-                            )
-                            return None
 
-                        # Completed successfully
+                            trials_completed += 1
+
+                            if trials_completed % 5 == 0:
+                                await self.tune_repo.update_tune_progress(tune_id, trials_completed)
+
+                            return {
+                                "trial_index": idx,
+                                "run_id": str(run_id),
+                                "params": params,
+                                "score": score_oos,
+                                "score_is": score_is,
+                                "score_oos": score_oos,
+                                "objective_score": obj_score,
+                                "summary": summary,
+                                "metrics_is": metrics_is_data,
+                                "metrics_oos": metrics_oos_data,
+                            }
+
+                        # Standard mode (no IS/OOS split)
+                        else:
+                            result = await asyncio.wait_for(
+                                self.runner.run(
+                                    strategy_entity_id=strategy_entity_id,
+                                    file_content=file_content,
+                                    filename=filename,
+                                    params=params,
+                                    workspace_id=workspace_id,
+                                    initial_cash=initial_cash,
+                                    commission_bps=commission_bps,
+                                    slippage_bps=slippage_bps,
+                                    date_from=date_from,
+                                    date_to=date_to,
+                                    allow_draft=True,
+                                ),
+                                timeout=self.trial_timeout,
+                            )
+
+                            summary = result["summary"]
+                            run_id = UUID(result["run_id"])
+                            score = compute_score(summary, objective_metric, min_trades)
+
+                            if score is None:
+                                trades = summary.get("trades", 0)
+                                if trades < min_trades:
+                                    skip_reason = f"min_trades_not_met ({trades}<{min_trades})"
+                                elif summary.get(objective_metric) is None:
+                                    skip_reason = f"metric_unavailable ({objective_metric})"
+                                else:
+                                    skip_reason = "unknown"
+
+                                await self.tune_repo.update_tune_run_result(
+                                    tune_id=tune_id,
+                                    trial_index=idx,
+                                    run_id=run_id,
+                                    score=None,
+                                    status="skipped",
+                                    skip_reason=skip_reason,
+                                )
+                                logger.debug(
+                                    "Trial skipped",
+                                    tune_id=str(tune_id),
+                                    trial_index=idx,
+                                    trades=trades,
+                                    skip_reason=skip_reason,
+                                )
+                                return None
+
+                            # Serialize metrics to metrics_oos (Option A: primary window)
+                            metrics_data = serialize_metrics(summary)
+
+                            # Evaluate gates on primary metrics
+                            gates_passed, gate_failures = evaluate_gates(metrics_data)
+
+                            if not gates_passed:
+                                # Gate failure → skipped (not failed)
+                                gate_failures_count += 1
+                                skip_reason = "; ".join(gate_failures)
+                                await self.tune_repo.update_tune_run_result(
+                                    tune_id=tune_id,
+                                    trial_index=idx,
+                                    run_id=run_id,  # Keep run_id for drill-through
+                                    score=score,
+                                    status="skipped",
+                                    skip_reason=skip_reason,
+                                    metrics_oos=metrics_data,
+                                )
+                                logger.debug(
+                                    "Trial skipped (gate failure)",
+                                    tune_id=str(tune_id),
+                                    trial_index=idx,
+                                    gate_failures=gate_failures,
+                                )
+                                return None
+
+                            # Compute objective score from primary metrics
+                            obj_score = compute_objective_score(
+                                metrics_data, objective_type, objective_params
+                            )
+
+                            await self.tune_repo.update_tune_run_result(
+                                tune_id=tune_id,
+                                trial_index=idx,
+                                run_id=run_id,
+                                score=score,
+                                status="completed",
+                                metrics_oos=metrics_data,
+                                objective_score=obj_score,
+                            )
+
+                            trials_completed += 1
+
+                            if trials_completed % 5 == 0:
+                                await self.tune_repo.update_tune_progress(tune_id, trials_completed)
+
+                            return {
+                                "trial_index": idx,
+                                "run_id": str(run_id),
+                                "params": params,
+                                "score": score,
+                                "objective_score": obj_score,
+                                "summary": summary,
+                                "metrics_oos": metrics_data,
+                            }
+
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Trial timed out",
+                            tune_id=str(tune_id),
+                            trial_index=idx,
+                            timeout_seconds=self.trial_timeout,
+                        )
                         await self.tune_repo.update_tune_run_result(
                             tune_id=tune_id,
                             trial_index=idx,
-                            run_id=run_id,
-                            score=score,
-                            status="completed",
+                            run_id=None,
+                            score=None,
+                            status="failed",
+                            failed_reason=f"timeout ({self.trial_timeout}s)",
                         )
-
-                        trials_completed += 1
-
-                        # Update progress periodically
-                        if trials_completed % 5 == 0:
-                            await self.tune_repo.update_tune_progress(tune_id, trials_completed)
-
-                        return {
-                            "trial_index": idx,
-                            "run_id": str(run_id),
-                            "params": params,
-                            "score": score,
-                            "summary": summary,
-                        }
+                        return None
 
                     except BacktestRunError as e:
                         logger.warning(
@@ -215,10 +732,16 @@ class ParamTuner:
                             trial_index=idx,
                             error=e.message,
                         )
-                        await self.tune_repo.update_tune_run_status(
-                            tune_id, idx, "failed", error=e.message
+                        await self.tune_repo.update_tune_run_result(
+                            tune_id=tune_id,
+                            trial_index=idx,
+                            run_id=None,
+                            score=None,
+                            status="failed",
+                            failed_reason=f"error: {e.message}",
                         )
                         return None
+
                     except Exception as e:
                         logger.error(
                             "Trial error",
@@ -226,8 +749,13 @@ class ParamTuner:
                             trial_index=idx,
                             error=str(e),
                         )
-                        await self.tune_repo.update_tune_run_status(
-                            tune_id, idx, "failed", error=str(e)
+                        await self.tune_repo.update_tune_run_result(
+                            tune_id=tune_id,
+                            trial_index=idx,
+                            run_id=None,
+                            score=None,
+                            status="failed",
+                            failed_reason=f"exception: {str(e)[:100]}",
                         )
                         return None
 
@@ -238,8 +766,38 @@ class ParamTuner:
             # Filter successful results
             valid_results = [r for r in trial_results if isinstance(r, dict) and r is not None]
 
-            # Build leaderboard
-            leaderboard = rank_trials(valid_results, objective_metric, min_trades, top_n=10)
+            # Sort by objective_score (composite) → score_oos (OOS) → score (raw)
+            def sort_key(r):
+                obj = r.get("objective_score")
+                if obj is not None:
+                    return (1, obj)  # Has objective score, sort by it
+                oos = r.get("score_oos")
+                if oos is not None:
+                    return (1, oos)  # Has OOS score, sort by it
+                score = r.get("score")
+                if score is not None:
+                    return (1, score)  # Has raw score
+                return (0, 0)  # No valid score
+
+            sorted_results = sorted(valid_results, key=sort_key, reverse=True)
+
+            # Build leaderboard from sorted results
+            leaderboard = []
+            for rank, trial in enumerate(sorted_results[:10], start=1):
+                # Use objective_score if available, otherwise fallback
+                display_score = (
+                    trial.get("objective_score")
+                    or trial.get("score_oos")
+                    or trial.get("score")
+                )
+                leaderboard.append({
+                    "rank": rank,
+                    "run_id": trial["run_id"],
+                    "params": trial["params"],
+                    "score": display_score,
+                    "objective_score": trial.get("objective_score"),
+                    "summary": trial.get("summary"),
+                })
 
             # Determine best
             best_run_id = None
@@ -251,11 +809,23 @@ class ParamTuner:
                 best_run_id = UUID(best["run_id"])
                 best_params = best["params"]
                 best_score = best["score"]
+            elif gate_failures_count > 0:
+                # No valid trials, and some were skipped due to gates
+                warnings.append(
+                    f"No trials passed gates ({gate_failures_count} skipped due to gate violations)"
+                )
+                logger.warning(
+                    "No trials passed gates",
+                    tune_id=str(tune_id),
+                    gate_failures_count=gate_failures_count,
+                )
 
             # Update tune with final results
             await self.tune_repo.complete_tune(
                 tune_id=tune_id,
                 best_run_id=best_run_id,
+                best_score=best_score,
+                best_params=best_params,
                 leaderboard=leaderboard,
                 trials_completed=trials_completed,
             )

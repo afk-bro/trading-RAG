@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS backtest_tunes (
 
     -- Results (cached, derived from tune_runs)
     best_run_id UUID REFERENCES backtest_runs(id) ON DELETE SET NULL,
+    best_score DOUBLE PRECISION,
+    best_params JSONB,
     leaderboard JSONB,
 
     -- Timing & errors

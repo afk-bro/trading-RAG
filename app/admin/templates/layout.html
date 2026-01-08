@@ -400,6 +400,7 @@
             <a href="/admin" class="logo">KB Admin</a>
             <a href="/admin/kb/entities" {% if request.url.path.startswith('/admin/kb/entities') %}class="active"{% endif %}>Entities</a>
             <a href="/admin/kb/claims" {% if request.url.path == '/admin/kb/claims' %}class="active"{% endif %}>Claims</a>
+            <a href="/admin/backtests/tunes" {% if request.url.path.startswith('/admin/backtests') %}class="active"{% endif %}>Tunes</a>
         </div>
     </nav>
 

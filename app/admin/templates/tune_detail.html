@@ -1,0 +1,579 @@
+{% extends "layout.html" %}
+
+{% block title %}Tune {{ tune.id[:8] }}... - KB Admin{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/admin/backtests/tunes?workspace_id={{ tune.workspace_id }}">Tunes</a> /
+    <span>{{ tune.id[:8] }}...</span>
+</div>
+
+<!-- Canceled Banner -->
+{% if tune.status == 'canceled' %}
+<div class="canceled-banner">
+    <strong>Canceled</strong> &mdash;
+    {% if counts.completed > 0 %}
+        showing results from {{ counts.completed }} completed trial{{ 's' if counts.completed != 1 else '' }}.
+    {% else %}
+        all trials were skipped before completion.
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Header -->
+<div class="detail-header">
+    <div class="header-row">
+        <h1>
+            <span class="badge badge-{{ tune.status }}">{{ tune.status }}</span>
+            Tune Session
+            {% if counts.running > 0 %}
+            <span class="running-badge">Running: {{ counts.running }}</span>
+            {% endif %}
+        </h1>
+        <div class="header-actions">
+            {% if tune.status in ['queued', 'running'] %}
+            <button onclick="cancelTune()" class="btn btn-danger" id="cancel-btn">Cancel Tune</button>
+            {% endif %}
+            <span id="refresh-indicator" class="refresh-indicator" style="display: none;">
+                <span class="spinner"></span> Auto-refreshing
+            </span>
+        </div>
+    </div>
+    <div class="detail-meta">
+        <span class="id-with-copy" title="{{ tune.id }}">
+            ID: {{ tune.id[:12] }}...
+            <button onclick="copyToClipboard('{{ tune.id }}')" class="copy-btn" title="Copy tune ID">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+        </span>
+        <span class="relative-time" data-timestamp="{{ tune.created_at.isoformat() }}" title="{{ tune.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+            Created: {{ tune.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
+        </span>
+        <span>Strategy:
+            {% if tune.strategy_name %}
+                <a href="/admin/kb/entities/{{ tune.strategy_entity_id }}">{{ tune.strategy_name }}</a>
+                <button onclick="copyToClipboard('{{ tune.strategy_entity_id }}')" class="copy-btn" title="Copy strategy ID">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+            {% else %}
+                {{ tune.strategy_entity_id[:8] }}...
+            {% endif %}
+        </span>
+        <span>Search: {{ tune.search_type }} ({{ tune.n_trials }} trials)</span>
+        {% if tune.oos_ratio %}
+        <span class="oos-badge" title="Out-of-sample validation enabled">OOS: {{ "%.0f"|format(tune.oos_ratio * 100) }}%</span>
+        {% endif %}
+        {% if tune.objective_type and tune.objective_type != 'sharpe' %}
+        <span class="objective-badge" title="Composite objective: {{ tune.objective_type }}{% if tune.objective_params %} {{ tune.objective_params | tojson }}{% endif %}">{{ tune.objective_type }}</span>
+        {% endif %}
+        {# Validity badge #}
+        {% if tune.status == 'canceled' %}
+        <span class="validity-badge validity-canceled" title="Tune was canceled">🛑 Canceled</span>
+        {% elif tune.status in ['completed', 'failed'] %}
+            {% if tune.best_run_id %}
+            <span class="validity-badge validity-valid" title="At least one trial passed gates">✅ Valid</span>
+            {% else %}
+            <span class="validity-badge validity-invalid" title="No trials passed gates">⚠️ No valid trials</span>
+            {% endif %}
+        {% endif %}
+        {# Gates summary #}
+        {% if tune.gates %}
+        <span class="gates-summary" title="Gate policy snapshot: {{ tune.gates | tojson }}">
+            Gates: DD ≤ {{ tune.gates.max_drawdown_pct }}% · Trades ≥ {{ tune.gates.min_trades }} · Eval: {{ tune.gates.evaluated_on | upper }}
+        </span>
+        {% else %}
+        <span class="gates-summary gates-missing" title="Gates not recorded (older tune)">Gates: (not recorded)</span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Status Counts -->
+<div class="stats">
+    <div class="stat">
+        <div class="stat-value" style="color: var(--text-muted)">{{ counts.queued }}</div>
+        <div class="stat-label">Queued</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" style="color: var(--info)">{{ counts.running }}</div>
+        <div class="stat-label">Running</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" style="color: var(--success)">{{ counts.completed }}</div>
+        <div class="stat-label">Valid</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" style="color: var(--warning)">{{ counts.skipped }}</div>
+        <div class="stat-label">Skipped</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" style="color: var(--danger)">{{ counts.failed }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+</div>
+
+<!-- Why Trials Skipped? Callout -->
+{% if skip_reasons_summary %}
+<div class="card skip-reasons-card">
+    <div class="card-header">
+        <h3 class="card-title">Why {{ counts.skipped }} trial{{ 's' if counts.skipped != 1 else '' }} skipped?</h3>
+    </div>
+    <div class="skip-reasons-list">
+        {% for item in skip_reasons_summary %}
+        <div class="skip-reason-item">
+            <span class="skip-reason-count">{{ item.count }}</span>
+            <span class="skip-reason-text">{{ item.reason }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Best Result Card -->
+{% if tune.best_score is not none %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Best Result{% if tune.oos_ratio %} <span class="oos-badge">OOS</span>{% endif %}</h3>
+        {% if tune.best_run_id %}
+        <a href="/admin/backtests/runs/{{ tune.best_run_id }}" class="btn">View Run</a>
+        {% endif %}
+    </div>
+    <div class="best-result">
+        <div class="best-score">
+            <span class="score-value">{{ "%.4f"|format(tune.best_score) }}</span>
+            <span class="score-label">{% if tune.objective_type and tune.objective_type != 'sharpe' %}{{ tune.objective_type }}{% else %}{{ tune.objective_metric }}{% endif %}{% if tune.oos_ratio %} (OOS){% endif %}</span>
+        </div>
+        {% if tune.best_params %}
+        <div class="best-params">
+            <h4>Best Parameters</h4>
+            <div class="code-block">{{ tune.best_params | tojson(indent=2) }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Best Result</h3>
+    </div>
+    <div class="empty-state" style="padding: 24px;">
+        <p>No valid trials completed yet.</p>
+        {% if counts.skipped > 0 %}
+        <p class="text-muted">{{ counts.skipped }} trials skipped - see "Why trials skipped?" above.</p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Trials Table -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Trials</h3>
+        <span class="pagination-info">{{ total_runs }} total</span>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <select name="run_status" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            <option value="completed" {% if run_status == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="skipped" {% if run_status == 'skipped' %}selected{% endif %}>Skipped</option>
+            <option value="failed" {% if run_status == 'failed' %}selected{% endif %}>Failed</option>
+            <option value="running" {% if run_status == 'running' %}selected{% endif %}>Running</option>
+            <option value="queued" {% if run_status == 'queued' %}selected{% endif %}>Queued</option>
+        </select>
+    </form>
+
+    {% if runs %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Status</th>
+                    {% if tune.objective_type and tune.objective_type != 'sharpe' %}
+                    <th title="Composite objective: {{ tune.objective_type }}">Objective</th>
+                    {% else %}
+                    <th>Score</th>
+                    {% endif %}
+                    {% if tune.oos_ratio %}
+                    <th>IS</th>
+                    <th>OOS</th>
+                    <th title="Overfit Gap: IS - OOS (lower is better)">Gap</th>
+                    {% endif %}
+                    <th>DD%</th>
+                    <th>Trades</th>
+                    <th>Parameters</th>
+                    <th>Skip/Fail Reason</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr class="clickable-row{% if run.run_id %} has-link{% endif %}" {% if run.run_id %}data-href="/admin/backtests/runs/{{ run.run_id }}"{% endif %}>
+                    <td>{{ run.trial_index }}</td>
+                    <td>
+                        <span class="badge badge-{{ run.status }}">{{ run.status }}</span>
+                    </td>
+                    <td>
+                        {% if tune.objective_type and tune.objective_type != 'sharpe' %}
+                            {# Composite objective - show objective_score with raw metric tooltip #}
+                            {% if run.objective_score is not none %}
+                                {% set raw_metric = run.metrics_oos.sharpe if run.metrics_oos and run.metrics_oos.sharpe is not none else (run.score if run.score else none) %}
+                                <strong title="Raw {{ tune.objective_metric }}: {{ '%.4f'|format(raw_metric) if raw_metric is not none else 'N/A' }}">{{ "%.4f"|format(run.objective_score) }}</strong>
+                            {% elif run.score is not none %}
+                                <strong>{{ "%.4f"|format(run.score) }}</strong>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        {% else %}
+                            {# Simple objective - show score as-is #}
+                            {% if run.score is not none %}
+                                <strong>{{ "%.4f"|format(run.score) }}</strong>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        {% endif %}
+                    </td>
+                    {% if tune.oos_ratio %}
+                    <td>
+                        {% if run.score_is is not none %}
+                            <span class="score-is">{{ "%.4f"|format(run.score_is) }}</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if run.score_oos is not none %}
+                            <span class="score-oos">{{ "%.4f"|format(run.score_oos) }}</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if run.overfit_gap is not none %}
+                            {% set trades_oos = run.metrics_oos.trades if run.metrics_oos and run.metrics_oos.trades else 0 %}
+                            {% set low_trades_warning = " ⚠️ Low trades: gap may be noisy" if trades_oos < 20 else "" %}
+                            <span class="overfit-gap {% if run.overfit_gap > 1.0 %}gap-danger{% elif run.overfit_gap > 0.5 %}gap-warning{% elif run.overfit_gap < 0 %}gap-negative{% endif %}" title="IS ({{ '%.4f'|format(run.score_is) if run.score_is else '-' }}) − OOS ({{ '%.4f'|format(run.score_oos) if run.score_oos else '-' }}){{ low_trades_warning }}">
+                                {{ "%.4f"|format(run.overfit_gap) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                    <td>
+                        {% if run.metrics_oos and run.metrics_oos.max_drawdown_pct is not none %}
+                            <span class="metric-dd {% if run.metrics_oos.max_drawdown_pct < -20 %}dd-warning{% elif run.metrics_oos.max_drawdown_pct < -10 %}dd-caution{% endif %}">
+                                {{ "%.1f"|format(run.metrics_oos.max_drawdown_pct) }}%
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if run.metrics_oos and run.metrics_oos.trades is not none %}
+                            <span class="metric-trades">{{ run.metrics_oos.trades }}</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="params-compact">
+                            {% for k, v in run.params.items() %}
+                                {{ k }}={{ v }}{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                        </span>
+                    </td>
+                    <td>
+                        {% if run.skip_reason %}
+                            <span class="skip-reason" title="{{ run.skip_reason }}">{{ run.skip_reason[:30] }}{% if run.skip_reason|length > 30 %}...{% endif %}</span>
+                        {% elif run.failed_reason %}
+                            <span class="failed-reason" title="{{ run.failed_reason }}">{{ run.failed_reason[:30] }}{% if run.failed_reason|length > 30 %}...{% endif %}</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="row-actions">
+                            {% if run.run_id %}
+                            <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('{{ run.run_id }}')" title="Copy run ID">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            </button>
+                            <a href="/admin/backtests/runs/{{ run.run_id }}" class="btn btn-secondary" onclick="event.stopPropagation()">View</a>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }} - {{ [offset + limit, total_runs]|min }} of {{ total_runs }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?run_status={{ run_status or '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?run_status={{ run_status or '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No trials found</h3>
+        <p>{% if run_status %}No trials with status "{{ run_status }}".{% else %}This tune has no trials yet.{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .canceled-banner {
+        background: rgba(248, 81, 73, 0.15);
+        border: 1px solid var(--danger);
+        border-radius: 6px;
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        color: var(--danger);
+    }
+
+    .header-row { display: flex; justify-content: space-between; align-items: center; }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .refresh-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--info); }
+    .spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--info); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .running-badge {
+        background: rgba(88, 166, 255, 0.2);
+        color: var(--info);
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-left: 12px;
+    }
+
+    .oos-badge {
+        background: rgba(136, 87, 229, 0.2);
+        color: #a371f7;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+
+    .objective-badge {
+        background: rgba(255, 166, 87, 0.2);
+        color: #f7a141;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+
+    .validity-badge {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    .validity-valid {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+    .validity-invalid {
+        background: rgba(210, 153, 34, 0.2);
+        color: var(--warning);
+    }
+    .validity-canceled {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+
+    .gates-summary {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-family: 'SF Mono', Consolas, monospace;
+    }
+    .gates-missing {
+        font-style: italic;
+        opacity: 0.7;
+    }
+
+    .btn-danger {
+        background: var(--danger);
+        color: white;
+    }
+    .btn-danger:hover {
+        opacity: 0.9;
+    }
+    .btn-danger:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .id-with-copy { display: inline-flex; align-items: center; gap: 4px; }
+
+    .table-container { overflow-x: auto; }
+    thead { position: sticky; top: 0; background: var(--bg-secondary); z-index: 10; }
+    thead th { border-bottom: 2px solid var(--border); }
+
+    .clickable-row.has-link { cursor: pointer; transition: background 0.15s; }
+    .clickable-row.has-link:hover { background: rgba(56, 139, 253, 0.15); }
+
+    .badge-queued { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-skipped { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+    .badge-canceled { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .text-muted { color: var(--text-muted); }
+    .params-compact { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; }
+    .skip-reason { font-size: 12px; color: var(--warning); }
+    .failed-reason { font-size: 12px; color: var(--danger); }
+    .score-is { font-size: 12px; color: var(--text-muted); }
+    .score-oos { font-size: 12px; color: var(--success); font-weight: 500; }
+    .metric-dd { font-size: 12px; font-family: 'SF Mono', Consolas, monospace; }
+    .metric-dd.dd-caution { color: var(--warning); }
+    .metric-dd.dd-warning { color: var(--danger); font-weight: 500; }
+    .metric-trades { font-size: 12px; font-family: 'SF Mono', Consolas, monospace; color: var(--text-muted); }
+    .overfit-gap { font-size: 12px; font-family: 'SF Mono', Consolas, monospace; color: var(--text-muted); }
+    .overfit-gap.gap-warning { color: var(--warning); }
+    .overfit-gap.gap-danger { color: var(--danger); font-weight: 500; }
+    .overfit-gap.gap-negative { color: var(--success); } /* OOS better than IS (not necessarily good strategy, just better generalization) */
+
+    .copy-btn { background: none; border: none; cursor: pointer; padding: 4px; color: var(--text-muted); border-radius: 4px; transition: background 0.15s; }
+    .copy-btn:hover { background: var(--bg); color: var(--text); }
+    .row-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+    .row-actions .copy-btn { opacity: 0; transition: opacity 0.15s; }
+    .clickable-row:hover .row-actions .copy-btn { opacity: 1; }
+
+    .best-result { display: flex; gap: 32px; align-items: flex-start; }
+    .best-score { text-align: center; }
+    .score-value { font-size: 36px; font-weight: 600; color: var(--success); display: block; }
+    .score-label { font-size: 14px; color: var(--text-muted); }
+    .best-params { flex: 1; }
+    .best-params h4 { margin-bottom: 8px; font-size: 14px; color: var(--text-muted); }
+
+    .skip-reasons-card { border-color: var(--warning); }
+    .skip-reasons-card .card-title { color: var(--warning); }
+    .skip-reasons-list { display: flex; flex-direction: column; gap: 8px; }
+    .skip-reason-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg); border-radius: 4px; }
+    .skip-reason-count { font-weight: 600; color: var(--warning); min-width: 24px; }
+    .skip-reason-text { font-family: 'SF Mono', Consolas, monospace; font-size: 13px; color: var(--text-muted); }
+</style>
+
+<script>
+// Copy to clipboard
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback could be added here
+    });
+}
+
+// Cancel tune
+async function cancelTune() {
+    if (!confirm('Cancel this tune? Running trials may complete, remaining trials will be skipped.')) {
+        return;
+    }
+
+    const btn = document.getElementById('cancel-btn');
+    btn.disabled = true;
+    btn.textContent = 'Canceling...';
+
+    try {
+        const response = await fetch('/backtests/tunes/{{ tune.id }}/cancel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (response.ok) {
+            // Reload page to show canceled state
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to cancel: ' + (data.detail || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Cancel Tune';
+        }
+    } catch (err) {
+        alert('Error canceling tune: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Cancel Tune';
+    }
+}
+
+// Clickable rows with Ctrl/Cmd+click for new tab
+document.querySelectorAll('.clickable-row.has-link').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const href = row.dataset.href;
+        if (href) {
+            if (e.ctrlKey || e.metaKey) {
+                window.open(href, '_blank');
+            } else {
+                window.location.href = href;
+            }
+        }
+    });
+});
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = 'Created: ' + formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000);
+
+// Auto-refresh while tune is running/queued
+const tuneStatus = '{{ tune.status }}';
+const isRunning = tuneStatus === 'running' || tuneStatus === 'queued';
+let refreshInterval = null;
+
+if (isRunning) {
+    document.getElementById('refresh-indicator').style.display = 'flex';
+    refreshInterval = setInterval(() => {
+        window.location.reload();
+    }, 2000);
+}
+
+// Stop refresh on visibility change (tab hidden)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden && refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    } else if (!document.hidden && isRunning && !refreshInterval) {
+        refreshInterval = setInterval(() => window.location.reload(), 2000);
+    }
+});
+</script>
+{% endblock %}
