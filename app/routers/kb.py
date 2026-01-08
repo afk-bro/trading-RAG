@@ -20,6 +20,10 @@ from app.schemas import (
     KBClaimListResponse,
     KBClaimDetailResponse,
     KBEvidenceItem,
+    StrategySpecResponse,
+    StrategySpecStatus,
+    StrategyCompileResponse,
+    StrategySpecStatusUpdate,
 )
 from app.services.kb_types import EntityType, ClaimType
 
@@ -328,4 +332,252 @@ async def get_claim(
         verification_model=claim.get("verification_model"),
         created_at=claim.get("created_at"),
         updated_at=claim.get("updated_at"),
+    )
+
+
+# ============================================================================
+# Strategy Spec Endpoints
+# ============================================================================
+
+
+@router.get(
+    "/strategies/{entity_id}/spec",
+    response_model=StrategySpecResponse,
+    summary="Get strategy specification",
+    description="Get the persisted strategy specification for a strategy entity.",
+)
+async def get_strategy_spec(
+    entity_id: UUID,
+) -> StrategySpecResponse:
+    """Get the persisted strategy spec for an entity."""
+    logger.info("Getting strategy spec", entity_id=str(entity_id))
+
+    kb_repo = _get_kb_repo()
+    spec = await kb_repo.get_strategy_spec(entity_id)
+
+    if not spec:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one.",
+        )
+
+    # Parse JSON fields
+    spec_json = spec.get("spec_json", {})
+    if isinstance(spec_json, str):
+        spec_json = json.loads(spec_json)
+
+    derived_claim_ids = spec.get("derived_from_claim_ids", [])
+    if isinstance(derived_claim_ids, str):
+        derived_claim_ids = json.loads(derived_claim_ids)
+
+    return StrategySpecResponse(
+        id=spec["id"],
+        strategy_entity_id=spec["strategy_entity_id"],
+        strategy_name=spec.get("strategy_name", "Unknown"),
+        spec_json=spec_json,
+        status=StrategySpecStatus(spec["status"]),
+        version=spec.get("version", 1),
+        derived_from_claim_ids=derived_claim_ids,
+        created_at=spec.get("created_at"),
+        updated_at=spec.get("updated_at"),
+        approved_at=spec.get("approved_at"),
+        approved_by=spec.get("approved_by"),
+    )
+
+
+@router.post(
+    "/strategies/{entity_id}/spec/refresh",
+    response_model=StrategySpecResponse,
+    summary="Refresh strategy specification",
+    description="Recompute strategy spec from verified claims and persist it.",
+)
+async def refresh_strategy_spec(
+    entity_id: UUID,
+) -> StrategySpecResponse:
+    """Recompute and persist strategy spec from verified claims."""
+    logger.info("Refreshing strategy spec", entity_id=str(entity_id))
+
+    kb_repo = _get_kb_repo()
+
+    # Get entity to find workspace_id
+    entity = await kb_repo.get_entity_by_id(entity_id)
+    if not entity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Entity {entity_id} not found",
+        )
+
+    if entity.get("type") != "strategy":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Entity {entity_id} is not a strategy type (type={entity.get('type')})",
+        )
+
+    try:
+        spec = await kb_repo.refresh_strategy_spec(entity_id, entity["workspace_id"])
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    # Parse JSON fields
+    spec_json = spec.get("spec_json", {})
+    if isinstance(spec_json, str):
+        spec_json = json.loads(spec_json)
+
+    derived_claim_ids = spec.get("derived_from_claim_ids", [])
+    if isinstance(derived_claim_ids, str):
+        derived_claim_ids = json.loads(derived_claim_ids)
+
+    logger.info(
+        "Strategy spec refreshed",
+        entity_id=str(entity_id),
+        version=spec.get("version"),
+        claim_count=len(derived_claim_ids),
+    )
+
+    return StrategySpecResponse(
+        id=spec["id"],
+        strategy_entity_id=spec["strategy_entity_id"],
+        strategy_name=entity["name"],
+        spec_json=spec_json,
+        status=StrategySpecStatus(spec["status"]),
+        version=spec.get("version", 1),
+        derived_from_claim_ids=derived_claim_ids,
+        created_at=spec.get("created_at"),
+        updated_at=spec.get("updated_at"),
+        approved_at=spec.get("approved_at"),
+        approved_by=spec.get("approved_by"),
+    )
+
+
+@router.post(
+    "/strategies/{entity_id}/compile",
+    response_model=StrategyCompileResponse,
+    summary="Compile strategy specification",
+    description="Compile a strategy spec into actionable outputs: param schema, backtest config, pseudocode.",
+    responses={
+        200: {"description": "Compilation successful"},
+        404: {"description": "No strategy spec found"},
+        409: {"description": "Spec not approved (use allow_draft=true to override)"},
+    },
+)
+async def compile_strategy_spec(
+    entity_id: UUID,
+    allow_draft: bool = Query(False, description="Allow compiling draft specs (dev/admin only)"),
+    force: bool = Query(False, description="Force recompilation (ignore cache)"),
+) -> StrategyCompileResponse:
+    """Compile strategy spec into actionable outputs.
+
+    By default, only approved specs can be compiled.
+    Use allow_draft=true to compile draft specs (for development/testing).
+    Use force=true to recompile even if cached results exist.
+    """
+    logger.info("Compiling strategy spec", entity_id=str(entity_id), allow_draft=allow_draft, force=force)
+
+    kb_repo = _get_kb_repo()
+
+    # First check if spec exists and is approved
+    spec = await kb_repo.get_strategy_spec(entity_id)
+    if not spec:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one first.",
+        )
+
+    # Enforce approval requirement unless allow_draft
+    if spec.get("status") != "approved" and not allow_draft:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Strategy spec is '{spec.get('status')}', not approved. Use PATCH to approve first, or pass ?allow_draft=true for dev/testing.",
+        )
+
+    result = await kb_repo.compile_strategy_spec(entity_id, force=force)
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one first.",
+        )
+
+    logger.info(
+        "Strategy spec compiled",
+        entity_id=str(entity_id),
+        spec_version=result.get("spec_version"),
+        param_count=len(result.get("param_schema", {}).get("properties", {})),
+    )
+
+    return StrategyCompileResponse(
+        spec_id=result["spec_id"],
+        spec_version=result["spec_version"],
+        spec_status=StrategySpecStatus(result["spec_status"]),
+        param_schema=result["param_schema"],
+        backtest_config=result["backtest_config"],
+        pseudocode=result["pseudocode"],
+        citations=result["citations"],
+    )
+
+
+@router.patch(
+    "/strategies/{entity_id}/spec",
+    response_model=StrategySpecResponse,
+    summary="Update strategy spec status",
+    description="Update the approval status of a strategy spec (draft, approved, deprecated).",
+)
+async def update_strategy_spec_status(
+    entity_id: UUID,
+    update: StrategySpecStatusUpdate,
+) -> StrategySpecResponse:
+    """Update strategy spec status for governance."""
+    logger.info(
+        "Updating strategy spec status",
+        entity_id=str(entity_id),
+        new_status=update.status.value,
+    )
+
+    kb_repo = _get_kb_repo()
+    spec = await kb_repo.update_strategy_spec_status(
+        entity_id,
+        update.status.value,
+        approved_by=update.approved_by,
+    )
+
+    if not spec:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No strategy spec found for entity {entity_id}",
+        )
+
+    # Parse JSON fields
+    spec_json = spec.get("spec_json", {})
+    if isinstance(spec_json, str):
+        spec_json = json.loads(spec_json)
+
+    derived_claim_ids = spec.get("derived_from_claim_ids", [])
+    if isinstance(derived_claim_ids, str):
+        derived_claim_ids = json.loads(derived_claim_ids)
+
+    # Get entity name
+    entity = await kb_repo.get_entity_by_id(entity_id)
+    strategy_name = entity["name"] if entity else "Unknown"
+
+    logger.info(
+        "Strategy spec status updated",
+        entity_id=str(entity_id),
+        status=spec["status"],
+    )
+
+    return StrategySpecResponse(
+        id=spec["id"],
+        strategy_entity_id=spec["strategy_entity_id"],
+        strategy_name=strategy_name,
+        spec_json=spec_json,
+        status=StrategySpecStatus(spec["status"]),
+        version=spec.get("version", 1),
+        derived_from_claim_ids=derived_claim_ids,
+        created_at=spec.get("created_at"),
+        updated_at=spec.get("updated_at"),
+        approved_at=spec.get("approved_at"),
+        approved_by=spec.get("approved_by"),
     )

@@ -80,14 +80,35 @@
 {% endif %}
 
 {% if strategy_spec %}
-<div class="card" style="border-color: var(--info);">
+<div class="card" style="border-color: {% if strategy_spec_status == 'approved' %}var(--success){% elif strategy_spec_status == 'deprecated' %}var(--danger){% else %}var(--info){% endif %};">
     <div class="card-header">
-        <h2 class="card-title" style="color: var(--info);">StrategySpec Preview</h2>
-        <button onclick="copySpec()" class="btn btn-secondary" style="font-size: 12px; padding: 4px 12px;">Copy JSON</button>
+        <h2 class="card-title" style="color: {% if strategy_spec_status == 'approved' %}var(--success){% elif strategy_spec_status == 'deprecated' %}var(--danger){% else %}var(--info){% endif %};">
+            StrategySpec {% if has_persisted_spec %}(v{{ strategy_spec_version }}){% else %}Preview{% endif %}
+        </h2>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            {% if has_persisted_spec %}
+            <span class="badge badge-{{ strategy_spec_status }}" style="{% if strategy_spec_status == 'approved' %}background: var(--success);{% elif strategy_spec_status == 'deprecated' %}background: var(--danger);{% else %}background: var(--warning); color: black;{% endif %}">
+                {{ strategy_spec_status }}
+            </span>
+            {% else %}
+            <span class="badge" style="background: var(--text-muted);">not persisted</span>
+            {% endif %}
+            <button onclick="copySpec()" class="btn btn-secondary" style="font-size: 12px; padding: 4px 12px;">Copy JSON</button>
+        </div>
     </div>
+    {% if has_persisted_spec %}
     <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
-        Auto-generated from verified claims. Shows rules, parameters, equations, warnings, and assumptions.
+        Persisted specification derived from verified claims.
+        {% if strategy_spec_approved_by %}
+        Approved by <strong>{{ strategy_spec_approved_by }}</strong>
+        {% if strategy_spec_approved_at %} on {{ strategy_spec_approved_at }}{% endif %}.
+        {% endif %}
     </p>
+    {% else %}
+    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+        Live preview from verified claims. Use <code>POST /kb/strategies/{{ entity.id }}/spec/refresh</code> to persist.
+    </p>
+    {% endif %}
     <div class="code-block" id="strategy-spec">{{ strategy_spec }}</div>
 </div>
 <script>

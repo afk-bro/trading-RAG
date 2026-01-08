@@ -258,44 +258,64 @@ async def admin_entity_detail(
         offset=offset,
     )
 
-    # Build StrategySpec preview for strategy entities
+    # Build StrategySpec for strategy entities
     strategy_spec = None
+    strategy_spec_status = None
+    strategy_spec_version = None
+    strategy_spec_approved_by = None
+    strategy_spec_approved_at = None
+    has_persisted_spec = False
+
     if entity.get("type") == "strategy":
-        # Gather all verified claims with spec-relevant types
-        spec_types = ["rule", "parameter", "equation", "warning", "assumption"]
-        spec_claims, _ = await kb_repo.list_claims(
-            workspace_id=entity["workspace_id"],
-            entity_id=entity_id,
-            status="verified",
-            limit=100,
-        )
+        # First check for persisted spec
+        persisted_spec = await kb_repo.get_strategy_spec(entity_id)
 
-        # Group by claim type
-        spec_draft = {
-            "name": entity["name"],
-            "description": entity.get("description"),
-            "rules": [],
-            "parameters": [],
-            "equations": [],
-            "warnings": [],
-            "assumptions": [],
-        }
+        if persisted_spec:
+            has_persisted_spec = True
+            # Use persisted spec
+            spec_json = persisted_spec.get("spec_json", {})
+            if isinstance(spec_json, str):
+                spec_json = json.loads(spec_json)
+            strategy_spec = spec_json
+            strategy_spec_status = persisted_spec.get("status", "draft")
+            strategy_spec_version = persisted_spec.get("version", 1)
+            strategy_spec_approved_by = persisted_spec.get("approved_by")
+            strategy_spec_approved_at = persisted_spec.get("approved_at")
+        else:
+            # Fall back to live preview from claims
+            spec_claims, _ = await kb_repo.list_claims(
+                workspace_id=entity["workspace_id"],
+                entity_id=entity_id,
+                status="verified",
+                limit=100,
+            )
 
-        for c in spec_claims:
-            ctype = c.get("claim_type", "other")
-            if ctype == "rule":
-                spec_draft["rules"].append(c["text"])
-            elif ctype == "parameter":
-                spec_draft["parameters"].append(c["text"])
-            elif ctype == "equation":
-                spec_draft["equations"].append(c["text"])
-            elif ctype == "warning":
-                spec_draft["warnings"].append(c["text"])
-            elif ctype == "assumption":
-                spec_draft["assumptions"].append(c["text"])
+            # Group by claim type
+            spec_draft = {
+                "name": entity["name"],
+                "description": entity.get("description"),
+                "rules": [],
+                "parameters": [],
+                "equations": [],
+                "warnings": [],
+                "assumptions": [],
+            }
 
-        # Remove empty sections
-        strategy_spec = {k: v for k, v in spec_draft.items() if v}
+            for c in spec_claims:
+                ctype = c.get("claim_type", "other")
+                if ctype == "rule":
+                    spec_draft["rules"].append(c["text"])
+                elif ctype == "parameter":
+                    spec_draft["parameters"].append(c["text"])
+                elif ctype == "equation":
+                    spec_draft["equations"].append(c["text"])
+                elif ctype == "warning":
+                    spec_draft["warnings"].append(c["text"])
+                elif ctype == "assumption":
+                    spec_draft["assumptions"].append(c["text"])
+
+            # Remove empty sections
+            strategy_spec = {k: v for k, v in spec_draft.items() if v}
 
     return templates.TemplateResponse(
         "entity_detail.html",
@@ -315,6 +335,11 @@ async def admin_entity_detail(
             "prev_offset": max(0, offset - limit),
             "next_offset": offset + limit,
             "strategy_spec": json.dumps(strategy_spec, indent=2) if strategy_spec else None,
+            "strategy_spec_status": strategy_spec_status,
+            "strategy_spec_version": strategy_spec_version,
+            "strategy_spec_approved_by": strategy_spec_approved_by,
+            "strategy_spec_approved_at": strategy_spec_approved_at,
+            "has_persisted_spec": has_persisted_spec,
             "possible_duplicates": possible_duplicates,
         },
     )

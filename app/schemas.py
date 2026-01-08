@@ -498,3 +498,57 @@ class KBAnswerResponse(BaseModel):
     claims_used: list[KBAnswerClaimRef] = Field(default_factory=list, description="Claims used in answer")
     fallback_used: bool = Field(default=False, description="Whether chunk RAG fallback was used")
     fallback_reason: Optional[str] = Field(None, description="Reason for fallback if used")
+
+
+# ============================================================================
+# Strategy Spec Schemas
+# ============================================================================
+
+
+class StrategySpecStatus(str, Enum):
+    """Status of a strategy specification."""
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+    DEPRECATED = "deprecated"
+
+
+class StrategySpecResponse(BaseModel):
+    """Response for GET /kb/strategies/{entity_id}/spec."""
+
+    id: UUID = Field(..., description="Spec ID")
+    strategy_entity_id: UUID = Field(..., description="Strategy entity ID")
+    strategy_name: str = Field(..., description="Strategy name")
+    spec_json: dict = Field(..., description="The compiled specification")
+    status: StrategySpecStatus = Field(..., description="Approval status")
+    version: int = Field(..., description="Spec version number")
+    derived_from_claim_ids: list[str] = Field(default_factory=list, description="Source claim IDs")
+    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
+    approved_at: Optional[datetime] = Field(None, description="Approval timestamp")
+    approved_by: Optional[str] = Field(None, description="Approver identifier")
+
+
+class StrategySpecRefreshRequest(BaseModel):
+    """Request for POST /kb/strategies/{entity_id}/spec/refresh."""
+
+    pass  # No body needed, entity_id is in path
+
+
+class StrategyCompileResponse(BaseModel):
+    """Response for POST /kb/strategies/{entity_id}/compile."""
+
+    spec_id: str = Field(..., description="Source spec ID")
+    spec_version: int = Field(..., description="Spec version used")
+    spec_status: StrategySpecStatus = Field(..., description="Spec approval status")
+    param_schema: dict = Field(..., description="JSON Schema for parameter UI form")
+    backtest_config: dict = Field(..., description="Engine-agnostic backtest configuration")
+    pseudocode: str = Field(..., description="Human-readable strategy description")
+    citations: list[str] = Field(..., description="Claim IDs used to derive the spec")
+
+
+class StrategySpecStatusUpdate(BaseModel):
+    """Request for PATCH /kb/strategies/{entity_id}/spec."""
+
+    status: StrategySpecStatus = Field(..., description="New status")
+    approved_by: Optional[str] = Field(None, description="Approver identifier (for approved status)")

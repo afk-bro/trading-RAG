@@ -973,3 +973,315 @@ class KnowledgeBaseRepository:
         )
 
         return stats
+
+    # =========================================================================
+    # Strategy Spec Methods
+    # =========================================================================
+
+    async def get_strategy_spec(
+        self,
+        entity_id: UUID,
+    ) -> Optional[dict]:
+        """Get the persisted strategy spec for an entity."""
+        query = """
+            SELECT s.*, e.name as strategy_name
+            FROM kb_strategy_specs s
+            JOIN kb_entities e ON s.strategy_entity_id = e.id
+            WHERE s.strategy_entity_id = $1
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, entity_id)
+            return dict(row) if row else None
+
+    async def refresh_strategy_spec(
+        self,
+        entity_id: UUID,
+        workspace_id: UUID,
+    ) -> dict:
+        """
+        Recompute strategy spec from verified claims and persist it.
+
+        Returns the new/updated spec record.
+        """
+        # Gather verified claims for this entity with spec-relevant types
+        spec_types = ["rule", "parameter", "equation", "warning", "assumption"]
+        claims, _ = await self.list_claims(
+            workspace_id=workspace_id,
+            entity_id=entity_id,
+            status="verified",
+            limit=100,
+        )
+
+        # Get entity details
+        entity = await self.get_entity_by_id(entity_id)
+        if not entity:
+            raise ValueError(f"Entity {entity_id} not found")
+
+        if entity.get("type") != "strategy":
+            raise ValueError(f"Entity {entity_id} is not a strategy type")
+
+        # Build spec JSON
+        spec_json = {
+            "name": entity["name"],
+            "description": entity.get("description"),
+            "rules": [],
+            "parameters": [],
+            "equations": [],
+            "warnings": [],
+            "assumptions": [],
+        }
+
+        claim_ids = []
+        for claim in claims:
+            ctype = claim.get("claim_type", "other")
+            claim_ids.append(str(claim["id"]))
+
+            if ctype == "rule":
+                spec_json["rules"].append(claim["text"])
+            elif ctype == "parameter":
+                spec_json["parameters"].append(claim["text"])
+            elif ctype == "equation":
+                spec_json["equations"].append(claim["text"])
+            elif ctype == "warning":
+                spec_json["warnings"].append(claim["text"])
+            elif ctype == "assumption":
+                spec_json["assumptions"].append(claim["text"])
+
+        # Remove empty sections
+        spec_json = {k: v for k, v in spec_json.items() if v}
+
+        # Upsert the spec (clear cache on update since spec_json changed)
+        upsert_query = """
+            INSERT INTO kb_strategy_specs (
+                strategy_entity_id, workspace_id, spec_json,
+                derived_from_claim_ids, version
+            )
+            VALUES ($1, $2, $3, $4, 1)
+            ON CONFLICT (strategy_entity_id) DO UPDATE SET
+                spec_json = EXCLUDED.spec_json,
+                derived_from_claim_ids = EXCLUDED.derived_from_claim_ids,
+                version = kb_strategy_specs.version + 1,
+                status = CASE
+                    WHEN kb_strategy_specs.status = 'approved' THEN 'draft'
+                    ELSE kb_strategy_specs.status
+                END,
+                updated_at = NOW(),
+                -- Clear compile cache (spec changed, needs recompilation)
+                compiled_param_schema = NULL,
+                compiled_backtest_config = NULL,
+                compiled_pseudocode = NULL,
+                compiled_at = NULL
+            RETURNING *
+        """
+
+        import json
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                upsert_query,
+                entity_id,
+                workspace_id,
+                json.dumps(spec_json),
+                json.dumps(claim_ids),
+            )
+            return dict(row) if row else {}
+
+    async def update_strategy_spec_status(
+        self,
+        entity_id: UUID,
+        status: str,
+        approved_by: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Update the status of a strategy spec (draft, approved, deprecated)."""
+        if status not in ("draft", "approved", "deprecated"):
+            raise ValueError(f"Invalid status: {status}")
+
+        query = """
+            UPDATE kb_strategy_specs
+            SET status = $2,
+                approved_by = CASE WHEN $2 = 'approved' THEN $3 ELSE approved_by END,
+                approved_at = CASE WHEN $2 = 'approved' THEN NOW() ELSE approved_at END,
+                updated_at = NOW()
+            WHERE strategy_entity_id = $1
+            RETURNING *
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, entity_id, status, approved_by)
+            return dict(row) if row else None
+
+    async def compile_strategy_spec(
+        self,
+        entity_id: UUID,
+        force: bool = False,
+    ) -> Optional[dict]:
+        """
+        Compile a strategy spec into actionable outputs.
+
+        Args:
+            entity_id: The strategy entity ID
+            force: If True, recompile even if cached results exist
+
+        Returns:
+            - param_schema: JSON Schema for UI form generation
+            - backtest_config: Engine-agnostic backtest configuration
+            - pseudocode: Human-readable strategy description
+            - citations: Claim IDs used to derive the spec
+        """
+        spec = await self.get_strategy_spec(entity_id)
+        if not spec:
+            return None
+
+        # Check for cached compilation (deterministic for spec version)
+        if not force and spec.get("compiled_at") and spec.get("compiled_param_schema"):
+            import json
+            compiled_pseudocode = spec.get("compiled_pseudocode", "")
+
+            derived_claim_ids = spec.get("derived_from_claim_ids", [])
+            if isinstance(derived_claim_ids, str):
+                derived_claim_ids = json.loads(derived_claim_ids)
+
+            # Handle JSONB that may come back as string (pgbouncer)
+            param_schema = spec["compiled_param_schema"]
+            if isinstance(param_schema, str):
+                param_schema = json.loads(param_schema)
+
+            backtest_config = spec["compiled_backtest_config"]
+            if isinstance(backtest_config, str):
+                backtest_config = json.loads(backtest_config)
+
+            return {
+                "spec_id": str(spec["id"]),
+                "spec_version": spec.get("version", 1),
+                "spec_status": spec.get("status", "draft"),
+                "param_schema": param_schema,
+                "backtest_config": backtest_config,
+                "pseudocode": compiled_pseudocode,
+                "citations": derived_claim_ids,
+                "cached": True,
+                "compiled_at": spec["compiled_at"],
+            }
+
+        import json
+        spec_json = spec.get("spec_json", {})
+        if isinstance(spec_json, str):
+            spec_json = json.loads(spec_json)
+
+        derived_claim_ids = spec.get("derived_from_claim_ids", [])
+        if isinstance(derived_claim_ids, str):
+            derived_claim_ids = json.loads(derived_claim_ids)
+
+        # Build param_schema from parameters
+        param_schema = {
+            "type": "object",
+            "title": f"{spec_json.get('name', 'Strategy')} Parameters",
+            "properties": {},
+            "required": [],
+        }
+
+        # Parse parameters to extract configurable values
+        for param_text in spec_json.get("parameters", []):
+            # Try to extract parameter name and default value
+            # e.g., "RSI is calculated using 14 periods by default"
+            param_text_lower = param_text.lower()
+
+            if "period" in param_text_lower:
+                param_schema["properties"]["period"] = {
+                    "type": "integer",
+                    "title": "Period",
+                    "description": param_text,
+                    "default": 14,  # Common default
+                    "minimum": 1,
+                    "maximum": 200,
+                }
+            elif "threshold" in param_text_lower or "level" in param_text_lower:
+                param_schema["properties"]["threshold"] = {
+                    "type": "number",
+                    "title": "Threshold",
+                    "description": param_text,
+                    "minimum": 0,
+                    "maximum": 100,
+                }
+            elif "deviation" in param_text_lower or "std" in param_text_lower:
+                param_schema["properties"]["std_dev"] = {
+                    "type": "number",
+                    "title": "Standard Deviations",
+                    "description": param_text,
+                    "default": 2.0,
+                    "minimum": 0.5,
+                    "maximum": 5.0,
+                }
+
+        # Build backtest_config
+        backtest_config = {
+            "strategy_name": spec_json.get("name"),
+            "entry_rules": spec_json.get("rules", []),
+            "exit_rules": [],  # Would need separate claim types
+            "risk_warnings": spec_json.get("warnings", []),
+            "assumptions": spec_json.get("assumptions", []),
+            "parameters": {
+                k: v.get("default")
+                for k, v in param_schema.get("properties", {}).items()
+                if "default" in v
+            },
+        }
+
+        # Generate pseudocode
+        pseudocode_lines = [
+            f"# Strategy: {spec_json.get('name', 'Unknown')}",
+            f"# {spec_json.get('description', '')}",
+            "",
+        ]
+
+        if spec_json.get("rules"):
+            pseudocode_lines.append("# Entry Rules:")
+            for i, rule in enumerate(spec_json["rules"], 1):
+                pseudocode_lines.append(f"#   {i}. {rule}")
+            pseudocode_lines.append("")
+
+        if spec_json.get("parameters"):
+            pseudocode_lines.append("# Parameters:")
+            for param in spec_json["parameters"]:
+                pseudocode_lines.append(f"#   - {param}")
+            pseudocode_lines.append("")
+
+        if spec_json.get("equations"):
+            pseudocode_lines.append("# Calculations:")
+            for eq in spec_json["equations"]:
+                pseudocode_lines.append(f"#   {eq}")
+            pseudocode_lines.append("")
+
+        if spec_json.get("warnings"):
+            pseudocode_lines.append("# Warnings:")
+            for warn in spec_json["warnings"]:
+                pseudocode_lines.append(f"#   ⚠️ {warn}")
+
+        pseudocode = "\n".join(pseudocode_lines)
+
+        # Cache the compiled artifacts
+        cache_query = """
+            UPDATE kb_strategy_specs
+            SET compiled_param_schema = $1,
+                compiled_backtest_config = $2,
+                compiled_pseudocode = $3,
+                compiled_at = NOW()
+            WHERE strategy_entity_id = $4
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                cache_query,
+                json.dumps(param_schema),
+                json.dumps(backtest_config),
+                pseudocode,
+                entity_id,
+            )
+
+        return {
+            "spec_id": str(spec["id"]),
+            "spec_version": spec.get("version", 1),
+            "spec_status": spec.get("status", "draft"),
+            "param_schema": param_schema,
+            "backtest_config": backtest_config,
+            "pseudocode": pseudocode,
+            "citations": derived_claim_ids,
+            "cached": False,
+        }
