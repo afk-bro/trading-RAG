@@ -1,0 +1,19 @@
+# Constraints file for deterministic dependency resolution
+# Use with: pip install -r requirements.txt -c constraints.txt
+#
+# These pins ensure sentence-transformers (and its torch/transformers deps)
+# resolve to known-working versions. sentence-transformers==3.3.1 is tested
+# with these specific versions.
+
+# PyTorch - pin to 2.x LTS for CUDA compatibility
+# Note: If using CUDA, ensure your CUDA version is compatible
+torch>=2.0.0,<2.5.0
+
+# Transformers - pin to version tested with sentence-transformers 3.3.1
+transformers>=4.36.0,<4.50.0
+
+# Tokenizers - often breaks between minor versions
+tokenizers>=0.15.0,<0.22.0
+
+# Hugging Face Hub - required by transformers
+huggingface-hub>=0.20.0,<0.27.0

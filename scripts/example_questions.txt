@@ -1,0 +1,37 @@
+# Example trading questions for rerank validation
+# One question per line, lines starting with # are ignored
+
+# Market analysis
+Why did BTC dump today?
+Is this a volatility squeeze or a breakout?
+What's the correlation between ETH and BTC this week?
+How do I identify a ranging market?
+What signals indicate trend exhaustion?
+
+# Strategy questions
+What grid spacing works best for choppy markets?
+How do I set stop losses for swing trades?
+When should I use a trailing stop vs fixed stop?
+What position sizing rules do you recommend?
+How do I scale into a position?
+
+# Technical analysis
+How do I read order flow?
+What does increasing volume with decreasing price mean?
+How do I identify support and resistance levels?
+What timeframe should I use for swing trading?
+How do I use VWAP in my analysis?
+
+# Risk management
+How much should I risk per trade?
+What's a good risk-reward ratio?
+How do I calculate position size based on volatility?
+When should I cut losses vs hold?
+How do I manage overnight risk?
+
+# Specific setups
+What is a fair value gap?
+How do I trade order blocks?
+What is liquidity hunting?
+How do I identify market structure shifts?
+What are the signs of accumulation vs distribution?

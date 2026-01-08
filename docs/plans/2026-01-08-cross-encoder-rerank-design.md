@@ -1064,3 +1064,188 @@ async def test_real_cross_encoder_inference():
 | neighbor.window | 1 | ±1 for non-PDF |
 | neighbor.pdf_window | 2 | ±2 for PDF |
 | neighbor.max_total | 20 | Soft cap (seeds sacred) |
+
+## Rollout & Operations
+
+### Safety Guardrails
+
+Hard caps enforced at the request layer (cannot be overridden by config):
+
+| Cap | Value | Rationale |
+|-----|-------|-----------|
+| MAX_CANDIDATES_K | 200 | Memory/latency ceiling for cross-encoder |
+| MAX_FINAL_K | 50 | Response size limit |
+| MAX_NEIGHBOR_TOTAL | 50 | Prevents runaway expansion |
+| RERANK_TIMEOUT_S | 10.0 | Fail-open to vector fallback |
+
+### Rollout Steps
+
+1. **Deploy with `rerank.enabled=false`** (default)
+   - Service starts, model not loaded
+   - Zero impact on existing queries
+
+2. **Enable warmup** (`WARMUP_RERANKER=true`)
+   - Model loads at startup (~15-30s cold)
+   - First query gets warm model
+
+3. **Enable for test workspace**
+   ```json
+   {"rerank": {"enabled": true, "candidates_k": 30, "final_k": 5}}
+   ```
+   - Conservative k values for initial validation
+   - Monitor latency and GPU utilization
+
+4. **Tune and expand**
+   - Increase `candidates_k` based on relevance metrics
+   - Enable for additional workspaces
+   - Adjust timeout if needed
+
+### Operational Checklist
+
+**Cold Start:**
+- [ ] First query after deploy may take 15-30s (model download + load)
+- [ ] Enable `WARMUP_RERANKER=true` in production to front-load this
+- [ ] Container memory: ~2GB for BGE-reranker-v2-m3 on CUDA
+
+**Concurrency:**
+- [ ] `max_concurrent=2` default prevents GPU OOM under load
+- [ ] Watch for semaphore wait time in logs
+- [ ] Scale pods horizontally for more throughput
+
+**Timeout Behavior:**
+- [ ] Rerank timeout (10s) triggers graceful fallback to vector scores
+- [ ] Log line includes `rerank_timeout=True` when this occurs
+- [ ] Increase timeout if GPU is undersized
+
+**Observability:**
+- [ ] Every query logs structured JSON with timing breakdown
+- [ ] Fields: `rerank_enabled`, `rerank_method`, `rerank_ms`, `rerank_timeout`
+- [ ] Dashboard alerts: p99 > 5s, timeout rate > 5%
+
+### Monitoring Queries
+
+```sql
+-- Rerank latency distribution (last hour)
+SELECT
+  workspace_id,
+  percentile_cont(0.5) WITHIN GROUP (ORDER BY rerank_ms) AS p50,
+  percentile_cont(0.99) WITHIN GROUP (ORDER BY rerank_ms) AS p99,
+  COUNT(*) FILTER (WHERE rerank_timeout) AS timeout_count
+FROM query_logs
+WHERE created_at > NOW() - INTERVAL '1 hour'
+  AND rerank_enabled = true
+GROUP BY workspace_id;
+```
+
+### Rollback
+
+If issues arise:
+1. Set `rerank.enabled=false` in workspace config (instant, no deploy)
+2. Queries fall back to vector-only (existing behavior)
+3. Reranker singleton remains loaded but unused
+
+**Rollback does NOT require restart. Three ways to disable:**
+- Request override: `rerank=false` in request body
+- Workspace config: `{"rerank": {"enabled": false}}`
+- Timeout fallback: automatic after 10s
+
+**What rollback removes:**
+- Cross-encoder/LLM inference cost (GPU/API)
+- Rerank latency
+
+**What rollback keeps:**
+- Postgres chunk fetch (needed for neighbor expansion metadata: document_id, chunk_index)
+- Neighbor expansion (controlled separately via `neighbor.enabled`)
+
+## Production Notes
+
+### Rerank State Machine
+
+`QueryMeta.rerank_state` provides single-field health tracking:
+
+```python
+class RerankState(str, Enum):
+    DISABLED = "disabled"        # rerank.enabled=false
+    OK = "ok"                    # rerank completed successfully
+    TIMEOUT_FALLBACK = "timeout_fallback"  # timed out, used vector order
+    ERROR_FALLBACK = "error_fallback"      # exception, used vector order
+```
+
+**Dashboard query for fallback rate (key health metric):**
+```sql
+SELECT
+  workspace_id,
+  COUNT(*) AS total_queries,
+  COUNT(*) FILTER (WHERE rerank_state = 'ok') AS rerank_ok,
+  COUNT(*) FILTER (WHERE rerank_state = 'timeout_fallback') AS timeouts,
+  COUNT(*) FILTER (WHERE rerank_state = 'error_fallback') AS errors,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE rerank_fallback) / COUNT(*), 2) AS fallback_rate_pct
+FROM query_logs
+WHERE created_at > NOW() - INTERVAL '1 hour'
+  AND rerank_enabled = true
+GROUP BY workspace_id;
+```
+
+### Timeout Behavior Detail
+
+`asyncio.wait_for(..., timeout=10)` cancels the coroutine but the underlying `ThreadPoolExecutor` thread may continue running the CUDA call to completion. This is acceptable because:
+
+1. Concurrency is limited by semaphore (`max_concurrent=2`)
+2. Timeouts are logged for monitoring
+3. The query returns immediately with vector fallback
+
+**Future consideration:** If timeout rate exceeds N per minute, consider auto-degrading rerank for that workspace (kill-switch lite).
+
+### Warmup Scope
+
+`WARMUP_RERANKER=true` only warms the **default model** (`BAAI/bge-reranker-v2-m3`).
+
+We intentionally do NOT iterate workspace configs to warm multiple models. This prevents:
+- GPU memory exhaustion from loading multiple 2GB+ models
+- Unpredictable startup times
+- OOM on smaller GPUs
+
+If a workspace configures a different model, it loads on first query (15-30s cold).
+
+### Dependency Pinning
+
+`sentence-transformers==3.3.1` depends on torch/transformers which can break between versions.
+
+For deterministic installs, use constraints.txt:
+```bash
+pip install -r requirements.txt -c constraints.txt
+```
+
+Contents of `constraints.txt`:
+```
+torch>=2.0.0,<2.5.0
+transformers>=4.36.0,<4.50.0
+tokenizers>=0.15.0,<0.22.0
+huggingface-hub>=0.20.0,<0.27.0
+```
+
+### Local Validation Commands
+
+**First query after restart:**
+```bash
+# Confirm model loads once, rerank_ms includes load time first time only
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "...", "question": "test", "rerank": true, "debug": true}'
+```
+
+**Burst concurrency test:**
+```bash
+# Fire 10 requests quickly - confirm single model load, no CUDA errors
+for i in {1..10}; do
+  curl -X POST http://localhost:8000/query \
+    -H "Content-Type: application/json" \
+    -d '{"workspace_id": "...", "question": "test '$i'", "rerank": true}' &
+done
+wait
+```
+
+Check logs for:
+- Single "Cross-encoder reranker warmed up" line
+- No CUDA OOM errors
+- Semaphore queuing (expected under load)

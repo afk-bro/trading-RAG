@@ -24,6 +24,12 @@ pytube==15.0.0
 # Text processing
 tiktoken==0.6.0
 
+# Cross-encoder reranking
+# Pin to tested version - sentence-transformers can break with torch/transformers changes
+# Use constraints.txt to pin torch/transformers for deterministic installs:
+#   pip install -r requirements.txt -c constraints.txt
+sentence-transformers==3.3.1
+
 # PDF extraction
 pymupdf==1.24.0
 pdfplumber==0.11.0

@@ -1,11 +1,24 @@
 """Chunk repository for Supabase Postgres."""
 
+from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class NeighborChunk:
+    """A chunk fetched as a neighbor of a seed chunk."""
+
+    chunk_id: str
+    document_id: str
+    chunk_index: int
+    text: str
+    source_type: str | None
+    seed_chunk_id: str  # Which seed this is a neighbor of
 
 
 class ChunkRepository:
@@ -218,3 +231,94 @@ class ChunkRepository:
 
         async with self.pool.acquire() as conn:
             return await conn.fetchval(query, workspace_id)
+
+    async def get_by_ids_map(
+        self,
+        chunk_ids: list[str],
+    ) -> dict[str, dict]:
+        """
+        Get chunks by IDs as a dict keyed by chunk_id.
+
+        Args:
+            chunk_ids: List of chunk ID strings
+
+        Returns:
+            Dict mapping chunk_id -> chunk record with document metadata
+        """
+        if not chunk_ids:
+            return {}
+
+        # Convert string IDs to UUIDs
+        uuid_ids = [UUID(cid) if isinstance(cid, str) else cid for cid in chunk_ids]
+
+        query = """
+            SELECT c.*, d.source_url, d.canonical_url, d.title, d.author,
+                   d.channel, d.published_at, d.source_type, d.video_id
+            FROM chunks c
+            JOIN documents d ON c.doc_id = d.id
+            WHERE c.id = ANY($1::uuid[])
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, uuid_ids)
+
+        return {str(row["id"]): dict(row) for row in rows}
+
+    async def get_neighbors_by_doc_indices(
+        self,
+        requests: list[tuple[str, int, str]],
+    ) -> list[NeighborChunk]:
+        """
+        Fetch chunks by (document_id, chunk_index) pairs with seed attribution.
+
+        Args:
+            requests: List of (document_id, chunk_index, seed_chunk_id) tuples
+
+        Returns:
+            List of NeighborChunk objects
+        """
+        if not requests:
+            return []
+
+        # Parse and prepare arrays for unnest
+        doc_ids = [
+            UUID(r[0]) if isinstance(r[0], str) else r[0]
+            for r in requests
+        ]
+        indices = [r[1] for r in requests]
+        seed_ids = [
+            UUID(r[2]) if isinstance(r[2], str) else r[2]
+            for r in requests
+        ]
+
+        query = """
+            WITH req(document_id, chunk_index, seed_chunk_id) AS (
+                SELECT * FROM unnest($1::uuid[], $2::int[], $3::uuid[])
+            )
+            SELECT
+                c.id AS chunk_id,
+                c.doc_id AS document_id,
+                c.chunk_index,
+                c.content AS text,
+                d.source_type,
+                req.seed_chunk_id
+            FROM req
+            JOIN chunks c ON c.doc_id = req.document_id
+                         AND c.chunk_index = req.chunk_index
+            JOIN documents d ON d.id = c.doc_id
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, doc_ids, indices, seed_ids)
+
+        return [
+            NeighborChunk(
+                chunk_id=str(row["chunk_id"]),
+                document_id=str(row["document_id"]),
+                chunk_index=row["chunk_index"],
+                text=row["text"],
+                source_type=row["source_type"],
+                seed_chunk_id=str(row["seed_chunk_id"]),
+            )
+            for row in rows
+        ]

@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cross-Encoder Reranking with Neighbor Expansion**
+  - Optional two-stage retrieval: vector search → cross-encoder rerank
+  - BGE-reranker-v2-m3 model (local inference, no external API)
+  - Neighbor expansion: fetches adjacent chunks for context continuity
+  - **Disabled by default** - enable via `rerank: true` in request or workspace config
+  - Safety caps: `retrieve_k ≤ 200`, `top_k ≤ 50`, timeout fallback to vector order
+  - New `QueryMeta` fields for observability:
+    - `rerank_state`: `disabled`, `ok`, `timeout_fallback`, `error_fallback`
+    - `rerank_ms`, `rerank_method`, `rerank_model`, `rerank_timeout`, `rerank_fallback`
+  - `debug: true` request flag exposes per-chunk `vector_score`, `rerank_score`, `rerank_rank`
+  - Configurable via `Settings`: `warmup_reranker`, `rerank_timeout_s`
+  - ML dependencies pinned in `constraints.txt` for reproducibility
 - **Backtest Parameter Tuning System** - Complete research workflow for strategy optimization
   - Grid/random search over strategy parameter spaces
   - IS/OOS (In-Sample/Out-of-Sample) split validation with configurable ratio

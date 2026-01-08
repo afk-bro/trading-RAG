@@ -218,10 +218,64 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning("Failed to initialize LLM subsystem", error=str(e))
 
+    # Optional: Warm up cross-encoder reranker (pre-load model to GPU)
+    # This is disabled by default to avoid GPU memory usage at startup.
+    # Enable via WARMUP_RERANKER=true in .env if desired.
+    #
+    # IMPORTANT: This only warms the DEFAULT model (BAAI/bge-reranker-v2-m3).
+    # If workspaces configure different models, those will load on first query.
+    # We intentionally do NOT iterate workspaces to warm multiple models,
+    # as this could exhaust GPU memory with multiple large models.
+    if settings.warmup_reranker:
+        try:
+            from app.services.reranker import get_reranker, RerankCandidate
+
+            # Only warm the default model - do not iterate workspace configs
+            warmup_config = {
+                "enabled": True,
+                "cross_encoder": {"device": "cuda"},  # Uses DEFAULT_MODEL
+            }
+            reranker = get_reranker(warmup_config)
+
+            if reranker and reranker.method == "cross_encoder":
+                dummy = [
+                    RerankCandidate(
+                        chunk_id="warmup",
+                        document_id="warmup",
+                        chunk_index=0,
+                        text="warmup text for model loading",
+                        vector_score=1.0,
+                        workspace_id="warmup",
+                    )
+                ]
+                await reranker.rerank("warmup query", dummy, top_k=1)
+                logger.info(
+                    "Cross-encoder reranker warmed up",
+                    model=reranker.model_id,
+                )
+        except Exception as e:
+            logger.warning("Failed to warm up reranker", error=str(e))
+
     yield
 
     # Cleanup on shutdown
     logger.info("Shutting down Trading RAG Service")
+
+    # Close reranker resources
+    try:
+        from app.services import reranker as reranker_module
+
+        if reranker_module._cross_encoder_reranker is not None:
+            reranker_module._cross_encoder_reranker.close(wait=True)
+            reranker_module._cross_encoder_reranker = None
+            logger.info("CrossEncoderReranker closed")
+
+        if reranker_module._llm_reranker is not None:
+            reranker_module._llm_reranker.close()
+            reranker_module._llm_reranker = None
+            logger.info("LLMReranker closed")
+    except Exception as e:
+        logger.warning("Error closing reranker", error=str(e))
 
     if _db_pool:
         await _db_pool.close()

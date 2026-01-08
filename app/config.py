@@ -144,6 +144,26 @@ class Settings(BaseSettings):
         description="Header name for API key"
     )
 
+    # Cross-encoder Reranker
+    warmup_reranker: bool = Field(
+        default=False,
+        description="Pre-load cross-encoder model at startup (uses GPU memory)"
+    )
+    rerank_timeout_s: float = Field(
+        default=10.0,
+        description="Rerank timeout in seconds. Fails open to vector fallback on timeout."
+    )
+
+    # Evaluation Persistence (PR3)
+    eval_persist_enabled: bool = Field(
+        default=False,
+        description="Persist /query/compare evaluations to query_compare_evals table"
+    )
+    eval_store_question_preview: bool = Field(
+        default=False,
+        description="Store first 80 chars of question (otherwise hash only)"
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""
