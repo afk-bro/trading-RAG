@@ -222,8 +222,14 @@ async def admin_entity_detail(
             detail=f"Entity {entity_id} not found",
         )
 
+    # Find possible duplicates
+    possible_duplicates = await kb_repo.find_possible_duplicates(
+        entity_id=entity_id,
+        workspace_id=entity["workspace_id"],
+        limit=5,
+    )
+
     # Parse aliases
-    import json
     if isinstance(entity.get("aliases"), str):
         try:
             entity["aliases"] = json.loads(entity["aliases"])
@@ -309,6 +315,7 @@ async def admin_entity_detail(
             "prev_offset": max(0, offset - limit),
             "next_offset": offset + limit,
             "strategy_spec": json.dumps(strategy_spec, indent=2) if strategy_spec else None,
+            "possible_duplicates": possible_duplicates,
         },
     )
 

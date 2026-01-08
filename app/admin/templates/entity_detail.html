@@ -43,6 +43,42 @@
     </div>
 </div>
 
+{% if possible_duplicates %}
+<div class="card" style="border-color: var(--warning);">
+    <div class="card-header">
+        <h2 class="card-title" style="color: var(--warning);">Possible Duplicates</h2>
+        <span class="pagination-info">{{ possible_duplicates|length }} found</span>
+    </div>
+    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+        These entities may be duplicates based on name/alias similarity. Review and merge if appropriate.
+    </p>
+    <table>
+        <thead>
+            <tr>
+                <th>Entity</th>
+                <th>Type</th>
+                <th>Match</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for dup in possible_duplicates %}
+            <tr>
+                <td>
+                    <a href="/admin/kb/entities/{{ dup.id }}">{{ dup.name }}</a>
+                </td>
+                <td><span class="badge badge-type">{{ dup.type }}</span></td>
+                <td>
+                    <span class="badge" style="background: var(--warning); color: black; font-size: 11px;">
+                        {{ dup.match_type | replace('_', ' ') }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 {% if strategy_spec %}
 <div class="card" style="border-color: var(--info);">
     <div class="card-header">

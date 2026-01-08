@@ -569,6 +569,61 @@ class KnowledgeBaseRepository:
             row = await conn.fetchrow(query, entity_id)
             return dict(row) if row else None
 
+    async def find_possible_duplicates(
+        self,
+        entity_id: UUID,
+        workspace_id: UUID,
+        limit: int = 5,
+    ) -> list[dict]:
+        """
+        Find entities that might be duplicates based on name/alias similarity.
+
+        Checks:
+        - Normalized name similarity (case-insensitive, ignoring spaces/dashes)
+        - If entity name appears in another entity's aliases
+        - If alias appears in another entity's name or aliases
+        """
+        query = """
+            WITH target AS (
+                SELECT id, name, type, aliases,
+                       LOWER(REGEXP_REPLACE(name, '[^a-zA-Z0-9]', '', 'g')) as norm_name
+                FROM kb_entities
+                WHERE id = $1
+            )
+            SELECT DISTINCT e.id, e.name, e.type, e.aliases,
+                   CASE
+                       WHEN LOWER(REGEXP_REPLACE(e.name, '[^a-zA-Z0-9]', '', 'g')) = t.norm_name
+                       THEN 'exact_normalized'
+                       WHEN e.aliases::text ILIKE '%' || t.name || '%'
+                       THEN 'name_in_alias'
+                       WHEN t.aliases::text ILIKE '%' || e.name || '%'
+                       THEN 'alias_matches_name'
+                       ELSE 'partial'
+                   END as match_type
+            FROM kb_entities e, target t
+            WHERE e.workspace_id = $2
+              AND e.id != $1
+              AND (
+                  -- Normalized name match (case-insensitive, no spaces/dashes)
+                  LOWER(REGEXP_REPLACE(e.name, '[^a-zA-Z0-9]', '', 'g')) = t.norm_name
+                  -- Entity name appears in other's aliases
+                  OR e.aliases::text ILIKE '%' || t.name || '%'
+                  -- Other's name appears in entity's aliases
+                  OR t.aliases::text ILIKE '%' || e.name || '%'
+                  -- Fuzzy: first 4 chars match and same type (catch typos)
+                  OR (
+                      LEFT(LOWER(e.name), 4) = LEFT(LOWER(t.name), 4)
+                      AND e.type = t.type
+                      AND LENGTH(e.name) > 4
+                  )
+              )
+            LIMIT $3
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, entity_id, workspace_id, limit)
+            return [dict(r) for r in rows]
+
     async def list_claims(
         self,
         workspace_id: UUID,
