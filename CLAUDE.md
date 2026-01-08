@@ -123,8 +123,35 @@ All tables have FK to workspaces for multi-tenant isolation.
 
 Migrations in `migrations/` - applied via Supabase MCP or dashboard.
 
+## Backtest Parameter Tuning
+
+Research workflow for strategy optimization via parameter sweeps.
+
+**Core Concepts**:
+- `tune` - A parameter sweep session (grid/random search over param space)
+- `tune_run` - A single trial within a tune (one param combination)
+- IS/OOS split - In-Sample (training) and Out-of-Sample (validation) data split
+
+**Objective Functions** (`app/services/backtest/tuner.py`):
+- `sharpe` - Sharpe ratio
+- `sharpe_dd_penalty` - `sharpe - λ × max_drawdown_pct`
+- `return` - Return percentage
+- `return_dd_penalty` - `return_pct - λ × max_drawdown_pct`
+- `calmar` - `return_pct / abs(max_drawdown_pct)`
+
+**Gates Policy**: Trials must pass gates (max drawdown ≤20%, min trades ≥5) to be considered valid. Gates are evaluated on OOS metrics when split is enabled.
+
+**Overfit Detection**: `overfit_gap = score_is - score_oos`. Gap >0.3 indicates moderate overfit risk, >0.5 is high risk.
+
+**Admin UI** (`app/admin/router.py`, `app/admin/templates/`):
+- `/admin/backtests/tunes` - Filterable tune list with validity badges
+- `/admin/backtests/tunes/{id}` - Tune detail with trial list
+- `/admin/backtests/leaderboard` - Global ranking by objective score (CSV export)
+- `/admin/backtests/compare?tune_id=A&tune_id=B` - N-way diff table (JSON export)
+
 ## API Endpoints
 
+**RAG Core**:
 - `GET /health` - Dependency health (Qdrant, Ollama, Supabase)
 - `POST /ingest` - Generic document ingestion
 - `POST /sources/youtube/ingest` - YouTube transcript ingestion
@@ -133,6 +160,13 @@ Migrations in `migrations/` - applied via Supabase MCP or dashboard.
 - `POST /reembed` - Migrate to new embedding model
 - `GET /jobs/{job_id}` - Async job status
 - `GET /metrics` - Prometheus metrics
+
+**Backtest Tuning**:
+- `POST /backtests/tune` - Start parameter sweep
+- `GET /backtests/tunes` - List tunes with filters (valid_only, objective_type, oos_enabled)
+- `GET /backtests/tunes/{id}` - Tune detail with trial list
+- `POST /backtests/tunes/{id}/cancel` - Cancel running tune
+- `GET /backtests/leaderboard` - Global ranking with best run metrics
 
 ## Testing Notes
 

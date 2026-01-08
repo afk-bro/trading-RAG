@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Backtest Parameter Tuning System** - Complete research workflow for strategy optimization
+  - Grid/random search over strategy parameter spaces
+  - IS/OOS (In-Sample/Out-of-Sample) split validation with configurable ratio
+  - Composite objective functions: `sharpe`, `sharpe_dd_penalty`, `return`, `return_dd_penalty`, `calmar`
+  - Gates policy enforcement (max drawdown, min trades) with audit snapshots
+  - Overfit diagnostics via IS-OOS score gap analysis
+- **Admin UI for Tuning**
+  - `/admin/backtests/tunes` - Filterable list with validity badges
+  - `/admin/backtests/leaderboard` - Global ranking by objective score
+  - `/admin/backtests/compare` - N-way diff table with highlighting
+  - CSV export for leaderboard, JSON export for compare
+  - "Compare Selected" multi-select from leaderboard
+- **Tuning API Endpoints**
+  - `POST /backtests/tune` - Run parameter sweep
+  - `GET /backtests/tunes` - List with filters (valid_only, objective_type, oos_enabled)
+  - `GET /backtests/leaderboard` - Ranked tunes with best run metrics
+  - `GET /backtests/tunes/{id}` - Tune detail with trial list
+  - `POST /backtests/tunes/{id}/cancel` - Cancel running tune
+- **Database Migrations** (012-016)
+  - Tune run failed_reason tracking
+  - IS/OOS split columns (score_is, score_oos, oos_ratio)
+  - Metrics JSONB persistence (metrics_is, metrics_oos)
+  - Composite objective support (objective_type, objective_params, objective_score)
+  - Gates JSONB for policy snapshots
+
 ### Changed
 - **BREAKING**: `OPENROUTER_API_KEY` is now optional (was required)
   - Service starts and runs without LLM configuration

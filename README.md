@@ -39,6 +39,8 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Semantic Search**: Qdrant vector search with payload filtering
 - **Answer Generation**: Optional LLM synthesis with citations (graceful degradation)
 - **Model Migration**: Re-embed support for model upgrades
+- **Backtest Parameter Tuning**: Grid/random search, IS/OOS splits, overfit detection
+- **Admin UI**: Leaderboards, N-way tune comparison, CSV/JSON exports
 
 ### Query Modes
 
@@ -159,6 +161,33 @@ Content-Type: application/json
 GET /jobs/{job_id}
 ```
 
+### Backtest Tuning
+
+```http
+POST /backtests/tune
+Content-Type: application/json
+
+{
+  "workspace_id": "uuid",
+  "strategy_entity_id": "uuid",
+  "param_space": {"fast_period": [5, 10, 20], "slow_period": [20, 50, 100]},
+  "objective_type": "sharpe_dd_penalty",
+  "oos_ratio": 0.3
+}
+```
+
+```http
+GET /backtests/leaderboard?workspace_id=uuid&valid_only=true&objective_type=sharpe
+```
+
+### Admin UI Routes
+
+| Route | Purpose |
+|-------|---------|
+| `/admin/backtests/tunes` | Filterable tune list |
+| `/admin/backtests/leaderboard` | Global ranking (CSV export) |
+| `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
+
 ## Project Structure
 
 ```
@@ -174,7 +203,11 @@ trading-RAG/
 │   │   ├── youtube.py
 │   │   ├── query.py
 │   │   ├── reembed.py
-│   │   └── jobs.py
+│   │   ├── jobs.py
+│   │   └── backtests.py
+│   ├── admin/
+│   │   ├── router.py
+│   │   └── templates/
 │   ├── services/
 │   │   ├── chunker.py
 │   │   ├── embedder.py
@@ -213,6 +246,16 @@ trading-RAG/
 ### chunk_vectors
 - Tracks embeddings per model/collection
 - Supports model migration workflows
+
+### backtest_tunes
+- Parameter sweep sessions with objective config
+- Gates policy snapshots for audit trail
+- Status: pending, running, completed, canceled
+
+### backtest_tune_runs
+- Individual trials within a tune
+- IS/OOS metrics and scores
+- Composite objective scoring
 
 ## Environment Variables
 
