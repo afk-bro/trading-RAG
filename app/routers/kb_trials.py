@@ -14,7 +14,7 @@ from uuid import UUID
 
 import anyio
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import Settings, get_settings
@@ -50,9 +50,15 @@ DEFAULT_RETRIEVE_K = 100
 DEFAULT_RERANK_KEEP = 50
 DEFAULT_TOP_K = 20
 
-# Timeouts (milliseconds)
-EMBED_TIMEOUT_MS = 5000
-QDRANT_TIMEOUT_MS = 10000
+# Timeouts (seconds)
+RECOMMEND_TIMEOUT_S = 30
+EMBED_TIMEOUT_S = 5
+QDRANT_TIMEOUT_S = 10
+
+# File upload limits
+MAX_OHLCV_FILE_SIZE_MB = 20
+MAX_OHLCV_FILE_SIZE_BYTES = MAX_OHLCV_FILE_SIZE_MB * 1024 * 1024
+MAX_OHLCV_ROWS = 100_000  # Reject files with more rows
 
 
 # =============================================================================
@@ -418,16 +424,30 @@ async def recommend(
 
     # Execute with timeouts
     try:
-        with anyio.fail_after(30):  # 30 second total timeout
+        with anyio.fail_after(RECOMMEND_TIMEOUT_S):
             result = await recommender.recommend(internal_req)
     except TimeoutError:
-        logger.error("Recommendation timed out", request_id=request_id)
+        logger.error(
+            "Recommendation timed out",
+            request_id=request_id,
+            workspace_id=str(request.workspace_id),
+            strategy=request.strategy_name,
+            mode=mode.value,
+            timeout_s=RECOMMEND_TIMEOUT_S,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Recommendation request timed out",
+            detail=f"Recommendation request timed out after {RECOMMEND_TIMEOUT_S}s",
         )
     except Exception as e:
-        logger.error("Recommendation failed", request_id=request_id, error=str(e))
+        logger.error(
+            "Recommendation failed",
+            request_id=request_id,
+            workspace_id=str(request.workspace_id),
+            strategy=request.strategy_name,
+            mode=mode.value,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Recommendation failed: {str(e)}",
@@ -474,9 +494,15 @@ async def recommend(
     logger.info(
         "Recommend complete",
         request_id=request_id,
+        workspace_id=str(request.workspace_id),
+        strategy=request.strategy_name,
+        objective=request.objective_type,
+        mode=mode.value,
         status=result.status,
         confidence=result.confidence,
         count_used=result.count_used,
+        used_relaxed=result.used_relaxed_filters,
+        used_metadata_fallback=result.used_metadata_fallback,
     )
 
     return response
@@ -563,6 +589,155 @@ async def ingest(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Ingestion failed: {str(e)}",
         )
+
+
+# =============================================================================
+# File Upload Endpoint (Separate for memory safety)
+# =============================================================================
+
+
+class OHLCVUploadResponse(BaseModel):
+    """Response from OHLCV file upload."""
+
+    request_id: str
+    row_count: int
+    regime_tags: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+@router.post(
+    "/upload-ohlcv",
+    response_model=OHLCVUploadResponse,
+    responses={
+        200: {"description": "OHLCV parsed and regime computed"},
+        400: {"description": "Invalid file format or content"},
+        413: {"description": "File too large"},
+    },
+    summary="Upload OHLCV file for regime computation",
+    description=f"""
+Upload OHLCV data file (JSON/CSV) to compute regime tags for recommendation queries.
+
+**Limits:**
+- Max file size: {MAX_OHLCV_FILE_SIZE_MB}MB
+- Max rows: {MAX_OHLCV_ROWS:,}
+
+**Expected format (JSON):**
+```json
+[{{"open": 100, "high": 105, "low": 99, "close": 103, "volume": 1000}}, ...]
+```
+
+**Expected format (CSV):**
+```
+open,high,low,close,volume
+100,105,99,103,1000
+...
+```
+""",
+)
+async def upload_ohlcv(
+    ohlcv_file: UploadFile = File(..., description="OHLCV data file (CSV/JSON)"),
+) -> OHLCVUploadResponse:
+    """Upload OHLCV file and compute regime tags."""
+    request_id = str(uuid.uuid4())
+    warnings: list[str] = []
+
+    logger.info(
+        "OHLCV upload request",
+        request_id=request_id,
+        filename=ohlcv_file.filename,
+        content_type=ohlcv_file.content_type,
+    )
+
+    # Check content-length header if available
+    if ohlcv_file.size and ohlcv_file.size > MAX_OHLCV_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "error": f"File too large. Maximum size is {MAX_OHLCV_FILE_SIZE_MB}MB",
+                "code": "FILE_TOO_LARGE",
+                "max_bytes": MAX_OHLCV_FILE_SIZE_BYTES,
+            },
+        )
+
+    # Stream-read with limit to prevent memory exhaustion
+    try:
+        chunks = []
+        total_size = 0
+        async for chunk in ohlcv_file:
+            total_size += len(chunk)
+            if total_size > MAX_OHLCV_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={
+                        "error": f"File too large. Maximum size is {MAX_OHLCV_FILE_SIZE_MB}MB",
+                        "code": "FILE_TOO_LARGE",
+                        "max_bytes": MAX_OHLCV_FILE_SIZE_BYTES,
+                    },
+                )
+            chunks.append(chunk)
+        content = b"".join(chunks)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": f"Failed to read file: {str(e)}", "code": "READ_ERROR"},
+        )
+
+    # Parse OHLCV data
+    try:
+        ohlcv_data = _parse_ohlcv_file(content, ohlcv_file.filename or "data.json")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": f"Failed to parse OHLCV: {str(e)}", "code": "PARSE_ERROR"},
+        )
+
+    # Check row count
+    row_count = len(ohlcv_data)
+    if row_count > MAX_OHLCV_ROWS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": f"Too many rows ({row_count:,}). Maximum is {MAX_OHLCV_ROWS:,}",
+                "code": "TOO_MANY_ROWS",
+                "max_rows": MAX_OHLCV_ROWS,
+            },
+        )
+
+    if row_count < 10:
+        warnings.append("very_few_bars")
+
+    # Compute regime
+    regime_tags: list[str] = []
+    try:
+        from app.services.kb.regime import compute_regime_from_ohlcv
+
+        regime = compute_regime_from_ohlcv(ohlcv_data, source="upload")
+        regime_tags = regime.regime_tags
+        warnings.extend(regime.warnings)
+    except Exception as e:
+        logger.warning(
+            "Failed to compute regime from OHLCV",
+            request_id=request_id,
+            error=str(e),
+        )
+        warnings.append("regime_computation_failed")
+
+    logger.info(
+        "OHLCV upload complete",
+        request_id=request_id,
+        row_count=row_count,
+        regime_tags=regime_tags,
+        warning_count=len(warnings),
+    )
+
+    return OHLCVUploadResponse(
+        request_id=request_id,
+        row_count=row_count,
+        regime_tags=regime_tags,
+        warnings=warnings,
+    )
 
 
 # =============================================================================

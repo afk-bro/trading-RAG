@@ -1453,3 +1453,354 @@ async def eval_cleanup(
         "deleted": deleted,
         "retention_days": days,
     }
+
+
+# =============================================================================
+# KB Trials Admin Endpoints
+# =============================================================================
+
+
+def _get_kb_trial_repo():
+    """Get KBTrialRepository instance."""
+    from app.repositories.kb_trials import KBTrialRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return KBTrialRepository(_db_pool)
+
+
+@router.get("/kb/trials/stats")
+async def kb_trials_stats(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    _: None = Depends(verify_admin_access),
+):
+    """
+    Get KB trials statistics for a workspace.
+
+    Returns:
+    - total_trials: Total trials ingested
+    - pct_with_oos: Percentage with OOS metrics
+    - pct_valid: Percentage passing gates
+    - embedding_model: Current embedding model
+    - embedding_dim: Embedding dimension
+    - collection_name: Active Qdrant collection
+    - last_ingestion_ts: Last ingestion run timestamp
+    - stale_text_hash_count: Trials needing reembed
+    """
+    if not _db_pool:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available",
+        )
+
+    # Get stats from database
+    async with _db_pool.acquire() as conn:
+        # Base query conditions
+        workspace_filter = "AND t.workspace_id = $1" if workspace_id else ""
+        params = [workspace_id] if workspace_id else []
+
+        # Total trials
+        total_query = f"""
+            SELECT COUNT(*) as total
+            FROM kb_trial_vectors t
+            WHERE 1=1 {workspace_filter}
+        """
+        total = await conn.fetchval(total_query, *params)
+
+        # Trials with OOS metrics
+        oos_query = f"""
+            SELECT COUNT(*) as with_oos
+            FROM kb_trial_vectors t
+            WHERE t.has_oos_metrics = true {workspace_filter}
+        """
+        with_oos = await conn.fetchval(oos_query, *params)
+
+        # Valid trials (passing gates)
+        valid_query = f"""
+            SELECT COUNT(*) as valid
+            FROM kb_trial_vectors t
+            WHERE t.is_valid = true {workspace_filter}
+        """
+        valid = await conn.fetchval(valid_query, *params)
+
+        # Last ingestion
+        last_ingest_query = f"""
+            SELECT MAX(t.created_at) as last_ts
+            FROM kb_trial_vectors t
+            WHERE 1=1 {workspace_filter}
+        """
+        last_ts = await conn.fetchval(last_ingest_query, *params)
+
+        # Get workspace config for embedding info
+        embed_model = "nomic-embed-text"
+        embed_dim = 768
+        collection_name = "trading_kb_trials__nomic-embed-text__768"
+
+        if workspace_id:
+            config_query = """
+                SELECT config
+                FROM workspaces
+                WHERE id = $1
+            """
+            config_row = await conn.fetchrow(config_query, workspace_id)
+            if config_row and config_row["config"]:
+                config = config_row["config"]
+                if isinstance(config, str):
+                    config = json.loads(config)
+                kb_config = config.get("kb", {})
+                embed_model = kb_config.get("embed_model", embed_model)
+                embed_dim = kb_config.get("embed_dim", embed_dim)
+                collection_name = kb_config.get("collection_name", collection_name)
+
+        # Stale text hash count (needs reembed)
+        stale_query = f"""
+            SELECT COUNT(*) as stale
+            FROM kb_trial_vectors t
+            WHERE t.needs_reembed = true {workspace_filter}
+        """
+        try:
+            stale_count = await conn.fetchval(stale_query, *params)
+        except Exception:
+            # Column might not exist yet
+            stale_count = 0
+
+    pct_with_oos = (with_oos / total * 100) if total > 0 else 0
+    pct_valid = (valid / total * 100) if total > 0 else 0
+
+    return {
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "total_trials": total or 0,
+        "trials_with_oos": with_oos or 0,
+        "trials_valid": valid or 0,
+        "pct_with_oos": round(pct_with_oos, 1),
+        "pct_valid": round(pct_valid, 1),
+        "embedding_model": embed_model,
+        "embedding_dim": embed_dim,
+        "collection_name": collection_name,
+        "last_ingestion_ts": last_ts.isoformat() if last_ts else None,
+        "stale_text_hash_count": stale_count or 0,
+    }
+
+
+@router.get("/kb/trials/ingestion-status")
+async def kb_ingestion_status(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    _: None = Depends(verify_admin_access),
+):
+    """
+    Get KB ingestion health status.
+
+    Returns:
+    - trials_missing_vectors: Trials without embeddings
+    - trials_missing_regime: Trials without regime snapshots
+    - warning_counts: Top warning types and counts
+    - recent_ingestion_runs: Last 10 ingestion runs
+    """
+    if not _db_pool:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available",
+        )
+
+    async with _db_pool.acquire() as conn:
+        workspace_filter = "AND workspace_id = $1" if workspace_id else ""
+        params = [workspace_id] if workspace_id else []
+
+        # Missing vectors
+        missing_vectors_query = f"""
+            SELECT COUNT(*) as count
+            FROM kb_trial_vectors
+            WHERE vector IS NULL {workspace_filter}
+        """
+        try:
+            missing_vectors = await conn.fetchval(missing_vectors_query, *params)
+        except Exception:
+            missing_vectors = 0
+
+        # Missing regime
+        missing_regime_query = f"""
+            SELECT COUNT(*) as count
+            FROM kb_trial_vectors
+            WHERE regime_snapshot IS NULL {workspace_filter}
+        """
+        try:
+            missing_regime = await conn.fetchval(missing_regime_query, *params)
+        except Exception:
+            missing_regime = 0
+
+        # Warning counts
+        warning_counts_query = f"""
+            SELECT
+                warning,
+                COUNT(*) as count
+            FROM kb_trial_vectors,
+                 LATERAL unnest(warnings) as warning
+            WHERE 1=1 {workspace_filter}
+            GROUP BY warning
+            ORDER BY count DESC
+            LIMIT 20
+        """
+        try:
+            warning_rows = await conn.fetch(warning_counts_query, *params)
+            warning_counts = {row["warning"]: row["count"] for row in warning_rows}
+        except Exception:
+            warning_counts = {}
+
+        # Recent ingestion runs (if tracked)
+        recent_runs = []
+        try:
+            runs_query = f"""
+                SELECT
+                    id,
+                    created_at,
+                    ingested_count,
+                    skipped_count,
+                    error_count,
+                    duration_ms
+                FROM kb_ingestion_runs
+                WHERE 1=1 {workspace_filter}
+                ORDER BY created_at DESC
+                LIMIT 10
+            """
+            run_rows = await conn.fetch(runs_query, *params)
+            recent_runs = [
+                {
+                    "id": str(row["id"]),
+                    "created_at": row["created_at"].isoformat(),
+                    "ingested_count": row["ingested_count"],
+                    "skipped_count": row["skipped_count"],
+                    "error_count": row["error_count"],
+                    "duration_ms": row["duration_ms"],
+                }
+                for row in run_rows
+            ]
+        except Exception:
+            # Table might not exist yet
+            pass
+
+    return {
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "trials_missing_vectors": missing_vectors or 0,
+        "trials_missing_regime": missing_regime or 0,
+        "warning_counts": warning_counts,
+        "recent_ingestion_runs": recent_runs,
+    }
+
+
+@router.get("/kb/collections")
+async def kb_collections(
+    request: Request,
+    _: None = Depends(verify_admin_access),
+):
+    """
+    Get list of KB collections in Qdrant.
+
+    Returns collection names, point counts, and embedding models.
+    """
+    from qdrant_client import AsyncQdrantClient
+    from app.config import get_settings
+
+    settings = get_settings()
+
+    try:
+        client = AsyncQdrantClient(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+        )
+
+        # Get all collections
+        collections_response = await client.get_collections()
+
+        result = []
+        for coll in collections_response.collections:
+            # Get collection info
+            try:
+                info = await client.get_collection(coll.name)
+                result.append({
+                    "name": coll.name,
+                    "points_count": info.points_count,
+                    "vectors_count": info.vectors_count,
+                    "status": info.status.value if info.status else "unknown",
+                    "vector_size": info.config.params.vectors.size if info.config.params.vectors else None,
+                    "distance": info.config.params.vectors.distance.value if info.config.params.vectors else None,
+                })
+            except Exception as e:
+                result.append({
+                    "name": coll.name,
+                    "error": str(e),
+                })
+
+        await client.close()
+
+        return {
+            "collections": result,
+            "qdrant_host": settings.qdrant_host,
+            "qdrant_port": settings.qdrant_port,
+        }
+
+    except Exception as e:
+        logger.error("Failed to get Qdrant collections", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to connect to Qdrant: {str(e)}",
+        )
+
+
+@router.get("/kb/warnings/top")
+async def kb_top_warnings(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    limit: int = Query(20, ge=1, le=100, description="Number of warnings to return"),
+    _: None = Depends(verify_admin_access),
+):
+    """
+    Get top warning types across KB trials.
+
+    Useful for identifying systematic data quality issues.
+    """
+    if not _db_pool:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available",
+        )
+
+    async with _db_pool.acquire() as conn:
+        workspace_filter = "AND workspace_id = $1" if workspace_id else ""
+        params = [workspace_id, limit] if workspace_id else [limit]
+        limit_param = "$2" if workspace_id else "$1"
+
+        query = f"""
+            SELECT
+                warning,
+                COUNT(*) as count,
+                COUNT(*) * 100.0 / (SELECT COUNT(*) FROM kb_trial_vectors WHERE 1=1 {workspace_filter}) as pct
+            FROM kb_trial_vectors,
+                 LATERAL unnest(warnings) as warning
+            WHERE 1=1 {workspace_filter}
+            GROUP BY warning
+            ORDER BY count DESC
+            LIMIT {limit_param}
+        """
+
+        try:
+            rows = await conn.fetch(query, *params)
+            warnings = [
+                {
+                    "warning": row["warning"],
+                    "count": row["count"],
+                    "pct": round(row["pct"], 2) if row["pct"] else 0,
+                }
+                for row in rows
+            ]
+        except Exception:
+            warnings = []
+
+    return {
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "warnings": warnings,
+    }
