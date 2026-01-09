@@ -236,8 +236,13 @@ class KBRecommender:
             limit=req.retrieve_limit,
         )
 
-        with sentry_sdk.start_span(op="retrieve", description="Retrieve candidates from Qdrant"):
+        with sentry_sdk.start_span(op="retrieve", description="Retrieve candidates from Qdrant") as span:
             retrieval_result = await self.retriever.retrieve(retrieval_req)
+            if span:
+                span.set_data("strict_count", retrieval_result.stats.strict_count)
+                span.set_data("relaxed_count", retrieval_result.stats.relaxed_count)
+                span.set_data("total_returned", retrieval_result.stats.total_returned)
+                span.set_data("used_relaxed", retrieval_result.stats.used_relaxed_filters)
         retrieval_ms = (time.perf_counter() - start_retrieval) * 1000
         # Note: embed_ms and qdrant_ms are sub-components of retrieval
         # If retriever provides breakdown, use it; otherwise estimate
@@ -265,12 +270,15 @@ class KBRecommender:
 
         # Step 3: Rerank candidates
         start_rerank = time.perf_counter()
-        with sentry_sdk.start_span(op="rerank", description="Rerank candidates by combined score"):
+        with sentry_sdk.start_span(op="rerank", description="Rerank candidates by combined score") as span:
             rerank_result = rerank_candidates(
                 candidates=retrieval_result.candidates,
                 query_tags=query_tags,
                 query_regime=query_regime,
             )
+            if span:
+                span.set_data("candidates_in", len(retrieval_result.candidates))
+                span.set_data("candidates_out", len(rerank_result.candidates))
         timings.rerank_ms = (time.perf_counter() - start_rerank) * 1000
         warnings.extend(rerank_result.warnings)
 

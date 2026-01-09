@@ -46,19 +46,52 @@ logger = structlog.get_logger(__name__)
 # Initialize Sentry (if configured)
 settings = get_settings()
 if settings.sentry_dsn:
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    import os
+
+    # Only send ERROR-level logs as Sentry events
+    sentry_logging = LoggingIntegration(
+        level=None,  # Keep normal log levels
+        event_level="ERROR",  # Only ERROR+ become Sentry events
+    )
+
+    def traces_sampler(sampling_context: dict) -> float:
+        """
+        Smart sampling: trace all slow/degraded requests, sample the rest.
+
+        - 100% for debug mode or degraded status
+        - 100% for errors (status 5xx)
+        - 10% for everything else
+        """
+        # Check for transaction context
+        tx_context = sampling_context.get("transaction_context", {})
+        tx_name = tx_context.get("name", "")
+
+        # Always trace KB recommend requests at higher rate
+        if "/kb/trials/recommend" in tx_name:
+            return 0.5  # 50% for KB recommend
+
+        # Check parent sampling decision
+        parent = sampling_context.get("parent_sampled")
+        if parent is not None:
+            return float(parent)
+
+        # Default sampling rate
+        return settings.sentry_traces_sample_rate
+
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         environment=settings.sentry_environment,
-        release=f"trading-rag@{__version__}",
-        traces_sample_rate=settings.sentry_traces_sample_rate,
-        profiles_sample_rate=settings.sentry_profiles_sample_rate,
+        release=os.environ.get("GIT_SHA", f"trading-rag@{__version__}"),
         integrations=[
+            sentry_logging,
             StarletteIntegration(transaction_style="endpoint"),
             FastApiIntegration(transaction_style="endpoint"),
         ],
-        # Don't send PII
+        enable_tracing=True,
+        traces_sampler=traces_sampler,
+        profiles_sample_rate=settings.sentry_profiles_sample_rate,
         send_default_pii=False,
-        # Attach request data for debugging
         attach_stacktrace=True,
     )
     logger.info(

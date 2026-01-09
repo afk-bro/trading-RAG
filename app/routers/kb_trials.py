@@ -347,15 +347,22 @@ async def recommend(
     start_time = time.perf_counter()
 
     # Set Sentry transaction tags for filtering/grouping
+    sentry_sdk.set_tag("request_id", request_id)
     sentry_sdk.set_tag("workspace_id", str(request.workspace_id))
-    sentry_sdk.set_tag("strategy_name", request.strategy_name)
-    sentry_sdk.set_tag("objective_type", request.objective_type)
+    sentry_sdk.set_tag("strategy", request.strategy_name)
+    sentry_sdk.set_tag("objective", request.objective_type)
     sentry_sdk.set_tag("mode", mode.value)
-    sentry_sdk.set_context("kb_recommend", {
+
+    # Set detailed context (don't include large payloads like OHLCV)
+    sentry_sdk.set_context("kb_recommend_request", {
         "request_id": request_id,
         "retrieve_k": request.retrieve_k,
         "rerank_keep": request.rerank_keep,
         "top_k": request.top_k,
+        "require_oos": request.require_oos,
+        "min_trades": request.min_trades,
+        "max_drawdown": request.max_drawdown,
+        "max_overfit_gap": request.max_overfit_gap,
         "has_regime_tags": bool(request.regime_tags),
         "has_dataset_id": bool(request.dataset_id),
     })
@@ -455,7 +462,7 @@ async def recommend(
         with sentry_sdk.start_span(op="recommend", description="KB recommend pipeline"):
             with anyio.fail_after(RECOMMEND_TIMEOUT_S):
                 result = await recommender.recommend(internal_req)
-    except TimeoutError:
+    except TimeoutError as e:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         logger.error(
             "kb_recommend_timeout",
@@ -469,6 +476,12 @@ async def recommend(
             total_ms=round(elapsed_ms, 1),
         )
         record_kb_qdrant_error()  # Timeout usually means Qdrant issue
+
+        # Capture with fingerprint for grouping
+        with sentry_sdk.push_scope() as scope:
+            scope.fingerprint = ["kb", "recommend_timeout"]
+            sentry_sdk.capture_exception(e)
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Recommendation request timed out after {RECOMMEND_TIMEOUT_S}s",
@@ -488,11 +501,24 @@ async def recommend(
             error_type=error_type,
             total_ms=round(elapsed_ms, 1),
         )
-        # Record appropriate error metric
+
+        # Record appropriate error metric and capture with fingerprint
         if "embed" in str(e).lower() or "ollama" in str(e).lower():
             record_kb_embed_error()
+            with sentry_sdk.push_scope() as scope:
+                scope.fingerprint = ["kb", "embed_error"]
+                sentry_sdk.capture_exception(e)
+        elif "qdrant" in str(e).lower():
+            record_kb_qdrant_error()
+            with sentry_sdk.push_scope() as scope:
+                scope.fingerprint = ["kb", "qdrant_error"]
+                sentry_sdk.capture_exception(e)
         else:
             record_kb_qdrant_error()
+            with sentry_sdk.push_scope() as scope:
+                scope.fingerprint = ["kb", "recommend_error", error_type]
+                sentry_sdk.capture_exception(e)
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Recommendation failed: {str(e)}",
@@ -602,12 +628,47 @@ async def recommend(
     )
 
     # Update Sentry with result status (for filtering by outcome)
-    sentry_sdk.set_tag("status", result.status)
-    sentry_sdk.set_tag("confidence_bucket",
+    sentry_sdk.set_tag("kb_status", result.status)
+    confidence_bucket = (
         "high" if result.confidence and result.confidence >= 0.7 else
         "medium" if result.confidence and result.confidence >= 0.4 else
         "low" if result.confidence else "none"
     )
+    sentry_sdk.set_tag("kb_confidence", confidence_bucket)
+
+    # Add span data for counts
+    span = sentry_sdk.get_current_span()
+    if span:
+        span.set_data("candidates_returned", result.count_used)
+        span.set_data("strict_count", result.retrieval_strict_count)
+        span.set_data("relaxed_count", result.retrieval_relaxed_count)
+        span.set_data("used_relaxed", result.used_relaxed_filters)
+        span.set_data("used_metadata_fallback", result.used_metadata_fallback)
+
+    # Add breadcrumb for degraded status (searchable but not an error)
+    if result.status == "degraded":
+        sentry_sdk.add_breadcrumb(
+            category="kb.recommend",
+            message="Recommendation degraded",
+            level="warning",
+            data={
+                "reasons": result.reasons,
+                "status": result.status,
+                "confidence": result.confidence,
+                "used_relaxed": result.used_relaxed_filters,
+                "used_metadata_fallback": result.used_metadata_fallback,
+            },
+        )
+    elif result.status == "none":
+        sentry_sdk.add_breadcrumb(
+            category="kb.recommend",
+            message="No recommendation available",
+            level="info",
+            data={
+                "reasons": result.reasons,
+                "suggested_actions": result.suggested_actions,
+            },
+        )
 
     return response
 
