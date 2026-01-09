@@ -478,8 +478,15 @@ async def recommend(
         record_kb_qdrant_error()  # Timeout usually means Qdrant issue
 
         # Capture with fingerprint for grouping
+        # Note: embed_model/collection tags not available yet (failure occurred before result)
+        # Use workspace_id tag (set at request start) to correlate with workspace config
         with sentry_sdk.push_scope() as scope:
             scope.fingerprint = ["kb", "recommend_timeout"]
+            scope.set_context("kb_error", {
+                "elapsed_ms": round(elapsed_ms, 1),
+                "timeout_s": RECOMMEND_TIMEOUT_S,
+                "retrieve_k": request.retrieve_k,
+            })
             sentry_sdk.capture_exception(e)
 
         raise HTTPException(
@@ -503,20 +510,30 @@ async def recommend(
         )
 
         # Record appropriate error metric and capture with fingerprint
+        # Note: embed_model/collection tags not available yet (failure occurred before result)
+        # Use workspace_id tag (set at request start) to correlate with workspace config
+        error_context = {
+            "elapsed_ms": round(elapsed_ms, 1),
+            "error_type": error_type,
+            "retrieve_k": request.retrieve_k,
+        }
         if "embed" in str(e).lower() or "ollama" in str(e).lower():
             record_kb_embed_error()
             with sentry_sdk.push_scope() as scope:
                 scope.fingerprint = ["kb", "embed_error"]
+                scope.set_context("kb_error", error_context)
                 sentry_sdk.capture_exception(e)
         elif "qdrant" in str(e).lower():
             record_kb_qdrant_error()
             with sentry_sdk.push_scope() as scope:
                 scope.fingerprint = ["kb", "qdrant_error"]
+                scope.set_context("kb_error", error_context)
                 sentry_sdk.capture_exception(e)
         else:
             record_kb_qdrant_error()
             with sentry_sdk.push_scope() as scope:
                 scope.fingerprint = ["kb", "recommend_error", error_type]
+                scope.set_context("kb_error", error_context)
                 sentry_sdk.capture_exception(e)
 
         raise HTTPException(
@@ -627,14 +644,36 @@ async def recommend(
         incomplete_regime=incomplete_regime,
     )
 
-    # Update Sentry with result status (for filtering by outcome)
+    # Update Sentry with result status and model/collection tags (for filtering)
     sentry_sdk.set_tag("kb_status", result.status)
+    sentry_sdk.set_tag("embed_model", result.embedding_model)
+    sentry_sdk.set_tag("collection", result.collection_name)
     confidence_bucket = (
         "high" if result.confidence and result.confidence >= 0.7 else
         "medium" if result.confidence and result.confidence >= 0.4 else
         "low" if result.confidence else "none"
     )
     sentry_sdk.set_tag("kb_confidence", confidence_bucket)
+
+    # Add ops breadcrumb for collection choice (helps debug mismatched environments)
+    sentry_sdk.add_breadcrumb(
+        category="kb.config",
+        message=f"Using collection {result.collection_name}",
+        level="info",
+        data={
+            "collection": result.collection_name,
+            "embed_model": result.embedding_model,
+            "workspace_id": str(request.workspace_id),
+        },
+    )
+
+    # Add per-step duration measurements for dashboards (9.2 polish)
+    sentry_sdk.set_measurement("kb.total_ms", total_ms, "millisecond")
+    sentry_sdk.set_measurement("kb.regime_ms", regime_ms, "millisecond")
+    sentry_sdk.set_measurement("kb.embed_ms", embed_ms, "millisecond")
+    sentry_sdk.set_measurement("kb.qdrant_ms", qdrant_ms, "millisecond")
+    sentry_sdk.set_measurement("kb.rerank_ms", rerank_ms, "millisecond")
+    sentry_sdk.set_measurement("kb.aggregate_ms", aggregate_ms, "millisecond")
 
     # Add span data for counts
     span = sentry_sdk.get_current_span()

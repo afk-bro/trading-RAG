@@ -57,19 +57,23 @@ if settings.sentry_dsn:
 
     def traces_sampler(sampling_context: dict) -> float:
         """
-        Smart sampling: trace all slow/degraded requests, sample the rest.
+        Route-aware sampling for KB recommend critical path.
 
-        - 100% for debug mode or degraded status
-        - 100% for errors (status 5xx)
-        - 10% for everything else
+        - 100% for KB recommend (filter by kb_status tag in Sentry dashboards)
+        - Inherits parent sampling decision if available
+        - Default rate for everything else
+
+        Note: We can't sample by response status (degraded/none) at trace start
+        since traces_sampler runs before the request. Instead we sample 100%
+        for KB recommend and use kb_status/mode tags to filter in Sentry UI.
         """
         # Check for transaction context
         tx_context = sampling_context.get("transaction_context", {})
         tx_name = tx_context.get("name", "")
 
-        # Always trace KB recommend requests at higher rate
+        # KB recommend - 100% sampling (filter by kb_status/mode tags in Sentry)
         if "/kb/trials/recommend" in tx_name:
-            return 0.5  # 50% for KB recommend
+            return 1.0
 
         # Check parent sampling decision
         parent = sampling_context.get("parent_sampled")
