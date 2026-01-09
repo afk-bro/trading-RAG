@@ -4,6 +4,8 @@ E2E tests for the Tunes List page (/admin/backtests/tunes).
 Tests filtering, pagination, and table interactions.
 """
 
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -63,8 +65,8 @@ class TestTunesListFilters:
         admin_page.locator("select[name='status']").select_option("completed")
         admin_page.wait_for_load_state("networkidle")
 
-        # URL should include status parameter
-        expect(admin_page).to_have_url(lambda url: "status=completed" in url)
+        # URL should include status parameter (use regex, not lambda)
+        expect(admin_page).to_have_url(re.compile(r"status=completed"))
 
     def test_valid_only_checkbox(
         self, admin_page: Page, base_url: str
@@ -78,8 +80,8 @@ class TestTunesListFilters:
             checkbox.check()
             admin_page.wait_for_load_state("networkidle")
 
-        # URL should include valid_only parameter
-        expect(admin_page).to_have_url(lambda url: "valid_only=true" in url)
+        # URL should include valid_only parameter (use regex, not lambda)
+        expect(admin_page).to_have_url(re.compile(r"valid_only=true"))
 
     def test_reset_filters_via_url(
         self, admin_page: Page, base_url: str
@@ -109,8 +111,8 @@ class TestTunesListTableInteraction:
         if first_row.count() > 0:
             first_row.click()
 
-            # Should navigate to tune detail
-            expect(admin_page).to_have_url(lambda url: "/admin/backtests/tunes/" in url)
+            # Should navigate to tune detail (use regex, not lambda)
+            expect(admin_page).to_have_url(re.compile(r"/admin/backtests/tunes/"))
 
     def test_copy_button_exists(
         self, admin_page: Page, base_url: str
