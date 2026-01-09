@@ -262,16 +262,36 @@ class TestPerformanceSmoke:
 # CI Artifact Export
 # =============================================================================
 
+# Fixed output directory for CI artifact upload
+SMOKE_OUTPUT_DIR = os.getenv("SMOKE_OUTPUT_DIR", "/tmp/smoke-results")
 
-def test_export_smoke_results(client, headers, tmp_path):
-    """Export smoke test results as JSON artifact for CI."""
+
+def test_export_smoke_results(client, headers):
+    """Export smoke test results as JSON artifact for CI.
+
+    This test runs recommend for each strategy and saves full responses
+    to a predictable location for artifact upload.
+    """
     import json
     from datetime import datetime
+    from pathlib import Path
+
+    # Create output directory
+    output_dir = Path(SMOKE_OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     results = {
         "timestamp": datetime.utcnow().isoformat(),
         "base_url": SMOKE_TEST_URL,
+        "workspace_id": TEST_WORKSPACE_ID,
         "strategies_tested": TEST_STRATEGIES,
+        "summary": {
+            "total": len(TEST_STRATEGIES),
+            "passed": 0,
+            "degraded": 0,
+            "none": 0,
+            "failed": 0,
+        },
         "responses": [],
     }
 
@@ -286,18 +306,55 @@ def test_export_smoke_results(client, headers, tmp_path):
             headers=headers,
         )
 
-        results["responses"].append({
-            "strategy": strategy,
-            "status_code": response.status_code,
-            "response": response.json() if response.status_code == 200 else {"error": response.text},
-        })
+        if response.status_code == 200:
+            data = response.json()
+            status = data.get("status", "unknown")
+            if status == "ok":
+                results["summary"]["passed"] += 1
+            elif status == "degraded":
+                results["summary"]["degraded"] += 1
+            elif status == "none":
+                results["summary"]["none"] += 1
+            else:
+                results["summary"]["failed"] += 1
 
-    # Write to file for CI artifact upload
-    output_file = tmp_path / "smoke_test_results.json"
+            results["responses"].append({
+                "strategy": strategy,
+                "status_code": response.status_code,
+                "kb_status": status,
+                "confidence": data.get("confidence"),
+                "count_used": data.get("count_used"),
+                "used_relaxed_filters": data.get("used_relaxed_filters"),
+                "used_metadata_fallback": data.get("used_metadata_fallback"),
+                "warnings": data.get("warnings", []),
+                "active_collection": data.get("active_collection"),
+                "embedding_model_id": data.get("embedding_model_id"),
+                "params": data.get("params", {}),
+            })
+        else:
+            results["summary"]["failed"] += 1
+            results["responses"].append({
+                "strategy": strategy,
+                "status_code": response.status_code,
+                "kb_status": "error",
+                "error": response.text[:500],  # Truncate long errors
+            })
+
+    # Write to predictable location for CI artifact upload
+    output_file = output_dir / "smoke_test_results.json"
     output_file.write_text(json.dumps(results, indent=2, default=str))
 
+    print(f"\n{'='*60}")
+    print(f"Smoke Test Summary")
+    print(f"{'='*60}")
+    print(f"Total: {results['summary']['total']}")
+    print(f"  OK:       {results['summary']['passed']}")
+    print(f"  Degraded: {results['summary']['degraded']}")
+    print(f"  None:     {results['summary']['none']}")
+    print(f"  Failed:   {results['summary']['failed']}")
     print(f"\nResults written to: {output_file}")
+    print(f"{'='*60}")
 
-    # Assert all passed
-    failed = [r for r in results["responses"] if r["status_code"] != 200]
-    assert len(failed) == 0, f"Failed strategies: {[r['strategy'] for r in failed]}"
+    # Assert all HTTP requests succeeded (200)
+    http_failed = [r for r in results["responses"] if r["status_code"] != 200]
+    assert len(http_failed) == 0, f"HTTP failures: {[r['strategy'] for r in http_failed]}"

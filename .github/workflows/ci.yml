@@ -169,18 +169,18 @@ jobs:
 
       - name: Run smoke tests
         run: |
-          SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -v --tb=short
+          SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -v --tb=short -s
         env:
           SMOKE_TEST_TIMEOUT: "30"
+          SMOKE_OUTPUT_DIR: "/tmp/smoke-results"
 
       - name: Upload smoke test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: smoke-test-results
-          path: |
-            /tmp/pytest-*/smoke_test_results.json
-          retention-days: 7
+          path: /tmp/smoke-results/
+          retention-days: 14
 
       - name: Stop server
         if: always()
