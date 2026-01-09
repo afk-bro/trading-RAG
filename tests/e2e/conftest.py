@@ -2,11 +2,13 @@
 Playwright E2E test fixtures for Admin UI.
 
 Run with:
-    pytest tests/e2e -m e2e --base-url http://localhost:8000
+    ADMIN_TOKEN=e2e-test-token pytest tests/e2e --base-url http://localhost:8000
 
 Requires:
-    - Running server: uvicorn app.main:app --port 8000
-    - ADMIN_TOKEN environment variable set (or test token configured)
+    1. Server running with ADMIN_TOKEN set:
+       ADMIN_TOKEN=e2e-test-token uvicorn app.main:app --port 8000
+
+    2. Same ADMIN_TOKEN in test environment (or use default)
 """
 
 import os
@@ -16,7 +18,7 @@ from playwright.sync_api import Page, BrowserContext
 
 # Default test configuration
 DEFAULT_BASE_URL = "http://localhost:8000"
-DEFAULT_ADMIN_TOKEN = "test-admin-token"
+DEFAULT_ADMIN_TOKEN = "e2e-test-token"
 
 
 @pytest.fixture(scope="session")
