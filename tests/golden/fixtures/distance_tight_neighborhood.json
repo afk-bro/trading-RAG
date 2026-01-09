@@ -1,0 +1,37 @@
+{
+  "name": "tight_neighborhood",
+  "description": "Neighbors are very tightly clustered with small variance. Tests MAD stability when the neighborhood has minimal spread. Current is slightly offset from the cluster center, resulting in small sigma.",
+  "current_features": {
+    "atr_pct": 0.025,
+    "rsi": 52.0,
+    "momentum": 0.15
+  },
+  "neighbor_features": [
+    {"atr_pct": 0.020, "rsi": 50.0, "momentum": 0.10},
+    {"atr_pct": 0.0201, "rsi": 50.1, "momentum": 0.101},
+    {"atr_pct": 0.0199, "rsi": 49.9, "momentum": 0.099},
+    {"atr_pct": 0.0202, "rsi": 50.2, "momentum": 0.102},
+    {"atr_pct": 0.0198, "rsi": 49.8, "momentum": 0.098},
+    {"atr_pct": 0.0200, "rsi": 50.0, "momentum": 0.100}
+  ],
+  "cluster_var": {
+    "atr_pct": 0.0001,
+    "rsi": 100.0,
+    "momentum": 1.0
+  },
+  "shrinkage_c": 20.0,
+  "expected": {
+    "z_score": 0.0,
+    "distance_now": 0.617,
+    "mu": 0.617,
+    "sigma": 0.022,
+    "baseline": "composite",
+    "n_neighbors": 6
+  },
+  "tolerance": {
+    "z_score": 0.01,
+    "distance_now": 0.01,
+    "mu": 0.01,
+    "sigma": 0.01
+  }
+}

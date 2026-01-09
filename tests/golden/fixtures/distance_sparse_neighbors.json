@@ -1,0 +1,34 @@
+{
+  "name": "sparse_neighbors",
+  "description": "Only 3 neighbors available - tests edge case handling with minimal data points. With 3 points, MAD computation uses middle value. Tests robust handling when neighbor count is near minimum.",
+  "current_features": {
+    "atr_pct": 0.03,
+    "rsi": 55.0,
+    "momentum": 0.5
+  },
+  "neighbor_features": [
+    {"atr_pct": 0.02, "rsi": 48.0, "momentum": 0.2},
+    {"atr_pct": 0.025, "rsi": 52.0, "momentum": 0.35},
+    {"atr_pct": 0.022, "rsi": 50.0, "momentum": 0.25}
+  ],
+  "cluster_var": {
+    "atr_pct": 0.0001,
+    "rsi": 100.0,
+    "momentum": 1.0
+  },
+  "shrinkage_c": 20.0,
+  "expected": {
+    "z_score": 0.0,
+    "distance_now": 1.042,
+    "mu": 1.042,
+    "sigma": 0.445,
+    "baseline": "composite",
+    "n_neighbors": 3
+  },
+  "tolerance": {
+    "z_score": 0.01,
+    "distance_now": 0.01,
+    "mu": 0.01,
+    "sigma": 0.01
+  }
+}

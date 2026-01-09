@@ -1,0 +1,36 @@
+{
+  "name": "identical_features",
+  "description": "Current features exactly match all neighbors. Tests that z-score is 0 when current regime is identical to its neighborhood. This is the baseline case where there is no regime drift.",
+  "current_features": {
+    "atr_pct": 0.02,
+    "rsi": 50.0,
+    "momentum": 0.0
+  },
+  "neighbor_features": [
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.0},
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.0},
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.0},
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.0},
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.0}
+  ],
+  "cluster_var": {
+    "atr_pct": 0.0001,
+    "rsi": 100.0,
+    "momentum": 1.0
+  },
+  "shrinkage_c": 20.0,
+  "expected": {
+    "z_score": 0.0,
+    "distance_now": 0.0,
+    "mu": 0.0,
+    "sigma": 0.0,
+    "baseline": "composite",
+    "n_neighbors": 5
+  },
+  "tolerance": {
+    "z_score": 0.001,
+    "distance_now": 0.001,
+    "mu": 0.001,
+    "sigma": 0.001
+  }
+}

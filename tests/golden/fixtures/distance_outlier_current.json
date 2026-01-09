@@ -1,0 +1,38 @@
+{
+  "name": "outlier_current",
+  "description": "Current features are far from a tight neighborhood cluster. Tests distance computation when current regime is an outlier. Neighbors are tightly clustered around low volatility/neutral momentum, while current shows high volatility/strong momentum. Note: z-score is 0 because d_now equals mu (median of same distribution).",
+  "current_features": {
+    "atr_pct": 0.08,
+    "rsi": 75.0,
+    "momentum": 2.5
+  },
+  "neighbor_features": [
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.1},
+    {"atr_pct": 0.021, "rsi": 51.0, "momentum": 0.05},
+    {"atr_pct": 0.019, "rsi": 49.5, "momentum": 0.15},
+    {"atr_pct": 0.022, "rsi": 50.5, "momentum": -0.05},
+    {"atr_pct": 0.018, "rsi": 48.0, "momentum": 0.0},
+    {"atr_pct": 0.020, "rsi": 52.0, "momentum": 0.08},
+    {"atr_pct": 0.023, "rsi": 49.0, "momentum": -0.1}
+  ],
+  "cluster_var": {
+    "atr_pct": 0.0001,
+    "rsi": 100.0,
+    "momentum": 1.0
+  },
+  "shrinkage_c": 20.0,
+  "expected": {
+    "z_score": 0.0,
+    "distance_now": 7.943,
+    "mu": 7.943,
+    "sigma": 0.125,
+    "baseline": "composite",
+    "n_neighbors": 7
+  },
+  "tolerance": {
+    "z_score": 0.01,
+    "distance_now": 0.01,
+    "mu": 0.01,
+    "sigma": 0.01
+  }
+}

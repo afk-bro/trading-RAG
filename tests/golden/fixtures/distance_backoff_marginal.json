@@ -1,0 +1,32 @@
+{
+  "name": "backoff_marginal",
+  "description": "No cluster_var provided - tests backoff to neighbors_only baseline. When cluster variance is unavailable, the system falls back to using only observed variance from neighbors. This is the marginal case where prior information is missing.",
+  "current_features": {
+    "atr_pct": 0.035,
+    "rsi": 60.0,
+    "momentum": 0.8
+  },
+  "neighbor_features": [
+    {"atr_pct": 0.02, "rsi": 50.0, "momentum": 0.1},
+    {"atr_pct": 0.03, "rsi": 55.0, "momentum": 0.4},
+    {"atr_pct": 0.025, "rsi": 52.0, "momentum": 0.25},
+    {"atr_pct": 0.028, "rsi": 48.0, "momentum": 0.3},
+    {"atr_pct": 0.022, "rsi": 54.0, "momentum": 0.15}
+  ],
+  "cluster_var": null,
+  "shrinkage_c": 20.0,
+  "expected": {
+    "z_score": 0.0,
+    "distance_now": 6.163,
+    "mu": 6.163,
+    "sigma": 0.694,
+    "baseline": "neighbors_only",
+    "n_neighbors": 5
+  },
+  "tolerance": {
+    "z_score": 0.01,
+    "distance_now": 0.01,
+    "mu": 0.01,
+    "sigma": 0.01
+  }
+}
