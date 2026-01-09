@@ -77,6 +77,9 @@ class RetrievalRequest:
     # Model selection (defaults to workspace config)
     embedding_model: Optional[str] = None
 
+    # Diagnostic mode: runs extra queries to count filter rejections
+    diagnostic: bool = False
+
 
 @dataclass
 class RetrievalCandidate:
@@ -90,6 +93,22 @@ class RetrievalCandidate:
 
 
 @dataclass
+class FilterRejections:
+    """Counts of candidates rejected by each filter.
+
+    These are computed by comparing counts with progressively relaxed filters.
+    Only populated in diagnostic mode to avoid extra queries.
+    """
+
+    by_oos: int = 0  # Rejected due to require_oos=True
+    by_trades: int = 0  # Rejected due to min_trades
+    by_drawdown: int = 0  # Rejected due to max_drawdown
+    by_overfit_gap: int = 0  # Rejected due to max_overfit_gap
+    by_regime: int = 0  # Rejected due to regime_tags mismatch
+    total_before_filters: int = 0  # Total candidates before any quality filters
+
+
+@dataclass
 class RetrievalStats:
     """Statistics from retrieval operation."""
 
@@ -100,6 +119,9 @@ class RetrievalStats:
     used_metadata_fallback: bool = False
     collection_name: str = ""
     embedding_model: str = ""
+
+    # Filter rejection counts (only in diagnostic mode)
+    filter_rejections: Optional[FilterRejections] = None
 
 
 @dataclass
@@ -324,6 +346,13 @@ class KBRetriever:
 
         stats.total_returned = len(candidates)
 
+        # Diagnostic mode: compute filter rejection counts
+        if req.diagnostic and query_vector is not None:
+            stats.filter_rejections = await self._compute_filter_rejections(
+                req=req,
+                query_vector=query_vector,
+            )
+
         logger.info(
             "Retrieval complete",
             strict_count=stats.strict_count,
@@ -331,6 +360,7 @@ class KBRetriever:
             total=stats.total_returned,
             used_relaxed=stats.used_relaxed_filters,
             metadata_fallback=stats.used_metadata_fallback,
+            diagnostic=req.diagnostic,
         )
 
         return RetrievalResult(
@@ -338,6 +368,116 @@ class KBRetriever:
             stats=stats,
             warnings=warnings,
         )
+
+    async def _compute_filter_rejections(
+        self,
+        req: RetrievalRequest,
+        query_vector: list[float],
+    ) -> FilterRejections:
+        """
+        Compute how many candidates were rejected by each filter.
+
+        Runs queries with progressively relaxed filters to compute deltas.
+        This is expensive, so only used in diagnostic mode.
+        """
+        rejections = FilterRejections()
+
+        # Query 1: No quality filters (baseline)
+        no_filters_count = await self.repository.count(
+            vector=query_vector,
+            workspace_id=req.workspace_id,
+            strategy_name=req.strategy_name,
+            objective_type=req.objective_type,
+            filters={},
+            limit=req.limit,
+        )
+        rejections.total_before_filters = no_filters_count
+
+        # Query 2: With require_oos only
+        oos_count = await self.repository.count(
+            vector=query_vector,
+            workspace_id=req.workspace_id,
+            strategy_name=req.strategy_name,
+            objective_type=req.objective_type,
+            filters={"require_oos": True},
+            limit=req.limit,
+        )
+        rejections.by_oos = no_filters_count - oos_count
+
+        # Query 3: With require_oos + min_trades
+        min_trades = req.min_trades or DEFAULT_STRICT_FILTERS["min_trades"]
+        trades_count = await self.repository.count(
+            vector=query_vector,
+            workspace_id=req.workspace_id,
+            strategy_name=req.strategy_name,
+            objective_type=req.objective_type,
+            filters={"require_oos": True, "min_trades": min_trades},
+            limit=req.limit,
+        )
+        rejections.by_trades = oos_count - trades_count
+
+        # Query 4: With require_oos + min_trades + max_drawdown
+        max_dd = req.max_drawdown or DEFAULT_STRICT_FILTERS["max_drawdown"]
+        dd_count = await self.repository.count(
+            vector=query_vector,
+            workspace_id=req.workspace_id,
+            strategy_name=req.strategy_name,
+            objective_type=req.objective_type,
+            filters={
+                "require_oos": True,
+                "min_trades": min_trades,
+                "max_drawdown": max_dd,
+            },
+            limit=req.limit,
+        )
+        rejections.by_drawdown = trades_count - dd_count
+
+        # Query 5: All strict filters (including overfit_gap)
+        max_overfit = req.max_overfit_gap or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
+        strict_count = await self.repository.count(
+            vector=query_vector,
+            workspace_id=req.workspace_id,
+            strategy_name=req.strategy_name,
+            objective_type=req.objective_type,
+            filters={
+                "require_oos": True,
+                "min_trades": min_trades,
+                "max_drawdown": max_dd,
+                "max_overfit_gap": max_overfit,
+            },
+            limit=req.limit,
+        )
+        rejections.by_overfit_gap = dd_count - strict_count
+
+        # Query 6: With regime tags (if provided)
+        if req.regime_tags:
+            regime_count = await self.repository.count(
+                vector=query_vector,
+                workspace_id=req.workspace_id,
+                strategy_name=req.strategy_name,
+                objective_type=req.objective_type,
+                filters={
+                    "require_oos": True,
+                    "min_trades": min_trades,
+                    "max_drawdown": max_dd,
+                    "max_overfit_gap": max_overfit,
+                    "regime_tags": req.regime_tags,
+                },
+                limit=req.limit,
+            )
+            rejections.by_regime = strict_count - regime_count
+
+        logger.info(
+            "Filter rejection analysis",
+            total_before=rejections.total_before_filters,
+            by_oos=rejections.by_oos,
+            by_trades=rejections.by_trades,
+            by_drawdown=rejections.by_drawdown,
+            by_overfit_gap=rejections.by_overfit_gap,
+            by_regime=rejections.by_regime,
+        )
+
+        return rejections
 
 
 # =============================================================================

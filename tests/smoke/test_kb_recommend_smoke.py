@@ -265,6 +265,13 @@ class TestPerformanceSmoke:
 # Fixed output directory for CI artifact upload
 SMOKE_OUTPUT_DIR = os.getenv("SMOKE_OUTPUT_DIR", "/tmp/smoke-results")
 
+# Relaxed floors for diagnostic pass
+RELAXED_FLOORS = {
+    "min_trades": 1,
+    "max_drawdown": 0.50,  # 50%
+    "max_overfit_gap": 1.0,  # Effectively disabled
+}
+
 
 def test_export_smoke_results(client, headers):
     """Export smoke test results as JSON artifact for CI.
@@ -318,6 +325,13 @@ def test_export_smoke_results(client, headers):
             else:
                 results["summary"]["failed"] += 1
 
+            # Build degradation_reasons from reasons + warnings for debugging
+            degradation_reasons = data.get("reasons", []).copy()
+            if data.get("used_relaxed_filters"):
+                degradation_reasons.append("used_relaxed_filters")
+            if data.get("used_metadata_fallback"):
+                degradation_reasons.append("used_metadata_fallback")
+
             results["responses"].append({
                 "strategy": strategy,
                 "status_code": response.status_code,
@@ -326,6 +340,8 @@ def test_export_smoke_results(client, headers):
                 "count_used": data.get("count_used"),
                 "used_relaxed_filters": data.get("used_relaxed_filters"),
                 "used_metadata_fallback": data.get("used_metadata_fallback"),
+                "degradation_reasons": degradation_reasons,
+                "suggested_actions": data.get("suggested_actions", []),
                 "warnings": data.get("warnings", []),
                 "active_collection": data.get("active_collection"),
                 "embedding_model_id": data.get("embedding_model_id"),
@@ -358,3 +374,97 @@ def test_export_smoke_results(client, headers):
     # Assert all HTTP requests succeeded (200)
     http_failed = [r for r in results["responses"] if r["status_code"] != 200]
     assert len(http_failed) == 0, f"HTTP failures: {[r['strategy'] for r in http_failed]}"
+
+
+def test_relaxed_smoke_diagnostic(client, headers):
+    """Run relaxed smoke pass to diagnose 'none' vs 'filters too strict'.
+
+    If strict smoke returns 'none' but relaxed returns 'ok' or 'degraded',
+    then the issue is filter strictness, not missing data.
+    """
+    import json
+    from datetime import datetime
+    from pathlib import Path
+
+    output_dir = Path(SMOKE_OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "test_type": "relaxed_diagnostic",
+        "relaxed_floors": RELAXED_FLOORS,
+        "strategies": [],
+    }
+
+    for strategy in TEST_STRATEGIES:
+        # Strict pass (production settings)
+        strict_response = client.post(
+            "/kb/trials/recommend",
+            json={
+                "workspace_id": TEST_WORKSPACE_ID,
+                "strategy_name": strategy,
+                "objective_type": "sharpe",
+            },
+            headers=headers,
+        )
+
+        # Relaxed pass (lowered floors)
+        relaxed_response = client.post(
+            "/kb/trials/recommend",
+            json={
+                "workspace_id": TEST_WORKSPACE_ID,
+                "strategy_name": strategy,
+                "objective_type": "sharpe",
+                "min_trades": RELAXED_FLOORS["min_trades"],
+                "max_drawdown": RELAXED_FLOORS["max_drawdown"],
+                "max_overfit_gap": RELAXED_FLOORS["max_overfit_gap"],
+            },
+            headers=headers,
+        )
+
+        strict_status = "error"
+        relaxed_status = "error"
+
+        if strict_response.status_code == 200:
+            strict_status = strict_response.json().get("status", "unknown")
+        if relaxed_response.status_code == 200:
+            relaxed_status = relaxed_response.json().get("status", "unknown")
+
+        # Determine diagnosis
+        diagnosis = "unknown"
+        if strict_status == "none" and relaxed_status in ["ok", "degraded"]:
+            diagnosis = "filters_too_strict"
+        elif strict_status == "none" and relaxed_status == "none":
+            diagnosis = "no_data_for_strategy"
+        elif strict_status in ["ok", "degraded"]:
+            diagnosis = "healthy"
+
+        results["strategies"].append({
+            "strategy": strategy,
+            "strict_status": strict_status,
+            "relaxed_status": relaxed_status,
+            "diagnosis": diagnosis,
+            "strict_count": strict_response.json().get("count_used", 0) if strict_response.status_code == 200 else 0,
+            "relaxed_count": relaxed_response.json().get("count_used", 0) if relaxed_response.status_code == 200 else 0,
+        })
+
+    # Write diagnostic results
+    output_file = output_dir / "relaxed_diagnostic_results.json"
+    output_file.write_text(json.dumps(results, indent=2, default=str))
+
+    # Summary
+    print(f"\n{'='*60}")
+    print("Relaxed Diagnostic Summary")
+    print(f"{'='*60}")
+    for s in results["strategies"]:
+        emoji = {"healthy": "✓", "filters_too_strict": "⚠", "no_data_for_strategy": "✗"}.get(s["diagnosis"], "?")
+        print(f"  {emoji} {s['strategy']}: {s['diagnosis']} (strict={s['strict_status']}, relaxed={s['relaxed_status']})")
+    print(f"\nResults written to: {output_file}")
+    print(f"{'='*60}")
+
+    # Don't fail on none - this is diagnostic only
+    # Just ensure HTTP succeeded
+    assert all(
+        s["strict_status"] != "error" and s["relaxed_status"] != "error"
+        for s in results["strategies"]
+    ), "HTTP errors in diagnostic pass"

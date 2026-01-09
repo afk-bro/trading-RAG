@@ -19,6 +19,7 @@ from app.services.kb.retrieval import (
     RetrievalRequest,
     RetrievalResult,
     KBRetriever,
+    FilterRejections,
 )
 from app.services.kb.rerank import (
     RerankResult,
@@ -90,6 +91,9 @@ class RecommendRequest:
     rerank_top_m: int = DEFAULT_RERANK_TOP_M
     aggregate_top_k: int = DEFAULT_AGGREGATE_TOP_K
 
+    # Diagnostic mode: compute filter rejection counts (expensive)
+    diagnostic: bool = False
+
 
 @dataclass
 class TrialSummary:
@@ -137,6 +141,9 @@ class RecommendResponse:
 
     # Timings (for observability)
     timings: Optional[RecommendTimings] = None
+
+    # Filter rejection counts (only in diagnostic mode)
+    filter_rejections: Optional[FilterRejections] = None
 
 
 # =============================================================================
@@ -234,6 +241,7 @@ class KBRecommender:
             max_drawdown=req.max_drawdown,
             regime_tags=query_tags if query_tags else None,
             limit=req.retrieve_limit,
+            diagnostic=req.diagnostic,
         )
 
         with sentry_sdk.start_span(op="retrieve", description="Retrieve candidates from Qdrant") as span:
@@ -380,6 +388,14 @@ class KBRecommender:
             aggregate_ms=round(timings.aggregate_ms, 1),
         )
 
+        # Build conditional suggested_actions based on filter_rejections
+        suggested_actions = self._build_suggested_actions(
+            status=status,
+            filter_rejections=retrieval_result.stats.filter_rejections,
+            reasons=reasons,
+            strict_count=retrieval_result.stats.strict_count,
+        )
+
         return RecommendResponse(
             params=aggregation_result.params,
             status=status,
@@ -388,7 +404,7 @@ class KBRecommender:
             count_used=aggregation_result.count_used,
             warnings=warnings,
             reasons=reasons,
-            suggested_actions=[],
+            suggested_actions=suggested_actions,
             retrieval_strict_count=retrieval_result.stats.strict_count,
             retrieval_relaxed_count=retrieval_result.stats.relaxed_count,
             used_relaxed_filters=retrieval_result.stats.used_relaxed_filters,
@@ -397,6 +413,7 @@ class KBRecommender:
             collection_name=retrieval_result.stats.collection_name,
             embedding_model=retrieval_result.stats.embedding_model,
             timings=timings,
+            filter_rejections=retrieval_result.stats.filter_rejections,
         )
 
     def _compute_status(
@@ -429,6 +446,64 @@ class KBRecommender:
             return "degraded"
 
         return "none"
+
+    def _build_suggested_actions(
+        self,
+        status: str,
+        filter_rejections: Optional[FilterRejections],
+        reasons: list[str],
+        strict_count: int,
+    ) -> list[str]:
+        """
+        Build conditional suggested_actions based on filter rejection analysis.
+
+        Actions are prioritized by the largest rejection source.
+        """
+        actions: list[str] = []
+
+        if status == "ok":
+            return []  # No actions needed
+
+        # Check filter rejections for specific guidance
+        if filter_rejections:
+            # Sort rejection types by count (highest first)
+            rejection_types = [
+                ("trades", filter_rejections.by_trades, "lower_min_trades_or_run_longer_backtest"),
+                ("drawdown", filter_rejections.by_drawdown, "increase_max_drawdown_threshold"),
+                ("overfit_gap", filter_rejections.by_overfit_gap, "increase_max_overfit_gap_or_longer_oos"),
+                ("oos", filter_rejections.by_oos, "enable_oos_split_in_tuner"),
+                ("regime", filter_rejections.by_regime, "backfill_regime_tags_for_strategy"),
+            ]
+
+            # Add action for largest rejection source
+            rejection_types.sort(key=lambda x: x[1], reverse=True)
+            for name, count, action in rejection_types:
+                if count > 0:
+                    actions.append(action)
+                    break  # Only add top action
+
+            # If zero total_before_filters, suggest ingesting data
+            if filter_rejections.total_before_filters == 0:
+                actions.insert(0, "ingest_trials_for_strategy")
+
+        elif status == "none":
+            # Generic actions when no filter rejection data
+            actions.extend([
+                "ingest_more_trials",
+                "check_strategy_name_spelling",
+                "verify_objective_type_match",
+            ])
+
+        elif status == "degraded":
+            # Check specific reasons
+            if "used_relaxed_filters" in reasons:
+                actions.append("run_more_trials_to_improve_coverage")
+            if "used_metadata_fallback" in reasons:
+                actions.append("check_embedding_service_health")
+            if "params_required_repair" in reasons:
+                actions.append("review_param_spec_constraints")
+
+        return actions
 
     def _build_none_response(
         self,

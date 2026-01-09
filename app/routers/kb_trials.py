@@ -168,6 +168,17 @@ class ParamSpreadInfo(BaseModel):
     mode_fraction: Optional[float] = None  # Fraction for categorical
 
 
+class FilterRejectionsInfo(BaseModel):
+    """Filter rejection counts for debug diagnostics."""
+
+    total_before_filters: int = Field(0, description="Total candidates before quality filters")
+    by_oos: int = Field(0, description="Rejected by require_oos=True")
+    by_trades: int = Field(0, description="Rejected by min_trades")
+    by_drawdown: int = Field(0, description="Rejected by max_drawdown")
+    by_overfit_gap: int = Field(0, description="Rejected by max_overfit_gap")
+    by_regime: int = Field(0, description="Rejected by regime_tags mismatch")
+
+
 class RecommendResponse(BaseModel):
     """Response from parameter recommendation."""
 
@@ -201,6 +212,7 @@ class RecommendResponse(BaseModel):
     # Optional debug data
     top_candidates: Optional[list[CandidateSummary]] = Field(None, description="Top candidates (debug mode)")
     param_spreads: Optional[dict[str, ParamSpreadInfo]] = Field(None, description="Parameter spread info")
+    filter_rejections: Optional[FilterRejectionsInfo] = Field(None, description="Filter rejection counts (debug mode)")
 
 
 class IngestResponse(BaseModel):
@@ -443,6 +455,9 @@ async def recommend(
     # Build recommend request
     from app.services.kb.recommend import RecommendRequest as InternalRecommendRequest
 
+    # Enable diagnostic mode in debug mode (computes filter rejection counts)
+    diagnostic = mode == RecommendMode.DEBUG
+
     internal_req = InternalRecommendRequest(
         workspace_id=request.workspace_id,
         strategy_name=request.strategy_name,
@@ -455,6 +470,7 @@ async def recommend(
         retrieve_limit=request.retrieve_k,
         rerank_top_m=request.rerank_keep,
         aggregate_top_k=request.top_k,
+        diagnostic=diagnostic,
     )
 
     # Execute with timeouts
@@ -578,6 +594,17 @@ async def recommend(
             )
             for t in result.top_trials
         ]
+
+        # Add filter rejections in debug mode
+        if result.filter_rejections:
+            response.filter_rejections = FilterRejectionsInfo(
+                total_before_filters=result.filter_rejections.total_before_filters,
+                by_oos=result.filter_rejections.by_oos,
+                by_trades=result.filter_rejections.by_trades,
+                by_drawdown=result.filter_rejections.by_drawdown,
+                by_overfit_gap=result.filter_rejections.by_overfit_gap,
+                by_regime=result.filter_rejections.by_regime,
+            )
 
     # Extract timings from result
     timings = result.timings

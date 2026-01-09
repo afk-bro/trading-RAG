@@ -495,6 +495,10 @@ class KBTrialRepository:
         self,
         workspace_id: Optional[UUID] = None,
         strategy_name: Optional[str] = None,
+        objective_type: Optional[str] = None,
+        filters: Optional[dict] = None,
+        vector: Optional[list[float]] = None,
+        limit: int = 10000,
     ) -> int:
         """
         Count trials matching filters.
@@ -502,6 +506,10 @@ class KBTrialRepository:
         Args:
             workspace_id: Optional workspace filter
             strategy_name: Optional strategy filter
+            objective_type: Optional objective type filter
+            filters: Additional quality filters (require_oos, min_trades, etc.)
+            vector: Optional query vector (uses search + count if provided)
+            limit: Maximum count limit
 
         Returns:
             Number of matching trials
@@ -510,7 +518,11 @@ class KBTrialRepository:
             qmodels.FieldCondition(
                 key="doc_type",
                 match=qmodels.MatchValue(value=KB_TRIALS_DOC_TYPE),
-            )
+            ),
+            qmodels.FieldCondition(
+                key="is_valid",
+                match=qmodels.MatchValue(value=True),
+            ),
         ]
 
         if workspace_id:
@@ -529,12 +541,36 @@ class KBTrialRepository:
                 )
             )
 
-        result = await self.client.count(
-            collection_name=self.collection,
-            count_filter=qmodels.Filter(must=conditions),
-        )
+        if objective_type:
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="objective_type",
+                    match=qmodels.MatchValue(value=objective_type),
+                )
+            )
 
-        return result.count
+        if filters:
+            conditions.extend(self._build_filter_conditions(filters))
+
+        qdrant_filter = qmodels.Filter(must=conditions)
+
+        # If vector provided, use search to get accurate similarity-weighted count
+        # Otherwise use simple count
+        if vector is not None:
+            results = await self.client.search(
+                collection_name=self.collection,
+                query_vector=vector,
+                query_filter=qdrant_filter,
+                limit=limit,
+                with_payload=False,
+            )
+            return len(results)
+        else:
+            result = await self.client.count(
+                collection_name=self.collection,
+                count_filter=qdrant_filter,
+            )
+            return result.count
 
     async def get_collection_info(self) -> dict:
         """Get collection information."""
