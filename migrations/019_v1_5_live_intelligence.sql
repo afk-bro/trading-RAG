@@ -8,7 +8,7 @@
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS regime_cluster_stats (
-    strategy_entity_id UUID NOT NULL,
+    strategy_entity_id UUID NOT NULL REFERENCES kb_entities(id) ON DELETE CASCADE,
     timeframe TEXT NOT NULL,
     regime_key TEXT NOT NULL,
     regime_dims JSONB NOT NULL,
@@ -52,6 +52,9 @@ CREATE INDEX IF NOT EXISTS idx_duration_stats_timeframe_key
     ON regime_duration_stats(timeframe, regime_key);
 
 COMMENT ON TABLE regime_duration_stats IS 'v1.5: Historical regime duration distributions for persistence estimation';
+-- NOTE: Intentionally NOT workspace-scoped. Duration stats describe market-level
+-- behavior (how long regimes typically last for a given symbol/timeframe) and are
+-- shared across all workspaces. Keyed by market properties, not strategy.
 
 -- =============================================================================
 -- Table 3: recommendation_records
