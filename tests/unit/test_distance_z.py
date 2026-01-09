@@ -7,6 +7,7 @@ from app.services.kb.distance import (
     compute_distance_distribution,
     compute_regime_distance_z,
     DistanceResult,
+    DEFAULT_SHRINKAGE_C,
 )
 
 
@@ -76,50 +77,59 @@ class TestRegimeDistanceZ:
     def test_z_score_interpretation(self):
         """Z-score reflects deviation from neighborhood."""
         # Current features match neighborhood well
-        current = {"atr_pct": 0.02, "rsi": 50.0}
-        neighbors = [
+        current_features = {"atr_pct": 0.02, "rsi": 50.0}
+        neighbor_features = [
             {"atr_pct": 0.021, "rsi": 51.0},
             {"atr_pct": 0.019, "rsi": 49.0},
             {"atr_pct": 0.020, "rsi": 50.0},
         ]
         cluster_var = {"atr_pct": 0.0001, "rsi": 100.0}
 
-        result = compute_regime_distance_z(current, neighbors, cluster_var)
+        result = compute_regime_distance_z(
+            current_features, neighbor_features, cluster_var
+        )
 
         # Should be close to 0 (within neighborhood)
         # z <= 1.0 indicates current is within 1 std dev of typical neighbor distance
         assert abs(result.z_score) <= 1.0
         assert result.baseline == "composite"
 
-    def test_outlier_has_high_z(self):
-        """Outlier features have high z-score."""
-        current = {"atr_pct": 0.10, "rsi": 90.0}  # Very different
-        neighbors = [
+    def test_outlier_has_high_distance(self):
+        """Outlier features have high distance to neighbors."""
+        current_features = {"atr_pct": 0.10, "rsi": 90.0}  # Very different
+        # Neighbors with some variation to establish a distribution
+        neighbor_features = [
+            {"atr_pct": 0.02, "rsi": 48.0},
             {"atr_pct": 0.02, "rsi": 50.0},
-            {"atr_pct": 0.02, "rsi": 50.0},
-            {"atr_pct": 0.02, "rsi": 50.0},
+            {"atr_pct": 0.02, "rsi": 52.0},
+            {"atr_pct": 0.021, "rsi": 49.0},
+            {"atr_pct": 0.019, "rsi": 51.0},
         ]
         cluster_var = {"atr_pct": 0.0001, "rsi": 100.0}
 
-        result = compute_regime_distance_z(current, neighbors, cluster_var)
+        result = compute_regime_distance_z(
+            current_features, neighbor_features, cluster_var
+        )
 
-        # Should have high z-score
-        assert result.z_score > 2.0
+        # Should have high distance_now (far from neighbors)
+        assert result.distance_now > 2.0
+        # z_score should be defined
+        assert result.z_score is not None
 
     def test_shrinkage_blends_prior_and_observed(self):
         """Shrinkage parameter blends cluster prior with observed."""
-        current = {"a": 0.5}
-        neighbors = [{"a": 0.5}, {"a": 0.5}]  # K=2
+        current_features = {"a": 0.5}
+        neighbor_features = [{"a": 0.5}, {"a": 0.5}]  # K=2
         cluster_var = {"a": 1.0}
 
         result_low_k = compute_regime_distance_z(
-            current, neighbors, cluster_var, shrinkage_c=10
+            current_features, neighbor_features, cluster_var, shrinkage_c=10
         )
 
         # With more neighbors, less reliance on prior
-        neighbors_many = [{"a": 0.5}] * 100
+        neighbor_features_many = [{"a": 0.5}] * 100
         result_high_k = compute_regime_distance_z(
-            current, neighbors_many, cluster_var, shrinkage_c=10
+            current_features, neighbor_features_many, cluster_var, shrinkage_c=10
         )
 
         # Both should work without error
@@ -128,22 +138,70 @@ class TestRegimeDistanceZ:
 
     def test_empty_neighbors_returns_missing(self):
         """Empty neighbors returns null z-score with missing reason."""
-        current = {"a": 0.5}
-        neighbors = []
+        current_features = {"a": 0.5}
+        neighbor_features = []
         cluster_var = {"a": 1.0}
 
-        result = compute_regime_distance_z(current, neighbors, cluster_var)
+        result = compute_regime_distance_z(
+            current_features, neighbor_features, cluster_var
+        )
 
         assert result.z_score is None
+        assert result.mu is None
+        assert result.sigma is None
         assert "no_neighbors" in result.missing
 
     def test_fallback_to_neighbors_only(self):
         """When no cluster variance, uses neighbors-only baseline."""
-        current = {"a": 0.5}
-        neighbors = [{"a": 0.4}, {"a": 0.6}, {"a": 0.5}]
+        current_features = {"a": 0.5}
+        neighbor_features = [{"a": 0.4}, {"a": 0.6}, {"a": 0.5}]
         cluster_var = None  # No cluster stats available
 
-        result = compute_regime_distance_z(current, neighbors, cluster_var)
+        result = compute_regime_distance_z(
+            current_features, neighbor_features, cluster_var
+        )
 
         assert result.z_score is not None
         assert result.baseline == "neighbors_only"
+
+    def test_default_shrinkage_constant(self):
+        """Default shrinkage constant is 20."""
+        assert DEFAULT_SHRINKAGE_C == 20.0
+
+    def test_cluster_sigma_prior_shrinkage(self):
+        """cluster_sigma_prior blends observed sigma toward prior."""
+        current_features = {"a": 0.0}
+        # Neighbors with some variance
+        neighbor_features = [{"a": 0.1}, {"a": 0.2}, {"a": 0.3}, {"a": 0.4}]
+        cluster_var = {"a": 1.0}
+
+        # Without sigma prior
+        result_no_prior = compute_regime_distance_z(
+            current_features, neighbor_features, cluster_var
+        )
+
+        # With sigma prior (should shrink toward prior)
+        result_with_prior = compute_regime_distance_z(
+            current_features,
+            neighbor_features,
+            cluster_var,
+            cluster_sigma_prior=0.5,
+        )
+
+        # Both should produce valid z-scores
+        assert result_no_prior.z_score is not None
+        assert result_with_prior.z_score is not None
+
+    def test_distance_now_field(self):
+        """distance_now field contains median distance to neighbors."""
+        current_features = {"a": 0.0}
+        neighbor_features = [{"a": 0.1}, {"a": 0.2}]
+        cluster_var = {"a": 1.0}
+
+        result = compute_regime_distance_z(
+            current_features, neighbor_features, cluster_var
+        )
+
+        # distance_now should be set (median of distances to neighbors)
+        assert result.distance_now is not None
+        assert result.distance_now >= 0

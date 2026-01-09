@@ -21,6 +21,9 @@ EPSILON: float = 1e-9
 # MAD to standard deviation conversion factor (for Gaussian)
 MAD_SCALE: float = 1.4826
 
+# Default shrinkage constant for variance blending
+DEFAULT_SHRINKAGE_C: float = 20.0
+
 
 @dataclass
 class DistributionStats:
@@ -37,18 +40,18 @@ class DistanceResult:
 
     Attributes:
         z_score: Distance z-score (None if computation not possible)
-        distance: Raw standardized distance to neighborhood centroid
-        mu: Baseline distance (median of neighbor distances)
-        sigma: Distance dispersion (scaled MAD)
+        distance_now: Raw standardized distance (median distance to neighbors)
+        mu: Baseline distance (median of neighbor distances), None if not computed
+        sigma: Distance dispersion (scaled MAD), None if not computed
         n_neighbors: Number of neighbors used
         baseline: Type of baseline used ("composite", "neighbors_only", "none")
         missing: List of reasons if z_score is None
     """
 
     z_score: Optional[float] = None
-    distance: Optional[float] = None
-    mu: float = 0.0
-    sigma: float = 0.0
+    distance_now: Optional[float] = None
+    mu: Optional[float] = None
+    sigma: Optional[float] = None
     n_neighbors: int = 0
     baseline: str = "none"
     missing: list[str] = field(default_factory=list)
@@ -240,10 +243,11 @@ def _shrink_variance(
 
 
 def compute_regime_distance_z(
-    current: dict[str, float],
-    neighbors: list[dict[str, float]],
+    current_features: dict[str, float],
+    neighbor_features: list[dict[str, float]],
     cluster_var: Optional[dict[str, float]] = None,
-    shrinkage_c: float = 10.0,
+    shrinkage_c: float = DEFAULT_SHRINKAGE_C,
+    cluster_sigma_prior: Optional[float] = None,
 ) -> DistanceResult:
     """
     Compute distance z-score for current regime vs neighbors.
@@ -253,44 +257,50 @@ def compute_regime_distance_z(
     may warrant lower confidence in recommendations.
 
     Algorithm:
-    1. Compute centroid of neighbors
-    2. Compute distance from current to centroid
-    3. Compute distances from each neighbor to centroid
-    4. Build robust distribution (median/MAD) of neighbor distances
-    5. Compute z = (d_current - mu) / (sigma + epsilon)
+    1. Compute distance from current to EACH neighbor (using cluster_var for scaling)
+    2. Build robust distribution (median/MAD) of those distances
+    3. Apply shrinkage: sigma = alpha * cluster_sigma_prior + (1-alpha) * sigma_obs
+    4. Compute z = (d_now - mu) / (sigma + epsilon) where d_now is median distance
 
     Variance handling:
-    - If cluster_var provided: blend with observed variance via shrinkage
+    - If cluster_var provided: use for scaling distances (blend with observed)
     - If no cluster_var: use observed variance from neighbors only
 
+    Sigma shrinkage:
+    - If cluster_sigma_prior provided: blend observed sigma toward prior
+    - alpha = shrinkage_c / (n_neighbors + shrinkage_c)
+
     Args:
-        current: Current regime features as dict
-        neighbors: List of neighbor regime feature dicts
-        cluster_var: Optional cluster-level variance per feature
+        current_features: Current regime features as dict
+        neighbor_features: List of neighbor regime feature dicts
+        cluster_var: Optional cluster-level variance per feature (for scaling)
         shrinkage_c: Shrinkage constant (higher = more prior weight)
+        cluster_sigma_prior: Optional prior sigma for distribution shrinkage
 
     Returns:
         DistanceResult with z-score and diagnostic info
     """
     # Handle empty neighbors
-    if not neighbors:
+    if not neighbor_features:
         return DistanceResult(
             z_score=None,
-            distance=None,
+            distance_now=None,
+            mu=None,
+            sigma=None,
             n_neighbors=0,
             baseline="none",
             missing=["no_neighbors"],
         )
 
-    n_neighbors = len(neighbors)
+    n_neighbors = len(neighbor_features)
 
-    # Compute neighborhood centroid
-    centroid = _compute_centroid(neighbors)
+    # Compute neighborhood centroid (for variance estimation)
+    centroid = _compute_centroid(neighbor_features)
 
     # Compute observed variance from neighbors
-    observed_var = _compute_observed_variance(neighbors, centroid)
+    observed_var = _compute_observed_variance(neighbor_features, centroid)
 
-    # Determine variance to use
+    # Determine variance to use for distance scaling
     if cluster_var is not None:
         # Blend cluster prior with observed via shrinkage
         variance = _shrink_variance(
@@ -299,46 +309,54 @@ def compute_regime_distance_z(
         baseline = "composite"
     else:
         # Use only observed variance
-        variance = observed_var if observed_var else {k: EPSILON for k in current}
+        variance = (
+            observed_var if observed_var else {k: EPSILON for k in current_features}
+        )
         baseline = "neighbors_only"
 
     # Ensure we have some variance to work with
     if not variance:
-        variance = {k: EPSILON for k in current}
+        variance = {k: EPSILON for k in current_features}
 
-    # Distance from current to centroid
-    d_current = compute_standardized_distance(current, centroid, variance)
-
-    # Distances from each neighbor to centroid
-    neighbor_distances = [
-        compute_standardized_distance(n, centroid, variance) for n in neighbors
+    # Compute distance from current to EACH neighbor (spec algorithm)
+    distances_to_neighbors = [
+        compute_standardized_distance(current_features, n, variance)
+        for n in neighbor_features
     ]
 
-    # Compute robust distribution of neighbor distances
-    dist_stats = compute_distance_distribution(neighbor_distances)
+    # Compute robust distribution of distances
+    dist_stats = compute_distance_distribution(distances_to_neighbors)
 
-    # Compute z-score
-    # When sigma is very small (low variance in neighbor distances), we need
-    # a sensible floor to avoid z-score explosion. In this case, we consider
-    # any distance within [0, 2*mu] as "normal" (z within -1 to +1).
-    if dist_stats.sigma > EPSILON:
-        sigma = dist_stats.sigma
-    elif dist_stats.mu > EPSILON:
-        # Use mu as sigma floor - this means distances from 0 to 2*mu
-        # will have z-scores in [-1, +1] range
-        sigma = dist_stats.mu
+    # d_now is the median distance to neighbors
+    d_now = dist_stats.mu
+
+    # Observed sigma from distribution
+    sigma_obs = dist_stats.sigma
+
+    # Apply shrinkage to sigma if cluster_sigma_prior provided
+    if cluster_sigma_prior is not None:
+        alpha = shrinkage_c / (n_neighbors + shrinkage_c)
+        sigma_final = alpha * cluster_sigma_prior + (1 - alpha) * sigma_obs
     else:
-        # Both mu and sigma are ~0 means all distances are ~0
-        # In this case, d_current should also be ~0, giving z ~0
+        sigma_final = sigma_obs
+
+    # Compute z-score with floor to avoid explosion
+    if sigma_final > EPSILON:
+        sigma = sigma_final
+    elif d_now > EPSILON:
+        # Use d_now as sigma floor
+        sigma = d_now
+    else:
+        # Both are ~0, use epsilon
         sigma = EPSILON
 
-    z_score = (d_current - dist_stats.mu) / sigma
+    z_score = (d_now - dist_stats.mu) / sigma
 
     return DistanceResult(
         z_score=z_score,
-        distance=d_current,
+        distance_now=d_now,
         mu=dist_stats.mu,
-        sigma=dist_stats.sigma,
+        sigma=sigma_obs,
         n_neighbors=n_neighbors,
         baseline=baseline,
         missing=[],
