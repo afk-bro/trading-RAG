@@ -20,7 +20,7 @@ from slowapi.util import get_remote_address
 
 from app import __version__
 from app.config import get_settings
-from app.routers import health, ingest, jobs, kb, kb_trials, metrics, pdf, query, reembed, youtube, backtests
+from app.routers import health, ingest, jobs, kb, kb_trials, metrics, pdf, query, reembed, youtube, backtests, forward_metrics
 from app.admin import router as admin_router, set_db_pool as set_admin_db_pool
 
 # Configure structured logging
@@ -248,6 +248,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             kb.set_db_pool(_db_pool)
             kb_trials.set_db_pool(_db_pool)
             backtests.set_db_pool(_db_pool)
+            forward_metrics.set_db_pool(_db_pool)
             set_admin_db_pool(_db_pool)
 
     except Exception as e:
@@ -577,6 +578,7 @@ app.include_router(backtests.router)  # Backtest runner endpoints
 app.include_router(reembed.router, tags=["Re-embed"])
 app.include_router(jobs.router, tags=["Jobs"])
 app.include_router(metrics.router)  # Metrics endpoint (excluded from OpenAPI)
+app.include_router(forward_metrics.router)  # Forward metrics endpoints
 app.include_router(admin_router)  # Admin UI (not in OpenAPI docs)
 
 
