@@ -1476,20 +1476,24 @@ def _get_kb_trial_repo():
 async def kb_trials_stats(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    since: Optional[datetime] = Query(None, description="Only count trials after this time"),
+    window_days: Optional[int] = Query(None, ge=1, le=365, description="Time window in days (7, 30, etc.)"),
     _: None = Depends(verify_admin_access),
 ):
     """
     Get KB trials statistics for a workspace.
 
-    Returns:
-    - total_trials: Total trials ingested
-    - pct_with_oos: Percentage with OOS metrics
-    - pct_valid: Percentage passing gates
-    - embedding_model: Current embedding model
-    - embedding_dim: Embedding dimension
-    - collection_name: Active Qdrant collection
-    - last_ingestion_ts: Last ingestion run timestamp
-    - stale_text_hash_count: Trials needing reembed
+    Returns point-in-time stats plus trend deltas when window_days is specified.
+
+    **Query params:**
+    - `since`: Only count trials created after this timestamp
+    - `window_days`: Compare current vs previous window (e.g., 7 days)
+
+    **Coverage metrics** explain why recommend might return none:
+    - pct_with_regime_is: Has in-sample regime snapshot
+    - pct_with_regime_oos: Has OOS regime snapshot (when has_oos=true)
+    - pct_with_objective_score: Has objective_score set
+    - pct_with_sharpe_oos: Has sharpe_oos metric (when has_oos=true)
     """
     if not _db_pool:
         raise HTTPException(
@@ -1497,56 +1501,132 @@ async def kb_trials_stats(
             detail="Database not available",
         )
 
-    # Get stats from database
+    from datetime import timedelta
+
+    # Calculate time boundaries
+    now = datetime.utcnow()
+    if window_days:
+        since = now - timedelta(days=window_days)
+        prev_since = since - timedelta(days=window_days)
+    else:
+        prev_since = None
+
     async with _db_pool.acquire() as conn:
-        # Base query conditions
-        workspace_filter = "AND t.workspace_id = $1" if workspace_id else ""
-        params = [workspace_id] if workspace_id else []
+        # Build query conditions
+        workspace_cond = "AND t.workspace_id = $1" if workspace_id else ""
+        base_params = [workspace_id] if workspace_id else []
 
-        # Total trials
-        total_query = f"""
-            SELECT COUNT(*) as total
-            FROM kb_trial_vectors t
-            WHERE 1=1 {workspace_filter}
-        """
-        total = await conn.fetchval(total_query, *params)
+        async def get_stats(time_filter: str = "", time_params: list = []):
+            """Get stats with optional time filter."""
+            params = base_params + time_params
 
-        # Trials with OOS metrics
-        oos_query = f"""
-            SELECT COUNT(*) as with_oos
-            FROM kb_trial_vectors t
-            WHERE t.has_oos_metrics = true {workspace_filter}
-        """
-        with_oos = await conn.fetchval(oos_query, *params)
+            # Total trials
+            total = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE 1=1 {workspace_cond} {time_filter}
+            """, *params) or 0
 
-        # Valid trials (passing gates)
-        valid_query = f"""
-            SELECT COUNT(*) as valid
-            FROM kb_trial_vectors t
-            WHERE t.is_valid = true {workspace_filter}
-        """
-        valid = await conn.fetchval(valid_query, *params)
+            if total == 0:
+                return {
+                    "total": 0, "with_oos": 0, "valid": 0, "stale": 0,
+                    "with_regime_is": 0, "with_regime_oos": 0,
+                    "with_objective_score": 0, "with_sharpe_oos": 0,
+                }
 
-        # Last ingestion
-        last_ingest_query = f"""
-            SELECT MAX(t.created_at) as last_ts
-            FROM kb_trial_vectors t
-            WHERE 1=1 {workspace_filter}
-        """
-        last_ts = await conn.fetchval(last_ingest_query, *params)
+            # Core metrics
+            with_oos = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE t.has_oos_metrics = true {workspace_cond} {time_filter}
+            """, *params) or 0
 
-        # Get workspace config for embedding info
+            valid = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE t.is_valid = true {workspace_cond} {time_filter}
+            """, *params) or 0
+
+            # Stale count
+            try:
+                stale = await conn.fetchval(f"""
+                    SELECT COUNT(*) FROM kb_trial_vectors t
+                    WHERE t.needs_reembed = true {workspace_cond} {time_filter}
+                """, *params) or 0
+            except Exception:
+                stale = 0
+
+            # Coverage metrics
+            with_regime_is = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE t.regime_snapshot_is IS NOT NULL {workspace_cond} {time_filter}
+            """, *params) or 0
+
+            with_regime_oos = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE t.regime_snapshot_oos IS NOT NULL
+                  AND t.has_oos_metrics = true {workspace_cond} {time_filter}
+            """, *params) or 0
+
+            with_objective = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE t.objective_score IS NOT NULL {workspace_cond} {time_filter}
+            """, *params) or 0
+
+            with_sharpe_oos = await conn.fetchval(f"""
+                SELECT COUNT(*) FROM kb_trial_vectors t
+                WHERE t.sharpe_oos IS NOT NULL
+                  AND t.has_oos_metrics = true {workspace_cond} {time_filter}
+            """, *params) or 0
+
+            return {
+                "total": total, "with_oos": with_oos, "valid": valid, "stale": stale,
+                "with_regime_is": with_regime_is, "with_regime_oos": with_regime_oos,
+                "with_objective_score": with_objective, "with_sharpe_oos": with_sharpe_oos,
+            }
+
+        # Get current stats
+        if since:
+            param_idx = len(base_params) + 1
+            time_filter = f"AND t.created_at >= ${param_idx}"
+            current = await get_stats(time_filter, [since])
+        else:
+            current = await get_stats()
+
+        # Get previous window stats for deltas
+        deltas = None
+        if prev_since and window_days:
+            param_idx = len(base_params) + 1
+            time_filter = f"AND t.created_at >= ${param_idx} AND t.created_at < ${param_idx + 1}"
+            previous = await get_stats(time_filter, [prev_since, since])
+
+            # Calculate deltas
+            deltas = {
+                "trials_added": current["total"] - previous["total"],
+                "valid_added": current["valid"] - previous["valid"],
+                "stale_added": current["stale"] - previous["stale"],
+                "pct_valid_delta": round(
+                    (current["valid"] / current["total"] * 100 if current["total"] > 0 else 0) -
+                    (previous["valid"] / previous["total"] * 100 if previous["total"] > 0 else 0),
+                    1
+                ),
+                "window_days": window_days,
+                "prev_window_start": prev_since.isoformat(),
+                "prev_window_end": since.isoformat(),
+            }
+
+        # Last ingestion timestamp
+        last_ts = await conn.fetchval(f"""
+            SELECT MAX(t.created_at) FROM kb_trial_vectors t
+            WHERE 1=1 {workspace_cond}
+        """, *base_params)
+
+        # Workspace config for embedding info
         embed_model = "nomic-embed-text"
         embed_dim = 768
         collection_name = "trading_kb_trials__nomic-embed-text__768"
 
         if workspace_id:
-            config_query = """
-                SELECT config
-                FROM workspaces
-                WHERE id = $1
-            """
-            config_row = await conn.fetchrow(config_query, workspace_id)
+            config_row = await conn.fetchrow("""
+                SELECT config FROM workspaces WHERE id = $1
+            """, workspace_id)
             if config_row and config_row["config"]:
                 config = config_row["config"]
                 if isinstance(config, str):
@@ -1556,34 +1636,44 @@ async def kb_trials_stats(
                 embed_dim = kb_config.get("embed_dim", embed_dim)
                 collection_name = kb_config.get("collection_name", collection_name)
 
-        # Stale text hash count (needs reembed)
-        stale_query = f"""
-            SELECT COUNT(*) as stale
-            FROM kb_trial_vectors t
-            WHERE t.needs_reembed = true {workspace_filter}
-        """
-        try:
-            stale_count = await conn.fetchval(stale_query, *params)
-        except Exception:
-            # Column might not exist yet
-            stale_count = 0
+    # Calculate percentages
+    total = current["total"]
+    oos_count = current["with_oos"]
 
-    pct_with_oos = (with_oos / total * 100) if total > 0 else 0
-    pct_valid = (valid / total * 100) if total > 0 else 0
+    def pct(num, denom):
+        return round(num / denom * 100, 1) if denom > 0 else 0
 
-    return {
+    result = {
         "workspace_id": str(workspace_id) if workspace_id else None,
-        "total_trials": total or 0,
-        "trials_with_oos": with_oos or 0,
-        "trials_valid": valid or 0,
-        "pct_with_oos": round(pct_with_oos, 1),
-        "pct_valid": round(pct_valid, 1),
+        "total_trials": total,
+        "trials_with_oos": oos_count,
+        "trials_valid": current["valid"],
+        "pct_with_oos": pct(oos_count, total),
+        "pct_valid": pct(current["valid"], total),
+
+        # Coverage metrics (explains why recommend might fail)
+        "coverage": {
+            "pct_with_regime_is": pct(current["with_regime_is"], total),
+            "pct_with_regime_oos": pct(current["with_regime_oos"], oos_count),
+            "pct_with_objective_score": pct(current["with_objective_score"], total),
+            "pct_with_sharpe_oos": pct(current["with_sharpe_oos"], oos_count),
+        },
+
+        # Embedding config
         "embedding_model": embed_model,
         "embedding_dim": embed_dim,
         "collection_name": collection_name,
         "last_ingestion_ts": last_ts.isoformat() if last_ts else None,
-        "stale_text_hash_count": stale_count or 0,
+        "stale_text_hash_count": current["stale"],
     }
+
+    # Add time window info
+    if since:
+        result["since"] = since.isoformat()
+    if deltas:
+        result["deltas"] = deltas
+
+    return result
 
 
 @router.get("/kb/trials/ingestion-status")
@@ -1698,9 +1788,13 @@ async def kb_collections(
     _: None = Depends(verify_admin_access),
 ):
     """
-    Get list of KB collections in Qdrant.
+    Get list of KB collections in Qdrant with health info.
 
-    Returns collection names, point counts, and embedding models.
+    Returns:
+    - Collection names and point counts
+    - Vector dimension and distance metric
+    - Payload index counts
+    - Optimizer status
     """
     from qdrant_client import AsyncQdrantClient
     from app.config import get_settings
@@ -1718,16 +1812,41 @@ async def kb_collections(
 
         result = []
         for coll in collections_response.collections:
-            # Get collection info
             try:
                 info = await client.get_collection(coll.name)
+
+                # Parse embedding model from collection name if encoded
+                # Format: trading_kb_trials__{model}__{dim}
+                parts = coll.name.split("__")
+                embedding_model = parts[1] if len(parts) >= 2 else None
+                embedding_dim = int(parts[2]) if len(parts) >= 3 else None
+
+                # Vector config
+                vec_cfg = info.config.params.vectors
+                vector_size = vec_cfg.size if vec_cfg else None
+                distance = vec_cfg.distance.value if vec_cfg and vec_cfg.distance else None
+
+                # Payload indexes count
+                payload_indexes = 0
+                if info.payload_schema:
+                    payload_indexes = len(info.payload_schema)
+
+                # Optimizer status
+                optimizer_status = "unknown"
+                if info.optimizer_status:
+                    optimizer_status = info.optimizer_status.status.value if hasattr(info.optimizer_status, 'status') else str(info.optimizer_status)
+
                 result.append({
                     "name": coll.name,
                     "points_count": info.points_count,
                     "vectors_count": info.vectors_count,
                     "status": info.status.value if info.status else "unknown",
-                    "vector_size": info.config.params.vectors.size if info.config.params.vectors else None,
-                    "distance": info.config.params.vectors.distance.value if info.config.params.vectors else None,
+                    "vector_size": vector_size or embedding_dim,
+                    "distance": distance,
+                    "embedding_model_id": embedding_model,
+                    "payload_indexes_count": payload_indexes,
+                    "optimizer_status": optimizer_status,
+                    "segments_count": len(info.segments or []) if hasattr(info, 'segments') else None,
                 })
             except Exception as e:
                 result.append({
@@ -1741,6 +1860,7 @@ async def kb_collections(
             "collections": result,
             "qdrant_host": settings.qdrant_host,
             "qdrant_port": settings.qdrant_port,
+            "total_collections": len(result),
         }
 
     except Exception as e:
@@ -1803,4 +1923,141 @@ async def kb_top_warnings(
     return {
         "workspace_id": str(workspace_id) if workspace_id else None,
         "warnings": warnings,
+    }
+
+
+@router.get("/kb/trials/sample")
+async def kb_trials_sample(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    warning: Optional[str] = Query(None, description="Filter by warning type (e.g., high_overfit)"),
+    is_valid: Optional[bool] = Query(None, description="Filter by validity"),
+    has_oos: Optional[bool] = Query(None, description="Filter by OOS availability"),
+    strategy_name: Optional[str] = Query(None, description="Filter by strategy"),
+    limit: int = Query(20, ge=1, le=100, description="Number of samples to return"),
+    _: None = Depends(verify_admin_access),
+):
+    """
+    Get sample trials for debugging quality issues.
+
+    Returns safe fields only - no sensitive internals.
+    Useful for inspecting what's actually in the KB.
+
+    **Example use cases:**
+    - `?warning=high_overfit` - See trials flagged as overfit
+    - `?is_valid=false` - See invalid trials
+    - `?has_oos=true&strategy_name=mean_reversion` - See valid OOS trials for a strategy
+    """
+    if not _db_pool:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available",
+        )
+
+    async with _db_pool.acquire() as conn:
+        # Build dynamic WHERE clause
+        conditions = ["1=1"]
+        params = []
+        param_idx = 1
+
+        if workspace_id:
+            conditions.append(f"workspace_id = ${param_idx}")
+            params.append(workspace_id)
+            param_idx += 1
+
+        if warning:
+            conditions.append(f"${param_idx} = ANY(warnings)")
+            params.append(warning)
+            param_idx += 1
+
+        if is_valid is not None:
+            conditions.append(f"is_valid = ${param_idx}")
+            params.append(is_valid)
+            param_idx += 1
+
+        if has_oos is not None:
+            conditions.append(f"has_oos_metrics = ${param_idx}")
+            params.append(has_oos)
+            param_idx += 1
+
+        if strategy_name:
+            conditions.append(f"strategy_name = ${param_idx}")
+            params.append(strategy_name)
+            param_idx += 1
+
+        # Add limit
+        params.append(limit)
+        limit_param = f"${param_idx}"
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT
+                id,
+                point_id,
+                tune_run_id,
+                strategy_name,
+                objective_type,
+                objective_score,
+                is_valid,
+                has_oos_metrics,
+                overfit_gap,
+                sharpe_is,
+                sharpe_oos,
+                trades_is,
+                trades_oos,
+                max_drawdown_is,
+                max_drawdown_oos,
+                regime_tags_is,
+                regime_tags_oos,
+                warnings,
+                created_at
+            FROM kb_trial_vectors
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT {limit_param}
+        """
+
+        try:
+            rows = await conn.fetch(query, *params)
+            samples = [
+                {
+                    "id": str(row["id"]),
+                    "point_id": row["point_id"],
+                    "tune_run_id": str(row["tune_run_id"]) if row["tune_run_id"] else None,
+                    "strategy_name": row["strategy_name"],
+                    "objective_type": row["objective_type"],
+                    "objective_score": row["objective_score"],
+                    "is_valid": row["is_valid"],
+                    "has_oos_metrics": row["has_oos_metrics"],
+                    "overfit_gap": row["overfit_gap"],
+                    "metrics": {
+                        "sharpe_is": row["sharpe_is"],
+                        "sharpe_oos": row["sharpe_oos"],
+                        "trades_is": row["trades_is"],
+                        "trades_oos": row["trades_oos"],
+                        "max_drawdown_is": row["max_drawdown_is"],
+                        "max_drawdown_oos": row["max_drawdown_oos"],
+                    },
+                    "regime_tags_is": row["regime_tags_is"],
+                    "regime_tags_oos": row["regime_tags_oos"],
+                    "warnings": row["warnings"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error("Failed to fetch KB samples", error=str(e))
+            samples = []
+
+    return {
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "filters": {
+            "warning": warning,
+            "is_valid": is_valid,
+            "has_oos": has_oos,
+            "strategy_name": strategy_name,
+        },
+        "count": len(samples),
+        "samples": samples,
     }
