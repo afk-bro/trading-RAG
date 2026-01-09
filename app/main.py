@@ -55,6 +55,31 @@ if settings.sentry_dsn:
         event_level="ERROR",  # Only ERROR+ become Sentry events
     )
 
+    def before_send(event, hint):
+        """
+        Filter out 4xx client errors from Sentry events.
+
+        We don't want to track user errors (401, 403, 404, 422, 429) as exceptions.
+        Only 5xx server errors should be captured.
+        """
+        # Check if this is an HTTP exception
+        if "exc_info" in hint:
+            exc_type, exc_value, tb = hint["exc_info"]
+            # Filter FastAPI/Starlette HTTP exceptions
+            if hasattr(exc_value, "status_code"):
+                status_code = exc_value.status_code
+                if 400 <= status_code < 500:
+                    return None  # Drop 4xx errors
+
+        # Check response context for status code
+        if "contexts" in event:
+            response = event.get("contexts", {}).get("response", {})
+            status_code = response.get("status_code", 0)
+            if 400 <= status_code < 500:
+                return None
+
+        return event
+
     def traces_sampler(sampling_context: dict) -> float:
         """
         Route-aware sampling for KB recommend critical path.
@@ -97,7 +122,15 @@ if settings.sentry_dsn:
         profiles_sample_rate=settings.sentry_profiles_sample_rate,
         send_default_pii=False,
         attach_stacktrace=True,
+        before_send=before_send,
     )
+
+    # Set global tags for service metadata
+    sentry_sdk.set_tag("service", "trading-rag")
+    sentry_sdk.set_tag("collection", settings.qdrant_collection_active)
+    sentry_sdk.set_tag("embed_model", settings.embed_model)
+    sentry_sdk.set_tag("vector_dim", settings.embed_dim)
+
     logger.info(
         "Sentry initialized",
         environment=settings.sentry_environment,
@@ -351,25 +384,66 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 # Create FastAPI app
+# Conditionally disable docs in production (set DOCS_ENABLED=false)
 app = FastAPI(
     title="Trading RAG Pipeline",
     description="RAG pipeline for finance and trading knowledge",
     version=__version__,
     lifespan=lifespan,
+    docs_url="/docs" if settings.docs_enabled else None,
+    redoc_url="/redoc" if settings.docs_enabled else None,
+    openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
+
+if not settings.docs_enabled:
+    logger.info("API docs disabled (DOCS_ENABLED=false)")
 
 # Add rate limiter state and exception handler
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add CORS middleware
+# In production, set CORS_ORIGINS to comma-separated list of allowed origins
+import os
+cors_origins_str = os.environ.get("CORS_ORIGINS", "*")
+if cors_origins_str == "*":
+    # Development mode - allow all (will log warning)
+    cors_origins = ["*"]
+    logger.warning("CORS_ORIGINS not set, allowing all origins (not for production)")
+else:
+    # Production mode - explicit allowlist
+    cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+    logger.info("CORS origins configured", origins=cors_origins)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# Security headers middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # Control referrer information
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+    # Add HSTS if behind TLS (check X-Forwarded-Proto)
+    if request.headers.get("X-Forwarded-Proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
 
 
 @app.middleware("http")

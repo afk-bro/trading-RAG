@@ -16,10 +16,18 @@ from uuid import UUID
 import anyio
 import sentry_sdk
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import Settings, get_settings
+from app.deps.security import (
+    require_admin_token,
+    get_current_user,
+    require_workspace_access,
+    get_rate_limiter,
+    get_workspace_semaphore,
+    CurrentUser,
+)
 from app.routers.metrics import (
     record_kb_recommend,
     record_kb_embed_error,
@@ -67,6 +75,18 @@ MAX_OHLCV_FILE_SIZE_MB = 20
 MAX_OHLCV_FILE_SIZE_BYTES = MAX_OHLCV_FILE_SIZE_MB * 1024 * 1024
 MAX_OHLCV_ROWS = 100_000  # Reject files with more rows
 
+# Defensive request bounds
+MAX_BARS_PROCESSED = 200_000  # Maximum OHLCV bars to process
+MAX_PARAM_KEYS = 50  # Maximum unique param keys in payload
+MAX_STRING_LENGTH = 256  # Max length for string fields (dataset_id, instrument, etc.)
+MAX_REGIME_TAGS = 20  # Maximum regime tags in request
+
+# Rate limiting defaults
+RATE_LIMIT_UPLOAD_PER_MIN = 5  # uploads per minute per IP
+RATE_LIMIT_RECOMMEND_PER_MIN_WS = 30  # recommend per minute per workspace
+RATE_LIMIT_RECOMMEND_PER_MIN_IP = 60  # recommend per minute per IP
+WORKSPACE_MAX_CONCURRENT = 2  # max concurrent recommend requests per workspace
+
 
 # =============================================================================
 # Enums
@@ -97,14 +117,22 @@ class RecommendRequest(BaseModel):
     # Required
     workspace_id: UUID = Field(..., description="Workspace ID")
     strategy_name: str = Field(..., min_length=1, max_length=100, description="Strategy name from registry")
-    objective_type: str = Field(..., description="Objective function type")
+    objective_type: str = Field(..., min_length=1, max_length=50, description="Objective function type")
 
     # Dataset source (exactly one required)
-    dataset_id: Optional[str] = Field(None, description="Reference dataset ID for regime computation")
+    dataset_id: Optional[str] = Field(
+        None,
+        max_length=MAX_STRING_LENGTH,
+        description="Reference dataset ID for regime computation",
+    )
     # Note: ohlcv_file handled separately via Form/File
 
     # Optional regime override
-    regime_tags: Optional[list[str]] = Field(None, max_length=20, description="Override regime tags for query")
+    regime_tags: Optional[list[str]] = Field(
+        None,
+        max_length=MAX_REGIME_TAGS,
+        description="Override regime tags for query",
+    )
 
     # Filter overrides (bounded by workspace defaults)
     require_oos: Optional[bool] = Field(None, description="Require OOS metrics")
@@ -121,6 +149,15 @@ class RecommendRequest(BaseModel):
     include_candidates: bool = Field(False, description="Include top candidates in response (debug)")
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_regime_tags(self):
+        """Validate individual regime tag lengths."""
+        if self.regime_tags:
+            for tag in self.regime_tags:
+                if len(tag) > MAX_STRING_LENGTH:
+                    raise ValueError(f"Regime tag too long: max {MAX_STRING_LENGTH} chars")
+        return self
 
 
 class IngestRequest(BaseModel):
@@ -362,7 +399,9 @@ def _validate_objective(strategy_name: str, objective_type: str) -> None:
     responses={
         200: {"description": "Recommendation generated (check status field)"},
         400: {"description": "Invalid strategy or objective", "model": ErrorDetail},
+        403: {"description": "Access denied to workspace"},
         422: {"description": "Validation error (bounds exceeded)"},
+        429: {"description": "Rate limit exceeded"},
         503: {"description": "Service unavailable (Qdrant/DB down)"},
     },
     summary="Get parameter recommendations",
@@ -382,13 +421,26 @@ Generate parameter recommendations based on similar historical trials.
 """,
 )
 async def recommend(
+    http_request: Request,
     request: RecommendRequest,
     mode: RecommendMode = Query(RecommendMode.FULL, description="Recommendation mode"),
     settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
+    _rate_ip: None = Depends(get_rate_limiter().check("recommend_ip", RATE_LIMIT_RECOMMEND_PER_MIN_IP)),
 ) -> RecommendResponse:
     """Generate parameter recommendations."""
     request_id = str(uuid.uuid4())
     start_time = time.perf_counter()
+
+    # Workspace access check (multi-tenant stub)
+    require_workspace_access(request.workspace_id, user)
+
+    # Per-workspace rate limit
+    await get_rate_limiter().check(
+        "recommend_ws",
+        RATE_LIMIT_RECOMMEND_PER_MIN_WS,
+        key_func=lambda _: str(request.workspace_id),
+    )(http_request)
 
     # Set Sentry transaction tags for filtering/grouping
     sentry_sdk.set_tag("request_id", request_id)
@@ -791,14 +843,15 @@ async def recommend(
     response_model=IngestResponse,
     responses={
         200: {"description": "Ingestion completed"},
-        403: {"description": "Admin access required"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Admin access denied"},
         503: {"description": "Service unavailable"},
     },
     summary="Ingest trials from tune runs (admin)",
     description="""
 Ingest completed tune runs into the Trading KB vector store.
 
-**Admin-only endpoint.**
+**Admin-only endpoint.** Requires X-Admin-Token header.
 
 Options:
 - `since`: Only ingest runs completed after this timestamp
@@ -810,6 +863,7 @@ Options:
 async def ingest(
     request: IngestRequest,
     settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
 ) -> IngestResponse:
     """Ingest trials from tune runs."""
     request_id = str(uuid.uuid4())
@@ -890,6 +944,7 @@ class OHLCVUploadResponse(BaseModel):
         200: {"description": "OHLCV parsed and regime computed"},
         400: {"description": "Invalid file format or content"},
         413: {"description": "File too large"},
+        429: {"description": "Rate limit exceeded"},
     },
     summary="Upload OHLCV file for regime computation",
     description=f"""
@@ -898,6 +953,7 @@ Upload OHLCV data file (JSON/CSV) to compute regime tags for recommendation quer
 **Limits:**
 - Max file size: {MAX_OHLCV_FILE_SIZE_MB}MB
 - Max rows: {MAX_OHLCV_ROWS:,}
+- Rate limit: {RATE_LIMIT_UPLOAD_PER_MIN}/min per IP
 
 **Expected format (JSON):**
 ```json
@@ -914,6 +970,7 @@ open,high,low,close,volume
 )
 async def upload_ohlcv(
     ohlcv_file: UploadFile = File(..., description="OHLCV data file (CSV/JSON)"),
+    _rate: None = Depends(get_rate_limiter().check("upload_ohlcv", RATE_LIMIT_UPLOAD_PER_MIN)),
 ) -> OHLCVUploadResponse:
     """Upload OHLCV file and compute regime tags."""
     request_id = str(uuid.uuid4())

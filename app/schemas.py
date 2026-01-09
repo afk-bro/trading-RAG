@@ -402,6 +402,14 @@ class HealthResponse(BaseModel):
     version: str = Field(..., description="Service version")
 
 
+class ReadinessResponse(BaseModel):
+    """Response for readiness endpoint (Kubernetes /ready probe)."""
+
+    ready: bool = Field(..., description="True if service is ready to accept traffic")
+    checks: dict[str, DependencyHealth] = Field(..., description="Individual check results")
+    version: str = Field(..., description="Service version")
+
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
 

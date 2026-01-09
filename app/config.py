@@ -164,6 +164,12 @@ class Settings(BaseSettings):
         description="Store first 80 chars of question (otherwise hash only)"
     )
 
+    # API Documentation
+    docs_enabled: bool = Field(
+        default=True,
+        description="Enable /docs and /openapi.json endpoints (disable in production)"
+    )
+
     # Sentry Observability
     sentry_dsn: Optional[str] = Field(
         default=None,

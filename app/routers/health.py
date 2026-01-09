@@ -1,16 +1,18 @@
-"""Health check endpoint."""
+"""Health check endpoints (liveness and readiness probes)."""
 
+import asyncio
 import time
 from typing import Any, Optional
 
+import asyncpg
 import httpx
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
 
 from app import __version__
 from app.config import Settings, get_settings
-from app.schemas import DependencyHealth, HealthResponse
+from app.schemas import DependencyHealth, HealthResponse, ReadinessResponse
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -91,6 +93,149 @@ async def check_supabase_health(settings: Settings) -> DependencyHealth:
         return DependencyHealth(status="error", latency_ms=latency, error=str(e))
 
 
+async def check_database_health(settings: Settings) -> DependencyHealth:
+    """Check PostgreSQL database connectivity (direct asyncpg query)."""
+    start = time.perf_counter()
+    if not settings.database_url:
+        return DependencyHealth(
+            status="error",
+            latency_ms=0,
+            error="DATABASE_URL not configured"
+        )
+    try:
+        conn = await asyncpg.connect(
+            settings.database_url,
+            ssl='require',
+            timeout=10,
+            statement_cache_size=0,  # Required for pgbouncer
+        )
+        await conn.fetchval("SELECT 1")
+        await conn.close()
+        latency = (time.perf_counter() - start) * 1000
+        return DependencyHealth(status="ok", latency_ms=latency)
+    except Exception as e:
+        latency = (time.perf_counter() - start) * 1000
+        return DependencyHealth(status="error", latency_ms=latency, error=str(e))
+
+
+async def check_qdrant_collection(settings: Settings) -> DependencyHealth:
+    """Check Qdrant collection exists and has expected dimensions."""
+    start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=settings.qdrant_timeout) as client:
+            collection = settings.qdrant_collection_active
+            response = await client.get(
+                f"{settings.qdrant_url}/collections/{collection}"
+            )
+            latency = (time.perf_counter() - start) * 1000
+            if response.status_code == 200:
+                data = response.json()
+                # Verify vector dimension matches config
+                result = data.get("result", {})
+                config = result.get("config", {})
+                params = config.get("params", {})
+                vectors = params.get("vectors", {})
+                # Handle both named and unnamed vector configs
+                if isinstance(vectors, dict) and "size" in vectors:
+                    dim = vectors["size"]
+                elif isinstance(vectors, dict):
+                    # Named vectors - check first one
+                    first_vec = next(iter(vectors.values()), {})
+                    dim = first_vec.get("size", 0) if isinstance(first_vec, dict) else 0
+                else:
+                    dim = 0
+
+                expected_dim = settings.embed_dim
+                if dim != expected_dim:
+                    return DependencyHealth(
+                        status="error",
+                        latency_ms=latency,
+                        error=f"Collection dim mismatch: {dim} vs expected {expected_dim}"
+                    )
+                return DependencyHealth(status="ok", latency_ms=latency)
+            elif response.status_code == 404:
+                return DependencyHealth(
+                    status="error",
+                    latency_ms=latency,
+                    error=f"Collection '{collection}' not found"
+                )
+            return DependencyHealth(
+                status="error",
+                latency_ms=latency,
+                error=f"Unexpected status: {response.status_code}"
+            )
+    except Exception as e:
+        latency = (time.perf_counter() - start) * 1000
+        return DependencyHealth(status="error", latency_ms=latency, error=str(e))
+
+
+async def check_embed_service(settings: Settings) -> DependencyHealth:
+    """Check embedding service is available and model loaded."""
+    start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+            response = await client.get(f"{settings.ollama_base_url}/api/tags")
+            latency = (time.perf_counter() - start) * 1000
+            if response.status_code == 200:
+                data = response.json()
+                models = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+                if settings.embed_model in models:
+                    return DependencyHealth(status="ok", latency_ms=latency)
+                return DependencyHealth(
+                    status="error",
+                    latency_ms=latency,
+                    error=f"Embed model '{settings.embed_model}' not loaded"
+                )
+            return DependencyHealth(
+                status="error",
+                latency_ms=latency,
+                error=f"Unexpected status: {response.status_code}"
+            )
+    except Exception as e:
+        latency = (time.perf_counter() - start) * 1000
+        return DependencyHealth(status="error", latency_ms=latency, error=str(e))
+
+
+@router.get("/ready", response_model=ReadinessResponse)
+async def readiness_check(
+    response: Response,
+    settings: Settings = Depends(get_settings)
+) -> ReadinessResponse:
+    """
+    Kubernetes readiness probe. Returns 200 if ready, 503 if not.
+
+    Checks:
+    - PostgreSQL database connectivity
+    - Qdrant vector store (collection exists, dimensions match)
+    - Embedding service (model loaded)
+    """
+    # Run all checks concurrently
+    db_check, qdrant_check, embed_check = await asyncio.gather(
+        check_database_health(settings),
+        check_qdrant_collection(settings),
+        check_embed_service(settings),
+    )
+
+    checks = {
+        "database": db_check,
+        "qdrant_collection": qdrant_check,
+        "embed_service": embed_check,
+    }
+
+    all_ok = all(c.status == "ok" for c in checks.values())
+
+    if not all_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        failed = [k for k, v in checks.items() if v.status != "ok"]
+        logger.warning("Readiness check failed", failed_checks=failed)
+
+    return ReadinessResponse(
+        ready=all_ok,
+        checks=checks,
+        version=__version__,
+    )
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check(settings: Settings = Depends(get_settings)) -> HealthResponse:
     """
@@ -101,8 +246,6 @@ async def health_check(settings: Settings = Depends(get_settings)) -> HealthResp
     logger.info("Health check requested")
 
     # Check all dependencies concurrently
-    import asyncio
-
     qdrant_task = check_qdrant_health(settings)
     ollama_task = check_ollama_health(settings)
     supabase_task = check_supabase_health(settings)

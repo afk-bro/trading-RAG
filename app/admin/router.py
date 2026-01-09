@@ -29,6 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings, get_settings
+from app.deps.security import require_admin_token
 from app.schemas import KBEntityType, KBClaimType, KBClaimStatus
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -60,55 +61,17 @@ def _get_kb_repo():
     return KnowledgeBaseRepository(_db_pool)
 
 
-async def verify_admin_access(
-    request: Request,
-    settings: Settings = Depends(get_settings),
-):
-    """
-    Verify admin access.
-
-    Security checks:
-    1. If ADMIN_TOKEN is set, require it in header or query param
-    2. In local development (localhost only), allow access
-    3. Otherwise, deny access
-
-    NOTE: LOG_LEVEL=DEBUG does NOT bypass auth. It only controls log verbosity.
-    """
-    admin_token = os.environ.get("ADMIN_TOKEN")
-
-    if admin_token:
-        # Check header first, then query param
-        provided_token = request.headers.get("X-Admin-Token")
-        if not provided_token:
-            provided_token = request.query_params.get("token")
-
-        if provided_token != admin_token:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid or missing admin token",
-            )
-        return True
-
-    # Allow in local development only (not DEBUG mode - that's a verbosity setting)
-    host = request.headers.get("host", "")
-    if "localhost" in host or "127.0.0.1" in host:
-        return True
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Admin access not allowed. Set ADMIN_TOKEN or use localhost.",
-    )
-
-
 # ===========================================
 # Admin Routes
 # ===========================================
+# Note: All routes use require_admin_token from app.deps.security
+# which provides constant-time token comparison and no debug bypass.
 
 
 @router.get("/", response_class=HTMLResponse)
 async def admin_home(
     request: Request,
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """Admin home page - redirect to KB entities."""
     return RedirectResponse(url="/admin/kb/entities", status_code=302)
@@ -122,7 +85,7 @@ async def admin_entities(
     type: Optional[str] = Query(None, description="Filter by entity type"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """List KB entities with search and filters."""
     kb_repo = _get_kb_repo()
@@ -210,7 +173,7 @@ async def admin_entity_detail(
     claim_type: Optional[str] = Query(None, description="Claim type filter"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """View entity details with claims."""
     kb_repo = _get_kb_repo()
@@ -350,7 +313,7 @@ async def admin_entity_detail(
 async def admin_claim_detail(
     request: Request,
     claim_id: UUID,
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """View claim details with evidence."""
     kb_repo = _get_kb_repo()
@@ -384,7 +347,7 @@ async def admin_claims_list(
     claim_type: Optional[str] = Query(None, description="Claim type filter"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """List all claims with search and filters."""
     kb_repo = _get_kb_repo()
@@ -480,7 +443,7 @@ async def admin_tunes_list(
     oos_enabled: Optional[str] = Query(None, description="Filter by OOS: 'true', 'false', or empty"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """List parameter tuning sessions."""
     tune_repo = _get_tune_repo()
@@ -573,7 +536,7 @@ async def admin_leaderboard(
     format: Optional[str] = Query(None, description="Output format: 'csv' for download"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """Global leaderboard: best tunes ranked by objective score."""
     tune_repo = _get_tune_repo()
@@ -880,7 +843,7 @@ async def admin_tune_compare(
     tune_id: list[UUID] = Query(..., description="Tune IDs to compare (2+)"),
     workspace_id: Optional[UUID] = Query(None, description="Workspace UUID (optional)"),
     format: Optional[str] = Query(None, description="Output format: 'json' for download"),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """Compare two or more parameter tuning sessions side-by-side."""
 
@@ -1161,7 +1124,7 @@ async def admin_tune_detail(
     run_status: Optional[str] = Query(None, description="Filter trials by status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """View tune session details with trials."""
     tune_repo = _get_tune_repo()
@@ -1264,7 +1227,7 @@ async def admin_tune_detail(
 async def admin_backtest_run_detail(
     request: Request,
     run_id: UUID,
-    _: bool = Depends(verify_admin_access),
+    _: bool = Depends(require_admin_token),
 ):
     """View backtest run details."""
     from app.repositories.backtests import BacktestRepository
@@ -1328,7 +1291,7 @@ async def eval_summary(
     request: Request,
     workspace_id: UUID = Query(..., description="Workspace to get stats for"),
     since: str = Query("24h", description="Time window: 1h, 24h, 7d, 30d"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get summary stats for query compare evaluations.
@@ -1361,7 +1324,7 @@ async def eval_by_config(
     request: Request,
     workspace_id: UUID = Query(..., description="Workspace to get stats for"),
     since: str = Query("7d", description="Time window: 1h, 24h, 7d, 30d"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get stats grouped by config fingerprint.
@@ -1400,7 +1363,7 @@ async def eval_most_impacted(
     workspace_id: UUID = Query(..., description="Workspace to get stats for"),
     since: str = Query("7d", description="Time window: 1h, 24h, 7d, 30d"),
     limit: int = Query(20, ge=1, le=100, description="Number of results"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get queries with highest reranking impact (lowest jaccard).
@@ -1437,7 +1400,7 @@ async def eval_most_impacted(
 async def eval_cleanup(
     request: Request,
     days: int = Query(90, ge=1, le=365, description="Delete evals older than N days"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Delete evaluations older than N days.
@@ -1476,7 +1439,7 @@ async def kb_trials_stats(
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
     since: Optional[datetime] = Query(None, description="Only count trials after this time"),
     window_days: Optional[int] = Query(None, ge=1, le=365, description="Time window in days (7, 30, etc.)"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get KB trials statistics for a workspace.
@@ -1678,7 +1641,7 @@ async def kb_trials_stats(
 async def kb_ingestion_status(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get KB ingestion health status.
@@ -1783,7 +1746,7 @@ async def kb_ingestion_status(
 @router.get("/kb/collections")
 async def kb_collections(
     request: Request,
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get list of KB collections in Qdrant with health info.
@@ -1874,7 +1837,7 @@ async def kb_top_warnings(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
     limit: int = Query(20, ge=1, le=100, description="Number of warnings to return"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get top warning types across KB trials.
@@ -1933,7 +1896,7 @@ async def kb_trials_sample(
     has_oos: Optional[bool] = Query(None, description="Filter by OOS availability"),
     strategy_name: Optional[str] = Query(None, description="Filter by strategy"),
     limit: int = Query(20, ge=1, le=100, description="Number of samples to return"),
-    _: None = Depends(verify_admin_access),
+    _: None = Depends(require_admin_token),
 ):
     """
     Get sample trials for debugging quality issues.
