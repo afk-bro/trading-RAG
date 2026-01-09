@@ -292,8 +292,15 @@ def rerank_candidates(
             _metadata_only=candidate._metadata_only,
         ))
 
-    # Sort by rerank score descending
-    reranked.sort(key=lambda x: x.rerank_score, reverse=True)
+    # Sort by rerank score descending, with tiebreakers for stability
+    # Tiebreakers: objective_score desc, point_id asc (guaranteed unique)
+    reranked.sort(
+        key=lambda x: (
+            -x.rerank_score,  # Descending
+            -(x.payload.get("objective_score") or 0),  # Descending
+            x.point_id,  # Ascending for absolute determinism (unique)
+        ),
+    )
 
     # Add warning if many have empty tags
     empty_tag_count = sum(1 for c in reranked if c.used_regime_source == "none")

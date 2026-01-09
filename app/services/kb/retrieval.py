@@ -35,12 +35,12 @@ DEFAULT_STRICT_FILTERS = {
     "max_drawdown": 0.25,  # 25%
 }
 
-# Relaxed filters (drop quality gates)
+# Relaxed filters (only loosen overfit_gap, keep other quality gates)
 DEFAULT_RELAXED_FILTERS = {
-    "require_oos": False,
-    "max_overfit_gap": None,  # No limit
-    "min_trades": None,
-    "max_drawdown": None,
+    "require_oos": True,  # Keep OOS requirement
+    "max_overfit_gap": None,  # Only this is relaxed
+    "min_trades": 5,  # Keep trade floor
+    "max_drawdown": 0.25,  # Keep DD cap
 }
 
 

@@ -68,13 +68,19 @@ class TestBuildFilters:
         assert filters["max_drawdown"] == 0.25
 
     def test_relaxed_filters(self, basic_request):
-        """Should use relaxed filters when strict=False."""
+        """Should use relaxed filters when strict=False.
+
+        Relaxed only loosens overfit_gap - keeps other quality gates.
+        """
         filters = build_filters(basic_request, strict=False)
 
-        assert filters["require_oos"] is False
+        # Only overfit_gap is relaxed
         assert filters["max_overfit_gap"] is None
-        assert filters["min_trades"] is None
-        assert filters["max_drawdown"] is None
+
+        # Other quality gates remain strict
+        assert filters["require_oos"] is True
+        assert filters["min_trades"] == 5
+        assert filters["max_drawdown"] == 0.25
 
     def test_request_overrides(self, basic_request):
         """Should apply request overrides."""

@@ -259,6 +259,23 @@ class KBRecommender:
         )
         warnings.extend(aggregation_result.warnings)
 
+        # Check 6: Final param validation (assert types are correct)
+        if strategy_spec and aggregation_result.params:
+            validation_result = strategy_spec.validate_params(aggregation_result.params)
+            if not validation_result.is_valid:
+                logger.warning(
+                    "Final param validation failed after repair",
+                    violations=validation_result.constraint_violations,
+                )
+                # Don't fail, but add warning
+                warnings.append("final_param_validation_failed")
+
+        # Check for repair warnings (clamping, type coercion, etc.)
+        has_repair_warnings = any(
+            w.startswith("param_") or w.startswith("constraint_")
+            for w in aggregation_result.warnings
+        )
+
         # Step 6: Determine status and compute confidence
         status = self._compute_status(
             strict_count=retrieval_result.stats.strict_count,
@@ -266,6 +283,7 @@ class KBRecommender:
             used_relaxed=retrieval_result.stats.used_relaxed_filters,
             used_metadata=retrieval_result.stats.used_metadata_fallback,
             count_used=aggregation_result.count_used,
+            has_repair_warnings=has_repair_warnings,
         )
 
         if status == "degraded":
@@ -275,11 +293,13 @@ class KBRecommender:
                 reasons.append("used_metadata_fallback")
             if retrieval_result.stats.strict_count < MIN_CANDIDATES_FOR_OK:
                 reasons.append("insufficient_strict_candidates")
+            if has_repair_warnings:
+                reasons.append("params_required_repair")
 
         confidence = compute_confidence(
             spreads=aggregation_result.spreads,
             count_used=aggregation_result.count_used,
-            has_warnings=len(warnings) > 0,
+            has_warnings=len(warnings) > 0 or has_repair_warnings,
             used_relaxed=retrieval_result.stats.used_relaxed_filters,
             used_metadata_fallback=retrieval_result.stats.used_metadata_fallback,
         )
@@ -331,12 +351,17 @@ class KBRecommender:
         used_relaxed: bool,
         used_metadata: bool,
         count_used: int,
+        has_repair_warnings: bool = False,
     ) -> Literal["ok", "degraded", "none"]:
         """Compute recommendation status."""
         if count_used == 0:
             return "none"
 
+        # Any fallback or repair triggers degraded
         if used_metadata:
+            return "degraded"
+
+        if has_repair_warnings:
             return "degraded"
 
         if used_relaxed and strict_count < MIN_CANDIDATES_FOR_DEGRADED:
