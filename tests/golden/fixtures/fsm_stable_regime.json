@@ -1,0 +1,167 @@
+{
+  "name": "stable_regime",
+  "description": "FSM remains in stable regime with consistent high-confidence input. Tests: age incrementing, candidate clearing after returning to stable.",
+  "config": {
+    "M": 5,
+    "C_enter": 0.75,
+    "C_exit": 0.55
+  },
+  "steps": [
+    {
+      "comment": "Step 0: First regime becomes immediately stable",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 1: Same regime, age increments",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.88,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 2: Same regime continues",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.82,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 3: Same regime, still stable",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.90,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 4: Different regime starts candidate tracking",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.70,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=high_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 5: Candidate builds (2 bars)",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.72,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=high_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 6: Back to stable regime - candidate cleared, age increments",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 5
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 7: Stable regime continues",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.87,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 8: Another candidate appears",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.65,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 9: Back to stable again - candidate cleared",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.80,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 7
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 10: Continue stable, testing long stability",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.83,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 8
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 11: Stable continues",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.86,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 9
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 12: Final stable bar",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.89,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 10
+      },
+      "transition": false
+    }
+  ]
+}

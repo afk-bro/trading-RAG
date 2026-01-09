@@ -1,0 +1,261 @@
+{
+  "name": "hysteresis_boundary",
+  "description": "Tests the boundary between C_exit and C_enter. Candidate builds with confidence in (C_exit, C_enter) range but transition requires median >= C_enter. Tests: candidate accumulation without transition, then successful transition when median crosses C_enter.",
+  "config": {
+    "M": 5,
+    "C_enter": 0.75,
+    "C_exit": 0.55
+  },
+  "steps": [
+    {
+      "comment": "Step 0: Initialize stable regime",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 1: Build stable age",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.80,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 2: Candidate at C_exit boundary (0.60 > 0.55) - counts",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.60,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 3: Candidate in hysteresis band (0.65)",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.65,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 4: Candidate in hysteresis band (0.68)",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.68,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 3,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 5: Candidate in hysteresis band (0.70)",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.70,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 4,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 6: 5th bar in hysteresis band (0.72) - M reached but median [0.60, 0.65, 0.68, 0.70, 0.72]=0.68 < 0.75, NO transition",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.72,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 5,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 7: Still in hysteresis band (0.73) - median of all [0.60, 0.65, 0.68, 0.70, 0.72, 0.73]=0.69 < 0.75, NO transition",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.73,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 6,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 8: Still in hysteresis band (0.74) - median of all [0.60, 0.65, 0.68, 0.70, 0.72, 0.73, 0.74]=0.70 < 0.75, NO transition",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.74,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 7,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 9: Back to stable - candidate cleared despite long persistence",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.82,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 10: Now test crossing C_enter - candidate with high confidence",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.76,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 11: Candidate with exactly C_enter (0.75)",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 12: Candidate above C_enter (0.78)",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.78,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 3,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 13: Candidate above C_enter (0.77)",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.77,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 4,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 14: 5th bar above C_enter (0.76) - TRANSITION! median [0.76, 0.75, 0.78, 0.77, 0.76]=0.76 >= 0.75",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.76,
+      "expected_state": {
+        "stable_key": "trend=downtrend|vol=low_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 1
+      },
+      "transition": true,
+      "transition_event": {
+        "from_key": "trend=uptrend|vol=high_vol",
+        "to_key": "trend=downtrend|vol=low_vol",
+        "median_confidence": 0.76
+      }
+    },
+    {
+      "comment": "Step 15: Test boundary exactly at C_enter: start new candidate sequence",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=downtrend|vol=low_vol",
+        "candidate_key": "trend=flat|vol=high_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 16: All exactly at C_enter",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=downtrend|vol=low_vol",
+        "candidate_key": "trend=flat|vol=high_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 17: All exactly at C_enter",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=downtrend|vol=low_vol",
+        "candidate_key": "trend=flat|vol=high_vol",
+        "candidate_count": 3,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 18: All exactly at C_enter",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=downtrend|vol=low_vol",
+        "candidate_key": "trend=flat|vol=high_vol",
+        "candidate_count": 4,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 19: 5th bar exactly at C_enter - TRANSITION! median=0.75 >= 0.75",
+      "raw_key": "trend=flat|vol=high_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=flat|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 1
+      },
+      "transition": true,
+      "transition_event": {
+        "from_key": "trend=downtrend|vol=low_vol",
+        "to_key": "trend=flat|vol=high_vol",
+        "median_confidence": 0.75
+      }
+    }
+  ]
+}

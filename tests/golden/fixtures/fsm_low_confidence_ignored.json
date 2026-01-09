@@ -1,0 +1,227 @@
+{
+  "name": "low_confidence_ignored",
+  "description": "New regime appears with confidence < C_exit, should be ignored as noise. Tests: noise filtering, age incrementing even when noise appears, stable regime maintained.",
+  "config": {
+    "M": 5,
+    "C_enter": 0.75,
+    "C_exit": 0.55
+  },
+  "steps": [
+    {
+      "comment": "Step 0: Initialize stable regime",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 1: Build stable regime age",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.82,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 2: LOW CONFIDENCE different regime - ignored, age still increments",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.40,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 3: Another low confidence signal - still ignored",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.50,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 4: Confidence just below threshold (0.54 < 0.55) - ignored",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.54,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 5
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 5: Back to stable with good confidence",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.80,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 6: Very low confidence noise",
+      "raw_key": "trend=downtrend|vol=high_vol",
+      "confidence": 0.25,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 7
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 7: More noise at 0.45",
+      "raw_key": "trend=flat|vol=low_vol",
+      "confidence": 0.45,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 8
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 8: Exactly at threshold (0.55) - this SHOULD count as candidate",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.55,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 8
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 9: Back to stable - candidate cleared",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.78,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 9
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 10: Low confidence again (0.30)",
+      "raw_key": "trend=downtrend|vol=high_vol",
+      "confidence": 0.30,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 10
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 11: Low confidence sequence 1 of many",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.48,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 11
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 12: Low confidence sequence 2 of many",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.52,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 12
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 13: Low confidence sequence 3 of many",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.50,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 13
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 14: Low confidence sequence 4 of many",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.53,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 14
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 15: Low confidence sequence 5 of many - even 5+ bars of low-conf doesn't trigger",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.51,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 15
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 16: Back to stable",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 16
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 17: Final stable bar - regime survived all noise",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.88,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 17
+      },
+      "transition": false
+    }
+  ]
+}

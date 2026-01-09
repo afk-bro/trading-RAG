@@ -1,0 +1,251 @@
+{
+  "name": "flicker_suppressed",
+  "description": "Regime flickers back and forth but doesn't trigger transition because candidate doesn't persist for M bars. Tests: candidate count resetting when regime flickers, hysteresis preventing false transitions.",
+  "config": {
+    "M": 5,
+    "C_enter": 0.75,
+    "C_exit": 0.55
+  },
+  "steps": [
+    {
+      "comment": "Step 0: Initialize stable regime",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 1
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 1: Build stable regime age",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.82,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 2: Candidate A appears",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.78,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 3: Candidate A persists (count=2)",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.76,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 2
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 4: FLICKER! Back to stable - candidate cleared, age increments",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.80,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 5: Candidate A returns - count starts over at 1",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.79,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 6: Candidate A persists (count=2)",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.77,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 7: Candidate A persists (count=3)",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.80,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 3,
+        "regime_age_bars": 3
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 8: FLICKER again! Back to stable - candidate cleared",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.83,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 9: Different candidate B appears (not A)",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.75,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 10: Candidate A returns - DIFFERENT candidate resets count",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.78,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 11: Candidate B returns - resets count again",
+      "raw_key": "trend=flat|vol=medium_vol",
+      "confidence": 0.76,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=flat|vol=medium_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 4
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 12: Back to stable - no transition occurred despite many candidates",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.81,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 5
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 13: More stable",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.84,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 14: Candidate appears again",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.77,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 1,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 15: Count 2",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.79,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 2,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 16: Count 3",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.76,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 3,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 17: Count 4 - one more to transition",
+      "raw_key": "trend=downtrend|vol=low_vol",
+      "confidence": 0.78,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": "trend=downtrend|vol=low_vol",
+        "candidate_count": 4,
+        "regime_age_bars": 6
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 18: FLICKER one bar before transition would happen!",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.85,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 7
+      },
+      "transition": false
+    },
+    {
+      "comment": "Step 19: Stable continues - flicker suppression worked",
+      "raw_key": "trend=uptrend|vol=high_vol",
+      "confidence": 0.82,
+      "expected_state": {
+        "stable_key": "trend=uptrend|vol=high_vol",
+        "candidate_key": null,
+        "candidate_count": 0,
+        "regime_age_bars": 8
+      },
+      "transition": false
+    }
+  ]
+}
