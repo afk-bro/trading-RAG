@@ -17,7 +17,7 @@ from slowapi.util import get_remote_address
 
 from app import __version__
 from app.config import get_settings
-from app.routers import health, ingest, jobs, kb, metrics, pdf, query, reembed, youtube, backtests
+from app.routers import health, ingest, jobs, kb, kb_trials, metrics, pdf, query, reembed, youtube, backtests
 from app.admin import router as admin_router, set_db_pool as set_admin_db_pool
 
 # Configure structured logging
@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             query.set_db_pool(_db_pool)
             reembed.set_db_pool(_db_pool)
             kb.set_db_pool(_db_pool)
+            kb_trials.set_db_pool(_db_pool)
             backtests.set_db_pool(_db_pool)
             set_admin_db_pool(_db_pool)
 
@@ -431,6 +432,7 @@ app.include_router(youtube.router, prefix="/sources/youtube", tags=["YouTube"])
 app.include_router(pdf.router, tags=["PDF"])
 app.include_router(query.router, tags=["Query"])
 app.include_router(kb.router)  # KB endpoints with /kb prefix
+app.include_router(kb_trials.router)  # Trading KB trial endpoints
 app.include_router(backtests.router)  # Backtest runner endpoints
 app.include_router(reembed.router, tags=["Re-embed"])
 app.include_router(jobs.router, tags=["Jobs"])

@@ -585,3 +585,13 @@ def validate_strategy(
     return get_default_registry().validate_strategy_params(
         strategy_name, params, allow_unknown
     )
+
+
+def list_strategies() -> list[str]:
+    """List all registered strategy names from the default registry."""
+    return get_default_registry().list_strategies()
+
+
+def list_objectives() -> list[str]:
+    """List all supported objective types."""
+    return [obj.value for obj in ObjectiveType]

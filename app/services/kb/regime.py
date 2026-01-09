@@ -596,3 +596,23 @@ def _safe_float(val: float, default: float = 0.0) -> float:
     if pd.isna(val) or np.isinf(val):
         return default
     return float(val)
+
+
+def compute_regime_from_ohlcv(
+    ohlcv: list[dict],
+    timeframe: Optional[str] = None,
+    source: str = "query",
+) -> RegimeSnapshot:
+    """
+    Convenience wrapper to compute regime from OHLCV list of dicts.
+
+    Args:
+        ohlcv: List of dicts with OHLCV data (open, high, low, close, volume)
+        timeframe: Optional timeframe string
+        source: Computation source
+
+    Returns:
+        RegimeSnapshot with computed features and tags
+    """
+    df = pd.DataFrame(ohlcv)
+    return compute_regime_snapshot(df, source=source, timeframe=timeframe)
