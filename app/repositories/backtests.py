@@ -838,3 +838,182 @@ class TuneRepository:
             deleted = await conn.fetchval(query, tune_id)
 
         return deleted is not None
+
+    # =========================================================================
+    # KB Ingestion Support
+    # =========================================================================
+
+    async def list_tune_runs_for_kb(
+        self,
+        workspace_id: UUID,
+        since: Optional[datetime] = None,
+        limit: Optional[int] = None,
+        only_missing_kb: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        List tune_runs for KB ingestion.
+
+        Returns tune_runs with their parent tune metadata for TrialDoc construction.
+
+        Args:
+            workspace_id: Workspace ID
+            since: Only fetch runs created after this time
+            limit: Maximum number to fetch
+            only_missing_kb: Only fetch runs without kb_ingested_at
+
+        Returns:
+            List of dicts with 'tune_run' and 'tune' keys
+        """
+        conditions = [
+            "t.workspace_id = $1",
+            "tr.status = 'completed'",
+        ]
+        params: list[Any] = [workspace_id]
+        param_idx = 2
+
+        if only_missing_kb:
+            conditions.append("tr.kb_ingested_at IS NULL")
+
+        if since:
+            conditions.append(f"tr.created_at >= ${param_idx}")
+            params.append(since)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT
+                tr.tune_id, tr.run_id, tr.trial_index, tr.params,
+                tr.score, tr.score_is, tr.score_oos, tr.objective_score,
+                tr.status, tr.skip_reason, tr.failed_reason,
+                tr.metrics_is, tr.metrics_oos,
+                tr.started_at, tr.finished_at, tr.created_at,
+                tr.kb_ingested_at, tr.kb_embedding_model_id, tr.kb_vector_dim,
+                t.strategy_entity_id, t.objective_type, t.objective_metric,
+                t.oos_ratio, t.gates,
+                e.name as strategy_name
+            FROM backtest_tune_runs tr
+            JOIN backtest_tunes t ON tr.tune_id = t.id
+            LEFT JOIN kb_entities e ON t.strategy_entity_id = e.id
+            WHERE {where_clause}
+            ORDER BY tr.created_at ASC
+        """
+
+        if limit:
+            query += f" LIMIT ${param_idx}"
+            params.append(limit)
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        results = []
+        for row in rows:
+            row_dict = dict(row)
+
+            # Parse JSONB fields
+            for field in ["params", "metrics_is", "metrics_oos", "gates"]:
+                if row_dict.get(field) and isinstance(row_dict[field], str):
+                    row_dict[field] = json.loads(row_dict[field])
+
+            # Structure as tune_run + tune
+            tune_run = {
+                "run_id": row_dict["run_id"],
+                "tune_id": row_dict["tune_id"],
+                "trial_index": row_dict["trial_index"],
+                "params": row_dict["params"],
+                "score": row_dict["score"],
+                "score_is": row_dict["score_is"],
+                "score_oos": row_dict["score_oos"],
+                "objective_score": row_dict["objective_score"],
+                "status": row_dict["status"],
+                "skip_reason": row_dict["skip_reason"],
+                "failed_reason": row_dict["failed_reason"],
+                "metrics_is": row_dict["metrics_is"],
+                "metrics_oos": row_dict["metrics_oos"],
+                "started_at": row_dict["started_at"],
+                "finished_at": row_dict["finished_at"],
+                "created_at": row_dict["created_at"],
+                "kb_ingested_at": row_dict.get("kb_ingested_at"),
+                "kb_embedding_model_id": row_dict.get("kb_embedding_model_id"),
+                "kb_vector_dim": row_dict.get("kb_vector_dim"),
+            }
+
+            tune = {
+                "id": row_dict["tune_id"],
+                "strategy_entity_id": row_dict["strategy_entity_id"],
+                "strategy_name": row_dict["strategy_name"],
+                "objective_type": row_dict["objective_type"],
+                "objective_metric": row_dict["objective_metric"],
+                "oos_ratio": row_dict["oos_ratio"],
+                "gates": row_dict.get("gates"),
+            }
+
+            results.append({"tune_run": tune_run, "tune": tune})
+
+        return results
+
+    async def mark_kb_ingested(
+        self,
+        tune_run_id: UUID,
+        kb_ingested_at: str,
+        kb_embedding_model_id: str,
+        kb_vector_dim: int,
+        kb_text_hash: str | None = None,
+    ) -> None:
+        """
+        Mark a tune_run as ingested into KB.
+
+        Args:
+            tune_run_id: The run ID (not tune_id + trial_index)
+            kb_ingested_at: ISO timestamp of ingestion
+            kb_embedding_model_id: Embedding model used
+            kb_vector_dim: Vector dimension
+            kb_text_hash: SHA256[:16] hash of trial text for drift detection
+        """
+        query = """
+            UPDATE backtest_tune_runs
+            SET kb_ingested_at = $2,
+                kb_embedding_model_id = $3,
+                kb_vector_dim = $4,
+                kb_text_hash = $5
+            WHERE run_id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query, tune_run_id, kb_ingested_at, kb_embedding_model_id,
+                kb_vector_dim, kb_text_hash
+            )
+
+    async def try_advisory_lock(self, lock_id: int) -> bool:
+        """
+        Try to acquire a PostgreSQL advisory lock.
+
+        Uses pg_try_advisory_lock for non-blocking acquisition.
+        Lock is held until connection closes or explicit release.
+
+        Args:
+            lock_id: Unique lock identifier (32-bit integer)
+
+        Returns:
+            True if lock acquired, False if already held by another session
+        """
+        query = "SELECT pg_try_advisory_lock($1)"
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(query, lock_id)
+            return bool(result)
+
+    async def release_advisory_lock(self, lock_id: int) -> bool:
+        """
+        Release a PostgreSQL advisory lock.
+
+        Args:
+            lock_id: Unique lock identifier
+
+        Returns:
+            True if lock was released, False if not held
+        """
+        query = "SELECT pg_advisory_unlock($1)"
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(query, lock_id)
+            return bool(result)

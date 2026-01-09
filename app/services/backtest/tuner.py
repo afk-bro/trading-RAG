@@ -21,6 +21,11 @@ import structlog
 
 from app.services.backtest.runner import BacktestRunner, BacktestRunError
 from app.services.backtest.scoring import compute_score, rank_trials
+from app.services.backtest.regime_integration import (
+    add_regime_to_metrics,
+    detect_timeframe_from_ohlcv,
+    extract_instrument_from_filename,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -408,6 +413,10 @@ class ParamTuner:
         # Update tune status to running
         await self.tune_repo.update_tune_status(tune_id, "running", started_at=datetime.utcnow())
 
+        # Detect timeframe and instrument for regime computation
+        detected_timeframe = detect_timeframe_from_ohlcv(file_content, filename)
+        detected_instrument = extract_instrument_from_filename(filename)
+
         try:
             # Generate parameter combinations
             param_sets = self._generate_params(param_space, search_type, n_trials, seed)
@@ -538,6 +547,28 @@ class ParamTuner:
                             metrics_is_data = serialize_metrics(is_summary)
                             metrics_oos_data = serialize_metrics(oos_summary)
 
+                            # Add regime snapshots to metrics
+                            add_regime_to_metrics(
+                                metrics_is_data,
+                                file_content=file_content,
+                                filename=filename,
+                                date_from=date_from,
+                                date_to=oos_split_timestamp,
+                                source="is",
+                                timeframe=detected_timeframe,
+                                instrument=detected_instrument,
+                            )
+                            add_regime_to_metrics(
+                                metrics_oos_data,
+                                file_content=file_content,
+                                filename=filename,
+                                date_from=oos_split_timestamp,
+                                date_to=date_to,
+                                source="oos",
+                                timeframe=detected_timeframe,
+                                instrument=detected_instrument,
+                            )
+
                             # Evaluate gates on OOS metrics
                             gates_passed, gate_failures = evaluate_gates(metrics_oos_data)
 
@@ -653,6 +684,18 @@ class ParamTuner:
 
                             # Serialize metrics to metrics_oos (Option A: primary window)
                             metrics_data = serialize_metrics(summary)
+
+                            # Add regime snapshot (full window = primary)
+                            add_regime_to_metrics(
+                                metrics_data,
+                                file_content=file_content,
+                                filename=filename,
+                                date_from=date_from,
+                                date_to=date_to,
+                                source="live",
+                                timeframe=detected_timeframe,
+                                instrument=detected_instrument,
+                            )
 
                             # Evaluate gates on primary metrics
                             gates_passed, gate_failures = evaluate_gates(metrics_data)
