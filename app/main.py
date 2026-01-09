@@ -158,6 +158,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(
         "Starting Trading RAG Service",
         version=__version__,
+        git_sha=settings.git_sha or "unknown",
+        build_time=settings.build_time or "unknown",
+        config_profile=settings.config_profile,
         host=settings.service_host,
         port=settings.service_port,
         qdrant_collection=settings.qdrant_collection_active,

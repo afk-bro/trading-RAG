@@ -22,6 +22,20 @@ class Settings(BaseSettings):
     service_port: int = Field(default=8000, description="Service port")
     log_level: str = Field(default="INFO", description="Logging level")
 
+    # Build/Release Metadata (set by CI/CD or container build)
+    git_sha: Optional[str] = Field(
+        default=None,
+        description="Git commit SHA (set by CI/CD)"
+    )
+    build_time: Optional[str] = Field(
+        default=None,
+        description="Build timestamp ISO8601 (set by CI/CD)"
+    )
+    config_profile: str = Field(
+        default="development",
+        description="Configuration profile (development, staging, production)"
+    )
+
     # Supabase Configuration
     supabase_url: str = Field(..., description="Supabase project URL")
     supabase_service_role_key: str = Field(

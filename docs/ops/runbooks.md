@@ -4,11 +4,67 @@ Standard operating procedures for Trading RAG service.
 
 ## Table of Contents
 
-1. [Qdrant Collection Rebuild](#qdrant-collection-rebuild)
-2. [Embedding Model Rotation](#embedding-model-rotation)
-3. [Handling KB Status: None](#handling-kb-status-none)
-4. [Handling KB Status: Degraded](#handling-kb-status-degraded)
-5. [Service Restart Procedure](#service-restart-procedure)
+1. [Multi-Replica Deployment Notes](#multi-replica-deployment-notes)
+2. [Qdrant Collection Rebuild](#qdrant-collection-rebuild)
+3. [Embedding Model Rotation](#embedding-model-rotation)
+4. [Handling KB Status: None](#handling-kb-status-none)
+5. [Handling KB Status: Degraded](#handling-kb-status-degraded)
+6. [Service Restart Procedure](#service-restart-procedure)
+
+---
+
+## Multi-Replica Deployment Notes
+
+**Important:** The current rate limiting and concurrency controls are per-replica only.
+
+### Current Behavior (Single-Replica)
+
+| Control | Implementation | Scope |
+|---------|----------------|-------|
+| Rate Limiter | In-process sliding window | Per replica |
+| Workspace Semaphore | asyncio.Semaphore | Per replica |
+
+### Multi-Replica Implications
+
+In multi-replica deployments:
+
+- **Rate limits become approximate.** With N replicas, effective limit is N × configured limit.
+  - Example: 30 req/min configured → 60 req/min actual with 2 replicas
+- **Concurrency caps multiply.** Each replica maintains its own semaphore.
+  - Example: 2 concurrent/workspace configured → 4 actual with 2 replicas
+
+### Upgrade Path (If Needed)
+
+To achieve true distributed rate limiting:
+
+1. **Redis-backed limiter** (recommended)
+   ```python
+   # Replace RateLimiter with Redis implementation
+   # Upstash Redis recommended for serverless
+   from upstash_ratelimit import Ratelimit
+   ```
+
+2. **Environment variables**
+   ```bash
+   REDIS_URL=redis://...
+   RATE_LIMIT_BACKEND=redis  # Switch from 'memory' to 'redis'
+   ```
+
+3. **Distributed semaphore** (for concurrency)
+   ```python
+   # Use Redis-based distributed lock
+   import redis.asyncio as redis
+   from redis.asyncio.lock import Lock
+   ```
+
+### When to Upgrade
+
+Upgrade to Redis-backed limiting when:
+- Running 3+ replicas
+- Rate limit accuracy is critical for billing/quota
+- Need to prevent workspace abuse across replicas
+
+**For single-replica or 2-replica deployments, the current implementation is sufficient.**
 
 ---
 

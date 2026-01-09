@@ -408,6 +408,9 @@ class ReadinessResponse(BaseModel):
     ready: bool = Field(..., description="True if service is ready to accept traffic")
     checks: dict[str, DependencyHealth] = Field(..., description="Individual check results")
     version: str = Field(..., description="Service version")
+    git_sha: Optional[str] = Field(None, description="Git commit SHA")
+    build_time: Optional[str] = Field(None, description="Build timestamp ISO8601")
+    config_profile: str = Field(..., description="Configuration profile (dev/staging/prod)")
 
 
 class ErrorResponse(BaseModel):

@@ -17,6 +17,27 @@ from app.schemas import DependencyHealth, HealthResponse, ReadinessResponse
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
+# =============================================================================
+# Readiness Check Configuration
+# =============================================================================
+
+# Hard timeout per dependency check (prevents blocking under network issues)
+READINESS_CHECK_TIMEOUT_S = 2.0
+
+# Throttled logging: track last failure time per check to avoid log spam
+_last_failure_log: dict[str, float] = {}
+_FAILURE_LOG_INTERVAL_S = 60.0  # Log failures at most once per minute per check
+
+
+def _should_log_failure(check_name: str) -> bool:
+    """Return True if we should log this failure (throttled)."""
+    now = time.time()
+    last = _last_failure_log.get(check_name, 0)
+    if now - last >= _FAILURE_LOG_INTERVAL_S:
+        _last_failure_log[check_name] = now
+        return True
+    return False
+
 
 async def check_qdrant_health(settings: Settings) -> DependencyHealth:
     """Check Qdrant connectivity and health."""
@@ -196,6 +217,35 @@ async def check_embed_service(settings: Settings) -> DependencyHealth:
         return DependencyHealth(status="error", latency_ms=latency, error=str(e))
 
 
+async def _timed_check(
+    name: str,
+    coro,
+    timeout: float = READINESS_CHECK_TIMEOUT_S
+) -> DependencyHealth:
+    """
+    Run a health check with hard timeout to prevent blocking.
+
+    This ensures /ready never hangs even if a dependency is unresponsive.
+    """
+    start = time.perf_counter()
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        latency = (time.perf_counter() - start) * 1000
+        return DependencyHealth(
+            status="error",
+            latency_ms=latency,
+            error=f"Check timed out after {timeout}s"
+        )
+    except Exception as e:
+        latency = (time.perf_counter() - start) * 1000
+        return DependencyHealth(
+            status="error",
+            latency_ms=latency,
+            error=str(e)
+        )
+
+
 @router.get("/ready", response_model=ReadinessResponse)
 async def readiness_check(
     response: Response,
@@ -204,16 +254,19 @@ async def readiness_check(
     """
     Kubernetes readiness probe. Returns 200 if ready, 503 if not.
 
-    Checks:
+    Checks (each with 2s hard timeout):
     - PostgreSQL database connectivity
     - Qdrant vector store (collection exists, dimensions match)
     - Embedding service (model loaded)
+
+    Note: Failures are logged at most once per minute to prevent log spam
+    during extended outages.
     """
-    # Run all checks concurrently
+    # Run all checks concurrently with hard timeouts
     db_check, qdrant_check, embed_check = await asyncio.gather(
-        check_database_health(settings),
-        check_qdrant_collection(settings),
-        check_embed_service(settings),
+        _timed_check("database", check_database_health(settings)),
+        _timed_check("qdrant_collection", check_qdrant_collection(settings)),
+        _timed_check("embed_service", check_embed_service(settings)),
     )
 
     checks = {
@@ -227,12 +280,25 @@ async def readiness_check(
     if not all_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         failed = [k for k, v in checks.items() if v.status != "ok"]
-        logger.warning("Readiness check failed", failed_checks=failed)
+
+        # Throttled logging: only log once per minute per failed check
+        for check_name in failed:
+            if _should_log_failure(check_name):
+                check_result = checks[check_name]
+                logger.warning(
+                    "Readiness check failed",
+                    check=check_name,
+                    error=check_result.error,
+                    latency_ms=check_result.latency_ms,
+                )
 
     return ReadinessResponse(
         ready=all_ok,
         checks=checks,
         version=__version__,
+        git_sha=settings.git_sha,
+        build_time=settings.build_time,
+        config_profile=settings.config_profile,
     )
 
 
