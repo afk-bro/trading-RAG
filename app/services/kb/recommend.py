@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional
 from uuid import UUID
 
+import sentry_sdk
 import structlog
 
 from app.services.kb.types import RegimeSnapshot
@@ -201,20 +202,21 @@ class KBRecommender:
         query_regime = req.query_regime
 
         if query_regime is None and req.ohlcv_data:
-            try:
-                query_regime = compute_regime_from_ohlcv(
-                    ohlcv=req.ohlcv_data,
-                    timeframe=req.timeframe,
-                    source="query",
-                )
-                logger.info(
-                    "Computed query regime",
-                    n_bars=query_regime.n_bars,
-                    tags=query_regime.regime_tags,
-                )
-            except Exception as e:
-                logger.warning("Failed to compute query regime", error=str(e))
-                warnings.append("query_regime_computation_failed")
+            with sentry_sdk.start_span(op="regime", description="Compute regime from OHLCV"):
+                try:
+                    query_regime = compute_regime_from_ohlcv(
+                        ohlcv=req.ohlcv_data,
+                        timeframe=req.timeframe,
+                        source="query",
+                    )
+                    logger.info(
+                        "Computed query regime",
+                        n_bars=query_regime.n_bars,
+                        tags=query_regime.regime_tags,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to compute query regime", error=str(e))
+                    warnings.append("query_regime_computation_failed")
         timings.regime_ms = (time.perf_counter() - start_regime) * 1000
 
         query_tags = query_regime.regime_tags if query_regime else []
@@ -234,7 +236,8 @@ class KBRecommender:
             limit=req.retrieve_limit,
         )
 
-        retrieval_result = await self.retriever.retrieve(retrieval_req)
+        with sentry_sdk.start_span(op="retrieve", description="Retrieve candidates from Qdrant"):
+            retrieval_result = await self.retriever.retrieve(retrieval_req)
         retrieval_ms = (time.perf_counter() - start_retrieval) * 1000
         # Note: embed_ms and qdrant_ms are sub-components of retrieval
         # If retriever provides breakdown, use it; otherwise estimate
@@ -262,11 +265,12 @@ class KBRecommender:
 
         # Step 3: Rerank candidates
         start_rerank = time.perf_counter()
-        rerank_result = rerank_candidates(
-            candidates=retrieval_result.candidates,
-            query_tags=query_tags,
-            query_regime=query_regime,
-        )
+        with sentry_sdk.start_span(op="rerank", description="Rerank candidates by combined score"):
+            rerank_result = rerank_candidates(
+                candidates=retrieval_result.candidates,
+                query_tags=query_tags,
+                query_regime=query_regime,
+            )
         timings.rerank_ms = (time.perf_counter() - start_rerank) * 1000
         warnings.extend(rerank_result.warnings)
 
@@ -285,10 +289,11 @@ class KBRecommender:
         start_aggregate = time.perf_counter()
         strategy_spec = get_strategy(req.strategy_name)
 
-        aggregation_result = aggregate_params(
-            candidates=top_k,
-            strategy_spec=strategy_spec,
-        )
+        with sentry_sdk.start_span(op="aggregate", description="Aggregate parameters"):
+            aggregation_result = aggregate_params(
+                candidates=top_k,
+                strategy_spec=strategy_spec,
+            )
         timings.aggregate_ms = (time.perf_counter() - start_aggregate) * 1000
         warnings.extend(aggregation_result.warnings)
 

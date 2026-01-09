@@ -164,6 +164,28 @@ class Settings(BaseSettings):
         description="Store first 80 chars of question (otherwise hash only)"
     )
 
+    # Sentry Observability
+    sentry_dsn: Optional[str] = Field(
+        default=None,
+        description="Sentry DSN for error tracking and performance monitoring"
+    )
+    sentry_environment: str = Field(
+        default="development",
+        description="Sentry environment tag (development, staging, production)"
+    )
+    sentry_traces_sample_rate: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Sentry performance tracing sample rate (0.0-1.0)"
+    )
+    sentry_profiles_sample_rate: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Sentry profiling sample rate (0.0-1.0)"
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""

@@ -6,11 +6,14 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import asyncpg
+import sentry_sdk
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from qdrant_client import AsyncQdrantClient
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -40,8 +43,31 @@ structlog.configure(
 
 logger = structlog.get_logger(__name__)
 
-# Initialize rate limiter
+# Initialize Sentry (if configured)
 settings = get_settings()
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        release=f"trading-rag@{__version__}",
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        profiles_sample_rate=settings.sentry_profiles_sample_rate,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+        # Don't send PII
+        send_default_pii=False,
+        # Attach request data for debugging
+        attach_stacktrace=True,
+    )
+    logger.info(
+        "Sentry initialized",
+        environment=settings.sentry_environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+    )
+
+# Initialize rate limiter
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[f"{settings.rate_limit_requests_per_minute}/minute"],

@@ -14,6 +14,7 @@ from typing import Annotated, Literal, Optional
 from uuid import UUID
 
 import anyio
+import sentry_sdk
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
@@ -345,6 +346,20 @@ async def recommend(
     request_id = str(uuid.uuid4())
     start_time = time.perf_counter()
 
+    # Set Sentry transaction tags for filtering/grouping
+    sentry_sdk.set_tag("workspace_id", str(request.workspace_id))
+    sentry_sdk.set_tag("strategy_name", request.strategy_name)
+    sentry_sdk.set_tag("objective_type", request.objective_type)
+    sentry_sdk.set_tag("mode", mode.value)
+    sentry_sdk.set_context("kb_recommend", {
+        "request_id": request_id,
+        "retrieve_k": request.retrieve_k,
+        "rerank_keep": request.rerank_keep,
+        "top_k": request.top_k,
+        "has_regime_tags": bool(request.regime_tags),
+        "has_dataset_id": bool(request.dataset_id),
+    })
+
     logger.info(
         "kb_recommend_start",
         request_id=request_id,
@@ -360,8 +375,9 @@ async def recommend(
     )
 
     # Validate strategy and objective
-    _validate_strategy(request.strategy_name)
-    _validate_objective(request.strategy_name, request.objective_type)
+    with sentry_sdk.start_span(op="validate", description="Validate strategy and objective"):
+        _validate_strategy(request.strategy_name)
+        _validate_objective(request.strategy_name, request.objective_type)
 
     # Check for regime tags or dataset_id
     has_dataset_id = request.dataset_id is not None
@@ -436,8 +452,9 @@ async def recommend(
 
     # Execute with timeouts
     try:
-        with anyio.fail_after(RECOMMEND_TIMEOUT_S):
-            result = await recommender.recommend(internal_req)
+        with sentry_sdk.start_span(op="recommend", description="KB recommend pipeline"):
+            with anyio.fail_after(RECOMMEND_TIMEOUT_S):
+                result = await recommender.recommend(internal_req)
     except TimeoutError:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         logger.error(
@@ -582,6 +599,14 @@ async def recommend(
         used_metadata_fallback=result.used_metadata_fallback,
         params_repaired=params_repaired,
         incomplete_regime=incomplete_regime,
+    )
+
+    # Update Sentry with result status (for filtering by outcome)
+    sentry_sdk.set_tag("status", result.status)
+    sentry_sdk.set_tag("confidence_bucket",
+        "high" if result.confidence and result.confidence >= 0.7 else
+        "medium" if result.confidence and result.confidence >= 0.4 else
+        "low" if result.confidence else "none"
     )
 
     return response
