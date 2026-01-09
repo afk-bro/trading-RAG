@@ -179,18 +179,30 @@ class FilterRejectionsInfo(BaseModel):
     by_regime: int = Field(0, description="Rejected by regime_tags mismatch")
 
 
+class RelaxationSuggestionInfo(BaseModel):
+    """Single-axis relaxation suggestion with risk note."""
+
+    filter_name: str = Field(..., description="Name of the filter to relax")
+    current_value: Optional[float | int | bool] = Field(None, description="Current filter value")
+    suggested_value: Optional[float | int | bool] = Field(None, description="Suggested relaxed value")
+    estimated_candidates: int = Field(0, description="Estimated candidates with this single change")
+    risk_note: str = Field("", description="Warning about the trade-off")
+
+
 class RecommendedRelaxedSettingsInfo(BaseModel):
     """Suggested relaxed filter settings that would yield candidates.
 
     Only returned when status='none' to help users understand
     what constraints to loosen for recommendations.
+
+    Each suggestion relaxes ONE filter at a time so users can
+    evaluate trade-offs independently.
     """
 
-    min_trades: Optional[int] = Field(None, description="Suggested min_trades value")
-    max_drawdown: Optional[float] = Field(None, description="Suggested max_drawdown value")
-    max_overfit_gap: Optional[float] = Field(None, description="Suggested max_overfit_gap value")
-    require_oos: Optional[bool] = Field(None, description="Suggested require_oos value")
-    estimated_candidates: int = Field(0, description="Estimated candidates with these settings")
+    suggestions: list[RelaxationSuggestionInfo] = Field(
+        default_factory=list,
+        description="Single-axis relaxation suggestions, sorted by impact",
+    )
 
 
 class RecommendResponse(BaseModel):
@@ -627,13 +639,18 @@ async def recommend(
             )
 
     # Add recommended relaxed settings when status='none'
-    if result.recommended_relaxed_settings:
+    if result.recommended_relaxed_settings and result.recommended_relaxed_settings.suggestions:
         response.recommended_relaxed_settings = RecommendedRelaxedSettingsInfo(
-            min_trades=result.recommended_relaxed_settings.min_trades,
-            max_drawdown=result.recommended_relaxed_settings.max_drawdown,
-            max_overfit_gap=result.recommended_relaxed_settings.max_overfit_gap,
-            require_oos=result.recommended_relaxed_settings.require_oos,
-            estimated_candidates=result.recommended_relaxed_settings.estimated_candidates,
+            suggestions=[
+                RelaxationSuggestionInfo(
+                    filter_name=s.filter_name,
+                    current_value=s.current_value,
+                    suggested_value=s.suggested_value,
+                    estimated_candidates=s.estimated_candidates,
+                    risk_note=s.risk_note,
+                )
+                for s in result.recommended_relaxed_settings.suggestions
+            ]
         )
 
     # Extract timings from result

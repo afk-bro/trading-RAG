@@ -450,6 +450,7 @@ def compute_confidence(
     has_warnings: bool = False,
     used_relaxed: bool = False,
     used_metadata_fallback: bool = False,
+    median_oos_trades: Optional[int] = None,
 ) -> float:
     """
     Compute confidence score for recommendation.
@@ -460,6 +461,7 @@ def compute_confidence(
         has_warnings: Whether there are warnings
         used_relaxed: Whether relaxed filters were used
         used_metadata_fallback: Whether metadata-only fallback was used
+        median_oos_trades: Median n_trades_oos across top trials
 
     Returns:
         Confidence score (0-1)
@@ -494,6 +496,16 @@ def compute_confidence(
     relaxed_penalty = 0.15 if used_relaxed else 0
     metadata_penalty = 0.3 if used_metadata_fallback else 0
 
-    confidence = count_conf - avg_spread_penalty - warning_penalty - relaxed_penalty - metadata_penalty
+    # Low trades penalty: cap confidence when statistical basis is weak
+    # Trust threshold: 10 trades. Below this, cap confidence and apply penalty.
+    low_trades_penalty = 0.0
+    confidence_cap = 1.0
+    if median_oos_trades is not None and median_oos_trades < 10:
+        # With < 10 trades, Sharpe/drawdown are statistically noisy
+        # Cap at "low" confidence (0.4) and add penalty
+        confidence_cap = 0.4
+        low_trades_penalty = 0.2
 
-    return max(0.0, min(1.0, confidence))
+    confidence = count_conf - avg_spread_penalty - warning_penalty - relaxed_penalty - metadata_penalty - low_trades_penalty
+
+    return max(0.0, min(confidence_cap, confidence))

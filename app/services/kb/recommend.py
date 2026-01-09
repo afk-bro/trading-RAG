@@ -5,6 +5,7 @@ Ties together retrieval, reranking, and aggregation to produce
 parameter recommendations based on similar historical trials.
 """
 
+import statistics
 import time
 from dataclasses import dataclass, field
 from typing import Literal, Optional
@@ -96,18 +97,32 @@ class RecommendRequest:
 
 
 @dataclass
+class RelaxationSuggestion:
+    """Single-axis relaxation suggestion with risk note.
+
+    Presents one filter adjustment at a time so users can
+    understand the impact of each change individually.
+    """
+
+    filter_name: str  # e.g., "min_trades", "max_drawdown"
+    current_value: Optional[float | int | bool] = None
+    suggested_value: Optional[float | int | bool] = None
+    estimated_candidates: int = 0  # How many would pass with this single change
+    risk_note: str = ""  # Warning about the trade-off
+
+
+@dataclass
 class RecommendedRelaxedSettings:
     """Suggested relaxed filter settings that would yield candidates.
 
     Computed when status='none' to help users understand what
     constraints need to be loosened to get recommendations.
+
+    Now returns single-axis suggestions so users can evaluate
+    each trade-off independently.
     """
 
-    min_trades: Optional[int] = None
-    max_drawdown: Optional[float] = None
-    max_overfit_gap: Optional[float] = None
-    require_oos: Optional[bool] = None
-    estimated_candidates: int = 0  # How many would pass with these settings
+    suggestions: list[RelaxationSuggestion] = field(default_factory=list)
 
 
 @dataclass
@@ -368,12 +383,31 @@ class KBRecommender:
             if has_repair_warnings:
                 reasons.append("params_required_repair")
 
+        # Compute median n_trades_oos for confidence guard
+        # Low trades = statistically noisy metrics
+        oos_trades_list = [
+            c.payload.get("n_trades_oos")
+            for c in top_k
+            if c.payload.get("n_trades_oos") is not None
+        ]
+        median_oos_trades = (
+            int(statistics.median(oos_trades_list))
+            if oos_trades_list
+            else None
+        )
+
+        # Add low_trade_count reason if median < trust threshold
+        if median_oos_trades is not None and median_oos_trades < 10:
+            reasons.append("low_trade_count")
+            warnings.append("low_oos_trades_statistical_noise")
+
         confidence = compute_confidence(
             spreads=aggregation_result.spreads,
             count_used=aggregation_result.count_used,
             has_warnings=len(warnings) > 0 or has_repair_warnings,
             used_relaxed=retrieval_result.stats.used_relaxed_filters,
             used_metadata_fallback=retrieval_result.stats.used_metadata_fallback,
+            median_oos_trades=median_oos_trades,
         )
 
         # Build trial summaries for transparency
@@ -530,6 +564,10 @@ class KBRecommender:
             if "params_required_repair" in reasons:
                 actions.append("review_param_spec_constraints")
 
+        # Low trade count action applies to both ok and degraded
+        if "low_trade_count" in reasons:
+            actions.append("run_longer_backtests_for_more_trades")
+
         return actions
 
     def _compute_recommended_relaxed_settings(
@@ -538,11 +576,12 @@ class KBRecommender:
         current_request: RecommendRequest,
     ) -> Optional[RecommendedRelaxedSettings]:
         """
-        Compute relaxed settings that would yield candidates.
+        Compute single-axis relaxation suggestions with risk notes.
 
-        Based on filter rejection analysis, suggest looser thresholds
-        that would pass more candidates through. Only computed when
-        status='none' and filter_rejections are available.
+        Each suggestion relaxes ONE filter at a time so users can
+        understand the impact of each change independently.
+
+        Only computed when status='none' and filter_rejections are available.
         """
         if not filter_rejections:
             return None
@@ -551,52 +590,72 @@ class KBRecommender:
         if filter_rejections.total_before_filters == 0:
             return None
 
-        # Determine which filters to relax based on rejection counts
-        settings = RecommendedRelaxedSettings()
-
-        # Progressive relaxation thresholds
-        relaxed_min_trades = 1  # Absolute minimum
-        relaxed_max_drawdown = 0.50  # 50% max DD
-        relaxed_max_overfit_gap = 1.0  # Effectively disabled
-        relaxed_require_oos = False  # Don't require OOS
-
-        # Start with current request values (or defaults)
         from app.services.kb.retrieval import DEFAULT_STRICT_FILTERS
 
-        # Compute cumulative candidates at each relaxation level
-        cumulative = filter_rejections.total_before_filters
+        suggestions: list[RelaxationSuggestion] = []
 
-        # If by_oos is significant, suggest disabling OOS requirement
-        if filter_rejections.by_oos > 0:
-            settings.require_oos = relaxed_require_oos
-            cumulative -= filter_rejections.by_oos  # Approximate remaining after relaxing
+        # Current values (from request or defaults)
+        current_min_trades = current_request.min_trades or DEFAULT_STRICT_FILTERS["min_trades"]
+        current_max_dd = current_request.max_drawdown or DEFAULT_STRICT_FILTERS["max_drawdown"]
+        current_max_overfit = current_request.max_overfit_gap or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
+        current_require_oos = current_request.require_oos if current_request.require_oos is not None else DEFAULT_STRICT_FILTERS["require_oos"]
 
-        # If by_trades is significant, suggest lower min_trades
+        # Baseline: total candidates before quality filters
+        baseline = filter_rejections.total_before_filters
+
+        # Single-axis suggestion 1: Lower min_trades
         if filter_rejections.by_trades > 0:
-            settings.min_trades = relaxed_min_trades
+            # Estimate: baseline minus other rejections
+            estimated = baseline - filter_rejections.by_oos
+            suggestions.append(RelaxationSuggestion(
+                filter_name="min_trades",
+                current_value=current_min_trades,
+                suggested_value=1,
+                estimated_candidates=estimated,
+                risk_note="lowering min_trades increases statistical noise",
+            ))
 
-        # If by_drawdown is significant, suggest higher max_drawdown
+        # Single-axis suggestion 2: Increase max_drawdown
         if filter_rejections.by_drawdown > 0:
-            settings.max_drawdown = relaxed_max_drawdown
+            estimated = baseline - filter_rejections.by_oos - filter_rejections.by_trades
+            suggestions.append(RelaxationSuggestion(
+                filter_name="max_drawdown",
+                current_value=current_max_dd,
+                suggested_value=0.50,
+                estimated_candidates=estimated,
+                risk_note="increasing max_drawdown increases risk tolerance",
+            ))
 
-        # If by_overfit_gap is significant, suggest higher max_overfit_gap
+        # Single-axis suggestion 3: Increase max_overfit_gap
         if filter_rejections.by_overfit_gap > 0:
-            settings.max_overfit_gap = relaxed_max_overfit_gap
+            estimated = baseline - filter_rejections.by_oos - filter_rejections.by_trades - filter_rejections.by_drawdown
+            suggestions.append(RelaxationSuggestion(
+                filter_name="max_overfit_gap",
+                current_value=current_max_overfit,
+                suggested_value=1.0,
+                estimated_candidates=estimated,
+                risk_note="increasing max_overfit_gap increases overfit risk",
+            ))
 
-        # Estimate how many candidates would pass with relaxed settings
-        # This is a rough estimate based on the rejection counts
-        # (In diagnostic mode, the total_before_filters gives us the baseline)
-        estimated = filter_rejections.total_before_filters
-        settings.estimated_candidates = estimated
+        # Single-axis suggestion 4: Disable OOS requirement
+        if filter_rejections.by_oos > 0:
+            # Disabling OOS recovers those rejected by OOS
+            estimated = baseline
+            suggestions.append(RelaxationSuggestion(
+                filter_name="require_oos",
+                current_value=current_require_oos,
+                suggested_value=False,
+                estimated_candidates=estimated,
+                risk_note="disabling OOS validation increases overfit risk",
+            ))
 
-        # Only return if we actually suggested relaxations
-        if (settings.min_trades is None and
-            settings.max_drawdown is None and
-            settings.max_overfit_gap is None and
-            settings.require_oos is None):
+        if not suggestions:
             return None
 
-        return settings
+        # Sort by estimated_candidates descending (most impactful first)
+        suggestions.sort(key=lambda s: s.estimated_candidates, reverse=True)
+
+        return RecommendedRelaxedSettings(suggestions=suggestions)
 
     def _build_none_response(
         self,
