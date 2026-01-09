@@ -17,6 +17,7 @@ import structlog
 from app.services.kb.types import RegimeSnapshot
 from app.services.kb.embed import KBEmbeddingAdapter, EmbeddingError, get_kb_embedder
 from app.repositories.kb_trials import KBTrialRepository
+from app.services.strategies.registry import get_strategy
 
 logger = structlog.get_logger(__name__)
 
@@ -141,13 +142,17 @@ class RetrievalResult:
 def build_filters(
     req: RetrievalRequest,
     strict: bool = True,
+    strategy_floors: Optional[dict] = None,
 ) -> dict:
     """
     Build filter dict for Qdrant query.
 
+    Priority: request overrides > strategy defaults > workspace defaults
+
     Args:
         req: Retrieval request
         strict: If True, use strict quality filters
+        strategy_floors: Strategy-specific floors from StrategySpec.kb_floors
 
     Returns:
         Filter dict for repository search
@@ -157,7 +162,18 @@ def build_filters(
     else:
         base = DEFAULT_RELAXED_FILTERS.copy()
 
-    # Apply request overrides
+    # Apply strategy-specific floors (if provided)
+    if strategy_floors:
+        if strategy_floors.get("require_oos") is not None:
+            base["require_oos"] = strategy_floors["require_oos"]
+        if strategy_floors.get("max_overfit_gap") is not None:
+            base["max_overfit_gap"] = strategy_floors["max_overfit_gap"]
+        if strategy_floors.get("min_trades") is not None:
+            base["min_trades"] = strategy_floors["min_trades"]
+        if strategy_floors.get("max_drawdown") is not None:
+            base["max_drawdown"] = strategy_floors["max_drawdown"]
+
+    # Apply request overrides (highest priority)
     if req.require_oos is not None:
         base["require_oos"] = req.require_oos
     if req.max_overfit_gap is not None:
@@ -233,6 +249,27 @@ class KBRetriever:
             embedding_model=self.embedder.model_id,
         )
 
+        # Lookup strategy-specific floors
+        strategy_floors: Optional[dict] = None
+        try:
+            strategy_spec = get_strategy(req.strategy_name)
+            if strategy_spec and strategy_spec.kb_floors:
+                strategy_floors = {
+                    "require_oos": strategy_spec.kb_floors.require_oos,
+                    "max_overfit_gap": strategy_spec.kb_floors.max_overfit_gap,
+                    "min_trades": strategy_spec.kb_floors.min_trades,
+                    "max_drawdown": strategy_spec.kb_floors.max_drawdown,
+                }
+                # Remove None values to allow default fallback
+                strategy_floors = {k: v for k, v in strategy_floors.items() if v is not None}
+                logger.debug(
+                    "Using strategy-specific KB floors",
+                    strategy=req.strategy_name,
+                    floors=strategy_floors,
+                )
+        except Exception as e:
+            logger.warning("Failed to lookup strategy floors", strategy=req.strategy_name, error=str(e))
+
         # Get query vector (embed if not provided)
         query_vector = req.query_vector
         embed_failed = False
@@ -251,7 +288,7 @@ class KBRetriever:
         candidates: list[RetrievalCandidate] = []
 
         if query_vector is not None:
-            strict_filters = build_filters(req, strict=True)
+            strict_filters = build_filters(req, strict=True, strategy_floors=strategy_floors)
             strict_results = await self.repository.search(
                 vector=query_vector,
                 workspace_id=req.workspace_id,
@@ -280,7 +317,7 @@ class KBRetriever:
                     threshold=req.min_candidates,
                 )
 
-                relaxed_filters = build_filters(req, strict=False)
+                relaxed_filters = build_filters(req, strict=False, strategy_floors=strategy_floors)
                 relaxed_results = await self.repository.search(
                     vector=query_vector,
                     workspace_id=req.workspace_id,
@@ -317,7 +354,7 @@ class KBRetriever:
             logger.info("Using metadata-only fallback")
 
             # Use relaxed filters for fallback
-            relaxed_filters = build_filters(req, strict=False)
+            relaxed_filters = build_filters(req, strict=False, strategy_floors=strategy_floors)
             fallback_results = await self.repository.search_by_filters(
                 workspace_id=req.workspace_id,
                 strategy_name=req.strategy_name,
@@ -351,6 +388,7 @@ class KBRetriever:
             stats.filter_rejections = await self._compute_filter_rejections(
                 req=req,
                 query_vector=query_vector,
+                strategy_floors=strategy_floors,
             )
 
         logger.info(
@@ -373,14 +411,18 @@ class KBRetriever:
         self,
         req: RetrievalRequest,
         query_vector: list[float],
+        strategy_floors: Optional[dict] = None,
     ) -> FilterRejections:
         """
         Compute how many candidates were rejected by each filter.
 
         Runs queries with progressively relaxed filters to compute deltas.
         This is expensive, so only used in diagnostic mode.
+
+        Priority chain: request override > strategy default > workspace default
         """
         rejections = FilterRejections()
+        sf = strategy_floors or {}
 
         # Query 1: No quality filters (baseline)
         no_filters_count = await self.repository.count(
@@ -405,7 +447,8 @@ class KBRetriever:
         rejections.by_oos = no_filters_count - oos_count
 
         # Query 3: With require_oos + min_trades
-        min_trades = req.min_trades or DEFAULT_STRICT_FILTERS["min_trades"]
+        # Priority: request override > strategy default > workspace default
+        min_trades = req.min_trades or sf.get("min_trades") or DEFAULT_STRICT_FILTERS["min_trades"]
         trades_count = await self.repository.count(
             vector=query_vector,
             workspace_id=req.workspace_id,
@@ -417,7 +460,7 @@ class KBRetriever:
         rejections.by_trades = oos_count - trades_count
 
         # Query 4: With require_oos + min_trades + max_drawdown
-        max_dd = req.max_drawdown or DEFAULT_STRICT_FILTERS["max_drawdown"]
+        max_dd = req.max_drawdown or sf.get("max_drawdown") or DEFAULT_STRICT_FILTERS["max_drawdown"]
         dd_count = await self.repository.count(
             vector=query_vector,
             workspace_id=req.workspace_id,
@@ -433,7 +476,7 @@ class KBRetriever:
         rejections.by_drawdown = trades_count - dd_count
 
         # Query 5: All strict filters (including overfit_gap)
-        max_overfit = req.max_overfit_gap or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
+        max_overfit = req.max_overfit_gap or sf.get("max_overfit_gap") or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
         strict_count = await self.repository.count(
             vector=query_vector,
             workspace_id=req.workspace_id,

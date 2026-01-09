@@ -50,6 +50,20 @@ OBJECTIVE_DESCRIPTIONS = {
 
 
 @dataclass
+class KBFloors:
+    """Strategy-specific KB quality floors.
+
+    These override workspace defaults to account for strategy-specific
+    characteristics (e.g., trend strategies have fewer trades).
+    """
+
+    min_trades: Optional[int] = None
+    max_overfit_gap: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    require_oos: Optional[bool] = None
+
+
+@dataclass
 class StrategySpec:
     """
     Complete specification for a trading strategy.
@@ -85,6 +99,9 @@ class StrategySpec:
 
     # Derived from (for KB-compiled strategies)
     derived_from_claims: list[str] = field(default_factory=list)
+
+    # Strategy-specific KB quality floors (override workspace defaults)
+    kb_floors: Optional[KBFloors] = None
 
     def __post_init__(self):
         if not self.display_name:
@@ -445,6 +462,11 @@ def create_trend_following_spec() -> StrategySpec:
         constraints=[
             {"type": "less_than", "a": "fast_period", "b": "slow_period"},
         ],
+        # Trend strategies typically have fewer trades on short windows
+        kb_floors=KBFloors(
+            min_trades=3,  # Lower than default (5) for trend
+            max_overfit_gap=0.4,  # Slightly more lenient
+        ),
     )
 
 
@@ -485,6 +507,10 @@ def create_breakout_spec() -> StrategySpec:
                 unit="bars",
             ),
         },
+        # Breakout strategies also have fewer trades in quiet markets
+        kb_floors=KBFloors(
+            min_trades=3,  # Lower than default (5) for breakout
+        ),
     )
 
 

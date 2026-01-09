@@ -179,6 +179,20 @@ class FilterRejectionsInfo(BaseModel):
     by_regime: int = Field(0, description="Rejected by regime_tags mismatch")
 
 
+class RecommendedRelaxedSettingsInfo(BaseModel):
+    """Suggested relaxed filter settings that would yield candidates.
+
+    Only returned when status='none' to help users understand
+    what constraints to loosen for recommendations.
+    """
+
+    min_trades: Optional[int] = Field(None, description="Suggested min_trades value")
+    max_drawdown: Optional[float] = Field(None, description="Suggested max_drawdown value")
+    max_overfit_gap: Optional[float] = Field(None, description="Suggested max_overfit_gap value")
+    require_oos: Optional[bool] = Field(None, description="Suggested require_oos value")
+    estimated_candidates: int = Field(0, description="Estimated candidates with these settings")
+
+
 class RecommendResponse(BaseModel):
     """Response from parameter recommendation."""
 
@@ -213,6 +227,12 @@ class RecommendResponse(BaseModel):
     top_candidates: Optional[list[CandidateSummary]] = Field(None, description="Top candidates (debug mode)")
     param_spreads: Optional[dict[str, ParamSpreadInfo]] = Field(None, description="Parameter spread info")
     filter_rejections: Optional[FilterRejectionsInfo] = Field(None, description="Filter rejection counts (debug mode)")
+
+    # Self-healing guidance (only when status='none')
+    recommended_relaxed_settings: Optional[RecommendedRelaxedSettingsInfo] = Field(
+        None,
+        description="Suggested relaxed filter settings that would yield candidates (status='none' only)",
+    )
 
 
 class IngestResponse(BaseModel):
@@ -605,6 +625,16 @@ async def recommend(
                 by_overfit_gap=result.filter_rejections.by_overfit_gap,
                 by_regime=result.filter_rejections.by_regime,
             )
+
+    # Add recommended relaxed settings when status='none'
+    if result.recommended_relaxed_settings:
+        response.recommended_relaxed_settings = RecommendedRelaxedSettingsInfo(
+            min_trades=result.recommended_relaxed_settings.min_trades,
+            max_drawdown=result.recommended_relaxed_settings.max_drawdown,
+            max_overfit_gap=result.recommended_relaxed_settings.max_overfit_gap,
+            require_oos=result.recommended_relaxed_settings.require_oos,
+            estimated_candidates=result.recommended_relaxed_settings.estimated_candidates,
+        )
 
     # Extract timings from result
     timings = result.timings

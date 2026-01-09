@@ -96,6 +96,21 @@ class RecommendRequest:
 
 
 @dataclass
+class RecommendedRelaxedSettings:
+    """Suggested relaxed filter settings that would yield candidates.
+
+    Computed when status='none' to help users understand what
+    constraints need to be loosened to get recommendations.
+    """
+
+    min_trades: Optional[int] = None
+    max_drawdown: Optional[float] = None
+    max_overfit_gap: Optional[float] = None
+    require_oos: Optional[bool] = None
+    estimated_candidates: int = 0  # How many would pass with these settings
+
+
+@dataclass
 class TrialSummary:
     """Summary of a trial used in recommendation."""
 
@@ -144,6 +159,9 @@ class RecommendResponse:
 
     # Filter rejection counts (only in diagnostic mode)
     filter_rejections: Optional[FilterRejections] = None
+
+    # Recommended relaxed settings (only when status='none')
+    recommended_relaxed_settings: Optional[RecommendedRelaxedSettings] = None
 
 
 # =============================================================================
@@ -396,6 +414,14 @@ class KBRecommender:
             strict_count=retrieval_result.stats.strict_count,
         )
 
+        # Compute recommended relaxed settings when status is 'none'
+        recommended_relaxed = None
+        if status == "none":
+            recommended_relaxed = self._compute_recommended_relaxed_settings(
+                filter_rejections=retrieval_result.stats.filter_rejections,
+                current_request=req,
+            )
+
         return RecommendResponse(
             params=aggregation_result.params,
             status=status,
@@ -414,6 +440,7 @@ class KBRecommender:
             embedding_model=retrieval_result.stats.embedding_model,
             timings=timings,
             filter_rejections=retrieval_result.stats.filter_rejections,
+            recommended_relaxed_settings=recommended_relaxed,
         )
 
     def _compute_status(
@@ -504,6 +531,72 @@ class KBRecommender:
                 actions.append("review_param_spec_constraints")
 
         return actions
+
+    def _compute_recommended_relaxed_settings(
+        self,
+        filter_rejections: Optional[FilterRejections],
+        current_request: RecommendRequest,
+    ) -> Optional[RecommendedRelaxedSettings]:
+        """
+        Compute relaxed settings that would yield candidates.
+
+        Based on filter rejection analysis, suggest looser thresholds
+        that would pass more candidates through. Only computed when
+        status='none' and filter_rejections are available.
+        """
+        if not filter_rejections:
+            return None
+
+        # If no data exists at all, relaxing won't help
+        if filter_rejections.total_before_filters == 0:
+            return None
+
+        # Determine which filters to relax based on rejection counts
+        settings = RecommendedRelaxedSettings()
+
+        # Progressive relaxation thresholds
+        relaxed_min_trades = 1  # Absolute minimum
+        relaxed_max_drawdown = 0.50  # 50% max DD
+        relaxed_max_overfit_gap = 1.0  # Effectively disabled
+        relaxed_require_oos = False  # Don't require OOS
+
+        # Start with current request values (or defaults)
+        from app.services.kb.retrieval import DEFAULT_STRICT_FILTERS
+
+        # Compute cumulative candidates at each relaxation level
+        cumulative = filter_rejections.total_before_filters
+
+        # If by_oos is significant, suggest disabling OOS requirement
+        if filter_rejections.by_oos > 0:
+            settings.require_oos = relaxed_require_oos
+            cumulative -= filter_rejections.by_oos  # Approximate remaining after relaxing
+
+        # If by_trades is significant, suggest lower min_trades
+        if filter_rejections.by_trades > 0:
+            settings.min_trades = relaxed_min_trades
+
+        # If by_drawdown is significant, suggest higher max_drawdown
+        if filter_rejections.by_drawdown > 0:
+            settings.max_drawdown = relaxed_max_drawdown
+
+        # If by_overfit_gap is significant, suggest higher max_overfit_gap
+        if filter_rejections.by_overfit_gap > 0:
+            settings.max_overfit_gap = relaxed_max_overfit_gap
+
+        # Estimate how many candidates would pass with relaxed settings
+        # This is a rough estimate based on the rejection counts
+        # (In diagnostic mode, the total_before_filters gives us the baseline)
+        estimated = filter_rejections.total_before_filters
+        settings.estimated_candidates = estimated
+
+        # Only return if we actually suggested relaxations
+        if (settings.min_trades is None and
+            settings.max_drawdown is None and
+            settings.max_overfit_gap is None and
+            settings.require_oos is None):
+            return None
+
+        return settings
 
     def _build_none_response(
         self,
