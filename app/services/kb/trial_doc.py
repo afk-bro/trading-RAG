@@ -30,6 +30,50 @@ from app.services.kb.constants import (
 # =============================================================================
 
 
+def regime_to_text(r: RegimeSnapshot) -> str:
+    """
+    Convert RegimeSnapshot to text for embedding (query context).
+
+    Used when querying the KB with current market conditions.
+
+    Args:
+        r: RegimeSnapshot
+
+    Returns:
+        Text representation for embedding
+    """
+    if r is None:
+        return "Regime: unknown."
+
+    # Tags
+    regime_str = ", ".join(r.regime_tags) if r.regime_tags else "neutral"
+
+    # Key metrics
+    metrics = []
+    if r.atr_pct > 0:
+        metrics.append(f"ATR {r.atr_pct*100:.1f}%")
+    if r.trend_strength > 0:
+        direction = "up" if r.trend_dir > 0 else "down" if r.trend_dir < 0 else "flat"
+        metrics.append(f"trend {direction} ({r.trend_strength:.2f})")
+    if r.rsi != 50:
+        metrics.append(f"RSI {r.rsi:.0f}")
+    if r.efficiency_ratio != 0.5:
+        metrics.append(f"efficiency {r.efficiency_ratio:.2f}")
+
+    metrics_str = ", ".join(metrics) if metrics else "neutral conditions"
+
+    # Timeframe and instrument
+    context = []
+    if r.instrument:
+        context.append(r.instrument)
+    if r.timeframe:
+        context.append(r.timeframe)
+    context_str = " ".join(context) if context else "unknown"
+
+    return f"""Regime: {regime_str}.
+Market conditions for {context_str}: {metrics_str}."""
+
+
 def trial_to_text(t: TrialDoc) -> str:
     """
     Convert TrialDoc to text for embedding.
