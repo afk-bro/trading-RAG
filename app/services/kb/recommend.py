@@ -32,8 +32,12 @@ from app.services.kb.aggregation import (
     aggregate_params,
     compute_confidence,
 )
+from app.services.kb.distance import compute_regime_distance_z, DistanceResult
+from app.services.kb.regime_fsm import RegimeFSM, FSMConfig, FSMState
 from app.services.strategies.registry import get_strategy, StrategySpec
 from app.repositories.kb_trials import KBTrialRepository
+from app.repositories.cluster_stats import ClusterStatsRepository, ClusterStats
+from app.repositories.duration_stats import DurationStatsRepository, DurationStats
 
 logger = structlog.get_logger(__name__)
 
@@ -66,6 +70,28 @@ class RecommendTimings:
     qdrant_ms: float = 0.0
     rerank_ms: float = 0.0
     aggregate_ms: float = 0.0
+    distance_ms: float = 0.0
+    duration_ms: float = 0.0
+
+
+@dataclass
+class RegimeStateStability:
+    """FSM state info for regime stability (v1.5)."""
+
+    candidate_key: Optional[str] = None
+    candidate_bars: int = 0
+    M: int = 20
+    C_enter: float = 0.75
+    C_exit: float = 0.55
+
+
+@dataclass
+class WindowMetadata:
+    """Window metadata for rolling computations (v1.5)."""
+
+    regime_age_bars: int = 0
+    performance_window: Optional[dict] = None  # {"bars": 500, "timeframe": "5m"}
+    distance_window: Optional[dict] = None  # {"bars": 500, "timeframe": "5m"}
 
 
 @dataclass
@@ -81,6 +107,10 @@ class RecommendRequest:
     query_regime: Optional[RegimeSnapshot] = None  # Pre-computed regime
     timeframe: Optional[str] = None
 
+    # v1.5 context (for duration stats, cluster stats lookups)
+    symbol: Optional[str] = None  # Trading symbol (e.g., "BTC/USDT")
+    strategy_entity_id: Optional[UUID] = None  # Strategy entity ID for cluster stats
+
     # Filter options
     require_oos: Optional[bool] = None
     max_overfit_gap: Optional[float] = None
@@ -94,6 +124,9 @@ class RecommendRequest:
 
     # Diagnostic mode: compute filter rejection counts (expensive)
     diagnostic: bool = False
+
+    # v1.5 FSM configuration (optional, uses defaults if None)
+    fsm_config: Optional[FSMConfig] = None
 
 
 @dataclass
@@ -178,6 +211,36 @@ class RecommendResponse:
     # Recommended relaxed settings (only when status='none')
     recommended_relaxed_settings: Optional[RecommendedRelaxedSettings] = None
 
+    # ==========================================================================
+    # v1.5 Live Intelligence Fields
+    # ==========================================================================
+
+    # Confidence decomposition (v1.5)
+    regime_fit_confidence: Optional[float] = None  # How well current market matches historical (0-1)
+    regime_distance_z: Optional[float] = None  # Z-score distance from neighborhood
+    distance_baseline: Optional[str] = None  # "composite" | "marginal" | "neighbors_only"
+    distance_n: Optional[int] = None  # Number of neighbors used for distance
+
+    # Duration fields (v1.5)
+    regime_age_bars: Optional[int] = None  # Bars since stable regime confirmed
+    regime_half_life_bars: Optional[int] = None  # Median historical duration
+    expected_remaining_bars: Optional[int] = None  # max(0, median - age)
+    duration_iqr_bars: Optional[list[int]] = None  # [p25, p75]
+    remaining_iqr_bars: Optional[list[int]] = None  # [max(0, p25-age), max(0, p75-age)]
+    duration_baseline: Optional[str] = None  # "composite_symbol" | "marginal" | "global_timeframe"
+    duration_n: Optional[int] = None  # Number of segments used
+
+    # FSM state (v1.5)
+    stable_regime_key: Optional[str] = None  # Confirmed stable regime
+    raw_regime_key: Optional[str] = None  # Raw current classification
+    regime_state_stability: Optional[RegimeStateStability] = None  # FSM state details
+
+    # Window metadata (v1.5)
+    windows: Optional[WindowMetadata] = None
+
+    # Missing field reasons (v1.5)
+    missing: list[str] = field(default_factory=list)  # ["no_duration_stats", "no_cluster_stats", etc.]
+
 
 # =============================================================================
 # Orchestrator
@@ -195,12 +258,15 @@ class KBRecommender:
     4. Select top K by objective_score
     5. Aggregate and repair parameters
     6. Compute confidence and status
+    7. (v1.5) Compute distance_z, duration stats, FSM state
     """
 
     def __init__(
         self,
         repository: KBTrialRepository,
         retriever: Optional[KBRetriever] = None,
+        cluster_stats_repo: Optional[ClusterStatsRepository] = None,
+        duration_stats_repo: Optional[DurationStatsRepository] = None,
     ):
         """
         Initialize recommender.
@@ -208,9 +274,13 @@ class KBRecommender:
         Args:
             repository: KB trial repository
             retriever: Optional retriever (created if None)
+            cluster_stats_repo: Optional cluster stats repository (v1.5)
+            duration_stats_repo: Optional duration stats repository (v1.5)
         """
         self.repository = repository
         self._retriever = retriever
+        self._cluster_stats_repo = cluster_stats_repo
+        self._duration_stats_repo = duration_stats_repo
 
     @property
     def retriever(self) -> KBRetriever:
@@ -424,6 +494,17 @@ class KBRecommender:
             for c in top_k[:5]  # Only include top 5 for transparency
         ]
 
+        # =================================================================
+        # Step 7: v1.5 Computations (distance_z, duration, FSM state)
+        # =================================================================
+        v15_result = await self._compute_v15_fields(
+            req=req,
+            query_regime=query_regime,
+            top_k=top_k,
+            timings=timings,
+        )
+        missing = v15_result.get("missing", [])
+
         # Finalize timings
         timings.total_ms = (time.perf_counter() - start_total) * 1000
 
@@ -475,7 +556,248 @@ class KBRecommender:
             timings=timings,
             filter_rejections=retrieval_result.stats.filter_rejections,
             recommended_relaxed_settings=recommended_relaxed,
+            # v1.5 fields
+            regime_fit_confidence=v15_result.get("regime_fit_confidence"),
+            regime_distance_z=v15_result.get("regime_distance_z"),
+            distance_baseline=v15_result.get("distance_baseline"),
+            distance_n=v15_result.get("distance_n"),
+            regime_age_bars=v15_result.get("regime_age_bars"),
+            regime_half_life_bars=v15_result.get("regime_half_life_bars"),
+            expected_remaining_bars=v15_result.get("expected_remaining_bars"),
+            duration_iqr_bars=v15_result.get("duration_iqr_bars"),
+            remaining_iqr_bars=v15_result.get("remaining_iqr_bars"),
+            duration_baseline=v15_result.get("duration_baseline"),
+            duration_n=v15_result.get("duration_n"),
+            stable_regime_key=v15_result.get("stable_regime_key"),
+            raw_regime_key=v15_result.get("raw_regime_key"),
+            regime_state_stability=v15_result.get("regime_state_stability"),
+            windows=v15_result.get("windows"),
+            missing=missing,
         )
+
+    async def _compute_v15_fields(
+        self,
+        req: RecommendRequest,
+        query_regime: Optional[RegimeSnapshot],
+        top_k: list,
+        timings: RecommendTimings,
+    ) -> dict:
+        """
+        Compute v1.5 fields: distance_z, duration stats, FSM state.
+
+        All v1.5 fields are optional - if data is unavailable, fields are
+        omitted and reasons added to the 'missing' list.
+
+        Args:
+            req: Original recommend request
+            query_regime: Computed regime snapshot
+            top_k: Top K candidates from retrieval
+            timings: Timing object to update
+
+        Returns:
+            Dict with v1.5 fields (all optional)
+        """
+        result: dict = {"missing": []}
+
+        # Extract regime features from query regime (for distance computation)
+        current_features: dict[str, float] = {}
+        raw_regime_key: Optional[str] = None
+        regime_fit_confidence: Optional[float] = None
+
+        if query_regime:
+            # Get features from regime snapshot
+            if hasattr(query_regime, "regime_features") and query_regime.regime_features:
+                current_features = query_regime.regime_features
+            # Get raw regime key from tags
+            raw_regime_key = self._build_regime_key_from_tags(query_regime.regime_tags)
+            # Regime fit confidence from the regime computation
+            if hasattr(query_regime, "confidence"):
+                regime_fit_confidence = query_regime.confidence
+
+        result["raw_regime_key"] = raw_regime_key
+        result["regime_fit_confidence"] = regime_fit_confidence
+
+        # Initialize FSM and compute stable regime key
+        fsm_config = req.fsm_config or FSMConfig()
+        fsm = RegimeFSM(config=fsm_config)
+
+        # For live intelligence, FSM should be updated with historical bars
+        # Here we just expose the current state based on raw_regime_key
+        if raw_regime_key and regime_fit_confidence is not None:
+            fsm.update(raw_regime_key, regime_fit_confidence)
+
+        fsm_state = fsm.get_state()
+        result["stable_regime_key"] = fsm_state.stable_regime_key
+        result["regime_state_stability"] = RegimeStateStability(
+            candidate_key=fsm_state.candidate_regime_key,
+            candidate_bars=fsm_state.candidate_count,
+            M=fsm_config.M,
+            C_enter=fsm_config.C_enter,
+            C_exit=fsm_config.C_exit,
+        )
+
+        # Regime age from FSM
+        regime_age_bars = fsm_state.regime_age_bars
+        result["regime_age_bars"] = regime_age_bars
+
+        # =================================================================
+        # Distance Z-Score Computation
+        # =================================================================
+        start_distance = time.perf_counter()
+
+        # Extract neighbor features from top_k candidates
+        neighbor_features: list[dict[str, float]] = []
+        for candidate in top_k:
+            payload = candidate.payload
+            if payload and "regime_features" in payload:
+                features = payload["regime_features"]
+                if isinstance(features, dict):
+                    neighbor_features.append(features)
+
+        # Try to get cluster stats for variance scaling
+        cluster_var: Optional[dict[str, float]] = None
+        cluster_sigma_prior: Optional[float] = None
+        distance_baseline = "neighbors_only"
+
+        if (
+            self._cluster_stats_repo
+            and req.strategy_entity_id
+            and req.timeframe
+            and fsm_state.stable_regime_key
+        ):
+            try:
+                cluster_stats = await self._cluster_stats_repo.get_stats_with_backoff(
+                    strategy_entity_id=req.strategy_entity_id,
+                    timeframe=req.timeframe,
+                    regime_key=fsm_state.stable_regime_key,
+                )
+                if cluster_stats:
+                    cluster_var = cluster_stats.feature_var
+                    distance_baseline = cluster_stats.baseline
+            except Exception as e:
+                logger.warning("Failed to get cluster stats", error=str(e))
+                result["missing"].append("cluster_stats_error")
+
+        # Compute distance z-score
+        if current_features and neighbor_features:
+            distance_result = compute_regime_distance_z(
+                current_features=current_features,
+                neighbor_features=neighbor_features,
+                cluster_var=cluster_var,
+                cluster_sigma_prior=cluster_sigma_prior,
+            )
+            result["regime_distance_z"] = distance_result.z_score
+            result["distance_baseline"] = distance_result.baseline
+            result["distance_n"] = distance_result.n_neighbors
+            if distance_result.missing:
+                result["missing"].extend(distance_result.missing)
+        else:
+            if not current_features:
+                result["missing"].append("no_query_regime_features")
+            if not neighbor_features:
+                result["missing"].append("no_neighbor_features")
+
+        timings.distance_ms = (time.perf_counter() - start_distance) * 1000
+
+        # =================================================================
+        # Duration Stats Computation
+        # =================================================================
+        start_duration = time.perf_counter()
+
+        if (
+            self._duration_stats_repo
+            and req.symbol
+            and req.timeframe
+            and fsm_state.stable_regime_key
+        ):
+            try:
+                duration_stats = await self._duration_stats_repo.get_stats_with_backoff(
+                    symbol=req.symbol,
+                    timeframe=req.timeframe,
+                    regime_key=fsm_state.stable_regime_key,
+                )
+                if duration_stats:
+                    result["regime_half_life_bars"] = duration_stats.median_duration_bars
+                    result["duration_iqr_bars"] = duration_stats.duration_iqr_bars
+                    result["duration_baseline"] = duration_stats.baseline
+                    result["duration_n"] = duration_stats.n_segments
+
+                    # Compute expected remaining based on regime age
+                    if regime_age_bars is not None:
+                        remaining = duration_stats.compute_expected_remaining(regime_age_bars)
+                        result["expected_remaining_bars"] = remaining.expected_remaining_bars
+                        result["remaining_iqr_bars"] = remaining.remaining_iqr_bars
+                else:
+                    result["missing"].append("no_duration_stats")
+            except Exception as e:
+                logger.warning("Failed to get duration stats", error=str(e))
+                result["missing"].append("duration_stats_error")
+        else:
+            if not self._duration_stats_repo:
+                result["missing"].append("duration_stats_repo_unavailable")
+            elif not req.symbol:
+                result["missing"].append("no_symbol_provided")
+            elif not req.timeframe:
+                result["missing"].append("no_timeframe_provided")
+            elif not fsm_state.stable_regime_key:
+                result["missing"].append("no_stable_regime_key")
+
+        timings.duration_ms = (time.perf_counter() - start_duration) * 1000
+
+        # =================================================================
+        # Window Metadata
+        # =================================================================
+        result["windows"] = WindowMetadata(
+            regime_age_bars=regime_age_bars or 0,
+            performance_window=None,  # To be populated by forward run system
+            distance_window={
+                "bars": len(neighbor_features),
+                "timeframe": req.timeframe,
+            } if neighbor_features else None,
+        )
+
+        return result
+
+    def _build_regime_key_from_tags(self, tags: list[str]) -> Optional[str]:
+        """
+        Build canonical regime key from regime tags.
+
+        Attempts to extract trend and vol dimensions from tags.
+
+        Args:
+            tags: List of regime tags
+
+        Returns:
+            Canonical regime key or None if dimensions not found
+        """
+        if not tags:
+            return None
+
+        from app.services.kb.regime_key import (
+            RegimeDims,
+            canonicalize_regime_key,
+            VALID_TREND_VALUES,
+            VALID_VOL_VALUES,
+        )
+
+        trend = None
+        vol = None
+
+        for tag in tags:
+            tag_lower = tag.lower()
+            if tag_lower in VALID_TREND_VALUES:
+                trend = tag_lower
+            elif tag_lower in VALID_VOL_VALUES:
+                vol = tag_lower
+
+        if trend and vol:
+            try:
+                dims = RegimeDims(trend=trend, vol=vol)
+                return canonicalize_regime_key(dims)
+            except ValueError:
+                return None
+
+        return None
 
     def _compute_status(
         self,

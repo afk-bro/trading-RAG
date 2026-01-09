@@ -145,6 +145,17 @@ class RecommendRequest(BaseModel):
     rerank_keep: int = Field(DEFAULT_RERANK_KEEP, ge=1, le=MAX_RERANK_KEEP, description="Top M after reranking")
     top_k: int = Field(DEFAULT_TOP_K, ge=1, le=MAX_TOP_K, description="Top K for aggregation")
 
+    # v1.5 context (for duration stats, cluster stats lookups)
+    symbol: Optional[str] = Field(
+        None, max_length=50, description="Trading symbol (e.g., 'BTC/USDT') for duration stats"
+    )
+    strategy_entity_id: Optional[UUID] = Field(
+        None, description="Strategy entity ID for cluster stats lookup"
+    )
+    timeframe: Optional[str] = Field(
+        None, max_length=10, description="Timeframe (e.g., '5m', '1h') for stats lookups"
+    )
+
     # Debug options
     include_candidates: bool = Field(False, description="Include top candidates in response (debug)")
 
@@ -242,6 +253,29 @@ class RecommendedRelaxedSettingsInfo(BaseModel):
     )
 
 
+# =============================================================================
+# v1.5 Live Intelligence Response Models
+# =============================================================================
+
+
+class RegimeStateStabilityInfo(BaseModel):
+    """FSM state info for regime stability (v1.5)."""
+
+    candidate_key: Optional[str] = Field(None, description="Current candidate regime key")
+    candidate_bars: int = Field(0, description="Bars candidate has persisted")
+    M: int = Field(20, description="Persistence bars required for transition")
+    C_enter: float = Field(0.75, description="Confidence threshold to confirm transition")
+    C_exit: float = Field(0.55, description="Confidence threshold to consider change")
+
+
+class WindowMetadataInfo(BaseModel):
+    """Window metadata for rolling computations (v1.5)."""
+
+    regime_age_bars: int = Field(0, description="Bars since stable regime confirmed")
+    performance_window: Optional[dict] = Field(None, description="Performance window config")
+    distance_window: Optional[dict] = Field(None, description="Distance computation window config")
+
+
 class RecommendResponse(BaseModel):
     """Response from parameter recommendation."""
 
@@ -281,6 +315,68 @@ class RecommendResponse(BaseModel):
     recommended_relaxed_settings: Optional[RecommendedRelaxedSettingsInfo] = Field(
         None,
         description="Suggested relaxed filter settings that would yield candidates (status='none' only)",
+    )
+
+    # =========================================================================
+    # v1.5 Live Intelligence Fields
+    # =========================================================================
+
+    # Confidence decomposition (v1.5)
+    regime_fit_confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="How well current market matches historical regime (0-1)"
+    )
+    regime_distance_z: Optional[float] = Field(
+        None, description="Z-score distance from neighborhood"
+    )
+    distance_baseline: Optional[str] = Field(
+        None, description="Baseline used for distance: 'composite' | 'marginal' | 'neighbors_only'"
+    )
+    distance_n: Optional[int] = Field(
+        None, ge=0, description="Number of neighbors used for distance computation"
+    )
+
+    # Duration fields (v1.5)
+    regime_age_bars: Optional[int] = Field(
+        None, ge=0, description="Bars since stable regime confirmed"
+    )
+    regime_half_life_bars: Optional[int] = Field(
+        None, ge=0, description="Median historical duration for this regime"
+    )
+    expected_remaining_bars: Optional[int] = Field(
+        None, ge=0, description="max(0, median - age)"
+    )
+    duration_iqr_bars: Optional[list[int]] = Field(
+        None, description="[p25, p75] historical duration"
+    )
+    remaining_iqr_bars: Optional[list[int]] = Field(
+        None, description="[max(0, p25-age), max(0, p75-age)]"
+    )
+    duration_baseline: Optional[str] = Field(
+        None, description="Baseline: 'composite_symbol' | 'marginal' | 'global_timeframe'"
+    )
+    duration_n: Optional[int] = Field(
+        None, ge=0, description="Number of segments used for duration stats"
+    )
+
+    # FSM state (v1.5)
+    stable_regime_key: Optional[str] = Field(
+        None, description="Confirmed stable regime key"
+    )
+    raw_regime_key: Optional[str] = Field(
+        None, description="Raw current classification"
+    )
+    regime_state_stability: Optional[RegimeStateStabilityInfo] = Field(
+        None, description="FSM state details"
+    )
+
+    # Window metadata (v1.5)
+    windows: Optional[WindowMetadataInfo] = Field(
+        None, description="Window metadata for rolling computations"
+    )
+
+    # Missing field reasons (v1.5)
+    missing: list[str] = Field(
+        default_factory=list, description="Reasons for unavailable v1.5 fields"
     )
 
 
@@ -555,6 +651,10 @@ async def recommend(
         rerank_top_m=request.rerank_keep,
         aggregate_top_k=request.top_k,
         diagnostic=diagnostic,
+        # v1.5 context
+        symbol=request.symbol,
+        strategy_entity_id=request.strategy_entity_id,
+        timeframe=request.timeframe,
     )
 
     # Execute with timeouts
@@ -658,6 +758,41 @@ async def recommend(
         query_regime_tags=result.query_regime_tags,
         active_collection=result.collection_name,
         embedding_model_id=result.embedding_model,
+        # v1.5 fields
+        regime_fit_confidence=result.regime_fit_confidence,
+        regime_distance_z=result.regime_distance_z,
+        distance_baseline=result.distance_baseline,
+        distance_n=result.distance_n,
+        regime_age_bars=result.regime_age_bars,
+        regime_half_life_bars=result.regime_half_life_bars,
+        expected_remaining_bars=result.expected_remaining_bars,
+        duration_iqr_bars=result.duration_iqr_bars,
+        remaining_iqr_bars=result.remaining_iqr_bars,
+        duration_baseline=result.duration_baseline,
+        duration_n=result.duration_n,
+        stable_regime_key=result.stable_regime_key,
+        raw_regime_key=result.raw_regime_key,
+        regime_state_stability=(
+            RegimeStateStabilityInfo(
+                candidate_key=result.regime_state_stability.candidate_key,
+                candidate_bars=result.regime_state_stability.candidate_bars,
+                M=result.regime_state_stability.M,
+                C_enter=result.regime_state_stability.C_enter,
+                C_exit=result.regime_state_stability.C_exit,
+            )
+            if result.regime_state_stability
+            else None
+        ),
+        windows=(
+            WindowMetadataInfo(
+                regime_age_bars=result.windows.regime_age_bars,
+                performance_window=result.windows.performance_window,
+                distance_window=result.windows.distance_window,
+            )
+            if result.windows
+            else None
+        ),
+        missing=result.missing,
     )
 
     # Add debug data if requested
