@@ -69,8 +69,10 @@ async def verify_admin_access(
 
     Security checks:
     1. If ADMIN_TOKEN is set, require it in header or query param
-    2. If LOG_LEVEL is DEBUG, allow access (dev mode)
+    2. In local development (localhost only), allow access
     3. Otherwise, deny access
+
+    NOTE: LOG_LEVEL=DEBUG does NOT bypass auth. It only controls log verbosity.
     """
     admin_token = os.environ.get("ADMIN_TOKEN")
 
@@ -87,11 +89,7 @@ async def verify_admin_access(
             )
         return True
 
-    # Allow in dev mode (DEBUG log level)
-    if settings.log_level.upper() == "DEBUG":
-        return True
-
-    # Check if we're in development (localhost)
+    # Allow in local development only (not DEBUG mode - that's a verbosity setting)
     host = request.headers.get("host", "")
     if "localhost" in host or "127.0.0.1" in host:
         return True

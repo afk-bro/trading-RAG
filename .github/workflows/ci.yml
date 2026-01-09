@@ -5,6 +5,10 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  schedule:
+    # Nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Manual trigger
 
 jobs:
   lint:
@@ -109,3 +113,78 @@ jobs:
       - name: Check image size
         run: |
           docker images trading-rag:test --format "{{.Size}}"
+
+  # Nightly smoke tests (runs on schedule or manual trigger)
+  smoke-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+        options: >-
+          --health-cmd "curl -f http://localhost:6333/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install httpx
+
+      - name: Start service in background
+        run: |
+          # Set minimal env vars for startup
+          export SUPABASE_URL=https://test.supabase.co
+          export SUPABASE_SERVICE_ROLE_KEY=test-key
+          export QDRANT_HOST=localhost
+          export QDRANT_PORT=6333
+          export LOG_LEVEL=WARNING
+
+          # Start uvicorn in background
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          echo $! > /tmp/server.pid
+
+          # Wait for server to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null; then
+              echo "Server is ready"
+              break
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run smoke tests
+        run: |
+          SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -v --tb=short
+        env:
+          SMOKE_TEST_TIMEOUT: "30"
+
+      - name: Upload smoke test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-results
+          path: |
+            /tmp/pytest-*/smoke_test_results.json
+          retention-days: 7
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -f /tmp/server.pid ]; then
+            kill $(cat /tmp/server.pid) || true
+          fi

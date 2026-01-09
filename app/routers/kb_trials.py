@@ -6,6 +6,7 @@ Provides recommendation and ingestion endpoints for the Trading KB:
 - POST /kb/trials/ingest - Ingest trials from tune runs (admin)
 """
 
+import time
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -18,6 +19,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import Settings, get_settings
+from app.routers.metrics import (
+    record_kb_recommend,
+    record_kb_embed_error,
+    record_kb_qdrant_error,
+)
 from app.services.strategies.registry import (
     ObjectiveType,
     get_strategy,
@@ -337,14 +343,20 @@ async def recommend(
 ) -> RecommendResponse:
     """Generate parameter recommendations."""
     request_id = str(uuid.uuid4())
+    start_time = time.perf_counter()
 
     logger.info(
-        "Recommend request",
+        "kb_recommend_start",
         request_id=request_id,
         workspace_id=str(request.workspace_id),
-        strategy=request.strategy_name,
-        objective=request.objective_type,
+        strategy_name=request.strategy_name,
+        objective_type=request.objective_type,
         mode=mode.value,
+        retrieve_k=request.retrieve_k,
+        rerank_keep=request.rerank_keep,
+        top_k=request.top_k,
+        has_regime_tags=bool(request.regime_tags),
+        has_dataset_id=bool(request.dataset_id),
     )
 
     # Validate strategy and objective
@@ -427,27 +439,43 @@ async def recommend(
         with anyio.fail_after(RECOMMEND_TIMEOUT_S):
             result = await recommender.recommend(internal_req)
     except TimeoutError:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
         logger.error(
-            "Recommendation timed out",
+            "kb_recommend_timeout",
             request_id=request_id,
             workspace_id=str(request.workspace_id),
-            strategy=request.strategy_name,
+            strategy_name=request.strategy_name,
+            objective_type=request.objective_type,
             mode=mode.value,
+            status="error",
             timeout_s=RECOMMEND_TIMEOUT_S,
+            total_ms=round(elapsed_ms, 1),
         )
+        record_kb_qdrant_error()  # Timeout usually means Qdrant issue
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Recommendation request timed out after {RECOMMEND_TIMEOUT_S}s",
         )
     except Exception as e:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        error_type = type(e).__name__
         logger.error(
-            "Recommendation failed",
+            "kb_recommend_error",
             request_id=request_id,
             workspace_id=str(request.workspace_id),
-            strategy=request.strategy_name,
+            strategy_name=request.strategy_name,
+            objective_type=request.objective_type,
             mode=mode.value,
+            status="error",
             error=str(e),
+            error_type=error_type,
+            total_ms=round(elapsed_ms, 1),
         )
+        # Record appropriate error metric
+        if "embed" in str(e).lower() or "ollama" in str(e).lower():
+            record_kb_embed_error()
+        else:
+            record_kb_qdrant_error()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Recommendation failed: {str(e)}",
@@ -491,18 +519,69 @@ async def recommend(
             for t in result.top_trials
         ]
 
+    # Extract timings from result
+    timings = result.timings
+    total_ms = timings.total_ms if timings else (time.perf_counter() - start_time) * 1000
+    qdrant_ms = timings.qdrant_ms if timings else 0.0
+    embed_ms = timings.embed_ms if timings else 0.0
+    regime_ms = timings.regime_ms if timings else 0.0
+    rerank_ms = timings.rerank_ms if timings else 0.0
+    aggregate_ms = timings.aggregate_ms if timings else 0.0
+
+    # Check for params repair (any warning starting with param_ or constraint_)
+    params_repaired = any(
+        w.startswith("param_") or w.startswith("constraint_")
+        for w in result.warnings
+    )
+    incomplete_regime = "query_regime_computation_failed" in result.warnings
+
+    # Comprehensive structured log record (9.1)
     logger.info(
-        "Recommend complete",
+        "kb_recommend_complete",
+        # Identifiers
         request_id=request_id,
         workspace_id=str(request.workspace_id),
-        strategy=request.strategy_name,
-        objective=request.objective_type,
+        strategy_name=request.strategy_name,
+        objective_type=request.objective_type,
         mode=mode.value,
+        # Status
         status=result.status,
         confidence=result.confidence,
-        count_used=result.count_used,
+        reasons=result.reasons,
+        # Fallbacks
+        strict_to_relaxed=result.used_relaxed_filters,
+        metadata_only=result.used_metadata_fallback,
+        repaired_params=params_repaired,
+        # Counts
+        candidates_returned=result.count_used,
+        after_strict=result.retrieval_strict_count,
+        after_relaxed=result.retrieval_relaxed_count,
+        top_k=len(result.top_trials) if result.top_trials else 0,
+        # Timings (ms)
+        total_ms=round(total_ms, 1),
+        regime_ms=round(regime_ms, 1),
+        embed_ms=round(embed_ms, 1),
+        qdrant_ms=round(qdrant_ms, 1),
+        rerank_ms=round(rerank_ms, 1),
+        aggregate_ms=round(aggregate_ms, 1),
+        # Model info
+        embedding_model_id=result.embedding_model,
+        active_collection=result.collection_name,
+        # Query context
+        query_regime_tags=result.query_regime_tags,
+    )
+
+    # Record Prometheus metrics (9.3)
+    record_kb_recommend(
+        status=result.status,
+        confidence=result.confidence,
+        total_ms=total_ms,
+        qdrant_ms=qdrant_ms,
+        embed_ms=embed_ms,
         used_relaxed=result.used_relaxed_filters,
         used_metadata_fallback=result.used_metadata_fallback,
+        params_repaired=params_repaired,
+        incomplete_regime=incomplete_regime,
     )
 
     return response

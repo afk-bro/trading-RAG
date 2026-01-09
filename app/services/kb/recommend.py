@@ -5,6 +5,7 @@ Ties together retrieval, reranking, and aggregation to produce
 parameter recommendations based on similar historical trials.
 """
 
+import time
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 from uuid import UUID
@@ -50,6 +51,18 @@ MIN_CANDIDATES_FOR_DEGRADED = 3
 # =============================================================================
 # Data Classes
 # =============================================================================
+
+
+@dataclass
+class RecommendTimings:
+    """Per-step timing breakdown for recommendation pipeline."""
+
+    total_ms: float = 0.0
+    regime_ms: float = 0.0
+    embed_ms: float = 0.0
+    qdrant_ms: float = 0.0
+    rerank_ms: float = 0.0
+    aggregate_ms: float = 0.0
 
 
 @dataclass
@@ -121,6 +134,9 @@ class RecommendResponse:
     collection_name: str = ""
     embedding_model: str = ""
 
+    # Timings (for observability)
+    timings: Optional[RecommendTimings] = None
+
 
 # =============================================================================
 # Orchestrator
@@ -173,12 +189,15 @@ class KBRecommender:
             req: Recommendation request
 
         Returns:
-            RecommendResponse with params, confidence, transparency
+            RecommendResponse with params, confidence, transparency, timings
         """
+        start_total = time.perf_counter()
+        timings = RecommendTimings()
         warnings: list[str] = []
         reasons: list[str] = []
 
         # Step 1: Compute query regime if needed
+        start_regime = time.perf_counter()
         query_regime = req.query_regime
 
         if query_regime is None and req.ohlcv_data:
@@ -196,10 +215,12 @@ class KBRecommender:
             except Exception as e:
                 logger.warning("Failed to compute query regime", error=str(e))
                 warnings.append("query_regime_computation_failed")
+        timings.regime_ms = (time.perf_counter() - start_regime) * 1000
 
         query_tags = query_regime.regime_tags if query_regime else []
 
-        # Step 2: Retrieve candidates
+        # Step 2: Retrieve candidates (includes embed + qdrant time)
+        start_retrieval = time.perf_counter()
         retrieval_req = RetrievalRequest(
             workspace_id=req.workspace_id,
             strategy_name=req.strategy_name,
@@ -214,11 +235,17 @@ class KBRecommender:
         )
 
         retrieval_result = await self.retriever.retrieve(retrieval_req)
+        retrieval_ms = (time.perf_counter() - start_retrieval) * 1000
+        # Note: embed_ms and qdrant_ms are sub-components of retrieval
+        # If retriever provides breakdown, use it; otherwise estimate
+        timings.embed_ms = getattr(retrieval_result.stats, "embed_ms", 0.0)
+        timings.qdrant_ms = getattr(retrieval_result.stats, "qdrant_ms", retrieval_ms)
         warnings.extend(retrieval_result.warnings)
 
         # Check if we have enough candidates
         if not retrieval_result.candidates:
-            return self._build_none_response(
+            timings.total_ms = (time.perf_counter() - start_total) * 1000
+            response = self._build_none_response(
                 req=req,
                 warnings=warnings,
                 reasons=["no_candidates_found"],
@@ -230,13 +257,17 @@ class KBRecommender:
                 collection_name=retrieval_result.stats.collection_name,
                 embedding_model=retrieval_result.stats.embedding_model,
             )
+            response.timings = timings
+            return response
 
         # Step 3: Rerank candidates
+        start_rerank = time.perf_counter()
         rerank_result = rerank_candidates(
             candidates=retrieval_result.candidates,
             query_tags=query_tags,
             query_regime=query_regime,
         )
+        timings.rerank_ms = (time.perf_counter() - start_rerank) * 1000
         warnings.extend(rerank_result.warnings)
 
         # Step 4: Select top M reranked, then top K by objective_score
@@ -251,12 +282,14 @@ class KBRecommender:
         top_k = top_m_sorted[:req.aggregate_top_k]
 
         # Step 5: Get strategy spec and aggregate
+        start_aggregate = time.perf_counter()
         strategy_spec = get_strategy(req.strategy_name)
 
         aggregation_result = aggregate_params(
             candidates=top_k,
             strategy_spec=strategy_spec,
         )
+        timings.aggregate_ms = (time.perf_counter() - start_aggregate) * 1000
         warnings.extend(aggregation_result.warnings)
 
         # Check 6: Final param validation (assert types are correct)
@@ -318,12 +351,20 @@ class KBRecommender:
             for c in top_k[:5]  # Only include top 5 for transparency
         ]
 
+        # Finalize timings
+        timings.total_ms = (time.perf_counter() - start_total) * 1000
+
         logger.info(
             "Recommendation complete",
             status=status,
             confidence=confidence,
             count_used=aggregation_result.count_used,
             param_count=len(aggregation_result.params),
+            total_ms=round(timings.total_ms, 1),
+            regime_ms=round(timings.regime_ms, 1),
+            qdrant_ms=round(timings.qdrant_ms, 1),
+            rerank_ms=round(timings.rerank_ms, 1),
+            aggregate_ms=round(timings.aggregate_ms, 1),
         )
 
         return RecommendResponse(
@@ -342,6 +383,7 @@ class KBRecommender:
             query_regime_tags=query_tags,
             collection_name=retrieval_result.stats.collection_name,
             embedding_model=retrieval_result.stats.embedding_model,
+            timings=timings,
         )
 
     def _compute_status(

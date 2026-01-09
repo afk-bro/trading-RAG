@@ -82,6 +82,50 @@ QDRANT_VECTORS_COUNT = Gauge(
     ["collection"],
 )
 
+# =============================================================================
+# Trading KB Metrics
+# =============================================================================
+
+KB_RECOMMEND_REQUESTS = Counter(
+    "kb_recommend_requests_total",
+    "Total KB recommend requests",
+    ["status", "confidence_bucket"],  # confidence_bucket: high (>0.7), medium (0.4-0.7), low (<0.4), none
+)
+
+KB_RECOMMEND_FALLBACK = Counter(
+    "kb_recommend_fallback_total",
+    "KB recommend fallback usage",
+    ["type"],  # relaxed, metadata_only, repaired, incomplete_regime
+)
+
+KB_RECOMMEND_LATENCY = Histogram(
+    "kb_recommend_latency_ms",
+    "KB recommend total latency in milliseconds",
+    buckets=[50, 100, 200, 500, 1000, 2000, 5000, 10000],
+)
+
+KB_QDRANT_LATENCY = Histogram(
+    "kb_qdrant_latency_ms",
+    "KB Qdrant query latency in milliseconds",
+    buckets=[10, 25, 50, 100, 250, 500, 1000],
+)
+
+KB_EMBED_LATENCY = Histogram(
+    "kb_embed_latency_ms",
+    "KB embedding latency in milliseconds",
+    buckets=[10, 25, 50, 100, 250, 500],
+)
+
+KB_EMBED_ERRORS = Counter(
+    "kb_embed_errors_total",
+    "KB embedding errors",
+)
+
+KB_QDRANT_ERRORS = Counter(
+    "kb_qdrant_errors_total",
+    "KB Qdrant query errors",
+)
+
 
 def record_request(method: str, endpoint: str, status_code: int, duration: float):
     """Record request metrics."""
@@ -121,6 +165,66 @@ def set_db_pool_metrics(pool_size: int, available: int):
 def set_qdrant_vectors(collection: str, count: int):
     """Set Qdrant vector count metric."""
     QDRANT_VECTORS_COUNT.labels(collection=collection).set(count)
+
+
+# =============================================================================
+# KB Metric Recording Functions
+# =============================================================================
+
+
+def _confidence_bucket(confidence: float | None) -> str:
+    """Convert confidence score to bucket label."""
+    if confidence is None:
+        return "none"
+    if confidence >= 0.7:
+        return "high"
+    if confidence >= 0.4:
+        return "medium"
+    return "low"
+
+
+def record_kb_recommend(
+    status: str,
+    confidence: float | None,
+    total_ms: float,
+    qdrant_ms: float = 0.0,
+    embed_ms: float = 0.0,
+    used_relaxed: bool = False,
+    used_metadata_fallback: bool = False,
+    params_repaired: bool = False,
+    incomplete_regime: bool = False,
+):
+    """Record KB recommend request metrics."""
+    # Request counter with status and confidence bucket
+    bucket = _confidence_bucket(confidence)
+    KB_RECOMMEND_REQUESTS.labels(status=status, confidence_bucket=bucket).inc()
+
+    # Latency histograms
+    KB_RECOMMEND_LATENCY.observe(total_ms)
+    if qdrant_ms > 0:
+        KB_QDRANT_LATENCY.observe(qdrant_ms)
+    if embed_ms > 0:
+        KB_EMBED_LATENCY.observe(embed_ms)
+
+    # Fallback counters
+    if used_relaxed:
+        KB_RECOMMEND_FALLBACK.labels(type="relaxed").inc()
+    if used_metadata_fallback:
+        KB_RECOMMEND_FALLBACK.labels(type="metadata_only").inc()
+    if params_repaired:
+        KB_RECOMMEND_FALLBACK.labels(type="repaired").inc()
+    if incomplete_regime:
+        KB_RECOMMEND_FALLBACK.labels(type="incomplete_regime").inc()
+
+
+def record_kb_embed_error():
+    """Record KB embedding error."""
+    KB_EMBED_ERRORS.inc()
+
+
+def record_kb_qdrant_error():
+    """Record KB Qdrant query error."""
+    KB_QDRANT_ERRORS.inc()
 
 
 @router.get("/metrics", include_in_schema=False)
