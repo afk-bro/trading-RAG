@@ -40,7 +40,10 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Answer Generation**: Optional LLM synthesis with citations (graceful degradation)
 - **Model Migration**: Re-embed support for model upgrades
 - **Backtest Parameter Tuning**: Grid/random search, IS/OOS splits, overfit detection
-- **Admin UI**: Leaderboards, N-way tune comparison, CSV/JSON exports
+- **Trading KB Recommend**: Strategy parameter recommendations with confidence scoring
+- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, CSV/JSON exports
+- **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
+- **Production Monitoring**: Sentry integration, structured logging, alerting rules
 
 ### Query Modes
 
@@ -180,6 +183,26 @@ Content-Type: application/json
 GET /backtests/leaderboard?workspace_id=uuid&valid_only=true&objective_type=sharpe
 ```
 
+### Trading KB Recommend
+```http
+POST /trading-kb/recommend
+Content-Type: application/json
+
+{
+  "workspace_id": "uuid",
+  "strategy_entity_id": "uuid",
+  "market_regime": "trending",
+  "risk_tolerance": "moderate"
+}
+```
+Returns parameter recommendations with confidence scores based on knowledge base analysis.
+
+### Readiness Check
+```http
+GET /ready
+```
+Deep dependency health check for Kubernetes readiness probes. Returns 200 when all dependencies (DB, Qdrant, embedder) are healthy, 503 otherwise.
+
 ### Admin UI Routes
 
 | Route | Purpose |
@@ -187,6 +210,7 @@ GET /backtests/leaderboard?workspace_id=uuid&valid_only=true&objective_type=shar
 | `/admin/backtests/tunes` | Filterable tune list |
 | `/admin/backtests/leaderboard` | Global ranking (CSV export) |
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
+| `/admin/ops/snapshot` | Go-live verification (release, config, health) |
 
 ## Project Structure
 
@@ -197,16 +221,20 @@ trading-RAG/
 │   ├── main.py              # FastAPI application
 │   ├── config.py            # Configuration management
 │   ├── schemas.py           # Pydantic models
+│   ├── deps/
+│   │   ├── __init__.py
+│   │   └── security.py      # Auth, rate limiting, concurrency
 │   ├── routers/
-│   │   ├── health.py
+│   │   ├── health.py        # /health and /ready endpoints
 │   │   ├── ingest.py
 │   │   ├── youtube.py
 │   │   ├── query.py
 │   │   ├── reembed.py
 │   │   ├── jobs.py
-│   │   └── backtests.py
+│   │   ├── backtests.py
+│   │   └── trading_kb.py    # KB recommend endpoint
 │   ├── admin/
-│   │   ├── router.py
+│   │   ├── router.py        # Admin UI and ops snapshot
 │   │   └── templates/
 │   ├── services/
 │   │   ├── chunker.py
@@ -217,16 +245,19 @@ trading-RAG/
 │       ├── documents.py
 │       ├── chunks.py
 │       └── vectors.py
+├── docs/
+│   ├── ops/
+│   │   ├── alerting-rules.md  # Sentry alert configuration
+│   │   └── runbooks.md        # Operational procedures
+│   └── plans/
 ├── tests/
 │   ├── unit/
 │   └── integration/
 ├── migrations/
-│   └── 001_initial_schema.sql
 ├── docker-compose.rag.yml
 ├── Dockerfile
 ├── requirements.txt
 ├── init.sh
-├── feature_list.json
 └── README.md
 ```
 
@@ -272,6 +303,40 @@ trading-RAG/
 | `SERVICE_PORT` | Service port (default: 8000) | No |
 
 **Note:** Without `OPENROUTER_API_KEY`, semantic search (`mode=retrieve`) works fully. LLM answer generation (`mode=answer`) will return retrieved chunks with a message indicating generation is disabled.
+
+## Production Deployment
+
+### Security Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADMIN_TOKEN` | Required for `/admin/*` endpoints | None (endpoints disabled) |
+| `DOCS_ENABLED` | Enable `/docs`, `/redoc`, `/openapi.json` | `true` |
+| `CORS_ORIGINS` | Comma-separated allowed origins | `*` |
+| `RATE_LIMIT_ENABLED` | Enable request rate limiting | `true` |
+| `CONFIG_PROFILE` | Environment profile (`development`/`production`) | `development` |
+
+### Build Metadata (set by CI/CD)
+
+| Variable | Description |
+|----------|-------------|
+| `GIT_SHA` | Git commit SHA for release tracking |
+| `BUILD_TIME` | ISO8601 build timestamp |
+
+### Monitoring
+
+| Variable | Description |
+|----------|-------------|
+| `SENTRY_DSN` | Sentry error tracking DSN |
+| `SENTRY_ENVIRONMENT` | Environment tag for Sentry |
+| `SENTRY_TRACES_SAMPLE_RATE` | Performance tracing sample rate (0.0-1.0) |
+
+### Health Probes
+
+- **Liveness**: `GET /health` - Basic service status
+- **Readiness**: `GET /ready` - Deep dependency checks (DB, Qdrant, embedder)
+
+Use `/ready` for Kubernetes readiness probes to prevent traffic during dependency outages.
 
 ## Development
 

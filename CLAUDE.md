@@ -151,15 +151,24 @@ Research workflow for strategy optimization via parameter sweeps.
 
 ## API Endpoints
 
+**Health & Readiness**:
+- `GET /health` - Liveness probe (always 200), dependency health
+- `GET /ready` - Readiness probe (503 if deps unhealthy), checks DB/Qdrant/embed
+- `GET /metrics` - Prometheus metrics
+
 **RAG Core**:
-- `GET /health` - Dependency health (Qdrant, Ollama, Supabase)
 - `POST /ingest` - Generic document ingestion
 - `POST /sources/youtube/ingest` - YouTube transcript ingestion
 - `POST /sources/pdf/ingest` - PDF file upload ingestion (multipart form)
 - `POST /query` - Semantic search (modes: `retrieve` or `answer`)
 - `POST /reembed` - Migrate to new embedding model
 - `GET /jobs/{job_id}` - Async job status
-- `GET /metrics` - Prometheus metrics
+
+**Trading KB Recommend** (`/kb/trials/*`):
+- `POST /kb/trials/recommend` - Get parameter recommendations for strategy
+- `POST /kb/trials/recommend?mode=debug` - Debug mode with full candidates
+- `POST /kb/trials/ingest` - Ingest trials from tune runs (admin-only)
+- `POST /kb/trials/upload-ohlcv` - Upload OHLCV data for regime analysis
 
 **Backtest Tuning**:
 - `POST /backtests/tune` - Start parameter sweep
@@ -168,10 +177,73 @@ Research workflow for strategy optimization via parameter sweeps.
 - `POST /backtests/tunes/{id}/cancel` - Cancel running tune
 - `GET /backtests/leaderboard` - Global ranking with best run metrics
 
+**Admin** (requires `X-Admin-Token` header):
+- `GET /admin/ops/snapshot` - Operational health snapshot for go-live
+- `GET /admin/kb/*` - KB inspection and curation endpoints
+- `GET /admin/backtests/*` - Backtest admin UI
+
+## Trading KB Recommend Pipeline
+
+The `/kb/trials/recommend` endpoint provides strategy parameter recommendations based on historical backtest results.
+
+**Response Status**:
+- `ok` - High confidence recommendations available
+- `degraded` - Recommendations available with caveats (used relaxed filters, low count)
+- `none` - No suitable recommendations found
+
+**Key Features**:
+- Strategy-specific quality floors (sharpe ≥0.3, return ≥5%, calmar ≥0.5)
+- Single-axis relaxation suggestions when `status=none`
+- Confidence scoring based on candidate count and score variance
+- Regime-aware filtering (volatility, trend, momentum tags)
+- Debug mode with full candidate inspection
+
+**Request Example**:
+```python
+POST /kb/trials/recommend
+{
+    "workspace_id": "uuid",
+    "strategy_name": "bb_reversal",
+    "objective_type": "sharpe",
+    "require_oos": true,
+    "max_drawdown": 0.20,
+    "min_trades": 5
+}
+```
+
+## Security & Operations
+
+**Security Dependencies** (`app/deps/security.py`):
+- `require_admin_token()` - Admin endpoint protection (hmac.compare_digest)
+- `require_workspace_access()` - Multi-tenant authorization stub
+- `RateLimiter` - Sliding window rate limiting (per-IP, per-workspace)
+- `WorkspaceSemaphore` - Per-workspace concurrency caps
+
+**Production Environment Variables**:
+```bash
+ADMIN_TOKEN=<secure-token>      # Required for /admin/* endpoints
+DOCS_ENABLED=false              # Disable /docs in production
+CORS_ORIGINS=https://app.com    # Explicit allowlist
+CONFIG_PROFILE=production       # Environment tag
+GIT_SHA=abc123                  # Set by CI/CD
+BUILD_TIME=2025-01-09T12:00:00Z # Set by CI/CD
+```
+
+**Monitoring**:
+- Sentry tags: `kb_status`, `kb_confidence`, `strategy`, `workspace_id`, `collection`, `embed_model`
+- Sentry measurements: `kb.total_ms`, `kb.embed_ms`, `kb.qdrant_ms`, `kb.rerank_ms`
+- 4xx errors filtered (not captured as exceptions)
+
+**Operational Docs** (`docs/ops/`):
+- `alerting-rules.md` - Sentry alert configuration
+- `runbooks.md` - Qdrant rebuild, model rotation, status handling
+
 ## Testing Notes
 
-- Unit tests mock external services (21 tests for PDF extractor alone)
+- Unit tests mock external services (727 tests total)
+- Security gate tests in `tests/unit/test_security_gates.py` (18 tests)
 - Integration tests use `@pytest.mark.requires_db` for tests needing real database
+- Smoke tests in `tests/smoke/` require running service
 - CI runs Qdrant service container for vector DB tests
 
 ## Roadmap Context
