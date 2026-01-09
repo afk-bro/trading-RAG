@@ -11,7 +11,11 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+import structlog
+
 from app.services.kb.regime_key import extract_marginal_keys
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -53,7 +57,7 @@ class ClusterStatsRepository:
         Args:
             pool: asyncpg connection pool
         """
-        self._pool = pool
+        self.pool = pool
 
     async def get_stats(
         self,
@@ -83,7 +87,7 @@ class ClusterStatsRepository:
               AND regime_key = $3
         """
 
-        async with self._pool.acquire() as conn:
+        async with self.pool.acquire() as conn:
             row = await conn.fetchrow(query, strategy_entity_id, timeframe, regime_key)
 
         if row is None:
@@ -134,6 +138,14 @@ class ClusterStatsRepository:
             # Combine marginals: take max variance per feature for safety
             combined = self._combine_marginals(marginal_stats)
             combined.baseline = "marginal"
+            logger.debug(
+                "cluster_stats_backoff_to_marginal",
+                strategy_entity_id=str(strategy_entity_id),
+                timeframe=timeframe,
+                regime_key=regime_key,
+                marginal_count=len(marginal_stats),
+                combined_n=combined.n,
+            )
             return combined
 
         return None
@@ -165,7 +177,7 @@ class ClusterStatsRepository:
                 updated_at = now()
         """
 
-        async with self._pool.acquire() as conn:
+        async with self.pool.acquire() as conn:
             await conn.execute(
                 query,
                 stats.strategy_entity_id,
@@ -179,6 +191,15 @@ class ClusterStatsRepository:
                 json.dumps(stats.feature_min) if stats.feature_min else None,
                 json.dumps(stats.feature_max) if stats.feature_max else None,
             )
+
+        logger.info(
+            "cluster_stats_upserted",
+            strategy_entity_id=str(stats.strategy_entity_id),
+            timeframe=stats.timeframe,
+            regime_key=stats.regime_key,
+            n=stats.n,
+            baseline=stats.baseline,
+        )
 
     def _row_to_stats(self, row: dict, baseline: str = "composite") -> ClusterStats:
         """
