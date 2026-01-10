@@ -73,10 +73,17 @@ jobs:
 
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short
+        env:
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: test-key-for-ci
+          QDRANT_HOST: localhost
+          QDRANT_PORT: 6333
 
       - name: Run integration tests (mocked)
         run: pytest tests/integration/ -v --tb=short -m "not requires_db"
         env:
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: test-key-for-ci
           QDRANT_HOST: localhost
           QDRANT_PORT: 6333
 

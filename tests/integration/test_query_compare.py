@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
 
 # Fixed UUIDs for consistent test data
