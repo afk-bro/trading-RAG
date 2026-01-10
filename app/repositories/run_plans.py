@@ -6,6 +6,8 @@ from uuid import UUID
 
 import structlog
 
+from app.repositories.utils import ensure_json, parse_jsonb_fields
+
 logger = structlog.get_logger(__name__)
 
 
@@ -171,11 +173,7 @@ class RunPlansRepository:
                 return None
 
             result = dict(row)
-
-            # Parse JSONB if returned as string
-            if result.get("plan") and isinstance(result["plan"], str):
-                result["plan"] = json.loads(result["plan"])
-
+            result["plan"] = ensure_json(result.get("plan"))
             return result
 
     async def list_run_plans(
@@ -263,13 +261,8 @@ class RunPlansRepository:
             total = await conn.fetchval(count_query, plan_id)
             rows = await conn.fetch(list_query, plan_id, limit, offset)
 
-        runs = []
-        for row in rows:
-            run = dict(row)
-            # Parse JSONB fields if returned as string
-            for field in ["params", "summary"]:
-                if run.get(field) and isinstance(run[field], str):
-                    run[field] = json.loads(run[field])
-            runs.append(run)
-
+        runs = [
+            parse_jsonb_fields(dict(row), ["params", "summary"])
+            for row in rows
+        ]
         return runs, total
