@@ -4,6 +4,7 @@ import csv
 import io
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import UUID
 
 import structlog
 
@@ -31,25 +32,36 @@ DD_PENALTY_LAMBDA = 0.5
 
 
 class RunOrchestrator:
-    """Orchestrates execution of RunPlan variants.
+    """Orchestrates execution of RunPlan variants with persistence.
 
     Responsibilities:
     - Parse OHLCV CSV dataset
     - Execute each variant through StrategyRunner + PaperBroker
     - Compute metrics (sharpe, return, max drawdown, etc.)
     - Journal RUN_STARTED and RUN_COMPLETED events
+    - Persist run_plans and backtest_runs to database
     - Maintain variant isolation via uuid5 namespaces
     """
 
-    def __init__(self, events_repo, runner):
+    def __init__(
+        self,
+        events_repo,
+        runner,
+        run_plans_repo=None,
+        backtest_repo=None,
+    ):
         """Initialize orchestrator.
 
         Args:
             events_repo: TradeEventsRepository for journaling events
             runner: StrategyRunner for evaluating strategies
+            run_plans_repo: RunPlansRepository for plan persistence (optional)
+            backtest_repo: BacktestRepository for variant persistence (optional)
         """
         self._events_repo = events_repo
         self._runner = runner
+        self._run_plans_repo = run_plans_repo
+        self._backtest_repo = backtest_repo
 
     async def execute(
         self, run_plan: RunPlan, dataset_content: bytes
@@ -73,6 +85,24 @@ class RunOrchestrator:
         bars = self._parse_ohlcv_csv(dataset_content)
         log.info("dataset_parsed", bar_count=len(bars))
 
+        # Build plan JSONB for persistence
+        plan_jsonb = self._build_plan_jsonb(run_plan, dataset_content)
+
+        # Persist run_plan at start
+        db_plan_id = None
+        if self._run_plans_repo:
+            db_plan_id = await self._run_plans_repo.create_run_plan(
+                workspace_id=run_plan.workspace_id,
+                strategy_entity_id=None,  # Not linked to kb_entity in v0
+                objective_name=run_plan.objective,
+                n_variants=run_plan.n_variants,
+                plan=plan_jsonb,
+                status="pending",
+            )
+            # Update status to running
+            await self._run_plans_repo.update_run_plan_status(db_plan_id, "running")
+            log.info("run_plan_persisted", db_plan_id=str(db_plan_id))
+
         # Journal RUN_STARTED
         await self._journal_run_event(
             run_plan,
@@ -87,10 +117,32 @@ class RunOrchestrator:
 
         # Execute each variant
         results: list[RunResult] = []
-        for variant in run_plan.variants:
+        variant_run_ids: dict[str, Optional[UUID]] = {}  # variant_id -> db run_id
+
+        for idx, variant in enumerate(run_plan.variants):
+            # Create pending row for this variant
+            run_id = None
+            if self._backtest_repo and db_plan_id:
+                run_id = await self._backtest_repo.create_variant_run(
+                    run_plan_id=db_plan_id,
+                    workspace_id=run_plan.workspace_id,
+                    strategy_entity_id=UUID("00000000-0000-0000-0000-000000000000"),
+                    variant_index=idx,
+                    variant_fingerprint=variant.variant_id,
+                    params=variant.spec_overrides,
+                    dataset_meta={"ref": run_plan.dataset_ref, "bar_count": len(bars)},
+                    run_kind="test_variant",
+                )
+                variant_run_ids[variant.variant_id] = run_id
+
             try:
                 result = await self._execute_variant(run_plan, variant, bars)
                 results.append(result)
+
+                # Persist variant result
+                if self._backtest_repo and run_id:
+                    await self._persist_variant_result(run_id, result)
+
                 log.info(
                     "variant_completed",
                     variant_id=variant.variant_id,
@@ -104,23 +156,42 @@ class RunOrchestrator:
                     variant_id=variant.variant_id,
                     error=str(e),
                 )
-                results.append(
-                    RunResult(
-                        run_plan_id=run_plan.run_plan_id,
-                        variant_id=variant.variant_id,
-                        status=RunResultStatus.failed,
-                        error=str(e),
-                        started_at=datetime.now(timezone.utc),
-                        completed_at=datetime.now(timezone.utc),
-                    )
+                failed_result = RunResult(
+                    run_plan_id=run_plan.run_plan_id,
+                    variant_id=variant.variant_id,
+                    status=RunResultStatus.failed,
+                    error=str(e),
+                    started_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(timezone.utc),
                 )
+                results.append(failed_result)
 
-        # Journal RUN_COMPLETED
+                # Persist failed result
+                if self._backtest_repo and run_id:
+                    await self._backtest_repo.update_variant_failed(run_id, str(e))
+
+        # Calculate aggregates
         n_success = sum(1 for r in results if r.status == RunResultStatus.success)
         n_skipped = sum(1 for r in results if r.status == RunResultStatus.skipped)
         n_failed = sum(1 for r in results if r.status == RunResultStatus.failed)
         best_id, best_score = select_best_variant(results)
 
+        # Find best variant's DB run ID
+        best_run_id = variant_run_ids.get(best_id) if best_id else None
+
+        # Complete run_plan with aggregates
+        if self._run_plans_repo and db_plan_id:
+            await self._run_plans_repo.complete_run_plan(
+                plan_id=db_plan_id,
+                status="completed",
+                n_completed=n_success,
+                n_failed=n_failed,
+                n_skipped=n_skipped,
+                best_backtest_run_id=best_run_id,
+                best_objective_score=best_score,
+            )
+
+        # Journal RUN_COMPLETED
         await self._journal_run_event(
             run_plan,
             "RUN_COMPLETED",
@@ -144,6 +215,91 @@ class RunOrchestrator:
         )
 
         return results
+
+    async def _persist_variant_result(
+        self, run_id: UUID, result: RunResult
+    ) -> None:
+        """Persist variant result to backtest_runs.
+
+        Args:
+            run_id: The backtest_runs row ID
+            result: The RunResult to persist
+        """
+        if result.status == RunResultStatus.skipped:
+            await self._backtest_repo.update_variant_skipped(
+                run_id=run_id,
+                skip_reason=result.skip_reason or "unknown",
+            )
+        elif result.status == RunResultStatus.failed:
+            await self._backtest_repo.update_variant_failed(
+                run_id=run_id,
+                error=result.error or "unknown error",
+            )
+        elif result.status == RunResultStatus.success and result.metrics:
+            # Build summary from metrics
+            summary = {
+                "sharpe": result.metrics.sharpe,
+                "return_pct": result.metrics.return_pct,
+                "max_drawdown_pct": result.metrics.max_drawdown_pct,
+                "trade_count": result.metrics.trade_count,
+                "win_rate": result.metrics.win_rate,
+                "ending_equity": result.metrics.ending_equity,
+                "profit_factor": result.metrics.profit_factor,
+            }
+            await self._backtest_repo.update_variant_completed(
+                run_id=run_id,
+                summary=summary,
+                equity_curve=[],  # Empty for now - full curve not stored in v0
+                trades=[],  # Empty for now
+                objective_score=result.objective_score,
+                has_equity_curve=False,
+                has_trades=False,
+                equity_points=0,
+                trade_count=result.metrics.trade_count,
+            )
+
+    def _build_plan_jsonb(
+        self, run_plan: RunPlan, dataset_content: bytes
+    ) -> dict:
+        """Build the plan JSONB structure for persistence.
+
+        Args:
+            run_plan: The RunPlan to serialize
+            dataset_content: Dataset bytes (for bar count)
+
+        Returns:
+            Dict with inputs, resolved, provenance sections
+        """
+        from app.services.testing.plan_builder import PlanBuilder
+
+        builder = PlanBuilder(
+            base_spec=run_plan.base_spec,
+            objective=run_plan.objective,
+            constraints={},  # Constraints not preserved in RunPlan currently
+            dataset_ref=run_plan.dataset_ref,
+            generator_name="run_orchestrator",
+            generator_version="1.0.0",
+        )
+
+        for idx, variant in enumerate(run_plan.variants):
+            # Determine param_source from tags
+            param_source = "unknown"
+            if "baseline" in variant.tags:
+                param_source = "baseline"
+            elif "grid" in variant.tags:
+                param_source = "grid"
+            elif "ablation" in variant.tags:
+                param_source = "ablation"
+            elif not variant.spec_overrides:
+                param_source = "baseline"
+
+            builder.add_variant(
+                variant_index=idx,
+                params=variant.spec_overrides,
+                param_source=param_source,
+            )
+
+        return builder.build()
 
     async def _execute_variant(
         self, run_plan: RunPlan, variant: RunVariant, bars: list[OHLCVBar]
