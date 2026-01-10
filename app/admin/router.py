@@ -74,6 +74,18 @@ def _get_kb_repo():
     return KnowledgeBaseRepository(_db_pool)
 
 
+def _get_run_plans_repo():
+    """Get RunPlansRepository instance."""
+    from app.repositories.run_plans import RunPlansRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return RunPlansRepository(_db_pool)
+
+
 # ===========================================
 # Admin Routes
 # ===========================================
@@ -2928,4 +2940,61 @@ async def admin_run_plan_detail(
             "completed_event": completed_event,
             "events": events,
         },
+    )
+
+
+# ===========================================
+# Run Plans API Endpoints (Verification)
+# ===========================================
+
+
+@router.get("/run-plans/{plan_id}")
+async def get_run_plan(
+    plan_id: UUID,
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Get a run plan by ID (verification endpoint).
+
+    Returns the full plan data including the plan JSONB.
+    """
+    repo = _get_run_plans_repo()
+    plan = await repo.get_run_plan(plan_id)
+
+    if not plan:
+        raise HTTPException(status_code=404, detail="Run plan not found")
+
+    return JSONResponse(content=_json_serializable(plan))
+
+
+@router.get("/run-plans/{plan_id}/runs")
+async def get_run_plan_runs(
+    plan_id: UUID,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    List backtest_runs for a run plan (no large blobs).
+
+    Does NOT include equity_curve or trades columns to keep response small.
+    """
+    repo = _get_run_plans_repo()
+
+    # Verify plan exists
+    plan = await repo.get_run_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Run plan not found")
+
+    runs, total = await repo.list_runs_for_plan(plan_id, limit=limit, offset=offset)
+
+    return JSONResponse(
+        content=_json_serializable(
+            {
+                "runs": runs,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
     )
