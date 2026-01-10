@@ -1055,6 +1055,8 @@ class TradeEventType(str, Enum):
     # Run plan events (Test Generator / Orchestrator)
     RUN_STARTED = "run_started"
     RUN_COMPLETED = "run_completed"
+    RUN_FAILED = "run_failed"
+    RUN_CANCELLED = "run_cancelled"
 
 
 class TradeEvent(BaseModel):
