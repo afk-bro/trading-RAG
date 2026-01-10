@@ -1,0 +1,153 @@
+{% extends "layout.html" %}
+
+{% block title %}Trade Events - Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Trade Events Journal</h2>
+        <span class="pagination-info">{{ total }} events</span>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <select name="event_type" onchange="this.form.submit()">
+            <option value="">All Event Types</option>
+            {% for et in event_types %}
+            <option value="{{ et }}" {% if event_type == et %}selected{% endif %}>{{ et }}</option>
+            {% endfor %}
+        </select>
+
+        <input type="text" name="symbol" placeholder="Symbol (e.g., BTCUSDT)" value="{{ symbol }}" />
+        <input type="text" name="correlation_id" placeholder="Correlation ID" value="{{ correlation_id }}" />
+
+        <select name="hours" onchange="this.form.submit()">
+            <option value="1" {% if hours == 1 %}selected{% endif %}>Last hour</option>
+            <option value="24" {% if hours == 24 %}selected{% endif %}>Last 24h</option>
+            <option value="72" {% if hours == 72 %}selected{% endif %}>Last 3 days</option>
+            <option value="168" {% if hours == 168 %}selected{% endif %}>Last 7 days</option>
+        </select>
+
+        <button type="submit">Filter</button>
+    </form>
+
+    <!-- Event Type Counts -->
+    {% if type_counts %}
+    <div class="type-counts" style="margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
+        {% for type_name, count in type_counts.items() %}
+        <span class="badge badge-{{ type_name.split('_')[0] }}" style="cursor: pointer;" onclick="window.location='?event_type={{ type_name }}&hours={{ hours }}'">
+            {{ type_name }}: {{ count }}
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if events %}
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Event Type</th>
+                <th>Symbol</th>
+                <th>Correlation ID</th>
+                <th>Intent ID</th>
+                <th>Payload Preview</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr class="clickable-row" data-href="/admin/trade/events/{{ event.id }}">
+                <td>
+                    <span title="{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                        {{ event.created_at.strftime('%H:%M:%S') }}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge badge-{{ event.event_type.split('_')[0] }}">{{ event.event_type }}</span>
+                </td>
+                <td>{{ event.symbol or '-' }}</td>
+                <td>
+                    <code style="font-size: 11px;">{{ event.correlation_id[:12] }}...</code>
+                </td>
+                <td>
+                    {% if event.intent_id %}
+                    <code style="font-size: 11px;">{{ event.intent_id[:8] }}...</code>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td class="truncate" style="max-width: 200px;">
+                    {% if event.payload %}
+                    {% set preview_keys = ['action', 'approved', 'reason', 'rules_failed'] %}
+                    {% for k in preview_keys %}
+                    {% if k in event.payload %}
+                    <span style="color: var(--text-muted);">{{ k }}:</span> {{ event.payload[k] }}{% if not loop.last %}, {% endif %}
+                    {% endif %}
+                    {% endfor %}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="/admin/trade/events/{{ event.id }}" class="btn btn-secondary" style="font-size: 12px; padding: 4px 8px;">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <span class="pagination-info">
+            Showing {{ offset + 1 }}-{{ [offset + limit, total]|min }} of {{ total }}
+        </span>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?event_type={{ event_type }}&symbol={{ symbol }}&correlation_id={{ correlation_id }}&hours={{ hours }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?event_type={{ event_type }}&symbol={{ symbol }}&correlation_id={{ correlation_id }}&hours={{ hours }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <h3>No events found</h3>
+        <p>{% if event_type or symbol or correlation_id %}Try adjusting your filters{% else %}No trade events in the last {{ hours }} hours{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .badge-intent { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-policy { background: rgba(136, 87, 229, 0.2); color: #a371f7; }
+    .badge-order { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+    .badge-position { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-kill { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-regime { background: rgba(255, 166, 87, 0.2); color: #f7a141; }
+
+    .clickable-row { cursor: pointer; transition: background 0.15s; }
+    .clickable-row:hover { background: rgba(56, 139, 253, 0.15); }
+
+    .type-counts .badge { font-size: 11px; }
+</style>
+
+<script>
+    // Clickable rows
+    document.querySelectorAll('.clickable-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            if (e.target.closest('a, button')) return;
+            const href = row.dataset.href;
+            if (href) {
+                if (e.ctrlKey || e.metaKey) {
+                    window.open(href, '_blank');
+                } else {
+                    window.location.href = href;
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

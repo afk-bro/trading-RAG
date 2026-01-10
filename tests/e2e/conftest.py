@@ -85,4 +85,81 @@ def admin_routes() -> dict:
         "claims": "/admin/kb/claims",
         "tunes": "/admin/backtests/tunes",
         "leaderboard": "/admin/backtests/leaderboard",
+        "trade_events": "/admin/trade/events",
     }
+
+
+# =============================================================================
+# E2E Test Helpers
+# =============================================================================
+
+# Fake UUID for testing pages that require an ID parameter
+FAKE_UUID = "00000000-0000-0000-0000-000000000001"
+
+
+def assert_no_500(page: Page) -> None:
+    """
+    Assert that the page does not show a 500 Internal Server Error.
+
+    Use this as a baseline assertion for admin pages - they should
+    gracefully handle missing data (404) but never crash (500).
+    """
+    from playwright.sync_api import expect
+    expect(page.locator("body")).not_to_contain_text("Internal Server Error")
+
+
+def visit_admin_page(page: Page, base_url: str, path: str) -> None:
+    """
+    Navigate to an admin page and verify it doesn't crash.
+
+    Args:
+        page: Playwright page with admin auth
+        base_url: Base URL of the server
+        path: Path to the admin page (e.g., "/admin/kb/entities")
+    """
+    page.goto(f"{base_url}{path}")
+    assert_no_500(page)
+
+
+def visit_detail_page(page: Page, base_url: str, path_template: str, uuid: str = FAKE_UUID) -> None:
+    """
+    Navigate to a detail page with a UUID parameter.
+
+    Args:
+        page: Playwright page with admin auth
+        base_url: Base URL of the server
+        path_template: Path with {id} placeholder (e.g., "/admin/kb/entities/{id}")
+        uuid: UUID to use (defaults to FAKE_UUID)
+    """
+    path = path_template.replace("{id}", uuid)
+    page.goto(f"{base_url}{path}")
+    assert_no_500(page)
+
+
+@pytest.fixture
+def e2e_helpers():
+    """
+    Provide E2E test helper functions.
+
+    Usage:
+        def test_my_page(admin_page, base_url, e2e_helpers):
+            e2e_helpers.visit_detail_page(admin_page, base_url, "/admin/foo/{id}")
+    """
+    class E2EHelpers:
+        FAKE_UUID = FAKE_UUID
+
+        @staticmethod
+        def assert_no_500(page: Page) -> None:
+            assert_no_500(page)
+
+        @staticmethod
+        def visit_admin_page(page: Page, base_url: str, path: str) -> None:
+            visit_admin_page(page, base_url, path)
+
+        @staticmethod
+        def visit_detail_page(
+            page: Page, base_url: str, path_template: str, uuid: str = FAKE_UUID
+        ) -> None:
+            visit_detail_page(page, base_url, path_template, uuid)
+
+    return E2EHelpers()

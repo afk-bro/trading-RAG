@@ -788,3 +788,234 @@ class QueryCompareResponse(BaseModel):
     vector_only: QueryResponse = Field(..., description="Results without reranking")
     reranked: QueryResponse = Field(..., description="Results with reranking")
     metrics: CompareMetrics = Field(..., description="Comparison metrics")
+
+
+# ===========================================
+# Trade Intent & Policy Engine Schemas
+# ===========================================
+
+
+class IntentAction(str, Enum):
+    """What the brain wants to do."""
+
+    OPEN_LONG = "open_long"
+    OPEN_SHORT = "open_short"
+    CLOSE_LONG = "close_long"
+    CLOSE_SHORT = "close_short"
+    SCALE_IN = "scale_in"
+    SCALE_OUT = "scale_out"
+    CANCEL_ORDER = "cancel_order"
+
+
+class TradeIntent(BaseModel):
+    """
+    A declaration of what the trading brain wants to do.
+
+    Provider-agnostic: this is what the strategy wants, not how
+    to execute it. The Policy Engine decides if it's allowed.
+    """
+
+    # Identity
+    id: UUID = Field(default_factory=lambda: __import__("uuid").uuid4(), description="Intent UUID")
+    correlation_id: str = Field(..., description="Correlation ID for tracing")
+    workspace_id: UUID = Field(..., description="Workspace this intent belongs to")
+
+    # What
+    action: IntentAction = Field(..., description="Requested action")
+    strategy_entity_id: UUID = Field(..., description="Strategy making the request")
+    symbol: str = Field(..., description="Trading symbol (e.g., BTCUSDT)")
+    timeframe: str = Field(..., description="Timeframe (e.g., 1h, 4h)")
+
+    # Parameters (optional, depends on action)
+    quantity: Optional[float] = Field(None, ge=0, description="Position size")
+    price: Optional[float] = Field(None, description="Limit price (None for market)")
+    stop_loss: Optional[float] = Field(None, description="Stop loss price")
+    take_profit: Optional[float] = Field(None, description="Take profit price")
+
+    # Context
+    signal_strength: Optional[float] = Field(None, ge=0.0, le=1.0, description="Signal confidence [0,1]")
+    regime_snapshot: Optional[dict] = Field(None, description="Current regime state")
+    reason: Optional[str] = Field(None, description="Human-readable reason for intent")
+
+    # Metadata
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="When intent was created")
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")
+
+
+class PolicyReason(str, Enum):
+    """Why a policy decision was made."""
+
+    # Rejections
+    KILL_SWITCH_ACTIVE = "kill_switch_active"
+    REGIME_DRIFT = "regime_drift"
+    MAX_DRAWDOWN_EXCEEDED = "max_drawdown_exceeded"
+    POSITION_LIMIT_EXCEEDED = "position_limit_exceeded"
+    DAILY_LOSS_LIMIT = "daily_loss_limit"
+    COOLDOWN_ACTIVE = "cooldown_active"
+    INVALID_SYMBOL = "invalid_symbol"
+    INVALID_TIMEFRAME = "invalid_timeframe"
+    STRATEGY_DISABLED = "strategy_disabled"
+    INSUFFICIENT_CONFIDENCE = "insufficient_confidence"
+
+    # Approvals
+    ALL_RULES_PASSED = "all_rules_passed"
+    MANUAL_OVERRIDE = "manual_override"
+
+
+class PolicyDecision(BaseModel):
+    """
+    The Policy Engine's verdict on a TradeIntent.
+
+    This is the gatekeeper's output: approved, rejected, or held.
+    """
+
+    # Decision
+    approved: bool = Field(..., description="Whether intent is approved for execution")
+    reason: PolicyReason = Field(..., description="Primary reason for decision")
+    reason_details: Optional[str] = Field(None, description="Additional details")
+
+    # Audit trail
+    rules_evaluated: list[str] = Field(default_factory=list, description="Rules that were evaluated")
+    rules_passed: list[str] = Field(default_factory=list, description="Rules that passed")
+    rules_failed: list[str] = Field(default_factory=list, description="Rules that failed")
+
+    # Modifications (for partial approvals)
+    modified_quantity: Optional[float] = Field(None, description="Adjusted quantity if capped")
+    warnings: list[str] = Field(default_factory=list, description="Non-blocking warnings")
+
+    # Context
+    evaluated_at: datetime = Field(default_factory=datetime.utcnow)
+    evaluation_ms: Optional[int] = Field(None, description="Evaluation time in ms")
+
+
+class PositionState(BaseModel):
+    """Current position for a symbol."""
+
+    symbol: str = Field(..., description="Trading symbol")
+    side: Optional[str] = Field(None, description="'long', 'short', or None if flat")
+    quantity: float = Field(default=0.0, description="Position size")
+    entry_price: Optional[float] = Field(None, description="Average entry price")
+    unrealized_pnl: Optional[float] = Field(None, description="Unrealized P&L")
+    realized_pnl_today: Optional[float] = Field(None, description="Realized P&L today")
+
+
+class CurrentState(BaseModel):
+    """
+    Minimal current state snapshot for policy evaluation.
+
+    This is what the Policy Engine needs to make decisions.
+    Kept minimal to avoid stale state issues.
+    """
+
+    # System state
+    kill_switch_active: bool = Field(default=False, description="Global kill switch")
+    trading_enabled: bool = Field(default=True, description="Trading allowed")
+
+    # Positions (optional - may not be available)
+    positions: list[PositionState] = Field(default_factory=list, description="Current positions")
+
+    # Account metrics (optional)
+    account_equity: Optional[float] = Field(None, description="Current account equity")
+    daily_pnl: Optional[float] = Field(None, description="Today's realized P&L")
+    max_drawdown_today: Optional[float] = Field(None, description="Today's max drawdown %")
+
+    # Regime (from v1.5)
+    current_regime: Optional[dict] = Field(None, description="Current regime snapshot")
+    regime_distance_z: Optional[float] = Field(None, description="Z-score from training regime")
+
+    # Timestamps
+    snapshot_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ===========================================
+# Trade Event Journal Schemas
+# ===========================================
+
+
+class TradeEventType(str, Enum):
+    """Types of events recorded in the trade journal."""
+
+    # Intent lifecycle
+    INTENT_EMITTED = "intent_emitted"
+    INTENT_VALIDATED = "intent_validated"
+    INTENT_INVALID = "intent_invalid"
+
+    # Policy evaluation
+    POLICY_EVALUATED = "policy_evaluated"
+    INTENT_APPROVED = "intent_approved"
+    INTENT_REJECTED = "intent_rejected"
+
+    # Execution
+    ORDER_SUBMITTED = "order_submitted"
+    ORDER_FILLED = "order_filled"
+    ORDER_PARTIAL_FILL = "order_partial_fill"
+    ORDER_CANCELLED = "order_cancelled"
+    ORDER_REJECTED = "order_rejected"
+
+    # Position changes
+    POSITION_OPENED = "position_opened"
+    POSITION_CLOSED = "position_closed"
+    POSITION_SCALED = "position_scaled"
+
+    # System events
+    KILL_SWITCH_ACTIVATED = "kill_switch_activated"
+    KILL_SWITCH_DEACTIVATED = "kill_switch_deactivated"
+    REGIME_DRIFT_DETECTED = "regime_drift_detected"
+
+
+class TradeEvent(BaseModel):
+    """
+    Immutable event record for the trade journal.
+
+    Append-only audit trail of all trading decisions.
+    """
+
+    id: UUID = Field(default_factory=lambda: __import__("uuid").uuid4())
+    correlation_id: str = Field(..., description="Links related events together")
+    workspace_id: UUID = Field(..., description="Workspace this event belongs to")
+
+    # Event type and timing
+    event_type: TradeEventType = Field(..., description="Type of event")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Context
+    strategy_entity_id: Optional[UUID] = Field(None, description="Strategy that triggered event")
+    symbol: Optional[str] = Field(None, description="Trading symbol if applicable")
+    timeframe: Optional[str] = Field(None, description="Timeframe if applicable")
+
+    # References
+    intent_id: Optional[UUID] = Field(None, description="Related intent ID")
+    order_id: Optional[str] = Field(None, description="External order ID")
+    position_id: Optional[str] = Field(None, description="External position ID")
+
+    # Payload (event-specific data)
+    payload: dict = Field(default_factory=dict, description="Event-specific data")
+
+    # Metadata
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")
+
+
+class TradeEventListResponse(BaseModel):
+    """Response for GET /admin/trade/events."""
+
+    items: list[TradeEvent] = Field(..., description="Event list")
+    total: int = Field(..., description="Total matching events")
+    limit: int = Field(..., description="Page size")
+    offset: int = Field(..., description="Page offset")
+
+
+class IntentEvaluateRequest(BaseModel):
+    """Request for POST /intents/evaluate."""
+
+    intent: TradeIntent = Field(..., description="Intent to evaluate")
+    state: Optional[CurrentState] = Field(None, description="Current state (uses defaults if not provided)")
+    dry_run: bool = Field(default=False, description="If true, don't journal the event")
+
+
+class IntentEvaluateResponse(BaseModel):
+    """Response for POST /intents/evaluate."""
+
+    intent_id: UUID = Field(..., description="Intent that was evaluated")
+    decision: PolicyDecision = Field(..., description="Policy engine decision")
+    events_recorded: int = Field(default=0, description="Number of events journaled")
+    correlation_id: str = Field(..., description="Correlation ID for tracing")
