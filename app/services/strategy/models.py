@@ -42,12 +42,12 @@ class MarketSnapshot(BaseModel):
     timeframe: str = Field(..., description="Timeframe: 'daily', '1h', etc.")
 
     # OHLCV window (most recent N bars)
-    bars: list[OHLCVBar] = Field(..., description="OHLCV bars, bars[-1] is current/latest")
+    bars: list[OHLCVBar] = Field(
+        ..., description="OHLCV bars, bars[-1] is current/latest"
+    )
 
     # Derived convenience fields (OPTIONAL - strategy computes if missing)
-    last_price: Optional[float] = Field(
-        None, description="If None, use bars[-1].close"
-    )
+    last_price: Optional[float] = Field(None, description="If None, use bars[-1].close")
     high_52w: Optional[float] = Field(
         None, description="52-week high. If None, compute from bars (excluding current)"
     )
@@ -86,7 +86,9 @@ class ExitConfig(BaseModel):
 class RiskConfig(BaseModel):
     """Risk management configuration."""
 
-    dollars_per_trade: float = Field(..., gt=0, description="Position sizing in dollars")
+    dollars_per_trade: float = Field(
+        ..., gt=0, description="Position sizing in dollars"
+    )
     max_positions: int = Field(
         default=5, ge=1, description="Maximum concurrent positions"
     )
@@ -101,7 +103,9 @@ class ExecutionSpec(BaseModel):
     """
 
     # Identity
-    strategy_id: str = Field(..., description="Strategy TYPE key (e.g., 'breakout_52w_high')")
+    strategy_id: str = Field(
+        ..., description="Strategy TYPE key (e.g., 'breakout_52w_high')"
+    )
     instance_id: UUID = Field(
         default_factory=uuid4,
         description="Runtime instance ID (auto-generated, used in intents)",

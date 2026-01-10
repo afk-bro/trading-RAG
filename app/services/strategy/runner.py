@@ -111,9 +111,7 @@ class StrategyRunner:
             return make_result(signals=["symbol_not_in_spec"])
 
         # 3. Get max_positions context (passed to strategy, NOT a hard gate here)
-        open_positions = [
-            p for p in paper_state.positions.values() if p.quantity > 0
-        ]
+        open_positions = [p for p in paper_state.positions.values() if p.quantity > 0]
         at_max_positions = len(open_positions) >= spec.risk.max_positions
 
         # 4. Delegate to strategy implementation

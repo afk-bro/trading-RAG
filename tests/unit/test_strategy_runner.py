@@ -154,7 +154,9 @@ def make_spec(workspace_id):
             timeframe="daily",
             entry=EntryConfig(type="breakout_52w_high", lookback_days=lookback_days),
             exit=ExitConfig(type="eod"),
-            risk=RiskConfig(dollars_per_trade=dollars_per_trade, max_positions=max_positions),
+            risk=RiskConfig(
+                dollars_per_trade=dollars_per_trade, max_positions=max_positions
+            ),
         )
 
     return _make_spec
@@ -356,7 +358,9 @@ class TestBreakoutStrategyDirect:
         )
 
         # Should have a partial lookback signal
-        partial_signals = [s for s in result.signals if s.startswith("lookback_partial")]
+        partial_signals = [
+            s for s in result.signals if s.startswith("lookback_partial")
+        ]
         assert len(partial_signals) == 1
         assert "4_of_252" in partial_signals[0]
 
@@ -426,7 +430,9 @@ class TestStrategyRunner:
         result = runner.evaluate(spec, snapshot, paper_state)
 
         # No entry intent because we already have position
-        entry_intents = [i for i in result.intents if i.action == IntentAction.OPEN_LONG]
+        entry_intents = [
+            i for i in result.intents if i.action == IntentAction.OPEN_LONG
+        ]
         assert len(entry_intents) == 0
 
     # -------------------------------------------------------------------------
@@ -460,7 +466,9 @@ class TestStrategyRunner:
         result = runner.evaluate(spec, snapshot, paper_state)
 
         # No exit intent (no position to close)
-        exit_intents = [i for i in result.intents if i.action == IntentAction.CLOSE_LONG]
+        exit_intents = [
+            i for i in result.intents if i.action == IntentAction.CLOSE_LONG
+        ]
         assert len(exit_intents) == 0
 
     # -------------------------------------------------------------------------
@@ -484,9 +492,7 @@ class TestStrategyRunner:
         assert intent.quantity == expected_qty
         assert intent.quantity == 9.52380952  # Verify the actual value
 
-    def test_zero_qty_skipped(
-        self, runner, make_spec, make_snapshot, make_paper_state
-    ):
+    def test_zero_qty_skipped(self, runner, make_spec, make_snapshot, make_paper_state):
         """No entry intent when rounded quantity <= 0."""
         # Very high price results in very small qty that rounds to 0
         spec = make_spec(dollars_per_trade=0.000000001)  # Tiny allocation
@@ -521,7 +527,9 @@ class TestStrategyRunner:
         result = runner.evaluate(spec, snapshot, paper_state)
 
         # Entry should be blocked
-        entry_intents = [i for i in result.intents if i.action == IntentAction.OPEN_LONG]
+        entry_intents = [
+            i for i in result.intents if i.action == IntentAction.OPEN_LONG
+        ]
         assert len(entry_intents) == 0
         # Should have signal explaining why blocked
         assert "entry_blocked_max_positions" in result.signals
@@ -550,7 +558,9 @@ class TestStrategyRunner:
         )
 
         # Exit should be allowed even at max positions
-        exit_intents = [i for i in result.intents if i.action == IntentAction.CLOSE_LONG]
+        exit_intents = [
+            i for i in result.intents if i.action == IntentAction.CLOSE_LONG
+        ]
         assert len(exit_intents) == 1
         assert exit_intents[0].symbol == "MSFT"
         assert "eod_exit_triggered" in result.signals
@@ -559,9 +569,7 @@ class TestStrategyRunner:
     # Symbol Filtering Tests
     # -------------------------------------------------------------------------
 
-    def test_symbol_filtering(
-        self, runner, make_spec, make_snapshot, make_paper_state
-    ):
+    def test_symbol_filtering(self, runner, make_spec, make_snapshot, make_paper_state):
         """Snapshot symbol not in spec.symbols produces no intent."""
         spec = make_spec(symbols=["AAPL", "GOOGL"])  # MSFT not in list
         snapshot = make_snapshot(symbol="MSFT", highs=[100.0, 102.0, 105.0])
@@ -657,11 +665,41 @@ class TestStrategyRunner:
         # Prior bars: highs = [100, 102, 103, 104]
         # Current bar: high = 110 (should be excluded from 52w high calc)
         bars = [
-            OHLCVBar(ts=now - timedelta(days=4), open=99, high=100.0, low=98, close=99.5, volume=1000),
-            OHLCVBar(ts=now - timedelta(days=3), open=100, high=102.0, low=99, close=101, volume=1000),
-            OHLCVBar(ts=now - timedelta(days=2), open=101, high=103.0, low=100, close=102, volume=1000),
-            OHLCVBar(ts=now - timedelta(days=1), open=102, high=104.0, low=101, close=103, volume=1000),
-            OHLCVBar(ts=now, open=103, high=110.0, low=102, close=105, volume=1000),  # Current
+            OHLCVBar(
+                ts=now - timedelta(days=4),
+                open=99,
+                high=100.0,
+                low=98,
+                close=99.5,
+                volume=1000,
+            ),
+            OHLCVBar(
+                ts=now - timedelta(days=3),
+                open=100,
+                high=102.0,
+                low=99,
+                close=101,
+                volume=1000,
+            ),
+            OHLCVBar(
+                ts=now - timedelta(days=2),
+                open=101,
+                high=103.0,
+                low=100,
+                close=102,
+                volume=1000,
+            ),
+            OHLCVBar(
+                ts=now - timedelta(days=1),
+                open=102,
+                high=104.0,
+                low=101,
+                close=103,
+                volume=1000,
+            ),
+            OHLCVBar(
+                ts=now, open=103, high=110.0, low=102, close=105, volume=1000
+            ),  # Current
         ]
         snapshot = MarketSnapshot(
             symbol="AAPL",

@@ -85,7 +85,11 @@ def evaluate_breakout_52w_high(
             ts=snapshot.ts,
             intents=[],
             signals=signals,
-            metadata={"high_52w": None, "last_price": last_price, "at_max_positions": at_max_positions},
+            metadata={
+                "high_52w": None,
+                "last_price": last_price,
+                "at_max_positions": at_max_positions,
+            },
             evaluation_id=evaluation_id,
         )
 
@@ -103,7 +107,11 @@ def evaluate_breakout_52w_high(
             ts=snapshot.ts,
             intents=[],
             signals=signals,
-            metadata={"high_52w": None, "last_price": last_price, "at_max_positions": at_max_positions},
+            metadata={
+                "high_52w": None,
+                "last_price": last_price,
+                "at_max_positions": at_max_positions,
+            },
             evaluation_id=evaluation_id,
         )
 
@@ -161,6 +169,10 @@ def evaluate_breakout_52w_high(
         ts=snapshot.ts,
         intents=intents,
         signals=signals,
-        metadata={"high_52w": high_52w, "last_price": last_price, "at_max_positions": at_max_positions},
+        metadata={
+            "high_52w": high_52w,
+            "last_price": last_price,
+            "at_max_positions": at_max_positions,
+        },
         evaluation_id=evaluation_id,
     )
