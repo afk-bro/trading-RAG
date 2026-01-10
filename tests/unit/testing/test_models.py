@@ -74,8 +74,8 @@ class TestCanonicalJson:
         # Note: Python's json.dumps renders 5.0 as "5.0" only if it's actually 5.0
         # In practice, 5.0 may render as "5.0" or "5" depending on precision
         # The important thing is consistency
-        assert canonical_json(obj_int) == canonical_json({"value": 5})
-        assert canonical_json(obj_float) == canonical_json({"value": 5.0})
+        assert result_int == canonical_json({"value": 5})
+        assert result_float == canonical_json({"value": 5.0})
 
 
 class TestHashVariant:

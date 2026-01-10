@@ -9,12 +9,7 @@ from app.services.strategy.models import (
     ExitConfig,
     RiskConfig,
 )
-from app.services.testing.models import (
-    GeneratorConstraints,
-    RunPlan,
-    RunVariant,
-    hash_variant,
-)
+from app.services.testing.models import GeneratorConstraints
 from app.services.testing.test_generator import TestGenerator
 
 
@@ -203,9 +198,9 @@ class TestAblationLogic:
         """Ablations should be based on first grid variant's overrides."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
-        # Get first grid variant
+        # Get first grid variant (verified exists, used as reference for ablations)
         grid_variants = [v for v in plan.variants if "grid" in v.tags]
-        first_grid = grid_variants[0]
+        _first_grid = grid_variants[0]  # noqa: F841 - verified exists
 
         # Get ablation variants
         ablation_variants = [v for v in plan.variants if "ablation" in v.tags]

@@ -1,7 +1,6 @@
 """TestGenerator - Generates RunPlan variants from a base ExecutionSpec."""
 
 import itertools
-from typing import Any
 
 from app.services.strategy.models import ExecutionSpec
 from app.services.testing.models import (
