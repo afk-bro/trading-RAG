@@ -13,6 +13,7 @@ from app.services.testing.models import (
     RunPlan,
     RunVariant,
     RunResult,
+    RunResultStatus,
     VariantMetrics,
 )
 
@@ -554,7 +555,7 @@ class TestSelectBestVariant:
         result = RunResult(
             run_plan_id=uuid4(),
             variant_id="abc123",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=15.0,
@@ -580,7 +581,7 @@ class TestSelectBestVariant:
         result1 = RunResult(
             run_plan_id=uuid4(),
             variant_id="low_score",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.0,
                 return_pct=10.0,
@@ -597,7 +598,7 @@ class TestSelectBestVariant:
         result2 = RunResult(
             run_plan_id=uuid4(),
             variant_id="high_score",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=2.0,
                 return_pct=20.0,
@@ -623,7 +624,7 @@ class TestSelectBestVariant:
         result1 = RunResult(
             run_plan_id=uuid4(),
             variant_id="lower_return",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=10.0,
@@ -640,7 +641,7 @@ class TestSelectBestVariant:
         result2 = RunResult(
             run_plan_id=uuid4(),
             variant_id="higher_return",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=15.0,  # Higher return
@@ -665,7 +666,7 @@ class TestSelectBestVariant:
         result1 = RunResult(
             run_plan_id=uuid4(),
             variant_id="higher_dd",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=15.0,
@@ -682,7 +683,7 @@ class TestSelectBestVariant:
         result2 = RunResult(
             run_plan_id=uuid4(),
             variant_id="lower_dd",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=15.0,
@@ -707,7 +708,7 @@ class TestSelectBestVariant:
         result1 = RunResult(
             run_plan_id=uuid4(),
             variant_id="zzz999",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=15.0,
@@ -724,7 +725,7 @@ class TestSelectBestVariant:
         result2 = RunResult(
             run_plan_id=uuid4(),
             variant_id="aaa111",  # Smaller lexicographically
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.5,
                 return_pct=15.0,
@@ -749,7 +750,7 @@ class TestSelectBestVariant:
         result1 = RunResult(
             run_plan_id=uuid4(),
             variant_id="failed_one",
-            status="failed",
+            status=RunResultStatus.failed,
             metrics=None,
             objective_score=None,
             error="Simulation error",
@@ -758,7 +759,7 @@ class TestSelectBestVariant:
         result2 = RunResult(
             run_plan_id=uuid4(),
             variant_id="success_one",
-            status="success",
+            status=RunResultStatus.success,
             metrics=VariantMetrics(
                 sharpe=1.0,
                 return_pct=10.0,
@@ -783,7 +784,7 @@ class TestSelectBestVariant:
         result1 = RunResult(
             run_plan_id=uuid4(),
             variant_id="failed1",
-            status="failed",
+            status=RunResultStatus.failed,
             metrics=None,
             objective_score=None,
             error="Error 1",
@@ -792,7 +793,7 @@ class TestSelectBestVariant:
         result2 = RunResult(
             run_plan_id=uuid4(),
             variant_id="failed2",
-            status="failed",
+            status=RunResultStatus.failed,
             metrics=None,
             objective_score=None,
             error="Error 2",
@@ -832,7 +833,7 @@ class TestOrchestratorExecute:
             return RunResult(
                 run_plan_id=run_plan.run_plan_id,
                 variant_id=variant.variant_id,
-                status="success",
+                status=RunResultStatus.success,
                 metrics=VariantMetrics(
                     sharpe=1.0,
                     return_pct=10.0,
@@ -873,7 +874,7 @@ class TestOrchestratorExecute:
             return RunResult(
                 run_plan_id=run_plan.run_plan_id,
                 variant_id=variant.variant_id,
-                status="success",
+                status=RunResultStatus.success,
                 metrics=VariantMetrics(
                     sharpe=1.0,
                     return_pct=10.0,
@@ -955,7 +956,7 @@ class TestSkippedVariants:
 
         assert len(results) == 1
         result = results[0]
-        assert result.status == "skipped"
+        assert result.status == RunResultStatus.skipped
         assert result.skip_reason is not None
         assert "dollars_per_trade" in result.skip_reason
         assert result.error is None  # error should be None for skipped

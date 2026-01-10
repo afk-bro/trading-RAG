@@ -11,6 +11,7 @@ from app.services.testing.models import (
     apply_overrides,
     validate_variant_params,
     RunPlanStatus,
+    RunResultStatus,
     GeneratorConstraints,
     RunVariant,
     RunPlan,
@@ -455,7 +456,7 @@ class TestRunResult:
         result = RunResult(
             run_plan_id=run_plan_id,
             variant_id="abc123def456ghij",
-            status="success",
+            status=RunResultStatus.success,
             metrics=metrics,
             started_at=started_at,
             objective_score=1.3,
@@ -463,7 +464,7 @@ class TestRunResult:
 
         assert result.run_plan_id == run_plan_id
         assert result.variant_id == "abc123def456ghij"
-        assert result.status == "success"
+        assert result.status == RunResultStatus.success
         assert result.metrics == metrics
         assert result.error is None
         assert result.objective_score == 1.3
@@ -477,12 +478,12 @@ class TestRunResult:
         result = RunResult(
             run_plan_id=run_plan_id,
             variant_id="abc123def456ghij",
-            status="failed",
+            status=RunResultStatus.failed,
             error="Backtest crashed: division by zero",
             started_at=started_at,
         )
 
-        assert result.status == "failed"
+        assert result.status == RunResultStatus.failed
         assert result.metrics is None
         assert result.error == "Backtest crashed: division by zero"
 
@@ -494,7 +495,7 @@ class TestRunResult:
         result = RunResult(
             run_plan_id=run_plan_id,
             variant_id="abc123def456ghij",
-            status="success",
+            status=RunResultStatus.success,
             started_at=started_at,
             duration_ms=1500,
             events_recorded=42,

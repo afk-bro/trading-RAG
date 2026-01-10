@@ -64,21 +64,22 @@ def validate_variant_params(materialized_spec: dict) -> tuple[bool, str | None]:
         materialized_spec: The spec dict after overrides are applied.
 
     Returns:
-        Tuple of (is_valid, error_message). error_message is None if valid.
+        Tuple of (is_valid, skip_reason). skip_reason is None if valid,
+        prefixed with "invalid_params:" if invalid.
     """
     try:
         dollars_per_trade = materialized_spec.get("risk", {}).get("dollars_per_trade", 0)
         max_positions = materialized_spec.get("risk", {}).get("max_positions", 0)
 
         if dollars_per_trade <= 0:
-            return False, f"dollars_per_trade must be > 0, got {dollars_per_trade}"
+            return False, f"invalid_params: dollars_per_trade must be > 0, got {dollars_per_trade}"
 
         if max_positions < 1:
-            return False, f"max_positions must be >= 1, got {max_positions}"
+            return False, f"invalid_params: max_positions must be >= 1, got {max_positions}"
 
         return True, None
     except (KeyError, TypeError) as e:
-        return False, f"Invalid spec structure: {e}"
+        return False, f"invalid_params: spec structure error - {e}"
 
 
 def apply_overrides(spec_dict: dict, overrides: dict[str, Any]) -> dict:
@@ -123,6 +124,14 @@ class RunPlanStatus(str, Enum):
     completed = "completed"
     failed = "failed"
     canceled = "canceled"
+
+
+class RunResultStatus(str, Enum):
+    """Status of a variant run result."""
+
+    success = "success"
+    failed = "failed"
+    skipped = "skipped"
 
 
 class GeneratorConstraints(BaseModel):
@@ -254,7 +263,7 @@ class RunResult(BaseModel):
 
     run_plan_id: UUID = Field(description="ID of the run plan this result belongs to")
     variant_id: str = Field(description="ID of the variant that was run")
-    status: str = Field(description="'success', 'failed', or 'skipped'")
+    status: RunResultStatus = Field(description="Result status: success, failed, or skipped")
     metrics: Optional[VariantMetrics] = None
     objective_score: Optional[float] = Field(default=None, description="Computed objective score")
     error: Optional[str] = Field(default=None, description="Error message if failed")

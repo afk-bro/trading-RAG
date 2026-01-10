@@ -14,6 +14,7 @@ from app.services.testing.models import (
     RunPlan,
     RunVariant,
     RunResult,
+    RunResultStatus,
     VariantMetrics,
     apply_overrides,
     validate_variant_params,
@@ -108,7 +109,7 @@ class RunOrchestrator:
                     RunResult(
                         run_plan_id=run_plan.run_plan_id,
                         variant_id=variant.variant_id,
-                        status="failed",
+                        status=RunResultStatus.failed,
                         error=str(e),
                         started_at=datetime.now(timezone.utc),
                         completed_at=datetime.now(timezone.utc),
@@ -116,9 +117,9 @@ class RunOrchestrator:
                 )
 
         # Journal RUN_COMPLETED
-        successful = sum(1 for r in results if r.status == "success")
-        skipped = sum(1 for r in results if r.status == "skipped")
-        failed = sum(1 for r in results if r.status == "failed")
+        successful = sum(1 for r in results if r.status == RunResultStatus.success)
+        skipped = sum(1 for r in results if r.status == RunResultStatus.skipped)
+        failed = sum(1 for r in results if r.status == RunResultStatus.failed)
         best_id, best_score = select_best_variant(results)
 
         await self._journal_run_event(
@@ -189,7 +190,7 @@ class RunOrchestrator:
                 return RunResult(
                     run_plan_id=run_plan.run_plan_id,
                     variant_id=variant.variant_id,
-                    status="skipped",
+                    status=RunResultStatus.skipped,
                     skip_reason=validation_error,
                     started_at=started_at,
                     completed_at=completed_at,
@@ -235,7 +236,7 @@ class RunOrchestrator:
             return RunResult(
                 run_plan_id=run_plan.run_plan_id,
                 variant_id=variant.variant_id,
-                status="success",
+                status=RunResultStatus.success,
                 metrics=metrics,
                 objective_score=objective_score,
                 started_at=started_at,
@@ -252,7 +253,7 @@ class RunOrchestrator:
             return RunResult(
                 run_plan_id=run_plan.run_plan_id,
                 variant_id=variant.variant_id,
-                status="failed",
+                status=RunResultStatus.failed,
                 error=str(e),
                 started_at=started_at,
                 completed_at=completed_at,
@@ -580,7 +581,7 @@ def select_best_variant(
     valid_results = [
         r
         for r in results
-        if r.status == "success"
+        if r.status == RunResultStatus.success
         and r.objective_score is not None
         and r.metrics is not None
     ]
