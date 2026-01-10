@@ -8,9 +8,31 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field, computed_field
+
+
+# CRITICAL: Constant namespace for uuid5 - used to generate isolated namespaces per variant
+# This MUST be a constant UUID, never run_plan_id (which varies per run)
+TESTING_VARIANT_NAMESPACE = UUID("8f3c2a2e-9d9a-4b2e-9f6b-3c3a4c1e9a01")
+
+
+def get_variant_namespace(run_plan_id: UUID, variant_id: str) -> UUID:
+    """Generate a deterministic namespace for a variant.
+
+    Same (run_plan_id, variant_id) → same namespace across runs.
+    Different variant_id → different namespace.
+    Used to isolate broker state between variants.
+
+    Args:
+        run_plan_id: The run plan's UUID
+        variant_id: The variant's 16-char hex ID
+
+    Returns:
+        UUID derived from the constant namespace + plan+variant identifier
+    """
+    return uuid5(TESTING_VARIANT_NAMESPACE, f"{run_plan_id}:{variant_id}")
 
 
 def canonical_json(obj: Any) -> str:
@@ -29,6 +51,34 @@ def hash_variant(base_spec: dict, overrides: dict) -> str:
     """
     payload = {"base": base_spec, "overrides": overrides}
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()[:16]
+
+
+def validate_variant_params(materialized_spec: dict) -> tuple[bool, str | None]:
+    """Validate that materialized spec has valid parameters.
+
+    Checks:
+    - risk.dollars_per_trade > 0
+    - risk.max_positions >= 1
+
+    Args:
+        materialized_spec: The spec dict after overrides are applied.
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is None if valid.
+    """
+    try:
+        dollars_per_trade = materialized_spec.get("risk", {}).get("dollars_per_trade", 0)
+        max_positions = materialized_spec.get("risk", {}).get("max_positions", 0)
+
+        if dollars_per_trade <= 0:
+            return False, f"dollars_per_trade must be > 0, got {dollars_per_trade}"
+
+        if max_positions < 1:
+            return False, f"max_positions must be >= 1, got {max_positions}"
+
+        return True, None
+    except (KeyError, TypeError) as e:
+        return False, f"Invalid spec structure: {e}"
 
 
 def apply_overrides(spec_dict: dict, overrides: dict[str, Any]) -> dict:
@@ -82,7 +132,7 @@ class GeneratorConstraints(BaseModel):
     dollars_per_trade_values: list[float] = Field(default_factory=list)
     max_positions_values: list[int] = Field(default_factory=list)
     include_ablations: bool = True
-    max_variants: int = 25
+    max_variants: int = Field(default=25, le=200, description="Max variants (hard cap at 200)")
     objective: str = "sharpe_dd_penalty"
 
 

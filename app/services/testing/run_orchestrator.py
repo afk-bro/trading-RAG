@@ -4,7 +4,7 @@ import csv
 import io
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import UUID, uuid5
+from uuid import UUID
 
 import structlog
 
@@ -16,12 +16,15 @@ from app.services.testing.models import (
     RunResult,
     VariantMetrics,
     apply_overrides,
+    validate_variant_params,
+    get_variant_namespace,
+    TESTING_VARIANT_NAMESPACE,
 )
 
 logger = structlog.get_logger(__name__)
 
-# CRITICAL: Constant namespace for uuid5 - used to generate isolated namespaces per variant
-VARIANT_NS = UUID("d3b07384-d9a5-4e6e-94e8-f0c0c1c2c3c4")
+# Re-export for backwards compatibility
+VARIANT_NS = TESTING_VARIANT_NAMESPACE
 
 # Lambda for drawdown penalty objectives
 DD_PENALTY_LAMBDA = 0.5
@@ -114,6 +117,8 @@ class RunOrchestrator:
 
         # Journal RUN_COMPLETED
         successful = sum(1 for r in results if r.status == "success")
+        skipped = sum(1 for r in results if r.status == "skipped")
+        failed = sum(1 for r in results if r.status == "failed")
         best_id, best_score = select_best_variant(results)
 
         await self._journal_run_event(
@@ -122,7 +127,8 @@ class RunOrchestrator:
             {
                 "n_variants": run_plan.n_variants,
                 "successful": successful,
-                "failed": len(results) - successful,
+                "skipped": skipped,
+                "failed": failed,
                 "best_variant_id": best_id,
                 "best_objective_score": best_score,
             },
@@ -131,7 +137,8 @@ class RunOrchestrator:
         log.info(
             "run_completed",
             successful=successful,
-            failed=len(results) - successful,
+            skipped=skipped,
+            failed=failed,
             best_variant_id=best_id,
             best_score=best_score,
         )
@@ -153,9 +160,9 @@ class RunOrchestrator:
         """
         started_at = datetime.now(timezone.utc)
 
-        # Generate isolated namespace for this variant
-        variant_namespace = uuid5(
-            VARIANT_NS, f"{run_plan.run_plan_id}:{variant.variant_id}"
+        # Generate isolated namespace for this variant using helper
+        variant_namespace = get_variant_namespace(
+            run_plan.run_plan_id, variant.variant_id
         )
 
         log = logger.bind(
@@ -169,6 +176,25 @@ class RunOrchestrator:
             materialized_spec = apply_overrides(
                 run_plan.base_spec, variant.spec_overrides
             )
+
+            # Validate params BEFORE execution - skip obviously broken variants
+            is_valid, validation_error = validate_variant_params(materialized_spec)
+            if not is_valid:
+                log.info(
+                    "variant_skipped_invalid_params",
+                    reason=validation_error,
+                )
+                completed_at = datetime.now(timezone.utc)
+                duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+                return RunResult(
+                    run_plan_id=run_plan.run_plan_id,
+                    variant_id=variant.variant_id,
+                    status="skipped",
+                    error=validation_error,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                )
 
             # TODO: Create ExecutionSpec from materialized_spec
             # TODO: Create isolated PaperState for this variant
@@ -237,17 +263,34 @@ class RunOrchestrator:
     def _parse_ohlcv_csv(content: bytes) -> list[OHLCVBar]:
         """Parse OHLCV CSV content into bars.
 
+        Strict parsing with minimal guardrails:
+        - BOM stripping (UTF-8 BOM: EF BB BF)
+        - Required column validation
+        - Timestamp parsing (fail fast)
+        - Monotonic increasing timestamps
+        - ≥2 bars required
+
+        Explicitly NOT implemented (deferred to v1+):
+        - Delimiter guessing
+        - Gap interpolation
+        - Resampling / downsampling
+        - Timezone inference
+
         Expected columns: ts, open, high, low, close, volume
 
         Args:
             content: CSV data as bytes
 
         Returns:
-            List of OHLCVBar
+            List of OHLCVBar with monotonically increasing timestamps
 
         Raises:
-            ValueError: If CSV is invalid or has < 2 bars
+            ValueError: If CSV is invalid, has < 2 bars, or non-monotonic timestamps
         """
+        # Strip UTF-8 BOM if present (EF BB BF = "\ufeff")
+        if content.startswith(b"\xef\xbb\xbf"):
+            content = content[3:]
+
         text = content.decode("utf-8")
         reader = csv.DictReader(io.StringIO(text))
 
@@ -256,14 +299,29 @@ class RunOrchestrator:
         if reader.fieldnames is None:
             raise ValueError("CSV has no header row")
 
-        missing = required_columns - set(reader.fieldnames)
+        # Strip BOM from first column name if present (can happen with some encodings)
+        fieldnames = [f.lstrip("\ufeff") for f in reader.fieldnames]
+        missing = required_columns - set(fieldnames)
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
 
         bars: list[OHLCVBar] = []
+        prev_ts: datetime | None = None
+        row_num = 1  # Start at 1 for human-readable error messages
+
         for row in reader:
+            row_num += 1
             try:
                 ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+
+                # Validate monotonically increasing timestamps
+                if prev_ts is not None and ts <= prev_ts:
+                    raise ValueError(
+                        f"Non-monotonic timestamp at row {row_num}: "
+                        f"{ts.isoformat()} <= {prev_ts.isoformat()}"
+                    )
+                prev_ts = ts
+
                 bar = OHLCVBar(
                     ts=ts,
                     open=float(row["open"]),
@@ -274,7 +332,7 @@ class RunOrchestrator:
                 )
                 bars.append(bar)
             except (ValueError, KeyError) as e:
-                raise ValueError(f"Invalid row in CSV: {row}, error: {e}")
+                raise ValueError(f"Invalid row {row_num} in CSV: {row}, error: {e}")
 
         if len(bars) < 2:
             raise ValueError("CSV must contain at least 2 bars")

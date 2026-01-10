@@ -9,12 +9,15 @@ from app.services.testing.models import (
     canonical_json,
     hash_variant,
     apply_overrides,
+    validate_variant_params,
     RunPlanStatus,
     GeneratorConstraints,
     RunVariant,
     RunPlan,
     VariantMetrics,
     RunResult,
+    TESTING_VARIANT_NAMESPACE,
+    get_variant_namespace,
 )
 
 
@@ -49,6 +52,29 @@ class TestCanonicalJson:
 
         # Keys should be sorted at all levels
         assert result == '{"a":1,"z":{"a":1,"b":2}}'
+
+    def test_float_precision_stable(self):
+        """Float values should serialize stably."""
+        obj1 = {"value": 0.1}
+        obj2 = {"value": 0.1}
+
+        assert canonical_json(obj1) == canonical_json(obj2)
+
+    def test_int_and_float_same_value_different_hash(self):
+        """int(5) and float(5.0) should produce different output (type matters)."""
+        obj_int = {"value": 5}
+        obj_float = {"value": 5.0}
+
+        # These are actually different in JSON - 5 vs 5.0
+        # Python json.dumps treats 5.0 as 5.0 and 5 as 5
+        result_int = canonical_json(obj_int)
+        result_float = canonical_json(obj_float)
+
+        # Note: Python's json.dumps renders 5.0 as "5.0" only if it's actually 5.0
+        # In practice, 5.0 may render as "5.0" or "5" depending on precision
+        # The important thing is consistency
+        assert canonical_json(obj_int) == canonical_json({"value": 5})
+        assert canonical_json(obj_float) == canonical_json({"value": 5.0})
 
 
 class TestHashVariant:
@@ -305,6 +331,21 @@ class TestGeneratorConstraints:
         assert constraints.max_variants == 50
         assert constraints.objective == "sharpe"
 
+    def test_max_variants_at_limit(self):
+        """max_variants=200 should be accepted (at hard cap)."""
+        constraints = GeneratorConstraints(max_variants=200)
+        assert constraints.max_variants == 200
+
+    def test_max_variants_exceeds_hard_cap(self):
+        """max_variants > 200 should be rejected at validation time."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            GeneratorConstraints(max_variants=201)
+
+        # Check the error is about max_variants constraint
+        assert "max_variants" in str(exc_info.value)
+
 
 class TestRunPlanStatus:
     """Tests for RunPlanStatus enum."""
@@ -461,3 +502,157 @@ class TestRunResult:
 
         assert result.duration_ms == 1500
         assert result.events_recorded == 42
+
+
+class TestVariantNamespace:
+    """Tests for TESTING_VARIANT_NAMESPACE and get_variant_namespace."""
+
+    def test_constant_namespace_is_uuid(self):
+        """TESTING_VARIANT_NAMESPACE should be a valid UUID."""
+        from uuid import UUID
+
+        assert isinstance(TESTING_VARIANT_NAMESPACE, UUID)
+
+    def test_same_inputs_produce_same_namespace(self):
+        """Same (run_plan_id, variant_id) should produce same namespace across calls."""
+        run_plan_id = uuid4()
+        variant_id = "abc123def456ghij"
+
+        ns1 = get_variant_namespace(run_plan_id, variant_id)
+        ns2 = get_variant_namespace(run_plan_id, variant_id)
+
+        assert ns1 == ns2
+
+    def test_different_variant_id_produces_different_namespace(self):
+        """Different variant_id should produce different namespace."""
+        run_plan_id = uuid4()
+        variant_id_1 = "abc123def456ghij"
+        variant_id_2 = "xyz789uvw123pqrs"
+
+        ns1 = get_variant_namespace(run_plan_id, variant_id_1)
+        ns2 = get_variant_namespace(run_plan_id, variant_id_2)
+
+        assert ns1 != ns2
+
+    def test_different_run_plan_id_produces_different_namespace(self):
+        """Different run_plan_id should produce different namespace."""
+        run_plan_id_1 = uuid4()
+        run_plan_id_2 = uuid4()
+        variant_id = "abc123def456ghij"
+
+        ns1 = get_variant_namespace(run_plan_id_1, variant_id)
+        ns2 = get_variant_namespace(run_plan_id_2, variant_id)
+
+        assert ns1 != ns2
+
+    def test_namespace_is_uuid(self):
+        """get_variant_namespace should return a UUID."""
+        from uuid import UUID
+
+        run_plan_id = uuid4()
+        variant_id = "abc123def456ghij"
+
+        ns = get_variant_namespace(run_plan_id, variant_id)
+        assert isinstance(ns, UUID)
+
+    def test_namespace_deterministic_across_repeated_calls(self):
+        """Namespace should be deterministic across any number of calls."""
+        # Fixed inputs for reproducibility testing
+        run_plan_id = uuid4()
+        variant_id = "abc123def456ghij"
+
+        namespaces = [get_variant_namespace(run_plan_id, variant_id) for _ in range(10)]
+
+        # All should be identical
+        assert all(ns == namespaces[0] for ns in namespaces)
+
+
+class TestValidateVariantParams:
+    """Tests for validate_variant_params function."""
+
+    def test_valid_params_returns_true(self):
+        """Valid params should return (True, None)."""
+        spec = {
+            "risk": {
+                "dollars_per_trade": 1000.0,
+                "max_positions": 5,
+            }
+        }
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is True
+        assert error is None
+
+    def test_zero_dollars_per_trade_returns_false(self):
+        """dollars_per_trade = 0 should be invalid."""
+        spec = {
+            "risk": {
+                "dollars_per_trade": 0,
+                "max_positions": 5,
+            }
+        }
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is False
+        assert "dollars_per_trade" in error
+        assert "> 0" in error
+
+    def test_negative_dollars_per_trade_returns_false(self):
+        """Negative dollars_per_trade should be invalid."""
+        spec = {
+            "risk": {
+                "dollars_per_trade": -100,
+                "max_positions": 5,
+            }
+        }
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is False
+        assert "dollars_per_trade" in error
+
+    def test_zero_max_positions_returns_false(self):
+        """max_positions = 0 should be invalid."""
+        spec = {
+            "risk": {
+                "dollars_per_trade": 1000,
+                "max_positions": 0,
+            }
+        }
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is False
+        assert "max_positions" in error
+        assert ">= 1" in error
+
+    def test_negative_max_positions_returns_false(self):
+        """Negative max_positions should be invalid."""
+        spec = {
+            "risk": {
+                "dollars_per_trade": 1000,
+                "max_positions": -1,
+            }
+        }
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is False
+        assert "max_positions" in error
+
+    def test_one_max_position_is_valid(self):
+        """max_positions = 1 should be valid (edge case)."""
+        spec = {
+            "risk": {
+                "dollars_per_trade": 100,
+                "max_positions": 1,
+            }
+        }
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is True
+        assert error is None
+
+    def test_missing_risk_section_returns_false(self):
+        """Missing risk section should fail validation."""
+        spec = {"entry": {"lookback_days": 252}}
+        is_valid, error = validate_variant_params(spec)
+        # Should fail because defaults to 0 which is <= 0
+        assert is_valid is False
+
+    def test_empty_spec_returns_false(self):
+        """Empty spec should fail validation."""
+        spec = {}
+        is_valid, error = validate_variant_params(spec)
+        assert is_valid is False

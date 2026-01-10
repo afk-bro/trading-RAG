@@ -356,3 +356,60 @@ class TestRunPlanMetadata:
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
         assert isinstance(plan.base_spec, dict)
         assert plan.base_spec["strategy_id"] == base_spec.strategy_id
+
+    def test_base_spec_uses_json_mode_dump(self, generator, base_spec, grid_constraints):
+        """RunPlan.base_spec should use model_dump(mode='json') for consistent serialization."""
+        plan = generator.generate(base_spec, "btc_2023", grid_constraints)
+
+        # JSON mode converts UUIDs to strings, datetimes to ISO strings, etc.
+        # Verify workspace_id is a string (not UUID object)
+        assert isinstance(plan.base_spec["workspace_id"], str)
+
+        # Verify instance_id is a string
+        assert isinstance(plan.base_spec["instance_id"], str)
+
+
+class TestNumericDiscipline:
+    """Tests for numeric type discipline in hashing."""
+
+    def test_variant_id_stable_for_int_lookback(self, generator, base_spec):
+        """Variant ID should be stable when lookback_days is int."""
+        constraints = GeneratorConstraints(
+            lookback_days_values=[126],  # int
+            dollars_per_trade_values=[1000.0],
+            max_positions_values=[3],
+        )
+        plan1 = generator.generate(base_spec, "btc_2023", constraints)
+        plan2 = generator.generate(base_spec, "btc_2023", constraints)
+
+        # Grid variant IDs should be identical
+        grid1 = [v for v in plan1.variants if "grid" in v.tags]
+        grid2 = [v for v in plan2.variants if "grid" in v.tags]
+
+        assert len(grid1) == len(grid2) == 1
+        assert grid1[0].variant_id == grid2[0].variant_id
+
+    def test_variant_id_stable_for_float_dollars(self, generator, base_spec):
+        """Variant ID should be stable when dollars_per_trade is float."""
+        constraints = GeneratorConstraints(
+            lookback_days_values=[126],
+            dollars_per_trade_values=[500.5],  # float with decimal
+            max_positions_values=[3],
+        )
+        plan1 = generator.generate(base_spec, "btc_2023", constraints)
+        plan2 = generator.generate(base_spec, "btc_2023", constraints)
+
+        grid1 = [v for v in plan1.variants if "grid" in v.tags]
+        grid2 = [v for v in plan2.variants if "grid" in v.tags]
+
+        assert grid1[0].variant_id == grid2[0].variant_id
+
+    def test_overrides_contain_primitives_only(self, generator, base_spec, grid_constraints):
+        """All override values should be JSON primitives (int, float, str, bool, None)."""
+        plan = generator.generate(base_spec, "btc_2023", grid_constraints)
+
+        for variant in plan.variants:
+            for key, value in variant.spec_overrides.items():
+                assert isinstance(value, (int, float, str, bool, type(None))), (
+                    f"Override {key}={value} is type {type(value).__name__}, expected primitive"
+                )

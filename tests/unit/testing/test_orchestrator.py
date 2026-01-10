@@ -900,9 +900,99 @@ class TestVARIANT_NS:
     """Tests for VARIANT_NS constant."""
 
     def test_variant_ns_is_valid_uuid(self):
-        """VARIANT_NS should be a valid UUID constant."""
+        """VARIANT_NS should be a valid UUID constant (alias for TESTING_VARIANT_NAMESPACE)."""
         from app.services.testing.run_orchestrator import VARIANT_NS
+        from app.services.testing.models import TESTING_VARIANT_NAMESPACE
 
         assert isinstance(VARIANT_NS, UUID)
-        # Should be the specific UUID we defined
-        assert str(VARIANT_NS) == "d3b07384-d9a5-4e6e-94e8-f0c0c1c2c3c4"
+        # VARIANT_NS is now an alias for TESTING_VARIANT_NAMESPACE
+        assert VARIANT_NS == TESTING_VARIANT_NAMESPACE
+        assert str(VARIANT_NS) == "8f3c2a2e-9d9a-4b2e-9f6b-3c3a4c1e9a01"
+
+
+class TestCsvRobustness:
+    """Tests for CSV parsing robustness features."""
+
+    def test_bom_stripped_from_csv(self):
+        """UTF-8 BOM should be stripped from CSV content."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        # Create CSV with UTF-8 BOM (EF BB BF)
+        bom = b"\xef\xbb\xbf"
+        csv_content = b"ts,open,high,low,close,volume\n"
+        csv_content += b"2023-01-01T00:00:00,100,105,99,104,1000\n"
+        csv_content += b"2023-01-02T00:00:00,104,108,103,107,1200\n"
+        csv_with_bom = bom + csv_content
+
+        bars = RunOrchestrator._parse_ohlcv_csv(csv_with_bom)
+        assert len(bars) == 2
+
+    def test_bom_in_column_name_stripped(self):
+        """BOM embedded in first column name should be handled."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        # BOM in first column name (can happen with some Excel exports)
+        csv_content = "\ufeffts,open,high,low,close,volume\n"
+        csv_content += "2023-01-01T00:00:00,100,105,99,104,1000\n"
+        csv_content += "2023-01-02T00:00:00,104,108,103,107,1200\n"
+
+        bars = RunOrchestrator._parse_ohlcv_csv(csv_content.encode("utf-8"))
+        assert len(bars) == 2
+
+    def test_monotonic_timestamps_required(self):
+        """Non-monotonic timestamps should raise ValueError."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        # Second timestamp is earlier than first
+        csv_content = b"ts,open,high,low,close,volume\n"
+        csv_content += b"2023-01-02T00:00:00,104,108,103,107,1200\n"
+        csv_content += b"2023-01-01T00:00:00,100,105,99,104,1000\n"  # Earlier!
+
+        with pytest.raises(ValueError, match="Non-monotonic timestamp"):
+            RunOrchestrator._parse_ohlcv_csv(csv_content)
+
+    def test_duplicate_timestamps_rejected(self):
+        """Duplicate timestamps should be rejected (not strictly increasing)."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        # Same timestamp twice
+        csv_content = b"ts,open,high,low,close,volume\n"
+        csv_content += b"2023-01-01T00:00:00,100,105,99,104,1000\n"
+        csv_content += b"2023-01-01T00:00:00,104,108,103,107,1200\n"  # Duplicate!
+
+        with pytest.raises(ValueError, match="Non-monotonic timestamp"):
+            RunOrchestrator._parse_ohlcv_csv(csv_content)
+
+    def test_monotonic_timestamps_pass(self):
+        """Properly ordered timestamps should pass validation."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        csv_content = b"ts,open,high,low,close,volume\n"
+        csv_content += b"2023-01-01T00:00:00,100,105,99,104,1000\n"
+        csv_content += b"2023-01-02T00:00:00,104,108,103,107,1200\n"
+        csv_content += b"2023-01-03T00:00:00,107,110,106,109,1100\n"
+
+        bars = RunOrchestrator._parse_ohlcv_csv(csv_content)
+        assert len(bars) == 3
+        # Verify order
+        assert bars[0].ts < bars[1].ts < bars[2].ts
+
+    def test_invalid_timestamp_format_fails_fast(self):
+        """Invalid timestamp format should fail immediately."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        csv_content = b"ts,open,high,low,close,volume\n"
+        csv_content += b"not-a-date,100,105,99,104,1000\n"
+        csv_content += b"2023-01-02T00:00:00,104,108,103,107,1200\n"
+
+        with pytest.raises(ValueError, match="Invalid row"):
+            RunOrchestrator._parse_ohlcv_csv(csv_content)
+
+    def test_missing_header_raises_error(self):
+        """CSV with no header should raise clear error."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+
+        csv_content = b""
+
+        with pytest.raises(ValueError, match="no header"):
+            RunOrchestrator._parse_ohlcv_csv(csv_content)

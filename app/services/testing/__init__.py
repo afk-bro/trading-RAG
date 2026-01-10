@@ -17,17 +17,20 @@ from app.services.testing.models import (
     canonical_json,
     hash_variant,
     apply_overrides,
+    validate_variant_params,
     RunPlanStatus,
     GeneratorConstraints,
     RunVariant,
     RunPlan,
     VariantMetrics,
     RunResult,
+    TESTING_VARIANT_NAMESPACE,
+    get_variant_namespace,
 )
 from app.services.testing.test_generator import TestGenerator
 from app.services.testing.run_orchestrator import (
     RunOrchestrator,
-    VARIANT_NS,
+    VARIANT_NS,  # Backwards compatibility alias
     select_best_variant,
 )
 
@@ -35,6 +38,7 @@ __all__ = [
     "canonical_json",
     "hash_variant",
     "apply_overrides",
+    "validate_variant_params",
     "RunPlanStatus",
     "GeneratorConstraints",
     "RunVariant",
@@ -43,6 +47,8 @@ __all__ = [
     "RunResult",
     "TestGenerator",
     "RunOrchestrator",
-    "VARIANT_NS",
+    "TESTING_VARIANT_NAMESPACE",
+    "get_variant_namespace",
+    "VARIANT_NS",  # Backwards compatibility alias
     "select_best_variant",
 ]
