@@ -76,16 +76,45 @@ def evaluate_breakout_52w_high(
     if last_price is None:
         last_price = snapshot.bars[-1].close
 
+    # Guard: invalid price (division by zero risk)
+    if last_price <= 0:
+        signals.append("entry_skipped_invalid_price")
+        return StrategyEvaluation(
+            spec_id=str(spec.instance_id),
+            symbol=symbol,
+            ts=snapshot.ts,
+            intents=[],
+            signals=signals,
+            metadata={"high_52w": None, "last_price": last_price, "at_max_positions": at_max_positions},
+            evaluation_id=evaluation_id,
+        )
+
     # Compute 52w high from PRIOR bars (exclude current bar!)
     lookback = spec.entry.lookback_days
     # snapshot.bars[-(lookback + 1):-1] gives us lookback bars BEFORE current
     prior_bars = snapshot.bars[-(lookback + 1) : -1]
+
+    # Guard: no history to compute high_52w
+    if not prior_bars and snapshot.high_52w is None:
+        signals.append("entry_skipped_no_history")
+        return StrategyEvaluation(
+            spec_id=str(spec.instance_id),
+            symbol=symbol,
+            ts=snapshot.ts,
+            intents=[],
+            signals=signals,
+            metadata={"high_52w": None, "last_price": last_price, "at_max_positions": at_max_positions},
+            evaluation_id=evaluation_id,
+        )
+
+    # Signal partial lookback
+    if prior_bars and len(prior_bars) < lookback:
+        signals.append(f"lookback_partial_{len(prior_bars)}_of_{lookback}")
+
     if snapshot.high_52w is not None:
         high_52w = snapshot.high_52w
-    elif prior_bars:
-        high_52w = max(b.high for b in prior_bars)
     else:
-        high_52w = 0.0
+        high_52w = max(b.high for b in prior_bars)
 
     # Helper to create intent with shared correlation_id
     def make_intent(**kwargs) -> TradeIntent:
@@ -132,6 +161,6 @@ def evaluate_breakout_52w_high(
         ts=snapshot.ts,
         intents=intents,
         signals=signals,
-        metadata={"high_52w": high_52w, "last_price": last_price},
+        metadata={"high_52w": high_52w, "last_price": last_price, "at_max_positions": at_max_positions},
         evaluation_id=evaluation_id,
     )
