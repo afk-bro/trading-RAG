@@ -426,11 +426,66 @@ BUILD_TIME=2025-01-09T12:00:00Z # Set by CI/CD
 
 ## Testing Notes
 
-- Unit tests mock external services (727 tests total)
-- Security gate tests in `tests/unit/test_security_gates.py` (18 tests)
-- Integration tests use `@pytest.mark.requires_db` for tests needing real database
-- Smoke tests in `tests/smoke/` require running service
-- CI runs Qdrant service container for vector DB tests
+### Test Categories
+
+| Category | Location | Runs in CI | Requirements |
+|----------|----------|------------|--------------|
+| Unit | `tests/unit/` | Always | None (all mocked) |
+| Integration (mocked) | `tests/integration/` | Always | Qdrant container |
+| Integration (full) | `tests/integration/` | Nightly/manual | Qdrant + real services |
+| Smoke | `tests/smoke/` | Nightly/manual | Full running service |
+
+### Test Markers
+
+```python
+@pytest.mark.requires_db      # Needs real DB/services - skipped in normal CI
+@pytest.mark.integration      # Integration test (informational)
+```
+
+### Running Tests Locally
+
+```bash
+# Unit tests (fast, no dependencies)
+pytest tests/unit/ -v
+
+# Integration tests without DB (needs Qdrant running)
+docker compose -f docker-compose.rag.yml up -d qdrant
+pytest tests/integration/ -v -m "not requires_db"
+
+# Full integration tests (needs all services)
+pytest tests/integration/ -v
+
+# Single test file
+pytest tests/unit/test_chunker.py -v
+```
+
+### Required Environment Variables for Tests
+
+```bash
+# Minimum for unit tests
+export SUPABASE_URL=https://test.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=test-key
+
+# For integration tests
+export QDRANT_HOST=localhost
+export QDRANT_PORT=6333
+```
+
+### CI Structure
+
+- **lint**: Black, flake8, mypy + mypy ratchet (no new ignores)
+- **unit-tests**: Fast, no external deps
+- **integration-tests**: Mocked services, Qdrant container
+- **integration-tests-full**: All tests, nightly/manual only
+- **smoke-test**: Full service, nightly/manual only
+
+### Mypy Ratchet
+
+`mypy.ini` has per-module ignores for legacy code. The ratchet script (`scripts/check_mypy_ratchet.sh`) fails CI if ignore count grows beyond baseline (currently 53). To fix types in a module:
+
+1. Remove its entry from `mypy.ini`
+2. Fix type errors
+3. Update `BASELINE` in ratchet script (decrease is good!)
 
 ## Roadmap Context
 

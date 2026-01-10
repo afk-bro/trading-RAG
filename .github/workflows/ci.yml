@@ -36,7 +36,34 @@ jobs:
       - name: Run mypy (type checking)
         run: mypy app/ --ignore-missing-imports
 
-  test:
+      - name: Check mypy ratchet (no new ignores)
+        run: ./scripts/check_mypy_ratchet.sh
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short
+        env:
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: test-key-for-ci
+          QDRANT_HOST: localhost
+          QDRANT_PORT: 6333
+
+  integration-tests:
     runs-on: ubuntu-latest
     services:
       qdrant:
@@ -71,16 +98,53 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short
+      - name: Run integration tests (no DB required)
+        run: pytest tests/integration/ -v --tb=short -m "not requires_db"
         env:
           SUPABASE_URL: https://test.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: test-key-for-ci
           QDRANT_HOST: localhost
           QDRANT_PORT: 6333
 
-      - name: Run integration tests (mocked)
-        run: pytest tests/integration/ -v --tb=short -m "not requires_db"
+  # Full integration tests with DB - runs nightly or on-demand only
+  integration-tests-full:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Wait for Qdrant
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:6333/readyz > /dev/null 2>&1; then
+              echo "Qdrant is ready"
+              exit 0
+            fi
+            echo "Waiting for Qdrant... ($i/30)"
+            sleep 2
+          done
+          echo "Qdrant failed to start"
+          exit 1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run all integration tests (including requires_db)
+        run: pytest tests/integration/ -v --tb=short
         env:
           SUPABASE_URL: https://test.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: test-key-for-ci
