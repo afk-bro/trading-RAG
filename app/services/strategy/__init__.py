@@ -9,6 +9,9 @@ Models:
 - EntryConfig, ExitConfig, RiskConfig: Configuration models
 - ExecutionSpec: Strategy instance definition
 - StrategyEvaluation: Runner output
+
+Runner:
+- StrategyRunner: Main evaluation engine
 """
 
 from app.services.strategy.models import (
@@ -20,6 +23,7 @@ from app.services.strategy.models import (
     ExecutionSpec,
     StrategyEvaluation,
 )
+from app.services.strategy.runner import StrategyRunner
 
 __all__ = [
     "OHLCVBar",
@@ -29,4 +33,5 @@ __all__ = [
     "RiskConfig",
     "ExecutionSpec",
     "StrategyEvaluation",
+    "StrategyRunner",
 ]
