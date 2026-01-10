@@ -33,6 +33,7 @@ from app.services.testing.run_orchestrator import (
     VARIANT_NS,  # Backwards compatibility alias
     select_best_variant,
 )
+from app.services.testing.plan_builder import PlanBuilder
 
 __all__ = [
     "canonical_json",
@@ -51,4 +52,5 @@ __all__ = [
     "get_variant_namespace",
     "VARIANT_NS",  # Backwards compatibility alias
     "select_best_variant",
+    "PlanBuilder",
 ]
