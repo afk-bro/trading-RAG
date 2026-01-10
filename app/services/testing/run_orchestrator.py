@@ -190,7 +190,7 @@ class RunOrchestrator:
                     run_plan_id=run_plan.run_plan_id,
                     variant_id=variant.variant_id,
                     status="skipped",
-                    error=validation_error,
+                    skip_reason=validation_error,
                     started_at=started_at,
                     completed_at=completed_at,
                     duration_ms=duration_ms,

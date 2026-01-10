@@ -248,16 +248,17 @@ class RunResult(BaseModel):
     """Results from executing a variant.
 
     Contains the outcome of running a single variant, including
-    success/failure status, metrics (if successful), and any
-    error information (if failed).
+    success/failure/skipped status, metrics (if successful), and any
+    error information (if failed) or skip reason (if skipped).
     """
 
     run_plan_id: UUID = Field(description="ID of the run plan this result belongs to")
     variant_id: str = Field(description="ID of the variant that was run")
-    status: str = Field(description="'success' or 'failed'")
+    status: str = Field(description="'success', 'failed', or 'skipped'")
     metrics: Optional[VariantMetrics] = None
     objective_score: Optional[float] = Field(default=None, description="Computed objective score")
     error: Optional[str] = Field(default=None, description="Error message if failed")
+    skip_reason: Optional[str] = Field(default=None, description="Reason if skipped (invalid params)")
     started_at: datetime = Field(description="When the run started")
     completed_at: Optional[datetime] = None
     duration_ms: Optional[int] = Field(default=None, description="Duration in milliseconds")

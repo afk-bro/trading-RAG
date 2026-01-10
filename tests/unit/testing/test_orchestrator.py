@@ -910,6 +910,114 @@ class TestVARIANT_NS:
         assert str(VARIANT_NS) == "8f3c2a2e-9d9a-4b2e-9f6b-3c3a4c1e9a01"
 
 
+class TestSkippedVariants:
+    """Tests for skipped variant handling."""
+
+    @pytest.mark.asyncio
+    async def test_skipped_variant_has_skip_reason_not_error(self, sample_csv_5_bars):
+        """Skipped variants should set skip_reason, not error field."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+        from app.services.testing.models import RunPlan, RunVariant
+
+        # Create run plan with a variant that has invalid params
+        base_spec = {
+            "strategy_id": "breakout_52w_high",
+            "name": "Test Strategy",
+            "workspace_id": str(uuid4()),
+            "symbols": ["AAPL"],
+            "timeframe": "daily",
+            "entry": {"type": "breakout_52w_high", "lookback_days": 252},
+            "exit": {"type": "eod"},
+            "risk": {"dollars_per_trade": 1000.0, "max_positions": 5},
+        }
+
+        run_plan = RunPlan(
+            workspace_id=uuid4(),
+            base_spec=base_spec,
+            variants=[
+                RunVariant(
+                    variant_id="invalid_variant",
+                    label="negative_dollars",
+                    spec_overrides={"risk.dollars_per_trade": -100.0},  # Invalid!
+                    tags=["grid"],
+                ),
+            ],
+            objective="sharpe_dd_penalty",
+            dataset_ref="test",
+        )
+
+        mock_events_repo = AsyncMock()
+        mock_events_repo.insert.return_value = uuid4()
+        mock_runner = MagicMock()
+
+        orchestrator = RunOrchestrator(mock_events_repo, mock_runner)
+        results = await orchestrator.execute(run_plan, sample_csv_5_bars)
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.status == "skipped"
+        assert result.skip_reason is not None
+        assert "dollars_per_trade" in result.skip_reason
+        assert result.error is None  # error should be None for skipped
+
+    @pytest.mark.asyncio
+    async def test_skipped_variants_journal_in_run_completed(self, sample_csv_5_bars):
+        """RUN_COMPLETED event should include skipped count."""
+        from app.services.testing.run_orchestrator import RunOrchestrator
+        from app.services.testing.models import RunPlan, RunVariant
+
+        base_spec = {
+            "strategy_id": "breakout_52w_high",
+            "name": "Test Strategy",
+            "workspace_id": str(uuid4()),
+            "symbols": ["AAPL"],
+            "timeframe": "daily",
+            "entry": {"type": "breakout_52w_high", "lookback_days": 252},
+            "exit": {"type": "eod"},
+            "risk": {"dollars_per_trade": 1000.0, "max_positions": 5},
+        }
+
+        run_plan = RunPlan(
+            workspace_id=uuid4(),
+            base_spec=base_spec,
+            variants=[
+                RunVariant(
+                    variant_id="valid_variant",
+                    label="baseline",
+                    spec_overrides={},
+                    tags=["baseline"],
+                ),
+                RunVariant(
+                    variant_id="invalid_variant",
+                    label="negative_dollars",
+                    spec_overrides={"risk.dollars_per_trade": -100.0},
+                    tags=["grid"],
+                ),
+            ],
+            objective="sharpe_dd_penalty",
+            dataset_ref="test",
+        )
+
+        mock_events_repo = AsyncMock()
+        mock_events_repo.insert.return_value = uuid4()
+        mock_runner = MagicMock()
+
+        orchestrator = RunOrchestrator(mock_events_repo, mock_runner)
+        await orchestrator.execute(run_plan, sample_csv_5_bars)
+
+        # Find the RUN_COMPLETED event call
+        calls = mock_events_repo.insert.call_args_list
+        run_completed_call = None
+        for call in calls:
+            event = call[0][0]
+            if event.payload.get("run_event_type") == "RUN_COMPLETED":
+                run_completed_call = event
+                break
+
+        assert run_completed_call is not None
+        assert run_completed_call.payload["skipped"] == 1
+
+
 class TestCsvRobustness:
     """Tests for CSV parsing robustness features."""
 
