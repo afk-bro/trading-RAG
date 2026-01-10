@@ -9,17 +9,15 @@ the compiled config parameters. Future versions could:
 - Support multiple strategy templates
 """
 
-from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 import numpy as np
 import structlog
 
 from backtesting import Backtest, Strategy
-from backtesting.lib import crossover
 
-from app.services.backtest.engines.base import BacktestResult, TradeRecord
+from app.services.backtest.engines.base import BacktestResult
 
 logger = structlog.get_logger(__name__)
 

@@ -104,7 +104,7 @@ def evaluate_breakout_52w_high(
         prior_bars = []
     else:
         history_len = min(lookback, num_bars - 1)
-        prior_bars = bars[-(history_len + 1) : -1]
+        prior_bars = bars[-(history_len + 1) : -1]  # noqa: E203
 
     # Guard: no history to compute high_52w
     if not prior_bars and snapshot.high_52w is None:

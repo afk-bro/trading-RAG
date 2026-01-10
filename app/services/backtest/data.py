@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from io import BytesIO, StringIO
+from io import StringIO
 from typing import Optional
 
 import pandas as pd

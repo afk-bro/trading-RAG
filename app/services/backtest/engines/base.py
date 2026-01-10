@@ -78,7 +78,7 @@ class BacktestEngine(Protocol):
         Run a backtest with the given data and configuration.
 
         Args:
-            ohlcv_df: DataFrame with OHLCV data (datetime index, columns: Open, High, Low, Close, Volume)
+            ohlcv_df: DataFrame with OHLCV data (datetime index, columns: Open, High, Low, Close, Volume)  # noqa: E501
             config: Compiled backtest configuration from strategy spec
             params: Validated parameters (with defaults applied)
             initial_cash: Starting capital

@@ -52,13 +52,11 @@ class BaseReranker(ABC):
     @abstractmethod
     def method(self) -> str:
         """Reranker method identifier."""
-        pass
 
     @property
     @abstractmethod
     def model_id(self) -> str | None:
         """Model identifier for observability."""
-        pass
 
     @abstractmethod
     async def rerank(
@@ -78,11 +76,9 @@ class BaseReranker(ABC):
         Returns:
             Top K results sorted by rerank score
         """
-        pass
 
     def close(self, wait: bool = True) -> None:
         """Cleanup resources. Override in subclasses as needed."""
-        pass
 
 
 class CrossEncoderReranker(BaseReranker):

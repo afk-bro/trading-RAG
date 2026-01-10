@@ -131,7 +131,7 @@ def classify_regime_from_ohlcv(
     if index < lookback:
         return None, 0.0
 
-    window = ohlcv[index - lookback : index + 1]
+    window = ohlcv[index - lookback : index + 1]  # noqa: E203
 
     if len(window) < lookback:
         return None, 0.0

@@ -1,12 +1,10 @@
 """Unit tests for trial document conversion utilities."""
 
-import pytest
 from uuid import uuid4
 
 from app.services.kb.trial_doc import (
     regime_to_text,
     trial_to_text,
-    trial_to_metadata,
 )
 from app.services.kb.types import TrialDoc, RegimeSnapshot
 

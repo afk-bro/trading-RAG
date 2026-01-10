@@ -1,7 +1,6 @@
 """Unit tests for KB aggregation module."""
 
 import pytest
-from unittest.mock import MagicMock
 
 from app.services.kb.aggregation import (
     compute_weight,
@@ -11,7 +10,6 @@ from app.services.kb.aggregation import (
     aggregate_params,
     validate_and_repair_params,
     compute_confidence,
-    ParamSpread,
     RELAXED_WEIGHT_MULTIPLIER,
     METADATA_ONLY_WEIGHT_MULTIPLIER,
 )

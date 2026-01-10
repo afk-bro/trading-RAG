@@ -30,7 +30,7 @@ class TestTuneDetailPage:
         )
 
         # Breadcrumb should link to tunes list
-        breadcrumb = admin_page.locator(".breadcrumb")
+        _breadcrumb = admin_page.locator(".breadcrumb")  # noqa: F841
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
 

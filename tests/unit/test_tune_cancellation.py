@@ -1,7 +1,7 @@
 """Tests for tune cancellation semantics and invariants."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 
@@ -102,7 +102,7 @@ class TestCancellationInvariants:
 
         # The implementation should protect canceled status
         # This is verified by the WHERE clause in the SQL
-        call_args = conn.execute.call_args[0][0]
+        _call_args = conn.execute.call_args[0][0]  # noqa: F841
         # If the implementation doesn't have protection, this test documents the need
         # The fix will add: WHERE status != 'canceled'
 
@@ -238,7 +238,6 @@ class TestBestResultsUnderCanceled:
         # This is a documentation test - the tuner already computes best from
         # valid trials, and cancel doesn't clear them.
         # The key invariant: best_* reflects "best of what ran" even if canceled.
-        pass
 
     @pytest.mark.asyncio
     async def test_canceled_tune_with_no_valid_trials_has_null_best(self):
@@ -247,4 +246,3 @@ class TestBestResultsUnderCanceled:
         """
         # This is natural behavior - if all trials were queued when canceled,
         # there's nothing to populate best_* with.
-        pass

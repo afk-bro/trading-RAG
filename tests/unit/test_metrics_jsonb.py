@@ -1,7 +1,6 @@
 """Tests for metrics JSONB persistence."""
 
 import pytest
-import math
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4

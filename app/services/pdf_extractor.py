@@ -8,7 +8,7 @@ Designed to be swapped to MinerU or external services later.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any
 
 import structlog
 
@@ -65,7 +65,6 @@ class PDFExtractorBackend(ABC):
     @abstractmethod
     def extract(self, file_bytes: bytes, config: PDFConfig) -> PDFExtractionResult:
         """Extract text from PDF bytes."""
-        pass
 
 
 class PyMuPDFBackend(PDFExtractorBackend):

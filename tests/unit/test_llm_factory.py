@@ -10,7 +10,6 @@ from app.services.llm_factory import (
     get_llm,
     reset_llm,
     LLMStartupError,
-    LLMStatus,
 )
 
 

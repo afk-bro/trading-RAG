@@ -1,8 +1,5 @@
 """Tests for overfit diagnostics (gap computation)."""
 
-import pytest
-from pydantic import ValidationError
-
 from app.routers.backtests import TuneRunListItem
 
 

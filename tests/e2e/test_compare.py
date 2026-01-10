@@ -59,7 +59,7 @@ class TestComparePageControls:
         )
 
         # Button only visible if tunes are found - check page loads without crash
-        swap_button = admin_page.locator("a:has-text('Swap A/B')")
+        _swap_button = admin_page.locator("a:has-text('Swap A/B')")  # noqa: F841
         # If tunes not found, button won't be visible - just verify no crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
@@ -74,7 +74,7 @@ class TestComparePageControls:
         )
 
         # Button only visible if tunes are found - check page loads without crash
-        json_button = admin_page.locator("a:has-text('Download JSON')")
+        _json_button = admin_page.locator("a:has-text('Download JSON')")  # noqa: F841
         # If tunes not found, button won't be visible - just verify no crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
@@ -108,5 +108,5 @@ class TestCompareNavigation:
         )
 
         # Check for View Tune links
-        view_links = admin_page.locator("a:has-text('View Tune')")
+        _view_links = admin_page.locator("a:has-text('View Tune')")  # noqa: F841
         # Links may not exist if error state

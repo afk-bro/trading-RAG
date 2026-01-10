@@ -18,26 +18,22 @@ from app.services.kb.types import RegimeSnapshot
 from app.services.kb.regime import compute_regime_from_ohlcv
 from app.services.kb.retrieval import (
     RetrievalRequest,
-    RetrievalResult,
     KBRetriever,
     FilterRejections,
 )
 from app.services.kb.rerank import (
-    RerankResult,
-    RerankedCandidate,
     rerank_candidates,
 )
 from app.services.kb.aggregation import (
-    AggregationResult,
     aggregate_params,
     compute_confidence,
 )
-from app.services.kb.distance import compute_regime_distance_z, DistanceResult
-from app.services.kb.regime_fsm import RegimeFSM, FSMConfig, FSMState
-from app.services.strategies.registry import get_strategy, StrategySpec
+from app.services.kb.distance import compute_regime_distance_z
+from app.services.kb.regime_fsm import RegimeFSM, FSMConfig
+from app.services.strategies.registry import get_strategy
 from app.repositories.kb_trials import KBTrialRepository
-from app.repositories.cluster_stats import ClusterStatsRepository, ClusterStats
-from app.repositories.duration_stats import DurationStatsRepository, DurationStats
+from app.repositories.cluster_stats import ClusterStatsRepository
+from app.repositories.duration_stats import DurationStatsRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -674,7 +670,7 @@ class KBRecommender:
         # Try to get cluster stats for variance scaling
         cluster_var: Optional[dict[str, float]] = None
         cluster_sigma_prior: Optional[float] = None
-        distance_baseline = "neighbors_only"
+        _distance_baseline = "neighbors_only"
 
         if (
             self._cluster_stats_repo
@@ -690,7 +686,7 @@ class KBRecommender:
                 )
                 if cluster_stats:
                     cluster_var = cluster_stats.feature_var
-                    distance_baseline = cluster_stats.baseline
+                    _distance_baseline = cluster_stats.baseline  # noqa: F841
             except Exception as e:
                 logger.warning("Failed to get cluster stats", error=str(e))
                 result["missing"].append("cluster_stats_error")

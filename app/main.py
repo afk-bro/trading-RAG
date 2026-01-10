@@ -224,7 +224,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 if match:
                     project_id = match.group(1)
                     # Supabase Postgres connection format with actual DB password
-                    postgres_url = f"postgresql://postgres:{settings.supabase_db_password}@db.{project_id}.supabase.co:5432/postgres"
+                    postgres_url = f"postgresql://postgres:{settings.supabase_db_password}@db.{project_id}.supabase.co:5432/postgres"  # noqa: E501
                     logger.info(
                         "Constructed database URL from Supabase project settings"
                     )
@@ -234,7 +234,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Using supabase_url as direct PostgreSQL connection")
         else:
             logger.warning(
-                "Database connection not configured. Set DATABASE_URL or SUPABASE_DB_PASSWORD in .env"
+                "Database connection not configured. Set DATABASE_URL or SUPABASE_DB_PASSWORD in .env"  # noqa: E501
             )
 
         if postgres_url:
@@ -431,7 +431,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add CORS middleware
 # In production, set CORS_ORIGINS to comma-separated list of allowed origins
-import os
+import os  # noqa: E402
 
 cors_origins_str = os.environ.get("CORS_ORIGINS", "*")
 if cors_origins_str == "*":
@@ -503,7 +503,7 @@ async def request_middleware(request: Request, call_next):
             return JSONResponse(
                 status_code=401,
                 content={
-                    "detail": f"API key required. Provide key in {settings.api_key_header_name} header",
+                    "detail": f"API key required. Provide key in {settings.api_key_header_name} header",  # noqa: E501
                     "retryable": False,
                 },
                 headers={
@@ -539,7 +539,7 @@ async def request_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=413,
             content={
-                "detail": f"Request body too large. Maximum size is {settings.max_request_body_size // (1024 * 1024)}MB",
+                "detail": f"Request body too large. Maximum size is {settings.max_request_body_size // (1024 * 1024)}MB",  # noqa: E501
                 "retryable": False,
             },
             headers={

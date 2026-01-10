@@ -68,7 +68,7 @@ class ForwardMetricsRequest(BaseModel):
     )
     realized_metrics: dict = Field(
         ...,
-        description="Realized metrics (return_pct, sharpe_proxy, hit_rate, max_drawdown_pct, expectancy)",
+        description="Realized metrics (return_pct, sharpe_proxy, hit_rate, max_drawdown_pct, expectancy)",  # noqa: E501
     )
 
     model_config = {"extra": "forbid"}
@@ -173,7 +173,7 @@ async def submit_metrics(request: ForwardMetricsRequest) -> ForwardMetricsRespon
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "error": f"Record is not active (status={record.status.value if hasattr(record.status, 'value') else record.status})",
+                "error": f"Record is not active (status={record.status.value if hasattr(record.status, 'value') else record.status})",  # noqa: E501
                 "code": "RECORD_NOT_ACTIVE",
             },
         )

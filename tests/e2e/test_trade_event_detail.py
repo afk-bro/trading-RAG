@@ -5,9 +5,9 @@ Tests event detail display, correlation timeline, and JSON payload.
 """
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page
 
-from tests.e2e.conftest import FAKE_UUID, assert_no_500, visit_detail_page
+from tests.e2e.conftest import FAKE_UUID, assert_no_500
 
 
 pytestmark = pytest.mark.e2e
@@ -28,7 +28,7 @@ class TestTradeEventDetailPage:
         admin_page.goto(f"{base_url}/admin/trade/events/{FAKE_UUID}")
 
         # Breadcrumb should exist
-        breadcrumb = admin_page.locator(".breadcrumb")
+        _breadcrumb = admin_page.locator(".breadcrumb")  # noqa: F841
         assert_no_500(admin_page)
 
 

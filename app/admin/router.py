@@ -1,7 +1,6 @@
 """Admin UI router for KB inspection and curation."""
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -23,21 +22,28 @@ def _json_serializable(obj: Any) -> Any:
     return obj
 
 
-import csv
-import io
+import csv  # noqa: E402
+import io  # noqa: E402
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import (
+from fastapi import (  # noqa: E402
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)  # noqa: E402
+from fastapi.responses import (  # noqa: E402
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
     StreamingResponse,
 )
-from fastapi.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates  # noqa: E402
 
-from app.config import Settings, get_settings
-from app.deps.security import require_admin_token
-from app.schemas import KBEntityType, KBClaimType, KBClaimStatus
+from app.config import Settings, get_settings  # noqa: E402
+from app.deps.security import require_admin_token  # noqa: E402
+from app.schemas import KBEntityType, KBClaimType  # noqa: E402
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
@@ -2055,7 +2061,7 @@ async def kb_top_warnings(
             SELECT
                 warning,
                 COUNT(*) as count,
-                COUNT(*) * 100.0 / (SELECT COUNT(*) FROM kb_trial_vectors WHERE 1=1 {workspace_filter}) as pct
+                COUNT(*) * 100.0 / (SELECT COUNT(*) FROM kb_trial_vectors WHERE 1=1 {workspace_filter}) as pct  # noqa: E501
             FROM kb_trial_vectors,
                  LATERAL unnest(warnings) as warning
             WHERE 1=1 {workspace_filter}
@@ -2248,7 +2254,6 @@ async def ops_snapshot(
     Use this endpoint to verify deployment health before enabling features.
     """
     import asyncio
-    import httpx
     from app import __version__
     from app.routers.health import (
         check_database_health,
@@ -2364,7 +2369,7 @@ async def ops_snapshot(
                     for row in workspace_rows
                 }
 
-                # Check for stale text hashes (trials where text_hash doesn't match current embedding)
+                # Check for stale text hashes (trials where text_hash doesn't match current embedding)  # noqa: E501
                 # This is a simplified check - in production you'd compare against chunk_vectors
                 stale = await conn.fetchval(
                     """

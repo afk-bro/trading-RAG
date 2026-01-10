@@ -252,7 +252,7 @@ class TuneRepository:
         Create a new tune record (status=queued).
 
         Args:
-            gates: Gate policy snapshot (e.g., {"max_drawdown_pct": 20, "min_trades": 10, "evaluated_on": "oos"}).
+            gates: Gate policy snapshot (e.g., {"max_drawdown_pct": 20, "min_trades": 10, "evaluated_on": "oos"}).  # noqa: E501
                    Persisted once at creation for audit/reproducibility.
 
         Returns:
@@ -825,7 +825,7 @@ class TuneRepository:
                    tr.started_at, tr.finished_at, tr.created_at
             FROM backtest_tune_runs tr
             WHERE {where_clause}
-            ORDER BY COALESCE(tr.objective_score, tr.score_oos, tr.score) DESC NULLS LAST, tr.trial_index ASC
+            ORDER BY COALESCE(tr.objective_score, tr.score_oos, tr.score) DESC NULLS LAST, tr.trial_index ASC  # noqa: E501
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
         params.extend([limit, offset])

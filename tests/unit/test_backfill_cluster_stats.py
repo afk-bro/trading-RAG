@@ -11,8 +11,7 @@ TDD tests following the v1.5 implementation plan:
 
 import pytest
 from uuid import uuid4
-from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import dataclass
+from unittest.mock import AsyncMock, MagicMock
 
 from app.jobs.backfill_cluster_stats import (
     run_cluster_stats_backfill,
@@ -20,7 +19,6 @@ from app.jobs.backfill_cluster_stats import (
     aggregate_trial_features,
     WelfordAccumulator,
 )
-from app.repositories.cluster_stats import ClusterStats
 
 
 # =============================================================================
@@ -700,7 +698,6 @@ class TestBackfillJobStrategyFilter:
 
         assert result.stats_written == 1
         # Should only write stats for target strategy
-        from uuid import UUID
 
         assert str(upserted_stats[0]["strategy_entity_id"]) == target_strategy_id
 
@@ -780,6 +777,5 @@ class TestBackfillJobPagination:
         assert result.trials_processed == 2  # Both pages processed
         assert result.stats_written == 1
         # Both trials should be aggregated (n=2)
-        import json
 
         assert upserted_stats[0]["n"] == 2

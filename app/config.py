@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     )
     chunk_tokenizer_encoding: str = Field(
         default="cl100k_base",
-        description="Tiktoken encoding name for tokenization (e.g., cl100k_base, p50k_base, r50k_base)",
+        description="Tiktoken encoding name for tokenization (e.g., cl100k_base, p50k_base, r50k_base)",  # noqa: E501
     )
 
     # Rate limiting
@@ -145,7 +145,7 @@ class Settings(BaseSettings):
     # API Key Authentication
     api_key: Optional[str] = Field(
         default=None,
-        description="Optional API key for authentication. If set, all requests must include X-API-Key header",
+        description="Optional API key for authentication. If set, all requests must include X-API-Key header",  # noqa: E501
     )
     api_key_header_name: str = Field(
         default="X-API-Key", description="Header name for API key"

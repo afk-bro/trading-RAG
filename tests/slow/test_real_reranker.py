@@ -82,7 +82,7 @@ class TestRealCrossEncoderInference:
                 ),
                 make_candidate(
                     "python",
-                    "Python is a high-level programming language used for web development and data science.",
+                    "Python is a high-level programming language used for web development and data science.",  # noqa: E501
                 ),
                 make_candidate(
                     "random", "The cat sat on the mat and looked out the window."

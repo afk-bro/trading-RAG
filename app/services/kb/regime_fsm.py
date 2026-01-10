@@ -16,7 +16,7 @@ State machine:
 4. Back to stable regime or different candidate -> reset candidate state
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from statistics import median
 from typing import Optional
 

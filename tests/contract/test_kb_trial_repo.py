@@ -5,7 +5,7 @@ a live Qdrant instance. Uses mocking to verify correct API usage.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 from app.repositories.kb_trials import KBTrialRepository

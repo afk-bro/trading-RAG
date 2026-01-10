@@ -219,7 +219,7 @@ class TestRetryLogic:
             return [[0.1] * 768] * len(batch)
 
         with patch.object(adapter, "_embed_batch_raw", side_effect=mock_embed):
-            result = await adapter.embed_texts(texts, skip_failures=True)
+            _result = await adapter.embed_texts(texts, skip_failures=True)  # noqa: F841
 
             # Some should succeed, some should fail
             assert call_count >= 3

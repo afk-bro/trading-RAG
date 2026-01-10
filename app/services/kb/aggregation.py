@@ -11,12 +11,11 @@ Handles:
 
 from dataclasses import dataclass, field
 from typing import Optional
-import math
 
 import structlog
 
 from app.services.kb.rerank import RerankedCandidate
-from app.services.strategies.registry import StrategySpec, get_strategy
+from app.services.strategies.registry import StrategySpec
 from app.services.strategies.params import ParamType
 
 logger = structlog.get_logger(__name__)

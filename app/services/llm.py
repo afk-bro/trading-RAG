@@ -5,15 +5,13 @@ from typing import Optional
 import httpx
 import structlog
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
 
 class LLMNotConfiguredError(Exception):
     """Raised when LLM generation is requested but no API key is configured."""
-
-    pass
 
 
 class OpenRouterLLM:

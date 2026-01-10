@@ -1,7 +1,5 @@
 """Unit tests for text chunking service."""
 
-import pytest
-
 from app.services.chunker import Chunk, Chunker, normalize_transcript
 
 

@@ -1,7 +1,7 @@
 """Unit tests for vector repository."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 from app.repositories.vectors import VectorRepository

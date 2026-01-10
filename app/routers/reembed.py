@@ -1,6 +1,5 @@
 """Re-embed endpoint for model migration."""
 
-import asyncio
 import uuid
 from typing import Optional
 
@@ -105,7 +104,7 @@ async def reembed_chunks_task(
         processed = 0
 
         for i in range(0, total_chunks, batch_size):
-            batch = chunks[i : i + batch_size]
+            batch = chunks[i : i + batch_size]  # noqa: E203
 
             # Extract texts
             texts = [c["content"] for c in batch]

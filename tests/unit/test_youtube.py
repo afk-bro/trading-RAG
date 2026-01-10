@@ -1,7 +1,5 @@
 """Unit tests for YouTube URL parsing."""
 
-import pytest
-
 from app.routers.youtube import parse_youtube_url
 
 

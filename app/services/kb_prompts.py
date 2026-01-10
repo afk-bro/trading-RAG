@@ -12,7 +12,7 @@ from typing import Any
 # Pass 1: Extraction Prompt (Flash model)
 # ===========================================
 
-EXTRACTION_SYSTEM_PROMPT = """You are a knowledge extraction system. Your task is to extract structured knowledge from the provided context chunks.
+EXTRACTION_SYSTEM_PROMPT = """You are a knowledge extraction system. Your task is to extract structured knowledge from the provided context chunks.  # noqa: E501
 
 ## OUTPUT FORMAT
 You must respond with valid JSON matching this exact schema:
@@ -29,7 +29,7 @@ You must respond with valid JSON matching this exact schema:
   ],
   "claims": [
     {
-      "claim_type": "definition|rule|assumption|warning|parameter|equation|observation|recommendation|other",
+      "claim_type": "definition|rule|assumption|warning|parameter|equation|observation|recommendation|other",  # noqa: E501
       "text": "Atomic truth statement",
       "entity_name": "Related entity if applicable",
       "entity_type": "concept|indicator|...",
@@ -41,7 +41,7 @@ You must respond with valid JSON matching this exact schema:
     {
       "from_entity": "Entity A name",
       "from_type": "concept|indicator|...",
-      "relation": "uses|requires|derived_from|variant_of|contradicts|supports|mentions|component_of|input_to|output_of|precedes|follows",
+      "relation": "uses|requires|derived_from|variant_of|contradicts|supports|mentions|component_of|input_to|output_of|precedes|follows",  # noqa: E501
       "to_entity": "Entity B name",
       "to_type": "concept|indicator|...",
       "evidence": [{"chunk_index": 0, "quote": "quote showing relation", "relevance": 0.9}]
@@ -51,10 +51,10 @@ You must respond with valid JSON matching this exact schema:
 ```
 
 ## CRITICAL RULES
-1. **Evidence Required**: Every claim MUST have at least one evidence pointer with a verbatim quote from the chunks.
+1. **Evidence Required**: Every claim MUST have at least one evidence pointer with a verbatim quote from the chunks.  # noqa: E501
 2. **Atomic Claims**: Each claim should be a single, testable statement. Split compound statements.
 3. **No Hallucination**: Only extract what is explicitly stated. Do not infer or assume.
-4. **Quote Accuracy**: The quote field must be a verbatim excerpt (max 200 chars) that directly supports the claim.
+4. **Quote Accuracy**: The quote field must be a verbatim excerpt (max 200 chars) that directly supports the claim.  # noqa: E501
 5. **Chunk Index**: chunk_index is 0-based, referring to the order chunks are provided.
 6. **Confidence**: Initial confidence 0.5-0.9 based on evidence strength. Never 1.0 at extraction.
 7. **Entity Types**: Use the most specific type. 'concept' is the catch-all.
@@ -114,7 +114,7 @@ Return valid JSON with entities, claims, and relations arrays. No markdown code 
 # Pass 2: Verification Prompt (Flash model)
 # ===========================================
 
-VERIFICATION_SYSTEM_PROMPT = """You are a claim verification system. Your task is to verify extracted claims against source evidence.
+VERIFICATION_SYSTEM_PROMPT = """You are a claim verification system. Your task is to verify extracted claims against source evidence.  # noqa: E501
 
 ## INPUT
 You will receive:
@@ -225,7 +225,7 @@ Return valid JSON with verdicts array. No markdown code fences."""
 # Pass 3: Synthesis Prompt (Sonnet/Gemma model)
 # ===========================================
 
-SYNTHESIS_SYSTEM_PROMPT = """You are a knowledge synthesis assistant. Your task is to answer questions using ONLY verified claims from a knowledge base.
+SYNTHESIS_SYSTEM_PROMPT = """You are a knowledge synthesis assistant. Your task is to answer questions using ONLY verified claims from a knowledge base.  # noqa: E501
 
 ## GROUNDING CONTRACT
 - Use ONLY the verified claims provided as your source of truth
@@ -312,7 +312,7 @@ If claims don't fully answer the question, acknowledge what's missing."""
 # KB Answer Prompt (for mode=kb_answer)
 # ===========================================
 
-KB_ANSWER_SYSTEM_PROMPT = """You are a knowledge base answer assistant. Your task is to answer questions using ONLY verified claims from a truth store.
+KB_ANSWER_SYSTEM_PROMPT = """You are a knowledge base answer assistant. Your task is to answer questions using ONLY verified claims from a truth store.  # noqa: E501
 
 ## OUTPUT FORMAT
 You must respond with valid JSON matching this schema:

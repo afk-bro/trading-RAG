@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Literal, Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 import anyio
@@ -34,7 +34,6 @@ from app.deps.security import (
     get_current_user,
     require_workspace_access,
     get_rate_limiter,
-    get_workspace_semaphore,
     CurrentUser,
 )
 from app.routers.metrics import (
@@ -43,10 +42,8 @@ from app.routers.metrics import (
     record_kb_qdrant_error,
 )
 from app.services.strategies.registry import (
-    ObjectiveType,
     get_strategy,
     list_strategies,
-    list_objectives,
 )
 
 router = APIRouter(prefix="/kb/trials", tags=["trading-kb"])
@@ -393,7 +390,7 @@ class RecommendResponse(BaseModel):
     # Self-healing guidance (only when status='none')
     recommended_relaxed_settings: Optional[RecommendedRelaxedSettingsInfo] = Field(
         None,
-        description="Suggested relaxed filter settings that would yield candidates (status='none' only)",
+        description="Suggested relaxed filter settings that would yield candidates (status='none' only)",  # noqa: E501
     )
 
     # =========================================================================
@@ -561,7 +558,7 @@ def _validate_objective(strategy_name: str, objective_type: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "error": f"Objective '{objective_type}' not supported for strategy '{strategy_name}'",
+                "error": f"Objective '{objective_type}' not supported for strategy '{strategy_name}'",  # noqa: E501
                 "code": "INVALID_OBJECTIVE",
                 "valid_options": valid_objectives,
             },

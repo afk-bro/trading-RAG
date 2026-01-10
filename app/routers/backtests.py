@@ -8,7 +8,6 @@ from uuid import UUID
 import structlog
 from fastapi import (
     APIRouter,
-    Depends,
     File,
     Form,
     HTTPException,
@@ -18,7 +17,6 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from app.config import Settings, get_settings
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 logger = structlog.get_logger(__name__)
@@ -619,7 +617,7 @@ async def create_tune(
     ),
     objective_type: str = Form(
         default="sharpe",
-        description="Objective function type: sharpe, sharpe_dd_penalty, return, return_dd_penalty, calmar",
+        description="Objective function type: sharpe, sharpe_dd_penalty, return, return_dd_penalty, calmar",  # noqa: E501
     ),
     objective_params: Optional[str] = Form(
         default=None, description='Objective params JSON (e.g., {"dd_lambda": 0.02})'
@@ -952,7 +950,7 @@ async def cancel_tune(tune_id: UUID):
     if tune["status"] not in ("queued", "running"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot cancel tune in '{tune['status']}' state. Only queued or running tunes can be canceled.",
+            detail=f"Cannot cancel tune in '{tune['status']}' state. Only queued or running tunes can be canceled.",  # noqa: E501
         )
 
     # Attempt cancellation

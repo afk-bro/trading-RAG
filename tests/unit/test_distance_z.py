@@ -1,12 +1,10 @@
 """Tests for regime distance z-score computation."""
 
 import pytest
-import numpy as np
 from app.services.kb.distance import (
     compute_standardized_distance,
     compute_distance_distribution,
     compute_regime_distance_z,
-    DistanceResult,
     DEFAULT_SHRINKAGE_C,
 )
 

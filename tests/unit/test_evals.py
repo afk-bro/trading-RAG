@@ -1,7 +1,5 @@
 """Unit tests for eval repository helpers."""
 
-import pytest
-
 from app.repositories.evals import (
     compute_question_hash,
     compute_config_fingerprint,

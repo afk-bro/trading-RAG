@@ -87,7 +87,7 @@ class PaperBroker(BrokerAdapter):
             return ExecutionResult(
                 success=False,
                 intent_id=intent.id,
-                error=f"Unsupported action: {intent.action.value}. Supported: OPEN_LONG, CLOSE_LONG",
+                error=f"Unsupported action: {intent.action.value}. Supported: OPEN_LONG, CLOSE_LONG",  # noqa: E501
                 error_code="UNSUPPORTED_ACTION",
             )
 
@@ -346,7 +346,7 @@ class PaperBroker(BrokerAdapter):
             # Validate full close only (PR1)
             if abs(quantity - existing.quantity) > 0.0001:  # Float tolerance
                 return {
-                    "error": f"Partial close not supported. Position qty: {existing.quantity}, requested: {quantity}",
+                    "error": f"Partial close not supported. Position qty: {existing.quantity}, requested: {quantity}",  # noqa: E501
                     "error_code": "PARTIAL_CLOSE_NOT_SUPPORTED",
                 }
 
@@ -638,7 +638,7 @@ class PaperBroker(BrokerAdapter):
             # Validate full close
             if abs(qty - position.quantity) > 0.0001:
                 errors.append(
-                    f"Event {event.id}: SELL qty ({qty}) != position qty ({position.quantity}) for {symbol}"
+                    f"Event {event.id}: SELL qty ({qty}) != position qty ({position.quantity}) for {symbol}"  # noqa: E501
                 )
                 # Still process to maintain cash consistency
                 qty = min(qty, position.quantity)
@@ -647,8 +647,8 @@ class PaperBroker(BrokerAdapter):
             # - We add gross sale proceeds and subtract fees to reflect the actual cash movement.
             # P&L accounting:
             # - realized_pnl is tracked *net of fees* so performance metrics include trading costs.
-            # - This means fees affect both the cash ledger (as an outflow) and the realized_pnl metric.
-            # - Equity is only reduced once in aggregate (via cash); realized_pnl is a reporting figure.
+            # - This means fees affect both the cash ledger (as an outflow) and the realized_pnl metric.  # noqa: E501
+            # - Equity is only reduced once in aggregate (via cash); realized_pnl is a reporting figure.  # noqa: E501
             state.cash += (qty * fill_price) - fees
             realized_pnl = (fill_price - position.avg_price) * qty - fees
             state.realized_pnl += realized_pnl

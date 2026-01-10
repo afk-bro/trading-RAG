@@ -10,7 +10,7 @@ Provides:
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, Optional, Union
+from typing import Any, Optional
 
 
 class ParamType(str, Enum):

@@ -30,7 +30,7 @@ class TestEntityDetailPage:
         )
 
         # Even on 404, check page structure
-        breadcrumb = admin_page.locator(".breadcrumb")
+        _breadcrumb = admin_page.locator(".breadcrumb")  # noqa: F841
         # Breadcrumb may contain link back to entities
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 

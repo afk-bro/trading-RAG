@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -125,7 +125,7 @@ class IngestRequest(BaseModel):
     )
     update_existing: bool = Field(
         default=False,
-        description="If true, supersede existing document at same canonical_url and create new version",
+        description="If true, supersede existing document at same canonical_url and create new version",  # noqa: E501
     )
 
 

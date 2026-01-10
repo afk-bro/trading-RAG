@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.config import Settings, get_settings
-from app.schemas import PDFConfig, PDFIngestResponse, SourceType
+from app.schemas import PDFIngestResponse, SourceType
 from app.services.chunker import Chunk, Chunker
 from app.services.pdf_extractor import (
     PDFBackend,
@@ -21,7 +21,7 @@ router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 # Import the ingest pipeline from main ingest router
-from app.routers.ingest import ingest_pipeline
+from app.routers.ingest import ingest_pipeline  # noqa: E402
 
 
 def compute_content_hash(content: bytes) -> str:

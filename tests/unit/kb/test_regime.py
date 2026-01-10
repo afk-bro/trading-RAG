@@ -3,12 +3,10 @@
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, timezone
 
 from app.services.kb import (
     RegimeSnapshot,
     compute_regime_snapshot,
-    compute_tags,
     regime_snapshot_to_text,
     compute_atr,
     compute_rsi,
@@ -340,7 +338,7 @@ class TestRegimeSnapshot:
         ]
 
         for val in numeric_fields:
-            assert not np.isnan(val), f"Found NaN in snapshot"
+            assert not np.isnan(val), "Found NaN in snapshot"
 
 
 # =============================================================================

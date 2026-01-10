@@ -5,7 +5,6 @@ These tests lock down exact text output to catch any changes
 that would affect embedding stability or reproducibility.
 """
 
-import pytest
 import numpy as np
 import pandas as pd
 from uuid import UUID
@@ -183,7 +182,7 @@ class TestTrialDocTextDeterminism:
         expected = """Dataset: btcusd_1h_2024 1h. OOS enabled.
 Regime: efficient, uptrend.
 Strategy: mean_reversion with period=20, stop_loss=0.02, threshold=2.0.
-Performance: OOS Sharpe 1.12, return 18.0%, max DD 12.0%. Objective: sharpe (score 1.12). (moderate overfit)"""
+Performance: OOS Sharpe 1.12, return 18.0%, max DD 12.0%. Objective: sharpe (score 1.12). (moderate overfit)"""  # noqa: E501
 
         assert (
             text == expected

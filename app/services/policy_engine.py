@@ -15,7 +15,6 @@ terminates evaluation (short-circuit).
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Optional
 import time
 
@@ -60,7 +59,6 @@ class PolicyRule(ABC):
     @abstractmethod
     def name(self) -> str:
         """Unique rule identifier (e.g., 'kill_switch', 'drift_guard')."""
-        pass
 
     @property
     def priority(self) -> int:
@@ -93,7 +91,6 @@ class PolicyRule(ABC):
         Returns:
             RuleResult with passed=True/False and optional details
         """
-        pass
 
 
 # =============================================================================

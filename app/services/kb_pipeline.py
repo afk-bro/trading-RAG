@@ -6,9 +6,6 @@ Three-pass architecture:
 - Pass 3 (Synthesize): Generate answer using only verified claims
 """
 
-from typing import Optional
-from uuid import UUID
-
 import structlog
 
 from app.services.llm_base import BaseLLMClient, LLMNotConfiguredError
@@ -48,8 +45,6 @@ MAX_TOKENS_SYNTHESIS = 2000  # Synthesis is answer-focused
 
 class KBPipelineError(Exception):
     """Error during knowledge base pipeline execution."""
-
-    pass
 
 
 class KBPipeline:

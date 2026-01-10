@@ -6,7 +6,6 @@ Tests for:
 - RecommendedRelaxedSettings only on status=none
 """
 
-import pytest
 from uuid import uuid4
 
 from app.services.kb.aggregation import compute_confidence, ParamSpread
@@ -17,8 +16,6 @@ from app.services.kb.retrieval import (
     FilterRejections,
 )
 from app.services.kb.recommend import (
-    RelaxationSuggestion,
-    RecommendedRelaxedSettings,
     RecommendRequest,
     KBRecommender,
 )

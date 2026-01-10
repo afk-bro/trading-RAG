@@ -1,14 +1,13 @@
 """Vector repository for Qdrant operations."""
 
-from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 import structlog
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.schemas import QueryFilters, SymbolsMode
 
 logger = structlog.get_logger(__name__)

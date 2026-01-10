@@ -229,7 +229,7 @@ class KBEmbeddingAdapter:
         try:
             return await self._embed_batch_raw(texts)
 
-        except httpx.TimeoutException as e:
+        except httpx.TimeoutException as _e:  # noqa: F841
             if retry_count < self.max_retries:
                 logger.warning(
                     "Batch timeout, retrying",
