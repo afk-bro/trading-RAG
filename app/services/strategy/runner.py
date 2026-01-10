@@ -16,6 +16,7 @@ from app.services.strategy.models import (
     MarketSnapshot,
     StrategyEvaluation,
 )
+from app.services.strategy.strategies import evaluate_breakout_52w_high
 
 # Type alias for strategy function signature
 StrategyFn = Callable[
@@ -51,12 +52,8 @@ class StrategyRunner:
         self._strategies[entry_type] = fn
 
     def _register_default_strategies(self) -> None:
-        """
-        Register built-in strategies.
-
-        Will register breakout_52w_high in Task 3.
-        """
-        pass
+        """Register built-in strategies."""
+        self.register_strategy("breakout_52w_high", evaluate_breakout_52w_high)
 
     def evaluate(
         self,
