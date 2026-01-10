@@ -1,7 +1,5 @@
 """Unit tests for metadata extractor service."""
 
-import pytest
-
 from app.services.extractor import (
     MetadataExtractor,
     ExtractedMetadata,

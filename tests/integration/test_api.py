@@ -7,10 +7,9 @@ Run with: pytest tests/integration/ -v
 Skip tests requiring DB: pytest tests/integration/ -v -m "not requires_db"
 """
 
-import os
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch
 import uuid
 
 
@@ -195,7 +194,7 @@ class TestYouTubeEndpoint:
         assert response.status_code == 200  # Returns 200 with error status
         data = response.json()
         assert data.get("status") == "error"
-        assert data.get("retryable") == False
+        assert data.get("retryable") is False
         assert "Could not extract video ID" in data.get("error_reason", "")
 
     def test_youtube_error_includes_retryable_flag(self, client):
@@ -428,7 +427,6 @@ class TestQueryFlow:
         """Test that query returns relevant results."""
         # First ingest some content
         # Then query for it
-        pass
 
 
 @pytest.mark.requires_db
@@ -441,4 +439,3 @@ class TestYouTubeFlow:
     @pytest.mark.skip(reason="Requires Supabase and YouTube API")
     def test_youtube_ingest_creates_document(self, client):
         """Test that YouTube ingest creates a document with timestamps."""
-        pass

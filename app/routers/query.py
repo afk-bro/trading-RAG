@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import Settings, get_settings
 from app.schemas import (
@@ -22,12 +22,9 @@ from app.schemas import (
     QueryRequest,
     QueryResponse,
     RerankState,
-    WorkspaceConfig,
 )
 from app.services.query_pipeline import (
     PipelineContext,
-    PipelineResult,
-    ResolvedConfig,
     resolve_config,
     run_retrieval_pipeline,
 )
@@ -135,7 +132,7 @@ async def query(
     - retrieve: Returns only matching chunks (no LLM call)
     - answer: Returns chunks + LLM-generated answer with citations
     - learn: Extract → verify → persist → synthesize (builds truth store)
-    - kb_answer: Answer from verified claims (truth store), falls back to chunk RAG if insufficient claims
+    - kb_answer: Answer from verified claims (truth store), falls back to chunk RAG if insufficient claims  # noqa: E501
 
     Filter capabilities:
     - source_types: Filter by document source (youtube, pdf, article, etc.)
@@ -842,16 +839,16 @@ async def query(
                             answer=answer,
                             supported=[],
                             not_specified=[
-                                "Insufficient verified claims in knowledge base, used chunk RAG fallback"
+                                "Insufficient verified claims in knowledge base, used chunk RAG fallback"  # noqa: E501
                             ],
                             claims_used=[],
                             fallback_used=True,
-                            fallback_reason=f"Only {len(verified_claims)} verified claims found (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required)",
+                            fallback_reason=f"Only {len(verified_claims)} verified claims found (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required)",  # noqa: E501
                         )
                     else:
                         answer = (
                             f"Insufficient knowledge in truth store. "
-                            f"Found {len(verified_claims)} verified claims (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required). "
+                            f"Found {len(verified_claims)} verified claims (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required). "  # noqa: E501
                             f"Consider using mode=learn to build the knowledge base first."
                         )
                         kb_answer_response = KBAnswerResponse(
@@ -862,7 +859,7 @@ async def query(
                             not_specified=[answer],
                             claims_used=[],
                             fallback_used=False,
-                            fallback_reason=f"Only {len(verified_claims)} verified claims found, no chunks available for fallback",
+                            fallback_reason=f"Only {len(verified_claims)} verified claims found, no chunks available for fallback",  # noqa: E501
                         )
 
             except Exception as e:

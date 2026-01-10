@@ -20,7 +20,7 @@ from uuid import UUID
 import structlog
 
 from app.services.backtest.runner import BacktestRunner, BacktestRunError
-from app.services.backtest.scoring import compute_score, rank_trials
+from app.services.backtest.scoring import compute_score
 from app.services.backtest.regime_integration import (
     add_regime_to_metrics,
     detect_timeframe_from_ohlcv,
@@ -539,7 +539,7 @@ class ParamTuner:
                             if score_oos is None:
                                 oos_trades = oos_summary.get("trades", 0)
                                 if oos_trades < min_trades:
-                                    skip_reason = f"oos_min_trades_not_met ({oos_trades}<{min_trades})"
+                                    skip_reason = f"oos_min_trades_not_met ({oos_trades}<{min_trades})"  # noqa: E501
                                 elif oos_summary.get(objective_metric) is None:
                                     skip_reason = (
                                         f"oos_metric_unavailable ({objective_metric})"

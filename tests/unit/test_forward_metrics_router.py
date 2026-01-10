@@ -1,14 +1,13 @@
 """Tests for forward metrics endpoint."""
 
 import pytest
-from datetime import datetime, timezone
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
-from app.routers.forward_metrics import router, set_db_pool
+from app.routers.forward_metrics import router
 from app.repositories.recommendation_records import RecordStatus
 
 

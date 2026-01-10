@@ -54,8 +54,6 @@ class LLMError(Exception):
 class LLMNotConfiguredError(Exception):
     """Raised when LLM generation is requested but no provider is configured."""
 
-    pass
-
 
 # Base client
 class BaseLLMClient(ABC):
@@ -137,7 +135,7 @@ class BaseLLMClient(ABC):
     # Grounding contract - enforces RAG discipline
     GROUNDING_CONTRACT = """GROUNDING CONTRACT (you must follow these rules):
 - Use ONLY the provided context chunks as your source of truth.
-- If the answer is not explicitly supported by the context, say: "The provided context does not specify this."
+- If the answer is not explicitly supported by the context, say: "The provided context does not specify this."  # noqa: E501
 - Do NOT use general knowledge, assumptions, or outside facts.
 - If the question asks for definitions and the context lacks a definition, state that clearly.
 - Cite sources using [1], [2], etc. to reference the numbered context chunks.

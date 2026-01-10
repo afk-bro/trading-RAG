@@ -23,7 +23,6 @@ Examples:
 
 import argparse
 import asyncio
-import json
 import sys
 from datetime import datetime
 from uuid import UUID
@@ -47,7 +46,7 @@ logger = structlog.get_logger(__name__)
 
 async def cmd_ingest(args: argparse.Namespace) -> int:
     """Run ingestion command."""
-    from app.services.kb.ingestion import KBIngestionPipeline, get_ingestion_pipeline
+    from app.services.kb.ingestion import KBIngestionPipeline
     from app.services.kb.embed import get_kb_embedder
     from app.repositories.kb_trials import KBTrialRepository
 
@@ -83,7 +82,7 @@ async def cmd_ingest(args: argparse.Namespace) -> int:
                 port=settings.qdrant_port,
             )
             # Use versioned collection name
-            dim = await embedder.get_vector_dim()
+            _dim = await embedder.get_vector_dim()  # noqa: F841
             collection_name = embedder.get_collection_name()
             repository = KBTrialRepository(client, collection=collection_name)
         except Exception as e:
@@ -354,7 +353,7 @@ def main():
     )
 
     # Collection info command
-    collection_parser = subparsers.add_parser(
+    _collection_parser = subparsers.add_parser(  # noqa: F841
         "collection-info",
         help="Show collection information",
     )

@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 
 from app.services.reranker import (
-    BaseReranker,
     CrossEncoderReranker,
     LLMReranker,
     RerankCandidate,
@@ -220,7 +219,9 @@ class TestCrossEncoderReranker:
         results = await reranker.rerank("test", candidates, top_k=3)
 
         # Check that vector scores are preserved (may be reordered)
-        result_vector_scores = {r.chunk_id: r.vector_score for r in results}
+        _result_vector_scores = {  # noqa: F841
+            r.chunk_id: r.vector_score for r in results
+        }  # noqa: F841
         for r in results:
             original = next(c for c in candidates if c.chunk_id == r.chunk_id)
             assert r.vector_score == original.vector_score

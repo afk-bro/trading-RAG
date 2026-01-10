@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import Any, Optional
+from typing import Optional
 
 import asyncpg
 import httpx
@@ -490,7 +490,7 @@ async def list_workspaces(settings: Settings = Depends(get_settings)):
             statement_cache_size=0,
         )
         rows = await conn.fetch(
-            "SELECT id, name, slug, is_active, ingestion_enabled, created_at FROM workspaces ORDER BY created_at DESC LIMIT 10"
+            "SELECT id, name, slug, is_active, ingestion_enabled, created_at FROM workspaces ORDER BY created_at DESC LIMIT 10"  # noqa: E501
         )
         await conn.close()
 
@@ -664,7 +664,7 @@ async def list_documents(settings: Settings = Depends(get_settings)):
             """
             SELECT
                 id, workspace_id, source_url, canonical_url, source_type,
-                content_hash, title, author, language, status, version, created_at, updated_at, last_indexed_at
+                content_hash, title, author, language, status, version, created_at, updated_at, last_indexed_at  # noqa: E501
             FROM documents
             ORDER BY created_at DESC
             LIMIT 20

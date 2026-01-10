@@ -186,7 +186,7 @@ class TestPyMuPDFBackend:
         """Test that pages with too few chars are skipped."""
         pdf_bytes = create_minimal_pdf()
         config = PDFConfig(min_chars_per_page=1000)  # High threshold
-        result = self.backend.extract(pdf_bytes, config)
+        _result = self.backend.extract(pdf_bytes, config)  # noqa: F841
         # Pages with fewer chars should be skipped (warnings added)
         # The exact behavior depends on the PDF content
 
@@ -259,7 +259,7 @@ def create_minimal_pdf() -> bytes:
         return pdf_bytes
     except ImportError:
         # Fallback: return a minimal PDF structure
-        return b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF"
+        return b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF"  # noqa: E501
 
 
 def create_multi_page_pdf(num_pages: int) -> bytes:

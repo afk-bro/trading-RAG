@@ -8,7 +8,6 @@ from app.services.kb.rerank import (
     get_candidate_regime_tags,
     compute_rerank_score,
     rerank_candidates,
-    RerankedCandidate,
     EMPTY_TAGS_JACCARD,
 )
 from app.services.kb.retrieval import RetrievalCandidate

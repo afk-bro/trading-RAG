@@ -1,7 +1,5 @@
 """Unit tests for backtest tuning functions."""
 
-import pytest
-
 from app.services.backtest.tuner import (
     derive_param_space,
     ParamTuner,

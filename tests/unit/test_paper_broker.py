@@ -423,7 +423,6 @@ class TestPaperBrokerReconciliation:
         self, paper_broker, sample_intent, mock_events_repo
     ):
         """State matches after reset + reconcile."""
-        from app.schemas import TradeEvent
 
         workspace_id = sample_intent.workspace_id
 

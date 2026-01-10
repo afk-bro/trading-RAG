@@ -6,7 +6,7 @@ from typing import Literal
 import structlog
 
 from app.config import Settings, get_settings
-from app.services.llm_base import BaseLLMClient, LLMNotConfiguredError
+from app.services.llm_base import BaseLLMClient
 
 logger = structlog.get_logger(__name__)
 
@@ -34,8 +34,6 @@ _initialized: bool = False
 
 class LLMStartupError(Exception):
     """Raised when LLM is required but no provider key is configured."""
-
-    pass
 
 
 def _get_effective_rerank_model(settings: Settings) -> str:

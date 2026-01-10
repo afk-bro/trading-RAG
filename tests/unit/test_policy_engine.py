@@ -1,7 +1,6 @@
 """Unit tests for the Policy Engine and rules."""
 
 import uuid
-from datetime import datetime
 
 import pytest
 

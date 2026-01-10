@@ -1,8 +1,5 @@
 """Unit tests for backtest scoring functions."""
 
-import math
-import pytest
-
 from app.services.backtest.scoring import compute_score, rank_trials
 
 

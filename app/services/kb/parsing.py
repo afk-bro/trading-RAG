@@ -14,12 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from app.services.backtest.data import (
     parse_ohlcv_csv,
-    OHLCVParseResult,
     OHLCVParseError,
 )
 

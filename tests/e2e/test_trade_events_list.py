@@ -7,7 +7,7 @@ Tests event listing, filtering, and navigation.
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.e2e.conftest import FAKE_UUID, assert_no_500
+from tests.e2e.conftest import assert_no_500
 
 
 pytestmark = pytest.mark.e2e

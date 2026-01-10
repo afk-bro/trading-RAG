@@ -1,11 +1,8 @@
 """Tests for regime stability FSM (hysteresis guard)."""
 
-import pytest
 from app.services.kb.regime_fsm import (
     RegimeFSM,
     FSMConfig,
-    FSMState,
-    RegimeTransitionEvent,
 )
 
 

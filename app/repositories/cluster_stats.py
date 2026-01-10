@@ -6,7 +6,7 @@ Used for distance z-score scaling in v1.5 live intelligence.
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 from uuid import UUID

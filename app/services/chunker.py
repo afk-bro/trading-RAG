@@ -160,7 +160,7 @@ class Chunker:
         for segment in segments:
             seg_text = segment.get("text", "")
             seg_start = segment.get("start", 0)
-            seg_end = segment.get("end", 0)
+            _seg_end = segment.get("end", 0)  # noqa: F841
             seg_tokens = self.count_tokens(seg_text)
 
             # Check if adding this segment exceeds limit

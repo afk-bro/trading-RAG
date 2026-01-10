@@ -9,8 +9,6 @@ from app.services.kb.retrieval import (
     RetrievalRequest,
     RetrievalCandidate,
     KBRetriever,
-    DEFAULT_STRICT_FILTERS,
-    DEFAULT_RELAXED_FILTERS,
     MIN_CANDIDATES_THRESHOLD,
 )
 from app.services.kb.types import RegimeSnapshot

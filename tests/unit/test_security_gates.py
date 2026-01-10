@@ -16,7 +16,6 @@ from starlette.requests import Request
 from app.deps.security import (
     require_admin_token,
     require_workspace_access,
-    get_current_user,
     RateLimiter,
     WorkspaceSemaphore,
     CurrentUser,
@@ -218,7 +217,7 @@ class TestDocsGating:
 
     def test_docs_disabled_when_setting_false(self):
         """When DOCS_ENABLED=false, /docs should not be accessible."""
-        with patch("app.config.Settings") as mock_settings_cls:
+        with patch("app.config.Settings") as _mock_settings_cls:  # noqa: F841
             mock_settings = MagicMock()
             mock_settings.docs_enabled = False
             mock_settings.sentry_dsn = None

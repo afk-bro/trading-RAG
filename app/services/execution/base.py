@@ -30,7 +30,6 @@ class BrokerAdapter(ABC):
     @abstractmethod
     def mode(self) -> str:
         """Return execution mode (paper/live)."""
-        pass
 
     @abstractmethod
     async def execute_intent(
@@ -58,24 +57,20 @@ class BrokerAdapter(ABC):
             HTTPException 400: Unsupported action or validation failure
             HTTPException 409: Intent already executed (idempotency)
         """
-        pass
 
     @abstractmethod
     async def get_positions(self, workspace_id: UUID) -> list[PaperPosition]:
         """Get all open positions for a workspace."""
-        pass
 
     @abstractmethod
     async def get_position(
         self, workspace_id: UUID, symbol: str
     ) -> Optional[PaperPosition]:
         """Get position for a specific symbol."""
-        pass
 
     @abstractmethod
     async def get_state(self, workspace_id: UUID) -> PaperState:
         """Get complete paper trading state."""
-        pass
 
     @abstractmethod
     async def reconcile_from_journal(self, workspace_id: UUID) -> ReconciliationResult:
@@ -87,9 +82,7 @@ class BrokerAdapter(ABC):
 
         Deduplicates by order_id to handle duplicate journal entries.
         """
-        pass
 
     @abstractmethod
     async def reset(self, workspace_id: UUID) -> None:
         """Reset state for a workspace (dev/test only)."""
-        pass

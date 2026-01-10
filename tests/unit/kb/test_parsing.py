@@ -1,9 +1,8 @@
 """Unit tests for KB OHLCV parsing enhancements."""
 
 import pytest
-import numpy as np
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.services.kb.parsing import (
     ParsedDataset,
@@ -13,7 +12,6 @@ from app.services.kb.parsing import (
     validate_for_regime,
     _extract_instrument,
     _detect_timeframe,
-    _compute_fingerprint,
     OHLCVParseError,
 )
 
@@ -36,7 +34,7 @@ def valid_csv_bytes():
     # Extend to 200+ rows for regime computation
     lines = csv_content.strip().split("\n")
     header = lines[0]
-    base_rows = lines[1:]
+    _base_rows = lines[1:]  # noqa: F841
 
     # Generate more rows
     rows = [header]

@@ -12,7 +12,7 @@ TDD tests following the v1.5 implementation plan:
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from app.jobs.backfill_duration_stats import (
     run_duration_stats_backfill,
@@ -24,7 +24,6 @@ from app.jobs.backfill_duration_stats import (
     RegimeSegment,
 )
 from app.services.kb.regime_fsm import FSMConfig
-from app.repositories.duration_stats import DurationStats
 
 
 # =============================================================================
@@ -576,7 +575,7 @@ class TestBackfillJobMultipleRegimeKeys:
         mock_db_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_db_pool.acquire.return_value.__aexit__ = AsyncMock()
 
-        result = await run_duration_stats_backfill(
+        _result = await run_duration_stats_backfill(  # noqa: F841
             db_pool=mock_db_pool,
             symbol="BTC/USDT",
             timeframe="5m",

@@ -5,7 +5,7 @@ Handles storage and retrieval of trial documents for the
 Trading Knowledge Base recommendation system.
 """
 
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 import structlog
@@ -15,7 +15,6 @@ from qdrant_client.http import models as qmodels
 from app.services.kb.constants import (
     KB_TRIALS_COLLECTION_NAME,
     KB_TRIALS_DOC_TYPE,
-    TIMEOUT_QDRANT_S,
 )
 
 logger = structlog.get_logger(__name__)

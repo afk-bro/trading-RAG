@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 import structlog
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -100,7 +100,7 @@ class OllamaEmbedder:
 
         # Process in batches
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
+            batch = texts[i : i + self.batch_size]  # noqa: E203
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(

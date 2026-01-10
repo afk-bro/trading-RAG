@@ -17,7 +17,6 @@ Set SMOKE_TEST_URL to test against a live server:
 
 import os
 import uuid
-from typing import Optional
 
 import pytest
 
@@ -124,7 +123,7 @@ class TestKBRecommendSmoke:
 
         # Log for debugging
         print(
-            f"\n{strategy}: status={data['status']}, confidence={data.get('confidence')}, count_used={data.get('count_used')}"
+            f"\n{strategy}: status={data['status']}, confidence={data.get('confidence')}, count_used={data.get('count_used')}"  # noqa: E501
         )
 
     @pytest.mark.parametrize("strategy", TEST_STRATEGIES[:2])  # Test subset for speed
@@ -378,7 +377,7 @@ def test_export_smoke_results(client, headers):
     output_file.write_text(json.dumps(results, indent=2, default=str))
 
     print(f"\n{'='*60}")
-    print(f"Smoke Test Summary")
+    print("Smoke Test Summary")
     print(f"{'='*60}")
     print(f"Total: {results['summary']['total']}")
     print(f"  OK:       {results['summary']['passed']}")
@@ -492,7 +491,7 @@ def test_relaxed_smoke_diagnostic(client, headers):
             "no_data_for_strategy": "✗",
         }.get(s["diagnosis"], "?")
         print(
-            f"  {emoji} {s['strategy']}: {s['diagnosis']} (strict={s['strict_status']}, relaxed={s['relaxed_status']})"
+            f"  {emoji} {s['strategy']}: {s['diagnosis']} (strict={s['strict_status']}, relaxed={s['relaxed_status']})"  # noqa: E501
         )
     print(f"\nResults written to: {output_file}")
     print(f"{'='*60}")

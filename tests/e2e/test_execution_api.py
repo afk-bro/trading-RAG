@@ -4,7 +4,7 @@ E2E tests for the Execution API endpoints (/execute/*).
 Tests paper trading state, positions, reconciliation, and intent execution.
 
 Run with:
-    ADMIN_TOKEN=e2e-test-token pytest tests/e2e/test_execution_api.py --base-url http://localhost:8000
+    ADMIN_TOKEN=e2e-test-token pytest tests/e2e/test_execution_api.py --base-url http://localhost:8000  # noqa: E501
 """
 
 import uuid

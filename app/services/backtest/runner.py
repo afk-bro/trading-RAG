@@ -1,6 +1,5 @@
 """Backtest runner - orchestrates strategy compilation, data loading, and execution."""
 
-import json
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -9,11 +8,9 @@ import structlog
 
 from app.services.backtest.data import (
     parse_ohlcv_csv,
-    OHLCVParseResult,
     OHLCVParseError,
 )
 from app.services.backtest.validate import validate_params, ParamValidationError
-from app.services.backtest.engines.base import BacktestResult
 from app.services.backtest.engines.backtestingpy import BacktestingPyEngine
 
 logger = structlog.get_logger(__name__)
@@ -113,7 +110,7 @@ class BacktestRunner:
             spec_status = spec.get("status", "draft")
             if spec_status != "approved" and not allow_draft:
                 raise BacktestRunError(
-                    f"Strategy spec is '{spec_status}', not approved. Use allow_draft=true or approve the spec first.",
+                    f"Strategy spec is '{spec_status}', not approved. Use allow_draft=true or approve the spec first.",  # noqa: E501
                     code="SPEC_NOT_APPROVED",
                     details={"status": spec_status},
                 )

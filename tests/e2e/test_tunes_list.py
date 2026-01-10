@@ -107,7 +107,7 @@ class TestTunesListTableInteraction:
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
         # Check for copy buttons (usually have a copy icon or title)
-        copy_buttons = admin_page.locator(
+        _copy_buttons = admin_page.locator(  # noqa: F841
             "button[title*='Copy'], button[aria-label*='Copy']"
         )
         # Just verify the page loads - copy buttons may not exist if no tunes

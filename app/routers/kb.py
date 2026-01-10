@@ -5,9 +5,8 @@ from typing import Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 
-from app.config import Settings, get_settings
 from app.schemas import (
     KBEntityType,
     KBClaimType,
@@ -364,7 +363,7 @@ async def get_strategy_spec(
     if not spec:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one.",
+            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one.",  # noqa: E501
         )
 
     # Parse JSON fields
@@ -462,7 +461,7 @@ async def refresh_strategy_spec(
     "/strategies/{entity_id}/compile",
     response_model=StrategyCompileResponse,
     summary="Compile strategy specification",
-    description="Compile a strategy spec into actionable outputs: param schema, backtest config, pseudocode.",
+    description="Compile a strategy spec into actionable outputs: param schema, backtest config, pseudocode.",  # noqa: E501
     responses={
         200: {"description": "Compilation successful"},
         404: {"description": "No strategy spec found"},
@@ -496,14 +495,14 @@ async def compile_strategy_spec(
     if not spec:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one first.",
+            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one first.",  # noqa: E501
         )
 
     # Enforce approval requirement unless allow_draft
     if spec.get("status") != "approved" and not allow_draft:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Strategy spec is '{spec.get('status')}', not approved. Use PATCH to approve first, or pass ?allow_draft=true for dev/testing.",
+            detail=f"Strategy spec is '{spec.get('status')}', not approved. Use PATCH to approve first, or pass ?allow_draft=true for dev/testing.",  # noqa: E501
         )
 
     result = await kb_repo.compile_strategy_spec(entity_id, force=force)
@@ -511,7 +510,7 @@ async def compile_strategy_spec(
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one first.",
+            detail=f"No strategy spec found for entity {entity_id}. Use POST /kb/strategies/{entity_id}/spec/refresh to create one first.",  # noqa: E501
         )
 
     logger.info(

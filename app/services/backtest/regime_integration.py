@@ -8,7 +8,6 @@ and embed them in metrics dictionaries.
 from datetime import datetime
 from typing import Optional
 
-import pandas as pd
 import structlog
 
 from app.services.backtest.data import parse_ohlcv_csv, OHLCVParseError
@@ -16,7 +15,6 @@ from app.services.backtest.data import parse_ohlcv_csv, OHLCVParseError
 # Import directly from submodules to avoid circular import
 from app.services.kb.types import RegimeSnapshot
 from app.services.kb.regime import compute_regime_snapshot
-from app.services.kb.constants import REGIME_WINDOW_BARS
 
 logger = structlog.get_logger(__name__)
 

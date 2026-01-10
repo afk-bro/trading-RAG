@@ -9,14 +9,12 @@ import structlog
 from app.services.kb_types import (
     EntityType,
     ClaimType,
-    RelationType,
     VerificationStatus,
     ExtractedEntity,
     ExtractedClaim,
     ExtractedRelation,
     ClaimVerdict,
     PersistenceStats,
-    EvidencePointer,
     compute_claim_fingerprint,
     validate_claim_evidence,
     MAX_QUOTE_LENGTH,
@@ -177,7 +175,7 @@ class KnowledgeBaseRepository:
             verification_model: Model used for verification
 
         Returns:
-            Tuple of (claim_id, created) - claim_id is None if duplicate, created is False if skipped
+            Tuple of (claim_id, created) - claim_id is None if duplicate, created is False if skipped  # noqa: E501
         """
         # Determine status and confidence from verdict if provided
         if verdict:
@@ -311,7 +309,7 @@ class KnowledgeBaseRepository:
             LEFT JOIN kb_entities e ON c.entity_id = e.id
             WHERE {' AND '.join(conditions[:-1])}
             ORDER BY c.confidence DESC, c.created_at DESC
-            LIMIT ${ param_idx}
+            LIMIT ${param_idx}
         """
 
         async with self.pool.acquire() as conn:
@@ -791,7 +789,7 @@ class KnowledgeBaseRepository:
         for word in words[:5]:  # Limit to first 5 words
             word_conditions.append(
                 f"""
-                (c.text ILIKE ${param_idx} OR e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})
+                (c.text ILIKE ${param_idx} OR e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})  # noqa: E501
             """
             )
             params.append(f"%{word}%")
@@ -1012,7 +1010,13 @@ class KnowledgeBaseRepository:
         Returns the new/updated spec record.
         """
         # Gather verified claims for this entity with spec-relevant types
-        spec_types = ["rule", "parameter", "equation", "warning", "assumption"]
+        _spec_types = [  # noqa: F841
+            "rule",
+            "parameter",
+            "equation",
+            "warning",
+            "assumption",
+        ]  # noqa: F841
         claims, _ = await self.list_claims(
             workspace_id=workspace_id,
             entity_id=entity_id,

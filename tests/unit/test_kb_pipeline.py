@@ -1,7 +1,6 @@
 """Unit tests for knowledge base extraction/verification pipeline."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import json
 
 from app.services.kb_types import (
@@ -12,7 +11,6 @@ from app.services.kb_types import (
     EvidencePointer,
     ExtractedEntity,
     ExtractedClaim,
-    ExtractedRelation,
     ExtractionResult,
     ClaimVerdict,
     VerificationResult,
@@ -293,7 +291,9 @@ class MockLLMClient:
         """Return mock responses based on prompt content."""
         self._call_count += 1
         user_content = messages[-1]["content"] if messages else ""
-        system_content = messages[0]["content"] if len(messages) > 0 else ""
+        _system_content = (  # noqa: F841
+            messages[0]["content"] if len(messages) > 0 else ""
+        )  # noqa: F841
 
         # Check for verification (before extraction since extraction is more specific)
         if "SOURCE CHUNKS" in user_content and "CLAIMS TO VERIFY" in user_content:
@@ -392,7 +392,7 @@ class TestKBPipeline:
     def sample_chunks(self):
         return [
             {
-                "content": "RSI (Relative Strength Index) is a momentum indicator. When RSI > 70, it indicates overbought conditions.",
+                "content": "RSI (Relative Strength Index) is a momentum indicator. When RSI > 70, it indicates overbought conditions.",  # noqa: E501
                 "title": "Technical Analysis Guide",
                 "doc_id": "doc-1",
             },

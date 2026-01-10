@@ -5,11 +5,9 @@ import pytest
 from app.services.strategies import (
     ParamType,
     ParamSpec,
-    ValidationResult,
     validate_params,
     repair_params,
     validate_and_repair_params,
-    ObjectiveType,
     StrategySpec,
     StrategyRegistry,
     create_default_registry,
@@ -17,7 +15,6 @@ from app.services.strategies import (
     get_strategy,
     validate_strategy,
     create_mean_reversion_spec,
-    create_trend_following_spec,
 )
 
 

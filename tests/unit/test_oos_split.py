@@ -2,10 +2,10 @@
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from app.services.backtest.tuner import ParamTuner, MIN_BARS_IS, MIN_BARS_OOS
+from app.services.backtest.tuner import ParamTuner
 
 
 class TestOOSSplitComputation:
@@ -114,13 +114,11 @@ class TestOOSSplitInvariants:
         """When OOS split is enabled, run_id should point to OOS run."""
         # This is a design decision - OOS is the validation run we care about
         # Verified by code inspection: run_id = UUID(oos_result["run_id"])
-        pass
 
     def test_winner_selection_by_oos_score(self):
         """Best params should be selected by highest OOS score."""
         # The repository orders by COALESCE(score_oos, score) DESC
         # This ensures OOS takes precedence when available
-        pass
 
 
 class TestOOSSplitEdgeCases:
@@ -193,15 +191,11 @@ class TestOOSRequestValidation:
 
     def test_oos_ratio_range_validation(self):
         """oos_ratio should be validated to (0, 0.5] range."""
-        from pydantic import ValidationError
-        from fastapi import Form
 
         # The Form validation ge=0.01, le=0.5 handles this
         # Values outside range should be rejected by FastAPI/Pydantic
-        pass
 
     def test_oos_ratio_optional(self):
         """oos_ratio should be optional (None by default)."""
         # When None, no split is performed
         # Verified by tuner code: if oos_ratio: ...
-        pass

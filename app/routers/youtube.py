@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import Settings, get_settings
 from app.routers.ingest import compute_content_hash, ingest_pipeline
@@ -112,7 +112,7 @@ async def fetch_video_metadata(video_id: str, api_key: Optional[str] = None) -> 
             }
     else:
         # Use oembed (no API key required, but limited info)
-        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"  # noqa: E501
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url)

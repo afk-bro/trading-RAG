@@ -14,7 +14,6 @@ Features:
 - Text hash tracking for drift detection
 """
 
-import asyncio
 import hashlib
 import os
 from dataclasses import dataclass, field

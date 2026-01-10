@@ -50,7 +50,9 @@ class TestLeaderboardSelection:
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
         # Check for checkboxes in table
-        checkboxes = admin_page.locator("table tbody input[type='checkbox']")
+        _checkboxes = admin_page.locator(  # noqa: F841
+            "table tbody input[type='checkbox']"
+        )  # noqa: F841
         # Just verify page loads - checkboxes depend on data
 
     def test_compare_button_disabled_without_selection(
@@ -72,7 +74,9 @@ class TestLeaderboardSelection:
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
         # Check for select-all checkbox in thead
-        select_all = admin_page.locator("table thead input[type='checkbox']")
+        _select_all = admin_page.locator(  # noqa: F841
+            "table thead input[type='checkbox']"
+        )  # noqa: F841
         # Just verify page loads correctly
 
 
@@ -84,7 +88,7 @@ class TestLeaderboardExport:
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
         # CSV button only visible when leaderboard has data
-        csv_button = admin_page.locator("a:has-text('Download CSV')")
+        _csv_button = admin_page.locator("a:has-text('Download CSV')")  # noqa: F841
         # Just verify page loads - button depends on data state
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
@@ -93,7 +97,7 @@ class TestLeaderboardExport:
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
         # Check the CSV link has the right href (if visible)
-        csv_link = admin_page.locator("a[href*='format=csv']")
+        _csv_link = admin_page.locator("a[href*='format=csv']")  # noqa: F841
         # Just verify page loads - link depends on data state
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 

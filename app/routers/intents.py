@@ -8,13 +8,10 @@ The intent evaluation flow:
 4. Response indicates if intent is approved for execution
 """
 
-import time
-import uuid as uuid_module
 from typing import Optional
-from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.schemas import (
     TradeIntent,

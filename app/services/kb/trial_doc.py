@@ -7,7 +7,6 @@ Provides functions for converting TrialDoc to:
 - Building TrialDoc from tune_run records
 """
 
-from dataclasses import asdict
 from typing import Any, Optional
 from uuid import UUID
 

@@ -157,10 +157,10 @@ def main():
         f"Segment A (uptrend): bars 0-{seg_a}, close {prices[0]:.2f} -> {prices[seg_a-1]:.2f}"
     )
     print(
-        f"Segment B (chop): bars {seg_a}-{seg_b}, close {prices[seg_a]:.2f} -> {prices[seg_b-1]:.2f}"
+        f"Segment B (chop): bars {seg_a}-{seg_b}, close {prices[seg_a]:.2f} -> {prices[seg_b-1]:.2f}"  # noqa: E501
     )
     print(
-        f"Segment C (downtrend): bars {seg_b}-{NUM_BARS}, close {prices[seg_b]:.2f} -> {prices[-1]:.2f}"
+        f"Segment C (downtrend): bars {seg_b}-{NUM_BARS}, close {prices[seg_b]:.2f} -> {prices[-1]:.2f}"  # noqa: E501
     )
 
     # Write output

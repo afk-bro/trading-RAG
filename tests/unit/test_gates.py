@@ -1,6 +1,5 @@
 """Tests for gate evaluation and winner selection."""
 
-import pytest
 import os
 from unittest.mock import patch
 
@@ -227,7 +226,6 @@ class TestGateIntegrationBehavior:
         operators to inspect the actual backtest results.
         """
         # This is a documentation test - actual behavior tested in integration
-        pass
 
     def test_gate_failure_preserves_scores(self):
         """Gate-failed trials should still have scores for comparison.
@@ -236,7 +234,6 @@ class TestGateIntegrationBehavior:
         even for gate-failed trials.
         """
         # This is a documentation test
-        pass
 
     def test_gate_failure_vs_runtime_failure_status(self):
         """Gate failures use 'skipped' status, runtime errors use 'failed'.
@@ -263,7 +260,6 @@ class TestWinnerSelectionWithGates:
         automatically excluded from valid_results and leaderboard.
         """
         # This is a documentation test - verified by code structure
-        pass
 
     def test_warning_when_no_trials_pass_gates(self):
         """Warning should be generated when all trials fail gates.
@@ -271,7 +267,6 @@ class TestWinnerSelectionWithGates:
         Format: "No trials passed gates (N skipped due to gate violations)"
         """
         # This is a documentation test - verified by tuner code
-        pass
 
     def test_no_best_run_when_all_gates_fail(self):
         """best_run_id should be None when no trials pass gates.
@@ -279,4 +274,3 @@ class TestWinnerSelectionWithGates:
         The tune completes but with null best_* fields.
         """
         # This is a documentation test
-        pass
