@@ -12,7 +12,8 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 
 # Mark all tests in this module as integration tests
-pytestmark = pytest.mark.integration
+# Also mark requires_db since they need service dependencies mocked properly
+pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
 
 # Test admin token - used in both headers and environment
