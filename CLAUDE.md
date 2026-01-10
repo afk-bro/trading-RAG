@@ -262,6 +262,54 @@ POST /execute/intents
 
 Returns 409 Conflict if intent already executed.
 
+## Strategy Runner
+
+The strategy runner generates TradeIntents from strategy configuration, market data, and current portfolio state. It bridges the gap between backtest research and live execution.
+
+**Architecture** (`app/services/strategy/`):
+```
+ExecutionSpec (strategy instance with params)
+      +
+MarketSnapshot (OHLCV window)
+      +
+PaperState (current positions/cash)
+      │
+      ▼
+┌─────────────────┐
+│ StrategyRunner  │ ─────► list[TradeIntent]
+└─────────────────┘
+      │
+      ▼
+  PolicyEngine → PaperBroker → Journal
+```
+
+**Key Models**:
+- `ExecutionSpec` - Runtime configuration for a strategy instance (strategy name, params, symbol, workspace)
+- `MarketSnapshot` - Point-in-time market state with OHLCV bars (caller-provided for determinism)
+- `StrategyEvaluation` - Runner output containing intents, signals, and evaluation metadata
+
+**Key Design Decisions**:
+- **Separate ExecutionSpec from StrategyRegistry**: Runtime config vs param schema definition
+- **MarketSnapshot is caller-provided**: Enables deterministic testing, no internal data fetching
+- **Stateless evaluation**: No internal runner state; all context passed in per call
+- **Max positions only blocks entries, never exits**: Safety rule to prevent over-allocation
+- **Exclude current bar from 52w high computation**: Avoid look-ahead bias
+- **evaluation_id shared by all intents**: Enables end-to-end tracing from signal to fill
+
+**Built-in Strategies**:
+- `breakout_52w_high` - Entry when price exceeds 52-week high, EOD exit
+
+**Usage Example**:
+```python
+from app.services.strategy import StrategyRunner, ExecutionSpec, MarketSnapshot
+
+runner = StrategyRunner()
+result = runner.evaluate(spec, snapshot, paper_state)
+for intent in result.intents:
+    # Execute via PaperBroker
+    pass
+```
+
 ## Trading KB Recommend Pipeline
 
 The `/kb/trials/recommend` endpoint provides strategy parameter recommendations based on historical backtest results.
