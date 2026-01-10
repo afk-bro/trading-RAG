@@ -35,6 +35,14 @@ from app.services.kb.trial_doc import (
     trial_to_metadata,
     trial_to_summary,
     build_trial_doc_from_tune_run,
+    build_trial_doc_from_eligible_row,
+)
+
+from app.services.kb.ingest import (
+    EligibleTrialsRepository,
+    QdrantAdapter,
+    IngestConfig,
+    KBTrialIngester,
 )
 
 from app.services.kb.parsing import (
@@ -91,6 +99,59 @@ from app.services.kb.embed import (
     get_kb_embedder,
 )
 
+from app.services.kb.candidacy import (
+    CandidacyConfig,
+    CandidacyDecision,
+    VariantMetricsForCandidacy,
+    is_candidate,
+    KNOWN_EXPERIMENT_TYPES,
+)
+
+from app.services.kb.circuit_breaker import (
+    BreakerState,
+    BreakerRepository,
+    CandidacyCircuitBreaker,
+    BacktestBreakerAdapter,
+)
+
+from app.services.kb.transitions import (
+    KBStatus,
+    KBStatusTransition,
+    TransitionResult,
+    transition_validator,
+)
+
+from app.services.kb.status_service import (
+    KBStatusService,
+    KBStatusResult,
+    KBStatusRepository,
+    KBIndexRepository,
+    CurrentStatus,
+    InvalidTransitionError,
+    TrialNotFoundError,
+)
+
+from app.services.kb.idempotency import (
+    KB_NAMESPACE,
+    IngestAction,
+    IngestResult,
+    IndexEntry,
+    BatchIngestResult,
+    KBTrialIndexRepository,
+    compute_point_id,
+    compute_content_hash,
+    compute_content_hash_from_trial,
+)
+
+from app.services.kb.comparator import (
+    EPSILON,
+    CURRENT_REGIME_SCHEMA,
+    ScoredCandidate,
+    compare_candidates,
+    rank_candidates,
+    candidates_within_epsilon,
+)
+
 __all__ = [
     # Types
     "RegimeSnapshot",
@@ -115,6 +176,12 @@ __all__ = [
     "trial_to_metadata",
     "trial_to_summary",
     "build_trial_doc_from_tune_run",
+    "build_trial_doc_from_eligible_row",
+    # Ingestion
+    "EligibleTrialsRepository",
+    "QdrantAdapter",
+    "IngestConfig",
+    "KBTrialIngester",
     # Parsing
     "ParsedDataset",
     "parse_ohlcv_for_kb",
@@ -155,4 +222,45 @@ __all__ = [
     "EmbeddingBatchError",
     "EmbeddingServiceError",
     "get_kb_embedder",
+    # Candidacy
+    "CandidacyConfig",
+    "CandidacyDecision",
+    "VariantMetricsForCandidacy",
+    "is_candidate",
+    "KNOWN_EXPERIMENT_TYPES",
+    # Circuit breaker
+    "BreakerState",
+    "BreakerRepository",
+    "CandidacyCircuitBreaker",
+    "BacktestBreakerAdapter",
+    # Transitions
+    "KBStatus",
+    "KBStatusTransition",
+    "TransitionResult",
+    "transition_validator",
+    # Status service
+    "KBStatusService",
+    "KBStatusResult",
+    "KBStatusRepository",
+    "KBIndexRepository",
+    "CurrentStatus",
+    "InvalidTransitionError",
+    "TrialNotFoundError",
+    # Idempotency
+    "KB_NAMESPACE",
+    "IngestAction",
+    "IngestResult",
+    "IndexEntry",
+    "BatchIngestResult",
+    "KBTrialIndexRepository",
+    "compute_point_id",
+    "compute_content_hash",
+    "compute_content_hash_from_trial",
+    # Comparator
+    "EPSILON",
+    "CURRENT_REGIME_SCHEMA",
+    "ScoredCandidate",
+    "compare_candidates",
+    "rank_candidates",
+    "candidates_within_epsilon",
 ]

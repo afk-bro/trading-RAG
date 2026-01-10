@@ -23,6 +23,7 @@ from app.services.kb.retrieval import (
 )
 from app.services.kb.rerank import (
     rerank_candidates,
+    RerankedCandidate,
 )
 from app.services.kb.aggregation import (
     aggregate_params,
@@ -30,6 +31,10 @@ from app.services.kb.aggregation import (
 )
 from app.services.kb.distance import compute_regime_distance_z
 from app.services.kb.regime_fsm import RegimeFSM, FSMConfig
+from app.services.kb.comparator import (
+    ScoredCandidate,
+    rank_candidates,
+)
 from app.services.strategies.registry import get_strategy
 from app.repositories.kb_trials import KBTrialRepository
 from app.repositories.cluster_stats import ClusterStatsRepository
@@ -406,15 +411,9 @@ class KBRecommender:
         warnings.extend(rerank_result.warnings)
 
         # Step 4: Select top M reranked, then top K by objective_score
+        # Uses epsilon-aware comparator for tie-breaking
         top_m = rerank_result.candidates[: req.rerank_top_m]
-
-        # Sort top M by objective_score and take top K
-        top_m_sorted = sorted(
-            top_m,
-            key=lambda c: c.payload.get("objective_score") or 0,
-            reverse=True,
-        )
-        top_k = top_m_sorted[: req.aggregate_top_k]
+        top_k = self._rank_and_select_top_k(top_m, req.aggregate_top_k)
 
         # Step 5: Get strategy spec and aggregate
         start_aggregate = time.perf_counter()
@@ -821,6 +820,93 @@ class KBRecommender:
                 return None
 
         return None
+
+    def _rank_and_select_top_k(
+        self,
+        candidates: list[RerankedCandidate],
+        top_k: int,
+    ) -> list[RerankedCandidate]:
+        """
+        Rank candidates using epsilon-aware comparator and select top K.
+
+        Uses tie-break rules when objective scores are within epsilon:
+        1. Primary score (objective_score)
+        2. promoted > candidate (human curation signal)
+        3. Current schema > other > null
+        4. Recent kb_promoted_at
+        5. Recent created_at
+
+        Args:
+            candidates: Reranked candidates to sort
+            top_k: Number of top candidates to return
+
+        Returns:
+            Top K candidates ranked by objective score with tie-breaks
+        """
+        from datetime import datetime, timezone
+
+        if not candidates:
+            return []
+
+        # Build mapping from point_id to candidate for reconstruction
+        candidate_map = {c.point_id: c for c in candidates}
+
+        # Convert to ScoredCandidates
+        scored: list[ScoredCandidate] = []
+        for c in candidates:
+            payload = c.payload
+            score = payload.get("objective_score") or 0.0
+            kb_status = payload.get("kb_status", "candidate")
+            regime_schema_version = payload.get("regime_schema_version")
+
+            # Parse timestamps
+            kb_promoted_at = None
+            if payload.get("kb_promoted_at"):
+                try:
+                    promoted_str = payload["kb_promoted_at"]
+                    if isinstance(promoted_str, datetime):
+                        kb_promoted_at = promoted_str
+                    elif isinstance(promoted_str, str):
+                        kb_promoted_at = datetime.fromisoformat(
+                            promoted_str.replace("Z", "+00:00")
+                        )
+                except (ValueError, TypeError):
+                    pass
+
+            created_at = datetime.now(timezone.utc)  # Default
+            if payload.get("created_at"):
+                try:
+                    created_str = payload["created_at"]
+                    if isinstance(created_str, datetime):
+                        created_at = created_str
+                    elif isinstance(created_str, str):
+                        created_at = datetime.fromisoformat(
+                            created_str.replace("Z", "+00:00")
+                        )
+                except (ValueError, TypeError):
+                    pass
+
+            scored.append(
+                ScoredCandidate(
+                    source_id=c.point_id,
+                    score=score,
+                    kb_status=kb_status,
+                    regime_schema_version=regime_schema_version,
+                    kb_promoted_at=kb_promoted_at,
+                    created_at=created_at,
+                )
+            )
+
+        # Rank using epsilon-aware comparator
+        ranked = rank_candidates(scored)
+
+        # Reconstruct RerankedCandidates in ranked order
+        result = []
+        for sc in ranked[:top_k]:
+            if sc.source_id in candidate_map:
+                result.append(candidate_map[sc.source_id])
+
+        return result
 
     def _compute_status(
         self,
