@@ -683,19 +683,31 @@ class RunOrchestrator:
 
         Args:
             run_plan: The RunPlan this event belongs to
-            event_type: Event type string (RUN_STARTED, RUN_COMPLETED)
+            event_type: Event type string (RUN_STARTED, RUN_COMPLETED, etc.)
             payload: Event payload dict
         """
-        # Use INTENT_EMITTED as a placeholder for run events
-        # In a real implementation, you'd add RUN_STARTED/RUN_COMPLETED to TradeEventType
+        # Map event type string to TradeEventType enum
+        event_type_map = {
+            "RUN_STARTED": TradeEventType.RUN_STARTED,
+            "RUN_COMPLETED": TradeEventType.RUN_COMPLETED,
+            "RUN_FAILED": TradeEventType.RUN_FAILED,
+            "RUN_CANCELLED": TradeEventType.RUN_CANCELLED,
+        }
+
+        mapped_type = event_type_map.get(event_type)
+        if not mapped_type:
+            logger.warning(
+                "unknown_run_event_type",
+                event_type=event_type,
+                run_plan_id=str(run_plan.run_plan_id),
+            )
+            return
+
         event = TradeEvent(
             correlation_id=str(run_plan.run_plan_id),
             workspace_id=run_plan.workspace_id,
-            event_type=TradeEventType.INTENT_EMITTED,  # Placeholder
-            payload={
-                "run_event_type": event_type,
-                **payload,
-            },
+            event_type=mapped_type,
+            payload=payload,
         )
 
         try:

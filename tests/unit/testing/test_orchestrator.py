@@ -1012,11 +1012,13 @@ class TestSkippedVariants:
         await orchestrator.execute(run_plan, sample_csv_5_bars)
 
         # Find the RUN_COMPLETED event call
+        from app.schemas import TradeEventType
+
         calls = mock_events_repo.insert.call_args_list
         run_completed_call = None
         for call in calls:
             event = call[0][0]
-            if event.payload.get("run_event_type") == "RUN_COMPLETED":
+            if event.event_type == TradeEventType.RUN_COMPLETED:
                 run_completed_call = event
                 break
 
