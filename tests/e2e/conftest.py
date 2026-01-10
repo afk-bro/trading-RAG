@@ -163,3 +163,46 @@ def e2e_helpers():
             visit_detail_page(page, base_url, path_template, uuid)
 
     return E2EHelpers()
+
+
+# =============================================================================
+# API E2E Test Fixtures (for testing JSON API endpoints)
+# =============================================================================
+
+
+@pytest.fixture(scope="function")
+def api_request(playwright, base_url: str, admin_token: str):
+    """
+    Create an API request context with admin authentication.
+
+    Usage:
+        def test_api_endpoint(api_request):
+            response = api_request.get("/execute/paper/state/...")
+            assert response.status == 200
+    """
+    context = playwright.request.new_context(
+        base_url=base_url,
+        extra_http_headers={
+            "X-Admin-Token": admin_token,
+            "Content-Type": "application/json",
+        }
+    )
+    yield context
+    context.dispose()
+
+
+@pytest.fixture(scope="function")
+def api_request_no_auth(playwright, base_url: str):
+    """
+    Create an API request context without authentication.
+
+    Use for testing auth enforcement on API endpoints.
+    """
+    context = playwright.request.new_context(
+        base_url=base_url,
+        extra_http_headers={
+            "Content-Type": "application/json",
+        }
+    )
+    yield context
+    context.dispose()

@@ -206,6 +206,19 @@ class Settings(BaseSettings):
         description="Sentry profiling sample rate (0.0-1.0)"
     )
 
+    # Paper Trading Configuration
+    paper_starting_equity: float = Field(
+        default=10000.0,
+        gt=0,
+        description="Starting equity for paper trading accounts"
+    )
+    paper_max_position_size_pct: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        description="Maximum position size as percentage of equity (0.20 = 20%)"
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""
