@@ -886,9 +886,7 @@ class TradeIntent(BaseModel):
     """
 
     # Identity
-    id: UUID = Field(
-        default_factory=lambda: __import__("uuid").uuid4(), description="Intent UUID"
-    )
+    id: UUID = Field(default_factory=uuid4, description="Intent UUID")
     correlation_id: str = Field(..., description="Correlation ID for tracing")
     workspace_id: UUID = Field(..., description="Workspace this intent belongs to")
 
@@ -1062,7 +1060,7 @@ class TradeEvent(BaseModel):
     Append-only audit trail of all trading decisions.
     """
 
-    id: UUID = Field(default_factory=lambda: __import__("uuid").uuid4())
+    id: UUID = Field(default_factory=uuid4)
     correlation_id: str = Field(..., description="Links related events together")
     workspace_id: UUID = Field(..., description="Workspace this event belongs to")
 
