@@ -1016,7 +1016,7 @@ class TestSkippedVariants:
                 break
 
         assert run_completed_call is not None
-        assert run_completed_call.payload["skipped"] == 1
+        assert run_completed_call.payload["n_skipped"] == 1
 
 
 class TestCsvRobustness:

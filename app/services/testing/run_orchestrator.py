@@ -117,9 +117,9 @@ class RunOrchestrator:
                 )
 
         # Journal RUN_COMPLETED
-        successful = sum(1 for r in results if r.status == RunResultStatus.success)
-        skipped = sum(1 for r in results if r.status == RunResultStatus.skipped)
-        failed = sum(1 for r in results if r.status == RunResultStatus.failed)
+        n_success = sum(1 for r in results if r.status == RunResultStatus.success)
+        n_skipped = sum(1 for r in results if r.status == RunResultStatus.skipped)
+        n_failed = sum(1 for r in results if r.status == RunResultStatus.failed)
         best_id, best_score = select_best_variant(results)
 
         await self._journal_run_event(
@@ -127,9 +127,9 @@ class RunOrchestrator:
             "RUN_COMPLETED",
             {
                 "n_variants": run_plan.n_variants,
-                "successful": successful,
-                "skipped": skipped,
-                "failed": failed,
+                "n_success": n_success,
+                "n_skipped": n_skipped,
+                "n_failed": n_failed,
                 "best_variant_id": best_id,
                 "best_objective_score": best_score,
             },
@@ -137,9 +137,9 @@ class RunOrchestrator:
 
         log.info(
             "run_completed",
-            successful=successful,
-            skipped=skipped,
-            failed=failed,
+            n_success=n_success,
+            n_skipped=n_skipped,
+            n_failed=n_failed,
             best_variant_id=best_id,
             best_score=best_score,
         )
