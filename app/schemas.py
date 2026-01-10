@@ -1052,6 +1052,10 @@ class TradeEventType(str, Enum):
     KILL_SWITCH_DEACTIVATED = "kill_switch_deactivated"
     REGIME_DRIFT_DETECTED = "regime_drift_detected"
 
+    # Run plan events (Test Generator / Orchestrator)
+    RUN_STARTED = "run_started"
+    RUN_COMPLETED = "run_completed"
+
 
 class TradeEvent(BaseModel):
     """

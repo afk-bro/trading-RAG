@@ -310,6 +310,64 @@ for intent in result.intents:
     pass
 ```
 
+## Test Generator & Run Orchestrator
+
+Parameter sweep framework for systematic strategy testing. Takes an ExecutionSpec and generates variants automatically, then runs them through StrategyRunner + PaperBroker.
+
+**Architecture** (`app/services/testing/`):
+```
+ExecutionSpec (base configuration)
+        │
+        ▼
+┌──────────────────┐
+│  Test Generator  │ ──► RunPlan with N variants
+└──────────────────┘
+        │
+        ▼
+┌──────────────────┐
+│ Run Orchestrator │ ──► Execute variants, collect metrics
+└──────────────────┘
+        │
+        ├────────────┬────────────┐
+        ▼            ▼            ▼
+  StrategyRunner  PaperBroker  trade_events
+        │
+        ▼
+  RunResult (per-variant metrics)
+```
+
+**Key Design Decisions**:
+- **Variant ID**: `sha256(canonical_json({base, overrides}))[:16]` - deterministic, stable across runs
+- **Overrides format**: Flat dotted-path dict only (e.g., `{"entry.lookback_days": 200}`)
+- **Broker isolation**: Each variant uses `uuid5(VARIANT_NS, f"{run_plan_id}:{variant_id}")` as workspace - prevents cross-contamination
+- **Equity tracking**: Trade-equity points (step function) - equity at each closed trade for drawdown/sharpe
+- **Persistence**: In-memory RunPlan for v0, events (RUN_STARTED, RUN_COMPLETED) in trade_events journal
+
+**Sweepable Parameters**:
+- `entry.lookback_days` - Lookback for 52w high calculation
+- `risk.dollars_per_trade` - Position sizing
+- `risk.max_positions` - Max concurrent positions
+
+**Generator Output**:
+1. **Baseline** variant (empty overrides) - always first
+2. **Grid sweep** variants (cartesian product of sweep values)
+3. **Ablation** variants (reset one param to default, relative to first grid combo)
+4. Deduplication + max_variants limit
+
+**Metrics Calculated**:
+- `return_pct` - (ending_equity / starting_equity - 1) × 100
+- `max_drawdown_pct` - Peak-to-trough from trade-equity curve
+- `sharpe` - mean(trade_returns) / std(trade_returns), None if <2 trades
+- `win_rate`, `trade_count`, `profit_factor`
+
+**API Endpoints**:
+- `POST /testing/run-plans/generate` - Generate RunPlan (no execution)
+- `POST /testing/run-plans/generate-and-execute` - Generate + execute + return results (multipart form with CSV)
+
+**Admin UI**:
+- `/admin/testing/run-plans` - List page (event-driven summaries)
+- `/admin/testing/run-plans/{id}` - Detail page
+
 ## Trading KB Recommend Pipeline
 
 The `/kb/trials/recommend` endpoint provides strategy parameter recommendations based on historical backtest results.
