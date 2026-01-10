@@ -5,7 +5,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.repositories.trade_events import TradeEventsRepository
@@ -14,7 +14,6 @@ from app.services.strategy.runner import StrategyRunner
 from app.services.testing import (
     GeneratorConstraints,
     RunOrchestrator,
-    RunPlan,
     TestGenerator,
     VariantMetrics,
     select_best_variant,
@@ -210,7 +209,7 @@ async def generate_run_plan(request: GenerateRequest) -> RunPlanResponse:
         503: {"description": "Database unavailable"},
     },
     summary="Generate and execute a run plan",
-    description="Generate a RunPlan and immediately execute all variants against uploaded OHLCV data.",
+    description="Generate RunPlan and execute all variants against uploaded OHLCV data.",
 )
 async def generate_and_execute_run_plan(
     file: UploadFile = File(
