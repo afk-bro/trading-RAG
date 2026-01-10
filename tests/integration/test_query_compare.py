@@ -131,23 +131,33 @@ class TestQueryCompareEndpoint:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Compare returns vector_only and reranked responses."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "What is Python?",
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "What is Python?",
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 data = response.json()
@@ -167,23 +177,33 @@ class TestQueryCompareEndpoint:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Compare returns comparison metrics."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "What is Python?",
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "What is Python?",
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 metrics = response.json()["metrics"]
@@ -203,23 +223,33 @@ class TestQueryCompareEndpoint:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Jaccard similarity is between 0 and 1."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 jaccard = response.json()["metrics"]["jaccard"]
@@ -232,23 +262,33 @@ class TestQueryCompareEndpoint:
         # Create minimal results that won't overlap
         minimal_results = [{"id": CHUNK_IDS[0], "score": 0.95}]
 
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=None):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=None
+        ):
 
             mock_search.return_value = minimal_results
             mock_chunks.return_value = {CHUNK_IDS[0]: mock_chunks_map[CHUNK_IDS[0]]}
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "top_k": 1,
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "top_k": 1,
+                    },
+                )
 
                 # With only 1 result, overlap is 1, spearman should be None
                 assert response.status_code == 200
@@ -262,24 +302,34 @@ class TestQueryCompareEndpoint:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Both runs use the same candidate set (verified via candidates_searched)."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "retrieve_k": 50,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "retrieve_k": 50,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 data = response.json()
@@ -293,22 +343,32 @@ class TestQueryCompareEndpoint:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Vector-only run has rerank_state=disabled."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                    },
+                )
 
                 assert response.status_code == 200
                 vector_meta = response.json()["vector_only"]["meta"]
@@ -319,22 +379,32 @@ class TestQueryCompareEndpoint:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Reranked run has rerank_state=ok (when successful)."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.services.query_pipeline.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.services.query_pipeline.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query/compare", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                })
+                response = client.post(
+                    "/query/compare",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                    },
+                )
 
                 assert response.status_code == 200
                 rerank_meta = response.json()["reranked"]["meta"]
@@ -410,29 +480,41 @@ class TestEvalLogging:
         """Compare endpoint emits structured eval log with all required fields."""
         import logging
 
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.services.query_pipeline.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.services.query_pipeline.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with caplog.at_level(logging.INFO):
                 with TestClient(app, raise_server_exceptions=False) as client:
-                    response = client.post("/query/compare", json={
-                        "workspace_id": str(uuid4()),
-                        "question": "Test query",
-                        "top_k": 3,
-                    })
+                    response = client.post(
+                        "/query/compare",
+                        json={
+                            "workspace_id": str(uuid4()),
+                            "question": "Test query",
+                            "top_k": 3,
+                        },
+                    )
 
                     assert response.status_code == 200
 
             # Find the query_compare log entry
-            compare_logs = [r for r in caplog.records if "query_compare" in r.getMessage()]
+            compare_logs = [
+                r for r in caplog.records if "query_compare" in r.getMessage()
+            ]
             assert len(compare_logs) >= 1, "Expected query_compare log entry"
 
     def test_eval_log_contains_required_fields(
@@ -442,29 +524,41 @@ class TestEvalLogging:
         import json
         import logging
 
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.services.query_pipeline.get_reranker", return_value=mock_reranker):
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.services.query_pipeline.get_reranker", return_value=mock_reranker
+        ):
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
 
             from app.main import app
+
             with caplog.at_level(logging.INFO):
                 with TestClient(app, raise_server_exceptions=False) as client:
-                    response = client.post("/query/compare", json={
-                        "workspace_id": str(uuid4()),
-                        "question": "Test query for logging",
-                        "top_k": 3,
-                    })
+                    response = client.post(
+                        "/query/compare",
+                        json={
+                            "workspace_id": str(uuid4()),
+                            "question": "Test query for logging",
+                            "top_k": 3,
+                        },
+                    )
 
                     assert response.status_code == 200
 
             # Find the query_compare log entry and parse JSON
-            compare_logs = [r for r in caplog.records if "query_compare" in r.getMessage()]
+            compare_logs = [
+                r for r in caplog.records if "query_compare" in r.getMessage()
+            ]
             assert len(compare_logs) >= 1, "Expected query_compare log entry"
 
             # Parse the JSON log message

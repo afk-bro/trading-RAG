@@ -20,7 +20,23 @@ from slowapi.util import get_remote_address
 
 from app import __version__
 from app.config import get_settings
-from app.routers import health, ingest, jobs, kb, kb_trials, metrics, pdf, query, reembed, youtube, backtests, forward_metrics, intents, execution, testing
+from app.routers import (
+    health,
+    ingest,
+    jobs,
+    kb,
+    kb_trials,
+    metrics,
+    pdf,
+    query,
+    reembed,
+    youtube,
+    backtests,
+    forward_metrics,
+    intents,
+    execution,
+    testing,
+)
 from app.admin import router as admin_router, set_db_pool as set_admin_db_pool
 
 # Configure structured logging
@@ -192,6 +208,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize asyncpg connection pool for Supabase
     try:
         import re
+
         postgres_url = None
 
         # Option 1: Direct DATABASE_URL takes precedence
@@ -208,7 +225,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     project_id = match.group(1)
                     # Supabase Postgres connection format with actual DB password
                     postgres_url = f"postgresql://postgres:{settings.supabase_db_password}@db.{project_id}.supabase.co:5432/postgres"
-                    logger.info("Constructed database URL from Supabase project settings")
+                    logger.info(
+                        "Constructed database URL from Supabase project settings"
+                    )
         # Option 3: If supabase_url is already a postgres URL, use it directly
         elif settings.supabase_url.startswith("postgresql://"):
             postgres_url = settings.supabase_url
@@ -230,7 +249,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 postgres_url,
                 min_size=0,  # Don't require any connections at startup
                 max_size=settings.db_pool_max_size,
-                ssl='require',
+                ssl="require",
                 timeout=10,  # Short connection timeout to avoid blocking startup
                 command_timeout=30,  # Query timeout
                 statement_cache_size=0,  # Disable for pgbouncer transaction mode
@@ -256,6 +275,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     except Exception as e:
         import traceback
+
         logger.error(
             "Failed to initialize database pool - endpoints requiring DB will be unavailable",
             error=str(e),
@@ -412,6 +432,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Add CORS middleware
 # In production, set CORS_ORIGINS to comma-separated list of allowed origins
 import os
+
 cors_origins_str = os.environ.get("CORS_ORIGINS", "*")
 if cors_origins_str == "*":
     # Development mode - allow all (will log warning)
@@ -448,7 +469,9 @@ async def security_headers_middleware(request: Request, call_next):
 
     # Add HSTS if behind TLS (check X-Forwarded-Proto)
     if request.headers.get("X-Forwarded-Proto") == "https":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
 
     return response
 

@@ -178,7 +178,9 @@ async def fetch_transcript(
                     transcript = transcript_list.find_generated_transcript(["en"])
                 except Exception:
                     # Try any available transcript
-                    transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])
+                    transcript = transcript_list.find_transcript(
+                        ["en", "en-US", "en-GB"]
+                    )
 
             # Fetch the transcript data
             transcript_data = transcript.fetch()
@@ -496,6 +498,7 @@ async def ingest_youtube(
 
     # Convert Chunk dataclass to ChunkInput for pre_chunks parameter
     from app.schemas import ChunkInput
+
     pre_chunks = [
         ChunkInput(
             content=chunk.content,

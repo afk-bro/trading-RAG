@@ -265,23 +265,25 @@ async def ingest_pipeline(
                 else:
                     locator_label = f"p. {chunk.page_start}"
 
-        chunk_records.append({
-            "content": chunk.content,
-            "chunk_index": chunk.chunk_index,
-            "token_count": chunk.token_count,
-            "content_hash": compute_content_hash(chunk.content),
-            "time_start_secs": chunk.time_start_secs,
-            "time_end_secs": chunk.time_end_secs,
-            "page_start": chunk.page_start,
-            "page_end": chunk.page_end,
-            "section": chunk.section,
-            "locator_label": locator_label,
-            "symbols": metadata.symbols,
-            "entities": metadata.entities,
-            "topics": metadata.topics,
-            "quality_score": metadata.quality_score,
-            "speaker": metadata.speaker,
-        })
+        chunk_records.append(
+            {
+                "content": chunk.content,
+                "chunk_index": chunk.chunk_index,
+                "token_count": chunk.token_count,
+                "content_hash": compute_content_hash(chunk.content),
+                "time_start_secs": chunk.time_start_secs,
+                "time_end_secs": chunk.time_end_secs,
+                "page_start": chunk.page_start,
+                "page_end": chunk.page_end,
+                "section": chunk.section,
+                "locator_label": locator_label,
+                "symbols": metadata.symbols,
+                "entities": metadata.entities,
+                "topics": metadata.topics,
+                "quality_score": metadata.quality_score,
+                "speaker": metadata.speaker,
+            }
+        )
 
     # Store chunks in database
     db_write_start = time.perf_counter()
@@ -333,23 +335,29 @@ async def ingest_pipeline(
 
     # Prepare Qdrant points
     qdrant_points = []
-    for i, (chunk_id, chunk_record, embedding) in enumerate(zip(chunk_ids, chunk_records, embeddings)):
-        qdrant_points.append({
-            "id": chunk_id,
-            "vector": embedding,
-            "payload": {
-                "workspace_id": str(workspace_id),
-                "doc_id": str(doc_id),
-                "source_type": source_type.value,
-                "author": author,
-                "channel": author,  # Same as author for consistency in queries
-                "symbols": chunk_record["symbols"],
-                "topics": chunk_record["topics"],
-                "entities": chunk_record["entities"],
-                "time_start_secs": chunk_record.get("time_start_secs"),
-                "published_at": int(published_at.timestamp()) if published_at else None,
-            },
-        })
+    for i, (chunk_id, chunk_record, embedding) in enumerate(
+        zip(chunk_ids, chunk_records, embeddings)
+    ):
+        qdrant_points.append(
+            {
+                "id": chunk_id,
+                "vector": embedding,
+                "payload": {
+                    "workspace_id": str(workspace_id),
+                    "doc_id": str(doc_id),
+                    "source_type": source_type.value,
+                    "author": author,
+                    "channel": author,  # Same as author for consistency in queries
+                    "symbols": chunk_record["symbols"],
+                    "topics": chunk_record["topics"],
+                    "entities": chunk_record["entities"],
+                    "time_start_secs": chunk_record.get("time_start_secs"),
+                    "published_at": (
+                        int(published_at.timestamp()) if published_at else None
+                    ),
+                },
+            }
+        )
 
     # Store in Qdrant
     try:
@@ -466,7 +474,9 @@ async def ingest_document(
     )
 
     # Determine canonical URL
-    canonical_url = str(request.source.url) if request.source.url else request.idempotency_key
+    canonical_url = (
+        str(request.source.url) if request.source.url else request.idempotency_key
+    )
     if not canonical_url:
         canonical_url = compute_content_hash(request.content)[:32]
 

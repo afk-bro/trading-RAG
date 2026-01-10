@@ -182,7 +182,9 @@ class TestRetryLogic:
             if call_count < 2:
                 response = MagicMock()
                 response.status_code = 500
-                raise httpx.HTTPStatusError("error", request=MagicMock(), response=response)
+                raise httpx.HTTPStatusError(
+                    "error", request=MagicMock(), response=response
+                )
             return [[0.1] * 768] * len(texts)
 
         with patch.object(adapter, "_embed_batch_raw", side_effect=mock_embed):
@@ -204,12 +206,16 @@ class TestRetryLogic:
                 # Full batch fails
                 response = MagicMock()
                 response.status_code = 400
-                raise httpx.HTTPStatusError("error", request=MagicMock(), response=response)
+                raise httpx.HTTPStatusError(
+                    "error", request=MagicMock(), response=response
+                )
             if "bad" in batch:
                 # Batch with bad item fails
                 response = MagicMock()
                 response.status_code = 400
-                raise httpx.HTTPStatusError("error", request=MagicMock(), response=response)
+                raise httpx.HTTPStatusError(
+                    "error", request=MagicMock(), response=response
+                )
             return [[0.1] * 768] * len(batch)
 
         with patch.object(adapter, "_embed_batch_raw", side_effect=mock_embed):
@@ -221,6 +227,7 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_skip_failures_mode(self, adapter):
         """Should skip failures when skip_failures=True."""
+
         async def mock_embed(texts):
             raise httpx.TimeoutException("timeout")
 
@@ -234,6 +241,7 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_raise_on_failure_mode(self, adapter):
         """Should raise when skip_failures=False."""
+
         async def mock_embed(texts):
             raise httpx.TimeoutException("timeout")
 

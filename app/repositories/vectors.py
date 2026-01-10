@@ -225,7 +225,9 @@ class VectorRepository:
         if filters:
             filter_conditions.extend(self._build_filter_conditions(filters))
 
-        qdrant_filter = qmodels.Filter(must=filter_conditions) if filter_conditions else None
+        qdrant_filter = (
+            qmodels.Filter(must=filter_conditions) if filter_conditions else None
+        )
 
         results = await self.client.search(
             collection_name=self.collection,
@@ -256,7 +258,9 @@ class VectorRepository:
             conditions.append(
                 qmodels.FieldCondition(
                     key="source_type",
-                    match=qmodels.MatchAny(any=[st.value for st in filters.source_types]),
+                    match=qmodels.MatchAny(
+                        any=[st.value for st in filters.source_types]
+                    ),
                 )
             )
 

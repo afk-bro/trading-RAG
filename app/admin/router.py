@@ -21,11 +21,18 @@ def _json_serializable(obj: Any) -> Any:
     elif isinstance(obj, UUID):
         return str(obj)
     return obj
+
+
 import csv
 import io
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings, get_settings
@@ -123,6 +130,7 @@ async def admin_entities(
     if type:
         try:
             from app.services.kb_types import EntityType
+
             entity_type = EntityType(type)
         except ValueError:
             pass
@@ -138,6 +146,7 @@ async def admin_entities(
 
     # Parse aliases for display
     import json
+
     for entity in entities:
         if isinstance(entity.get("aliases"), str):
             try:
@@ -298,7 +307,9 @@ async def admin_entity_detail(
             "has_next": offset + limit < total_claims,
             "prev_offset": max(0, offset - limit),
             "next_offset": offset + limit,
-            "strategy_spec": json.dumps(strategy_spec, indent=2) if strategy_spec else None,
+            "strategy_spec": (
+                json.dumps(strategy_spec, indent=2) if strategy_spec else None
+            ),
             "strategy_spec_status": strategy_spec_status,
             "strategy_spec_version": strategy_spec_version,
             "strategy_spec_approved_by": strategy_spec_approved_by,
@@ -440,7 +451,9 @@ async def admin_tunes_list(
     status: Optional[str] = Query(None, alias="status", description="Filter by status"),
     valid_only: bool = Query(False, description="Only show valid tunes"),
     objective_type: Optional[str] = Query(None, description="Filter by objective type"),
-    oos_enabled: Optional[str] = Query(None, description="Filter by OOS: 'true', 'false', or empty"),
+    oos_enabled: Optional[str] = Query(
+        None, description="Filter by OOS: 'true', 'false', or empty"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
@@ -529,11 +542,17 @@ async def admin_tunes_list(
 async def admin_leaderboard(
     request: Request,
     workspace_id: UUID = Query(..., description="Workspace UUID"),
-    valid_only: bool = Query(True, description="Only tunes with valid results (default True)"),
+    valid_only: bool = Query(
+        True, description="Only tunes with valid results (default True)"
+    ),
     include_canceled: bool = Query(False, description="Include canceled tunes"),
     objective_type: Optional[str] = Query(None, description="Filter by objective type"),
-    oos_enabled: Optional[str] = Query(None, description="Filter by OOS: 'true' or 'false'"),
-    format: Optional[str] = Query(None, description="Output format: 'csv' for download"),
+    oos_enabled: Optional[str] = Query(
+        None, description="Filter by OOS: 'true' or 'false'"
+    ),
+    format: Optional[str] = Query(
+        None, description="Output format: 'csv' for download"
+    ),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
@@ -585,12 +604,14 @@ async def admin_leaderboard(
 
         # Parse best_metrics_oos to object for template
         if e.get("best_metrics_oos"):
+
             class MetricsObj:
                 def __init__(self, d):
                     self.return_pct = d.get("return_pct")
                     self.sharpe = d.get("sharpe")
                     self.max_drawdown_pct = d.get("max_drawdown_pct")
                     self.trades = d.get("trades")
+
             e["best_metrics_oos"] = MetricsObj(e["best_metrics_oos"])
 
         enriched_entries.append(e)
@@ -730,15 +751,14 @@ def _generate_leaderboard_csv(
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
 # =============================================================================
 # Tune Compare helpers
 # =============================================================================
+
 
 def _normalize_compare_value(value: Any, fmt: str = "default") -> str:
     """Normalize value for display and comparison."""
@@ -842,7 +862,9 @@ async def admin_tune_compare(
     request: Request,
     tune_id: list[UUID] = Query(..., description="Tune IDs to compare (2+)"),
     workspace_id: Optional[UUID] = Query(None, description="Workspace UUID (optional)"),
-    format: Optional[str] = Query(None, description="Output format: 'json' for download"),
+    format: Optional[str] = Query(
+        None, description="Output format: 'json' for download"
+    ),
     _: bool = Depends(require_admin_token),
 ):
     """Compare two or more parameter tuning sessions side-by-side."""
@@ -889,60 +911,99 @@ async def admin_tune_compare(
     # --- Section: Identity ---
     rows.append({"section": "Identity", "is_header": True})
 
-    rows.append({
-        "label": "Strategy",
-        "values": [t.get("strategy_name") or t["strategy_entity_id"][:8] + "..." for t in tunes],
-        "fmt": "default",
-    })
-    rows.append({
-        "label": "Status",
-        "values": [t["status"] for t in tunes],
-        "fmt": "default",
-    })
-    rows.append({
-        "label": "Objective Type",
-        "values": [t.get("objective_type") or "sharpe" for t in tunes],
-        "fmt": "default",
-    })
+    rows.append(
+        {
+            "label": "Strategy",
+            "values": [
+                t.get("strategy_name") or t["strategy_entity_id"][:8] + "..."
+                for t in tunes
+            ],
+            "fmt": "default",
+        }
+    )
+    rows.append(
+        {
+            "label": "Status",
+            "values": [t["status"] for t in tunes],
+            "fmt": "default",
+        }
+    )
+    rows.append(
+        {
+            "label": "Objective Type",
+            "values": [t.get("objective_type") or "sharpe" for t in tunes],
+            "fmt": "default",
+        }
+    )
 
     # Extract dd_lambda from objective_params
     dd_lambdas = []
     for t in tunes:
         params = t.get("objective_params") or {}
         dd_lambdas.append(params.get("dd_lambda"))
-    rows.append({
-        "label": "λ (dd_lambda)",
-        "values": [_normalize_compare_value(v, "float2") for v in dd_lambdas],
-        "raw_values": dd_lambdas,
-        "fmt": "float2",
-    })
+    rows.append(
+        {
+            "label": "λ (dd_lambda)",
+            "values": [_normalize_compare_value(v, "float2") for v in dd_lambdas],
+            "raw_values": dd_lambdas,
+            "fmt": "float2",
+        }
+    )
 
-    rows.append({
-        "label": "OOS Ratio",
-        "values": [_normalize_compare_value(t.get("oos_ratio"), "pct_ratio") for t in tunes],
-        "raw_values": [t.get("oos_ratio") for t in tunes],
-        "fmt": "pct_ratio",
-    })
+    rows.append(
+        {
+            "label": "OOS Ratio",
+            "values": [
+                _normalize_compare_value(t.get("oos_ratio"), "pct_ratio") for t in tunes
+            ],
+            "raw_values": [t.get("oos_ratio") for t in tunes],
+            "fmt": "pct_ratio",
+        }
+    )
 
     # Gates
-    rows.append({
-        "label": "Gates: Max DD",
-        "values": [_normalize_compare_value((t.get("gates") or {}).get("max_drawdown_pct"), "int") + "%"
-                   if (t.get("gates") or {}).get("max_drawdown_pct") is not None else "—" for t in tunes],
-        "raw_values": [(t.get("gates") or {}).get("max_drawdown_pct") for t in tunes],
-        "fmt": "default",
-    })
-    rows.append({
-        "label": "Gates: Min Trades",
-        "values": [_normalize_compare_value((t.get("gates") or {}).get("min_trades"), "int") for t in tunes],
-        "raw_values": [(t.get("gates") or {}).get("min_trades") for t in tunes],
-        "fmt": "int",
-    })
-    rows.append({
-        "label": "Gates: Evaluated On",
-        "values": [(t.get("gates") or {}).get("evaluated_on") or "—" for t in tunes],
-        "fmt": "default",
-    })
+    rows.append(
+        {
+            "label": "Gates: Max DD",
+            "values": [
+                (
+                    _normalize_compare_value(
+                        (t.get("gates") or {}).get("max_drawdown_pct"), "int"
+                    )
+                    + "%"
+                    if (t.get("gates") or {}).get("max_drawdown_pct") is not None
+                    else "—"
+                )
+                for t in tunes
+            ],
+            "raw_values": [
+                (t.get("gates") or {}).get("max_drawdown_pct") for t in tunes
+            ],
+            "fmt": "default",
+        }
+    )
+    rows.append(
+        {
+            "label": "Gates: Min Trades",
+            "values": [
+                _normalize_compare_value(
+                    (t.get("gates") or {}).get("min_trades"), "int"
+                )
+                for t in tunes
+            ],
+            "raw_values": [(t.get("gates") or {}).get("min_trades") for t in tunes],
+            "fmt": "int",
+        }
+    )
+    rows.append(
+        {
+            "label": "Gates: Evaluated On",
+            "values": [
+                (t.get("gates") or {}).get("evaluated_on") or "—" for t in tunes
+            ],
+            "fmt": "default",
+        }
+    )
 
     # --- Section: Winning Metrics ---
     rows.append({"section": "Winning Metrics", "is_header": True})
@@ -951,45 +1012,79 @@ async def admin_tune_compare(
     for t in tunes:
         t["_metrics"] = t.get("best_metrics_oos") or {}
 
-    rows.append({
-        "label": "Objective Score",
-        "values": [_normalize_compare_value(t.get("best_objective_score") or t.get("score_oos") or t.get("best_score"), "float4") for t in tunes],
-        "fmt": "float4",
-    })
-    rows.append({
-        "label": "Return %",
-        "values": [_normalize_compare_value(t["_metrics"].get("return_pct"), "pct") for t in tunes],
-        "raw_values": [t["_metrics"].get("return_pct") for t in tunes],
-        "fmt": "pct",
-    })
-    rows.append({
-        "label": "Sharpe",
-        "values": [_normalize_compare_value(t["_metrics"].get("sharpe"), "float2") for t in tunes],
-        "raw_values": [t["_metrics"].get("sharpe") for t in tunes],
-        "fmt": "float2",
-    })
-    rows.append({
-        "label": "Max DD %",
-        "values": [_normalize_compare_value(t["_metrics"].get("max_drawdown_pct"), "pct_neg") for t in tunes],
-        "raw_values": [t["_metrics"].get("max_drawdown_pct") for t in tunes],
-        "fmt": "pct_neg",
-    })
-    rows.append({
-        "label": "Trades",
-        "values": [_normalize_compare_value(t["_metrics"].get("trades"), "int") for t in tunes],
-        "raw_values": [t["_metrics"].get("trades") for t in tunes],
-        "fmt": "int",
-    })
+    rows.append(
+        {
+            "label": "Objective Score",
+            "values": [
+                _normalize_compare_value(
+                    t.get("best_objective_score")
+                    or t.get("score_oos")
+                    or t.get("best_score"),
+                    "float4",
+                )
+                for t in tunes
+            ],
+            "fmt": "float4",
+        }
+    )
+    rows.append(
+        {
+            "label": "Return %",
+            "values": [
+                _normalize_compare_value(t["_metrics"].get("return_pct"), "pct")
+                for t in tunes
+            ],
+            "raw_values": [t["_metrics"].get("return_pct") for t in tunes],
+            "fmt": "pct",
+        }
+    )
+    rows.append(
+        {
+            "label": "Sharpe",
+            "values": [
+                _normalize_compare_value(t["_metrics"].get("sharpe"), "float2")
+                for t in tunes
+            ],
+            "raw_values": [t["_metrics"].get("sharpe") for t in tunes],
+            "fmt": "float2",
+        }
+    )
+    rows.append(
+        {
+            "label": "Max DD %",
+            "values": [
+                _normalize_compare_value(
+                    t["_metrics"].get("max_drawdown_pct"), "pct_neg"
+                )
+                for t in tunes
+            ],
+            "raw_values": [t["_metrics"].get("max_drawdown_pct") for t in tunes],
+            "fmt": "pct_neg",
+        }
+    )
+    rows.append(
+        {
+            "label": "Trades",
+            "values": [
+                _normalize_compare_value(t["_metrics"].get("trades"), "int")
+                for t in tunes
+            ],
+            "raw_values": [t["_metrics"].get("trades") for t in tunes],
+            "fmt": "int",
+        }
+    )
 
     # Overfit gap with special styling
     overfit_gaps = [t.get("overfit_gap") for t in tunes]
-    rows.append({
-        "label": "Overfit Gap",
-        "values": [_normalize_compare_value(g, "float4") for g in overfit_gaps],
-        "raw_values": overfit_gaps,
-        "classes": [_overfit_class(g) for g in overfit_gaps],
-        "fmt": "float4",
-    })
+    rows.append(
+        {
+            "label": "Overfit Gap",
+            "values": [_normalize_compare_value(g, "float4") for g in overfit_gaps],
+            "raw_values": overfit_gaps,
+            "classes": [_overfit_class(g) for g in overfit_gaps],
+            "fmt": "float4",
+        }
+    )
 
     # --- Section: Best Params ---
     rows.append({"section": "Best Params", "is_header": True})
@@ -1011,12 +1106,14 @@ async def admin_tune_compare(
                 param_values.append(f"{val:.4g}")
             else:
                 param_values.append(str(val))
-        rows.append({
-            "label": key,
-            "values": param_values,
-            "is_param": True,
-            "fmt": "default",
-        })
+        rows.append(
+            {
+                "label": key,
+                "values": param_values,
+                "is_param": True,
+                "fmt": "default",
+            }
+        )
 
     # Mark differing rows
     for row in rows:
@@ -1035,7 +1132,9 @@ async def admin_tune_compare(
             "tunes": tunes,
             "rows": rows,
             "tune_ids": [str(tid) for tid in tune_id],
-            "workspace_id": str(workspace_id) if workspace_id else tunes[0]["workspace_id"],
+            "workspace_id": (
+                str(workspace_id) if workspace_id else tunes[0]["workspace_id"]
+            ),
         },
     )
 
@@ -1077,7 +1176,9 @@ def _generate_compare_json(tunes: list[dict], rows: list[dict]) -> JSONResponse:
                 "metrics_oos": metrics_oos,
                 "params": tune.get("best_params"),
             },
-            "created_at": tune.get("created_at").isoformat() if tune.get("created_at") else None,
+            "created_at": (
+                tune.get("created_at").isoformat() if tune.get("created_at") else None
+            ),
         }
         tune_exports.append(tune_export)
 
@@ -1106,14 +1207,14 @@ def _generate_compare_json(tunes: list[dict], rows: list[dict]) -> JSONResponse:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
     # Build filename with tune ID prefixes (e.g., compare_abc123_def456_20240115_1430.json)
-    tune_id_parts = [t.get("id", "")[:8] for t in tunes[:3]]  # First 3 tune IDs, 8 chars each
+    tune_id_parts = [
+        t.get("id", "")[:8] for t in tunes[:3]
+    ]  # First 3 tune IDs, 8 chars each
     filename = f"compare_{'_'.join(tune_id_parts)}_{timestamp}.json"
 
     return JSONResponse(
         content=_json_serializable(export_data),
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -1199,8 +1300,7 @@ async def admin_tune_detail(
                 tune_id,
             )
             skip_reasons_summary = [
-                {"reason": row["skip_reason"], "count": row["count"]}
-                for row in rows
+                {"reason": row["skip_reason"], "count": row["count"]} for row in rows
             ]
 
     return templates.TemplateResponse(
@@ -1310,8 +1410,12 @@ async def eval_summary(
         "total": summary.total,
         "impacted_count": summary.impacted_count,
         "impact_rate": round(summary.impact_rate, 4),
-        "p50_rerank_ms": round(summary.p50_rerank_ms, 1) if summary.p50_rerank_ms else None,
-        "p95_rerank_ms": round(summary.p95_rerank_ms, 1) if summary.p95_rerank_ms else None,
+        "p50_rerank_ms": (
+            round(summary.p50_rerank_ms, 1) if summary.p50_rerank_ms else None
+        ),
+        "p95_rerank_ms": (
+            round(summary.p95_rerank_ms, 1) if summary.p95_rerank_ms else None
+        ),
         "fallback_count": summary.fallback_count,
         "fallback_rate": round(summary.fallback_rate, 4),
         "timeout_count": summary.timeout_count,
@@ -1386,7 +1490,9 @@ async def eval_most_impacted(
                 "question_preview": q.question_preview,
                 "jaccard": round(q.jaccard, 4),
                 "spearman": round(q.spearman, 4) if q.spearman is not None else None,
-                "rank_delta_mean": round(q.rank_delta_mean, 2) if q.rank_delta_mean else None,
+                "rank_delta_mean": (
+                    round(q.rank_delta_mean, 2) if q.rank_delta_mean else None
+                ),
                 "rank_delta_max": q.rank_delta_max,
                 "vector_top5_ids": q.vector_top5_ids,
                 "reranked_top5_ids": q.reranked_top5_ids,
@@ -1437,8 +1543,12 @@ def _get_kb_trial_repo():
 async def kb_trials_stats(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
-    since: Optional[datetime] = Query(None, description="Only count trials after this time"),
-    window_days: Optional[int] = Query(None, ge=1, le=365, description="Time window in days (7, 30, etc.)"),
+    since: Optional[datetime] = Query(
+        None, description="Only count trials after this time"
+    ),
+    window_days: Optional[int] = Query(
+        None, ge=1, le=365, description="Time window in days (7, 30, etc.)"
+    ),
     _: None = Depends(require_admin_token),
 ):
     """
@@ -1482,65 +1592,123 @@ async def kb_trials_stats(
             params = base_params + time_params
 
             # Total trials
-            total = await conn.fetchval(f"""
+            total = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE 1=1 {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
             if total == 0:
                 return {
-                    "total": 0, "with_oos": 0, "valid": 0, "stale": 0,
-                    "with_regime_is": 0, "with_regime_oos": 0,
-                    "with_objective_score": 0, "with_sharpe_oos": 0,
+                    "total": 0,
+                    "with_oos": 0,
+                    "valid": 0,
+                    "stale": 0,
+                    "with_regime_is": 0,
+                    "with_regime_oos": 0,
+                    "with_objective_score": 0,
+                    "with_sharpe_oos": 0,
                 }
 
             # Core metrics
-            with_oos = await conn.fetchval(f"""
+            with_oos = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE t.has_oos_metrics = true {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
-            valid = await conn.fetchval(f"""
+            valid = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE t.is_valid = true {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
             # Stale count
             try:
-                stale = await conn.fetchval(f"""
+                stale = (
+                    await conn.fetchval(
+                        f"""
                     SELECT COUNT(*) FROM kb_trial_vectors t
                     WHERE t.needs_reembed = true {workspace_cond} {time_filter}
-                """, *params) or 0
+                """,
+                        *params,
+                    )
+                    or 0
+                )
             except Exception:
                 stale = 0
 
             # Coverage metrics
-            with_regime_is = await conn.fetchval(f"""
+            with_regime_is = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE t.regime_snapshot_is IS NOT NULL {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
-            with_regime_oos = await conn.fetchval(f"""
+            with_regime_oos = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE t.regime_snapshot_oos IS NOT NULL
                   AND t.has_oos_metrics = true {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
-            with_objective = await conn.fetchval(f"""
+            with_objective = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE t.objective_score IS NOT NULL {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
-            with_sharpe_oos = await conn.fetchval(f"""
+            with_sharpe_oos = (
+                await conn.fetchval(
+                    f"""
                 SELECT COUNT(*) FROM kb_trial_vectors t
                 WHERE t.sharpe_oos IS NOT NULL
                   AND t.has_oos_metrics = true {workspace_cond} {time_filter}
-            """, *params) or 0
+            """,
+                    *params,
+                )
+                or 0
+            )
 
             return {
-                "total": total, "with_oos": with_oos, "valid": valid, "stale": stale,
-                "with_regime_is": with_regime_is, "with_regime_oos": with_regime_oos,
-                "with_objective_score": with_objective, "with_sharpe_oos": with_sharpe_oos,
+                "total": total,
+                "with_oos": with_oos,
+                "valid": valid,
+                "stale": stale,
+                "with_regime_is": with_regime_is,
+                "with_regime_oos": with_regime_oos,
+                "with_objective_score": with_objective,
+                "with_sharpe_oos": with_sharpe_oos,
             }
 
         # Get current stats
@@ -1555,7 +1723,9 @@ async def kb_trials_stats(
         deltas = None
         if prev_since and window_days:
             param_idx = len(base_params) + 1
-            time_filter = f"AND t.created_at >= ${param_idx} AND t.created_at < ${param_idx + 1}"
+            time_filter = (
+                f"AND t.created_at >= ${param_idx} AND t.created_at < ${param_idx + 1}"
+            )
             previous = await get_stats(time_filter, [prev_since, since])
 
             # Calculate deltas
@@ -1564,9 +1734,17 @@ async def kb_trials_stats(
                 "valid_added": current["valid"] - previous["valid"],
                 "stale_added": current["stale"] - previous["stale"],
                 "pct_valid_delta": round(
-                    (current["valid"] / current["total"] * 100 if current["total"] > 0 else 0) -
-                    (previous["valid"] / previous["total"] * 100 if previous["total"] > 0 else 0),
-                    1
+                    (
+                        current["valid"] / current["total"] * 100
+                        if current["total"] > 0
+                        else 0
+                    )
+                    - (
+                        previous["valid"] / previous["total"] * 100
+                        if previous["total"] > 0
+                        else 0
+                    ),
+                    1,
                 ),
                 "window_days": window_days,
                 "prev_window_start": prev_since.isoformat(),
@@ -1574,10 +1752,13 @@ async def kb_trials_stats(
             }
 
         # Last ingestion timestamp
-        last_ts = await conn.fetchval(f"""
+        last_ts = await conn.fetchval(
+            f"""
             SELECT MAX(t.created_at) FROM kb_trial_vectors t
             WHERE 1=1 {workspace_cond}
-        """, *base_params)
+        """,
+            *base_params,
+        )
 
         # Workspace config for embedding info
         embed_model = "nomic-embed-text"
@@ -1585,9 +1766,12 @@ async def kb_trials_stats(
         collection_name = "trading_kb_trials__nomic-embed-text__768"
 
         if workspace_id:
-            config_row = await conn.fetchrow("""
+            config_row = await conn.fetchrow(
+                """
                 SELECT config FROM workspaces WHERE id = $1
-            """, workspace_id)
+            """,
+                workspace_id,
+            )
             if config_row and config_row["config"]:
                 config = config_row["config"]
                 if isinstance(config, str):
@@ -1611,7 +1795,6 @@ async def kb_trials_stats(
         "trials_valid": current["valid"],
         "pct_with_oos": pct(oos_count, total),
         "pct_valid": pct(current["valid"], total),
-
         # Coverage metrics (explains why recommend might fail)
         "coverage": {
             "pct_with_regime_is": pct(current["with_regime_is"], total),
@@ -1619,7 +1802,6 @@ async def kb_trials_stats(
             "pct_with_objective_score": pct(current["with_objective_score"], total),
             "pct_with_sharpe_oos": pct(current["with_sharpe_oos"], oos_count),
         },
-
         # Embedding config
         "embedding_model": embed_model,
         "embedding_dim": embed_dim,
@@ -1785,7 +1967,9 @@ async def kb_collections(
                 # Vector config
                 vec_cfg = info.config.params.vectors
                 vector_size = vec_cfg.size if vec_cfg else None
-                distance = vec_cfg.distance.value if vec_cfg and vec_cfg.distance else None
+                distance = (
+                    vec_cfg.distance.value if vec_cfg and vec_cfg.distance else None
+                )
 
                 # Payload indexes count
                 payload_indexes = 0
@@ -1795,25 +1979,37 @@ async def kb_collections(
                 # Optimizer status
                 optimizer_status = "unknown"
                 if info.optimizer_status:
-                    optimizer_status = info.optimizer_status.status.value if hasattr(info.optimizer_status, 'status') else str(info.optimizer_status)
+                    optimizer_status = (
+                        info.optimizer_status.status.value
+                        if hasattr(info.optimizer_status, "status")
+                        else str(info.optimizer_status)
+                    )
 
-                result.append({
-                    "name": coll.name,
-                    "points_count": info.points_count,
-                    "vectors_count": info.vectors_count,
-                    "status": info.status.value if info.status else "unknown",
-                    "vector_size": vector_size or embedding_dim,
-                    "distance": distance,
-                    "embedding_model_id": embedding_model,
-                    "payload_indexes_count": payload_indexes,
-                    "optimizer_status": optimizer_status,
-                    "segments_count": len(info.segments or []) if hasattr(info, 'segments') else None,
-                })
+                result.append(
+                    {
+                        "name": coll.name,
+                        "points_count": info.points_count,
+                        "vectors_count": info.vectors_count,
+                        "status": info.status.value if info.status else "unknown",
+                        "vector_size": vector_size or embedding_dim,
+                        "distance": distance,
+                        "embedding_model_id": embedding_model,
+                        "payload_indexes_count": payload_indexes,
+                        "optimizer_status": optimizer_status,
+                        "segments_count": (
+                            len(info.segments or [])
+                            if hasattr(info, "segments")
+                            else None
+                        ),
+                    }
+                )
             except Exception as e:
-                result.append({
-                    "name": coll.name,
-                    "error": str(e),
-                })
+                result.append(
+                    {
+                        "name": coll.name,
+                        "error": str(e),
+                    }
+                )
 
         await client.close()
 
@@ -1891,7 +2087,9 @@ async def kb_top_warnings(
 async def kb_trials_sample(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
-    warning: Optional[str] = Query(None, description="Filter by warning type (e.g., high_overfit)"),
+    warning: Optional[str] = Query(
+        None, description="Filter by warning type (e.g., high_overfit)"
+    ),
     is_valid: Optional[bool] = Query(None, description="Filter by validity"),
     has_oos: Optional[bool] = Query(None, description="Filter by OOS availability"),
     strategy_name: Optional[str] = Query(None, description="Filter by strategy"),
@@ -1985,7 +2183,9 @@ async def kb_trials_sample(
                 {
                     "id": str(row["id"]),
                     "point_id": row["point_id"],
-                    "tune_run_id": str(row["tune_run_id"]) if row["tune_run_id"] else None,
+                    "tune_run_id": (
+                        str(row["tune_run_id"]) if row["tune_run_id"] else None
+                    ),
                     "strategy_name": row["strategy_name"],
                     "objective_type": row["objective_type"],
                     "objective_score": row["objective_score"],
@@ -2003,7 +2203,9 @@ async def kb_trials_sample(
                     "regime_tags_is": row["regime_tags_is"],
                     "regime_tags_oos": row["regime_tags_oos"],
                     "warnings": row["warnings"],
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "created_at": (
+                        row["created_at"].isoformat() if row["created_at"] else None
+                    ),
                 }
                 for row in rows
             ]
@@ -2065,9 +2267,21 @@ async def ops_snapshot(
     readiness = {
         "ready": all(c.status == "ok" for c in [db_check, qdrant_check, embed_check]),
         "checks": {
-            "database": {"status": db_check.status, "latency_ms": db_check.latency_ms, "error": db_check.error},
-            "qdrant_collection": {"status": qdrant_check.status, "latency_ms": qdrant_check.latency_ms, "error": qdrant_check.error},
-            "embed_service": {"status": embed_check.status, "latency_ms": embed_check.latency_ms, "error": embed_check.error},
+            "database": {
+                "status": db_check.status,
+                "latency_ms": db_check.latency_ms,
+                "error": db_check.error,
+            },
+            "qdrant_collection": {
+                "status": qdrant_check.status,
+                "latency_ms": qdrant_check.latency_ms,
+                "error": qdrant_check.error,
+            },
+            "embed_service": {
+                "status": embed_check.status,
+                "latency_ms": embed_check.latency_ms,
+                "error": embed_check.error,
+            },
         },
     }
 
@@ -2183,9 +2397,12 @@ async def ops_snapshot(
         if smoke_path.exists():
             try:
                 import json
+
                 with open(smoke_path) as f:
                     smoke_data = json.load(f)
-                smoke_run["last_run"] = smoke_data.get("timestamp") or smoke_data.get("run_at")
+                smoke_run["last_run"] = smoke_data.get("timestamp") or smoke_data.get(
+                    "run_at"
+                )
                 smoke_run["status"] = smoke_data.get("status", "unknown")
                 smoke_run["results_available"] = True
                 break
@@ -2268,6 +2485,7 @@ async def admin_trade_events(
 
     # Build filters
     from datetime import timedelta
+
     since = datetime.utcnow() - timedelta(hours=hours)
 
     event_types_filter = None
@@ -2292,17 +2510,21 @@ async def admin_trade_events(
     # Convert events to dicts for template
     events_data = []
     for event in events:
-        events_data.append({
-            "id": str(event.id),
-            "correlation_id": event.correlation_id,
-            "event_type": event.event_type.value,
-            "created_at": event.created_at,
-            "strategy_entity_id": str(event.strategy_entity_id) if event.strategy_entity_id else None,
-            "symbol": event.symbol,
-            "timeframe": event.timeframe,
-            "intent_id": str(event.intent_id) if event.intent_id else None,
-            "payload": event.payload,
-        })
+        events_data.append(
+            {
+                "id": str(event.id),
+                "correlation_id": event.correlation_id,
+                "event_type": event.event_type.value,
+                "created_at": event.created_at,
+                "strategy_entity_id": (
+                    str(event.strategy_entity_id) if event.strategy_entity_id else None
+                ),
+                "symbol": event.symbol,
+                "timeframe": event.timeframe,
+                "intent_id": str(event.intent_id) if event.intent_id else None,
+                "payload": event.payload,
+            }
+        )
 
     # Get event type counts for sidebar
     type_counts = await repo.count_by_type(workspace_id, since_hours=hours)
@@ -2357,7 +2579,9 @@ async def admin_trade_event_detail(
         "workspace_id": str(event.workspace_id),
         "event_type": event.event_type.value,
         "created_at": event.created_at,
-        "strategy_entity_id": str(event.strategy_entity_id) if event.strategy_entity_id else None,
+        "strategy_entity_id": (
+            str(event.strategy_entity_id) if event.strategy_entity_id else None
+        ),
         "symbol": event.symbol,
         "timeframe": event.timeframe,
         "intent_id": str(event.intent_id) if event.intent_id else None,
@@ -2369,12 +2593,14 @@ async def admin_trade_event_detail(
 
     related_data = []
     for rel in related_events:
-        related_data.append({
-            "id": str(rel.id),
-            "event_type": rel.event_type.value,
-            "created_at": rel.created_at,
-            "is_current": rel.id == event.id,
-        })
+        related_data.append(
+            {
+                "id": str(rel.id),
+                "event_type": rel.event_type.value,
+                "created_at": rel.created_at,
+                "is_current": rel.id == event.id,
+            }
+        )
 
     return templates.TemplateResponse(
         "trade_event_detail.html",
@@ -2396,7 +2622,9 @@ async def admin_trade_event_detail(
 async def admin_run_plans_list(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
-    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    status_filter: Optional[str] = Query(
+        None, alias="status", description="Filter by status"
+    ),
     hours: int = Query(24, ge=1, le=168, description="Time window in hours"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -2550,19 +2778,21 @@ async def admin_run_plans_list(
 
     run_plans = []
     for row in rows:
-        run_plans.append({
-            "run_plan_id": row["run_plan_id"],
-            "status": row["status"],
-            "started_at": row["started_at"],
-            "completed_at": row["completed_at"],
-            "n_variants": row["n_variants"],
-            "objective": row["objective"],
-            "dataset_ref": row["dataset_ref"],
-            "bar_count": row["bar_count"],
-            "n_completed": row["n_completed"],
-            "n_failed": row["n_failed"],
-            "duration_ms": row["duration_ms"],
-        })
+        run_plans.append(
+            {
+                "run_plan_id": row["run_plan_id"],
+                "status": row["status"],
+                "started_at": row["started_at"],
+                "completed_at": row["completed_at"],
+                "n_variants": row["n_variants"],
+                "objective": row["objective"],
+                "dataset_ref": row["dataset_ref"],
+                "bar_count": row["bar_count"],
+                "n_completed": row["n_completed"],
+                "n_failed": row["n_failed"],
+                "duration_ms": row["duration_ms"],
+            }
+        )
 
     return templates.TemplateResponse(
         "run_plans_list.html",
@@ -2669,9 +2899,13 @@ async def admin_run_plan_detail(
 
     started_at = started_event["created_at"] if started_event else None
     n_variants = started_event["payload"].get("n_variants") if started_event else None
-    n_completed = completed_event["payload"].get("n_completed") if completed_event else None
+    n_completed = (
+        completed_event["payload"].get("n_completed") if completed_event else None
+    )
     n_failed = completed_event["payload"].get("n_failed") if completed_event else None
-    duration_ms = completed_event["payload"].get("duration_ms") if completed_event else None
+    duration_ms = (
+        completed_event["payload"].get("duration_ms") if completed_event else None
+    )
 
     return templates.TemplateResponse(
         "run_plan_detail.html",

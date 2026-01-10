@@ -478,7 +478,9 @@ class KnowledgeBaseRepository:
         param_idx = 2
 
         if q:
-            conditions.append(f"(e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})")
+            conditions.append(
+                f"(e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})"
+            )
             params.append(f"%{q}%")
             param_idx += 1
 
@@ -679,12 +681,14 @@ class KnowledgeBaseRepository:
             param_idx += 1
 
         if source_id:
-            conditions.append(f"""
+            conditions.append(
+                f"""
                 EXISTS (
                     SELECT 1 FROM kb_evidence e
                     WHERE e.claim_id = c.id AND e.doc_id = ${param_idx}
                 )
-            """)
+            """
+            )
             params.append(source_id)
             param_idx += 1
 
@@ -785,9 +789,11 @@ class KnowledgeBaseRepository:
         param_idx = 3
 
         for word in words[:5]:  # Limit to first 5 words
-            word_conditions.append(f"""
+            word_conditions.append(
+                f"""
                 (c.text ILIKE ${param_idx} OR e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})
-            """)
+            """
+            )
             params.append(f"%{word}%")
             param_idx += 1
 
@@ -932,7 +938,9 @@ class KnowledgeBaseRepository:
                                     claim_id=claim_id,
                                     doc_id=doc_id,
                                     chunk_id=chunk_ids[ev.chunk_index],
-                                    quote=ev.quote[:MAX_QUOTE_LENGTH],  # Ensure truncation
+                                    quote=ev.quote[
+                                        :MAX_QUOTE_LENGTH
+                                    ],  # Ensure truncation
                                     relevance_score=ev.relevance,
                                 )
                                 stats.evidence_created += 1
@@ -1075,6 +1083,7 @@ class KnowledgeBaseRepository:
         """
 
         import json
+
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 upsert_query,
@@ -1134,6 +1143,7 @@ class KnowledgeBaseRepository:
         # Check for cached compilation (deterministic for spec version)
         if not force and spec.get("compiled_at") and spec.get("compiled_param_schema"):
             import json
+
             compiled_pseudocode = spec.get("compiled_pseudocode", "")
 
             derived_claim_ids = spec.get("derived_from_claim_ids", [])
@@ -1162,6 +1172,7 @@ class KnowledgeBaseRepository:
             }
 
         import json
+
         spec_json = spec.get("spec_json", {})
         if isinstance(spec_json, str):
             spec_json = json.loads(spec_json)

@@ -204,7 +204,9 @@ async def get_entity(
 async def list_claims(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     q: Optional[str] = Query(None, description="Search query (claim text)"),
-    status: KBClaimStatus = Query(KBClaimStatus.VERIFIED, description="Filter by verification status"),
+    status: KBClaimStatus = Query(
+        KBClaimStatus.VERIFIED, description="Filter by verification status"
+    ),
     claim_type: Optional[KBClaimType] = Query(None, description="Filter by claim type"),
     entity_id: Optional[UUID] = Query(None, description="Filter by entity"),
     source_id: Optional[UUID] = Query(None, description="Filter by source document"),
@@ -260,7 +262,9 @@ async def list_claims(
             confidence=c["confidence"],
             entity_id=c.get("entity_id"),
             entity_name=c.get("entity_name"),
-            entity_type=KBEntityType(c["entity_type"]) if c.get("entity_type") else None,
+            entity_type=(
+                KBEntityType(c["entity_type"]) if c.get("entity_type") else None
+            ),
             created_at=c.get("created_at"),
         )
         for c in claims
@@ -326,7 +330,9 @@ async def get_claim(
         confidence=claim["confidence"],
         entity_id=claim.get("entity_id"),
         entity_name=claim.get("entity_name"),
-        entity_type=KBEntityType(claim["entity_type"]) if claim.get("entity_type") else None,
+        entity_type=(
+            KBEntityType(claim["entity_type"]) if claim.get("entity_type") else None
+        ),
         evidence=evidence,
         extraction_model=claim.get("extraction_model"),
         verification_model=claim.get("verification_model"),
@@ -465,7 +471,9 @@ async def refresh_strategy_spec(
 )
 async def compile_strategy_spec(
     entity_id: UUID,
-    allow_draft: bool = Query(False, description="Allow compiling draft specs (dev/admin only)"),
+    allow_draft: bool = Query(
+        False, description="Allow compiling draft specs (dev/admin only)"
+    ),
     force: bool = Query(False, description="Force recompilation (ignore cache)"),
 ) -> StrategyCompileResponse:
     """Compile strategy spec into actionable outputs.
@@ -474,7 +482,12 @@ async def compile_strategy_spec(
     Use allow_draft=true to compile draft specs (for development/testing).
     Use force=true to recompile even if cached results exist.
     """
-    logger.info("Compiling strategy spec", entity_id=str(entity_id), allow_draft=allow_draft, force=force)
+    logger.info(
+        "Compiling strategy spec",
+        entity_id=str(entity_id),
+        allow_draft=allow_draft,
+        force=force,
+    )
 
     kb_repo = _get_kb_repo()
 

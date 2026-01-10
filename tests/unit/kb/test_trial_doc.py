@@ -40,8 +40,11 @@ class TestRegimeToTextGolden:
         result = regime_to_text(regime)
 
         # Lock the exact format
-        assert result == """Regime: high_vol, uptrend.
+        assert (
+            result
+            == """Regime: high_vol, uptrend.
 Market conditions for BTCUSDT 1h: ATR 5.2%, trend up (0.75), RSI 65, efficiency 0.72."""
+        )
 
     def test_neutral_regime(self):
         """Neutral regime with defaults."""
@@ -49,8 +52,11 @@ Market conditions for BTCUSDT 1h: ATR 5.2%, trend up (0.75), RSI 65, efficiency 
 
         result = regime_to_text(regime)
 
-        assert result == """Regime: neutral.
+        assert (
+            result
+            == """Regime: neutral.
 Market conditions for unknown: neutral conditions."""
+        )
 
     def test_none_regime(self):
         """None regime should return unknown."""

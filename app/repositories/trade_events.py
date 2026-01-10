@@ -166,7 +166,9 @@ class TradeEventsRepository:
         param_idx = 2
 
         if filters.event_types:
-            placeholders = ", ".join(f"${param_idx + i}" for i in range(len(filters.event_types)))
+            placeholders = ", ".join(
+                f"${param_idx + i}" for i in range(len(filters.event_types))
+            )
             conditions.append(f"event_type IN ({placeholders})")
             params.extend(et.value for et in filters.event_types)
             param_idx += len(filters.event_types)
@@ -282,7 +284,9 @@ class TradeEventsRepository:
         """
 
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(query, workspace_id, strategy_entity_id, since, limit)
+            rows = await conn.fetch(
+                query, workspace_id, strategy_entity_id, since, limit
+            )
 
         return [self._row_to_event(row) for row in rows]
 
@@ -321,6 +325,14 @@ class TradeEventsRepository:
             intent_id=row["intent_id"],
             order_id=row["order_id"],
             position_id=row["position_id"],
-            payload=row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"] or "{}"),
-            metadata=row["metadata"] if isinstance(row["metadata"], dict) else json.loads(row["metadata"] or "{}"),
+            payload=(
+                row["payload"]
+                if isinstance(row["payload"], dict)
+                else json.loads(row["payload"] or "{}")
+            ),
+            metadata=(
+                row["metadata"]
+                if isinstance(row["metadata"], dict)
+                else json.loads(row["metadata"] or "{}")
+            ),
         )

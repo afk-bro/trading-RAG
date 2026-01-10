@@ -188,7 +188,10 @@ class TestEffectiveRerankModel:
         )
         # The function should strip but still return the model
         result = _get_effective_rerank_model(settings)
-        assert result in ["claude-haiku-3-5", "  claude-haiku-3-5  "]  # Either is acceptable
+        assert result in [
+            "claude-haiku-3-5",
+            "  claude-haiku-3-5  ",
+        ]  # Either is acceptable
 
 
 class TestGetLLMStatus:

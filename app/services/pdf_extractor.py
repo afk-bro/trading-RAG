@@ -63,9 +63,7 @@ class PDFExtractorBackend(ABC):
     """Abstract base class for PDF extraction backends."""
 
     @abstractmethod
-    def extract(
-        self, file_bytes: bytes, config: PDFConfig
-    ) -> PDFExtractionResult:
+    def extract(self, file_bytes: bytes, config: PDFConfig) -> PDFExtractionResult:
         """Extract text from PDF bytes."""
         pass
 
@@ -73,16 +71,12 @@ class PDFExtractorBackend(ABC):
 class PyMuPDFBackend(PDFExtractorBackend):
     """PyMuPDF (fitz) based extraction backend."""
 
-    def extract(
-        self, file_bytes: bytes, config: PDFConfig
-    ) -> PDFExtractionResult:
+    def extract(self, file_bytes: bytes, config: PDFConfig) -> PDFExtractionResult:
         """Extract text using PyMuPDF."""
         try:
             import fitz  # pymupdf
         except ImportError as e:
-            raise ImportError(
-                "PyMuPDF not installed. Run: pip install pymupdf"
-            ) from e
+            raise ImportError("PyMuPDF not installed. Run: pip install pymupdf") from e
 
         result = PDFExtractionResult(backend_used="pymupdf")
         warnings: list[str] = []
@@ -146,9 +140,7 @@ class PyMuPDFBackend(PDFExtractorBackend):
 class PDFPlumberBackend(PDFExtractorBackend):
     """pdfplumber based extraction backend."""
 
-    def extract(
-        self, file_bytes: bytes, config: PDFConfig
-    ) -> PDFExtractionResult:
+    def extract(self, file_bytes: bytes, config: PDFConfig) -> PDFExtractionResult:
         """Extract text using pdfplumber."""
         try:
             import pdfplumber

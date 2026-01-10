@@ -98,7 +98,9 @@ class TestGenerator:
             return []
 
         variants = []
-        for lookback, dollar, max_pos in itertools.product(lookbacks, dollars, max_positions):
+        for lookback, dollar, max_pos in itertools.product(
+            lookbacks, dollars, max_positions
+        ):
             overrides = {
                 "entry.lookback_days": lookback,
                 "risk.dollars_per_trade": dollar,

@@ -14,9 +14,7 @@ pytestmark = pytest.mark.e2e
 class TestComparePageErrors:
     """Tests for compare page error states."""
 
-    def test_no_tune_ids_shows_error(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_no_tune_ids_shows_error(self, admin_page: Page, base_url: str):
         """Compare page shows error when no tune IDs provided."""
         admin_page.goto(f"{base_url}/admin/backtests/compare")
 
@@ -24,9 +22,7 @@ class TestComparePageErrors:
         # Page should not crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_single_tune_id_shows_error(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_single_tune_id_shows_error(self, admin_page: Page, base_url: str):
         """Compare page requires at least 2 tune IDs."""
         admin_page.goto(f"{base_url}/admin/backtests/compare?tune_id=fake-uuid-1234")
 
@@ -38,9 +34,7 @@ class TestComparePageErrors:
 class TestComparePageStructure:
     """Tests for compare page structure with valid data."""
 
-    def test_page_loads_with_fake_ids(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_page_loads_with_fake_ids(self, admin_page: Page, base_url: str):
         """Page handles invalid UUIDs gracefully."""
         admin_page.goto(
             f"{base_url}/admin/backtests/compare"
@@ -56,9 +50,7 @@ class TestComparePageStructure:
 class TestComparePageControls:
     """Tests for compare page control buttons."""
 
-    def test_swap_button_exists_with_valid_data(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_swap_button_exists_with_valid_data(self, admin_page: Page, base_url: str):
         """Swap A/B button is present when comparing valid tunes."""
         admin_page.goto(
             f"{base_url}/admin/backtests/compare"
@@ -90,9 +82,7 @@ class TestComparePageControls:
 class TestCompareDiffTable:
     """Tests for comparison diff table display."""
 
-    def test_diff_table_sections(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_diff_table_sections(self, admin_page: Page, base_url: str):
         """Diff table has expected sections."""
         # This test requires valid tune IDs in the database
         # Using placeholder - real test would need fixtures
@@ -109,9 +99,7 @@ class TestCompareDiffTable:
 class TestCompareNavigation:
     """Tests for navigation from compare page."""
 
-    def test_view_tune_buttons_link_correctly(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_view_tune_buttons_link_correctly(self, admin_page: Page, base_url: str):
         """View Tune buttons link to correct tune detail pages."""
         admin_page.goto(
             f"{base_url}/admin/backtests/compare"

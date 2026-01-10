@@ -249,9 +249,7 @@ class StrategySpec:
             params=params,
             constraints=data.get("constraints", []),
             supported_objectives=supported_objectives,
-            default_objective=ObjectiveType(
-                data.get("default_objective", "sharpe")
-            ),
+            default_objective=ObjectiveType(data.get("default_objective", "sharpe")),
             tuning_config=data.get("tuning_config", {}),
             status=data.get("status", "active"),
             derived_from_claims=data.get("derived_from_claims", []),
@@ -292,9 +290,7 @@ class StrategyRegistry:
     def list_active_strategies(self) -> list[str]:
         """List strategies with active status."""
         return [
-            name
-            for name, spec in self._strategies.items()
-            if spec.status == "active"
+            name for name, spec in self._strategies.items() if spec.status == "active"
         ]
 
     def is_known(self, name: str) -> bool:
@@ -333,7 +329,9 @@ class StrategyRegistry:
                 return ValidationResult(
                     is_valid=True,
                     errors=[],
-                    warnings=[f"Unknown strategy '{strategy_name}', skipping validation"],
+                    warnings=[
+                        f"Unknown strategy '{strategy_name}', skipping validation"
+                    ],
                     repaired_params=params,
                 )
             else:

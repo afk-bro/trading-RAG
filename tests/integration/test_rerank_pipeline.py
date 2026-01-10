@@ -150,6 +150,7 @@ def mock_reranker():
 @pytest.fixture
 def mock_slow_reranker():
     """Mock reranker that times out (takes 0.5s, test uses 0.1s timeout)."""
+
     async def mock_rerank_slow(query, candidates, top_k):
         await asyncio.sleep(0.5)  # Exceeds test timeout of 0.1s
         return []
@@ -165,6 +166,7 @@ def mock_slow_reranker():
 @pytest.fixture
 def mock_failing_reranker():
     """Mock reranker that raises an exception."""
+
     async def mock_rerank_fail(query, candidates, top_k):
         raise RuntimeError("CUDA out of memory")
 
@@ -183,13 +185,20 @@ class TestRerankDisabled:
         self, mock_embedder, mock_vector_results, mock_chunks_map
     ):
         """When rerank disabled, results are in vector score order."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.services.reranker.get_reranker", return_value=None), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.services.reranker.get_reranker", return_value=None
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -217,14 +226,18 @@ class TestRerankDisabled:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "What is Python?",
-                    "mode": "retrieve",
-                    "rerank": False,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "What is Python?",
+                        "mode": "retrieve",
+                        "rerank": False,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 data = response.json()
@@ -241,13 +254,20 @@ class TestRerankDisabled:
         self, mock_embedder, mock_vector_results, mock_chunks_map
     ):
         """When rerank disabled, rerank_ms should be None."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.services.reranker.get_reranker", return_value=None), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.services.reranker.get_reranker", return_value=None
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -273,13 +293,17 @@ class TestRerankDisabled:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test query",
-                    "mode": "retrieve",
-                    "rerank": False,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test query",
+                        "mode": "retrieve",
+                        "rerank": False,
+                    },
+                )
 
                 assert response.status_code == 200
                 meta = response.json()["meta"]
@@ -293,13 +317,20 @@ class TestRerankEnabled:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """When rerank succeeds, state is OK."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -325,15 +356,19 @@ class TestRerankEnabled:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "What is Python?",
-                    "mode": "retrieve",
-                    "rerank": True,
-                    "retrieve_k": 10,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "What is Python?",
+                        "mode": "retrieve",
+                        "rerank": True,
+                        "retrieve_k": 10,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 data = response.json()
@@ -353,13 +388,20 @@ class TestRerankEnabled:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """When rerank enabled, rerank_ms should be populated."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -385,13 +427,17 @@ class TestRerankEnabled:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "mode": "retrieve",
-                    "rerank": True,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "mode": "retrieve",
+                        "rerank": True,
+                    },
+                )
 
                 meta = response.json()["meta"]
                 assert meta["rerank_ms"] is not None
@@ -402,7 +448,12 @@ class TestRerankTimeout:
     """Tests for rerank timeout fallback."""
 
     def test_timeout_returns_timeout_fallback_state(
-        self, mock_embedder, mock_vector_results, mock_chunks_map, mock_slow_reranker, monkeypatch
+        self,
+        mock_embedder,
+        mock_vector_results,
+        mock_chunks_map,
+        mock_slow_reranker,
+        monkeypatch,
     ):
         """When rerank times out, state is TIMEOUT_FALLBACK.
 
@@ -414,23 +465,35 @@ class TestRerankTimeout:
 
         # Clear cached settings to pick up new env var
         from app.config import get_settings
+
         get_settings.cache_clear()
 
         try:
-            with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-                 patch("app.routers.query._db_pool", MagicMock()), \
-                 patch("app.routers.query._qdrant_client", MagicMock()), \
-                 patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-                 patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-                 patch("app.routers.query.get_reranker", return_value=mock_slow_reranker), \
-                 patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+            with patch(
+                "app.services.embedder.get_embedder", return_value=mock_embedder
+            ), patch("app.routers.query._db_pool", MagicMock()), patch(
+                "app.routers.query._qdrant_client", MagicMock()
+            ), patch(
+                "app.repositories.vectors.VectorRepository.search",
+                new_callable=AsyncMock,
+            ) as mock_search, patch(
+                "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+                new_callable=AsyncMock,
+            ) as mock_chunks, patch(
+                "app.routers.query.get_reranker", return_value=mock_slow_reranker
+            ), patch(
+                "app.services.neighbor_expansion.expand_neighbors",
+                new_callable=AsyncMock,
+            ) as mock_expand:
 
                 mock_search.return_value = mock_vector_results
                 mock_chunks.return_value = mock_chunks_map
 
                 from app.services.neighbor_expansion import ExpandedChunk
 
-                async def passthrough_expand(seeds, repo, config, already_have_ids=None):
+                async def passthrough_expand(
+                    seeds, repo, config, already_have_ids=None
+                ):
                     return [
                         ExpandedChunk(
                             chunk_id=s.chunk_id,
@@ -449,14 +512,18 @@ class TestRerankTimeout:
                 mock_expand.side_effect = passthrough_expand
 
                 from app.main import app
+
                 with TestClient(app, raise_server_exceptions=False) as client:
-                    response = client.post("/query", json={
-                        "workspace_id": str(uuid4()),
-                        "question": "Test query",
-                        "mode": "retrieve",
-                        "rerank": True,
-                        "top_k": 3,
-                    })
+                    response = client.post(
+                        "/query",
+                        json={
+                            "workspace_id": str(uuid4()),
+                            "question": "Test query",
+                            "mode": "retrieve",
+                            "rerank": True,
+                            "top_k": 3,
+                        },
+                    )
 
                     assert response.status_code == 200
                     meta = response.json()["meta"]
@@ -478,13 +545,20 @@ class TestRerankError:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_failing_reranker
     ):
         """When rerank fails, state is ERROR_FALLBACK."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_failing_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_failing_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -510,14 +584,18 @@ class TestRerankError:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test query",
-                    "mode": "retrieve",
-                    "rerank": True,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test query",
+                        "mode": "retrieve",
+                        "rerank": True,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 meta = response.json()["meta"]
@@ -536,13 +614,20 @@ class TestDebugField:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """When debug=True, results include debug field."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -568,15 +653,19 @@ class TestDebugField:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "What is Python?",
-                    "mode": "retrieve",
-                    "rerank": True,
-                    "debug": True,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "What is Python?",
+                        "mode": "retrieve",
+                        "rerank": True,
+                        "debug": True,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 results = response.json()["results"]
@@ -595,13 +684,20 @@ class TestDebugField:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """When debug=False, results exclude debug field."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -627,15 +723,19 @@ class TestDebugField:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "What is Python?",
-                    "mode": "retrieve",
-                    "rerank": True,
-                    "debug": False,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "What is Python?",
+                        "mode": "retrieve",
+                        "rerank": True,
+                        "debug": False,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 results = response.json()["results"]
@@ -652,13 +752,20 @@ class TestRequestOverrides:
         self, mock_embedder, mock_vector_results, mock_chunks_map
     ):
         """Request-level rerank=False overrides workspace config."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.services.reranker.get_reranker") as mock_get_reranker, \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.services.reranker.get_reranker"
+        ) as mock_get_reranker, patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -685,14 +792,18 @@ class TestRequestOverrides:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 # Explicitly disable rerank at request level
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "mode": "retrieve",
-                    "rerank": False,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "mode": "retrieve",
+                        "rerank": False,
+                    },
+                )
 
                 assert response.status_code == 200
                 meta = response.json()["meta"]
@@ -715,13 +826,20 @@ class TestConfigPrecedence:
         self, mock_embedder, mock_vector_results, mock_chunks_map
     ):
         """Request top_k overrides workspace default (8)."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=None), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=None
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -747,15 +865,19 @@ class TestConfigPrecedence:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 # Request top_k=3 (workspace default is 8)
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "mode": "retrieve",
-                    "rerank": False,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "mode": "retrieve",
+                        "rerank": False,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 results = response.json()["results"]
@@ -766,13 +888,20 @@ class TestConfigPrecedence:
         self, mock_embedder, mock_vector_results, mock_chunks_map, mock_reranker
     ):
         """Request retrieve_k controls how many candidates are searched."""
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             # Track what limit was passed to search
             actual_limit = None
@@ -806,16 +935,20 @@ class TestConfigPrecedence:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 # Request retrieve_k=100 (workspace default is 50)
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "mode": "retrieve",
-                    "rerank": True,
-                    "retrieve_k": 100,
-                    "top_k": 3,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "mode": "retrieve",
+                        "rerank": True,
+                        "retrieve_k": 100,
+                        "top_k": 3,
+                    },
+                )
 
                 assert response.status_code == 200
                 # Verify search was called with request's retrieve_k
@@ -828,13 +961,20 @@ class TestConfigPrecedence:
 
         This verifies request-level override > workspace config precedence.
         """
-        with patch("app.services.embedder.get_embedder", return_value=mock_embedder), \
-             patch("app.routers.query._db_pool", MagicMock()), \
-             patch("app.routers.query._qdrant_client", MagicMock()), \
-             patch("app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock) as mock_search, \
-             patch("app.repositories.chunks.ChunkRepository.get_by_ids_map", new_callable=AsyncMock) as mock_chunks, \
-             patch("app.routers.query.get_reranker", return_value=mock_reranker), \
-             patch("app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock) as mock_expand:
+        with patch(
+            "app.services.embedder.get_embedder", return_value=mock_embedder
+        ), patch("app.routers.query._db_pool", MagicMock()), patch(
+            "app.routers.query._qdrant_client", MagicMock()
+        ), patch(
+            "app.repositories.vectors.VectorRepository.search", new_callable=AsyncMock
+        ) as mock_search, patch(
+            "app.repositories.chunks.ChunkRepository.get_by_ids_map",
+            new_callable=AsyncMock,
+        ) as mock_chunks, patch(
+            "app.routers.query.get_reranker", return_value=mock_reranker
+        ), patch(
+            "app.services.neighbor_expansion.expand_neighbors", new_callable=AsyncMock
+        ) as mock_expand:
 
             mock_search.return_value = mock_vector_results
             mock_chunks.return_value = mock_chunks_map
@@ -860,16 +1000,20 @@ class TestConfigPrecedence:
             mock_expand.side_effect = passthrough_expand
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 # Workspace default is rerank disabled, but request enables it
-                response = client.post("/query", json={
-                    "workspace_id": str(uuid4()),
-                    "question": "Test",
-                    "mode": "retrieve",
-                    "rerank": True,  # Override default False
-                    "retrieve_k": 20,
-                    "top_k": 5,
-                })
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid4()),
+                        "question": "Test",
+                        "mode": "retrieve",
+                        "rerank": True,  # Override default False
+                        "retrieve_k": 20,
+                        "top_k": 5,
+                    },
+                )
 
                 assert response.status_code == 200
                 meta = response.json()["meta"]

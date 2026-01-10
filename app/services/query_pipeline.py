@@ -110,7 +110,9 @@ def resolve_config(
         rerank_enabled = force_rerank
     else:
         rerank_enabled = (
-            request.rerank if request.rerank is not None else workspace_rerank["enabled"]
+            request.rerank
+            if request.rerank is not None
+            else workspace_rerank["enabled"]
         )
 
     rerank_method = (
@@ -162,9 +164,7 @@ def resolve_config(
     # When rerank disabled, search only final_k (no over-fetch needed)
     if not rerank_enabled:
         candidates_k = (
-            request.top_k
-            if request.top_k is not None
-            else workspace_retrieval["top_k"]
+            request.top_k if request.top_k is not None else workspace_retrieval["top_k"]
         )
         candidates_k = min(candidates_k, MAX_FINAL_K)
         final_k = candidates_k

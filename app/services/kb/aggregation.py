@@ -239,7 +239,9 @@ def aggregate_params(
     weights = [compute_weight(c, max_rerank) for c in candidates]
 
     # Collect params from all candidates
-    all_params: dict[str, list[tuple[any, float]]] = {}  # param_name -> [(value, weight)]
+    all_params: dict[str, list[tuple[any, float]]] = (
+        {}
+    )  # param_name -> [(value, weight)]
 
     for candidate, weight in zip(candidates, weights):
         params = candidate.payload.get("params", {})
@@ -489,7 +491,9 @@ def compute_confidence(
             if spread.mode_fraction < 0.5:
                 spread_penalties.append(0.1)
 
-    avg_spread_penalty = sum(spread_penalties) / len(spread_penalties) if spread_penalties else 0
+    avg_spread_penalty = (
+        sum(spread_penalties) / len(spread_penalties) if spread_penalties else 0
+    )
 
     # Warning penalties
     warning_penalty = 0.1 if has_warnings else 0
@@ -506,6 +510,13 @@ def compute_confidence(
         confidence_cap = 0.4
         low_trades_penalty = 0.2
 
-    confidence = count_conf - avg_spread_penalty - warning_penalty - relaxed_penalty - metadata_penalty - low_trades_penalty
+    confidence = (
+        count_conf
+        - avg_spread_penalty
+        - warning_penalty
+        - relaxed_penalty
+        - metadata_penalty
+        - low_trades_penalty
+    )
 
     return max(0.0, min(confidence_cap, confidence))

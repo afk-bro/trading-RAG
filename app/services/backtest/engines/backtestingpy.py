@@ -173,7 +173,11 @@ class BacktestingPyEngine:
 
         # Calculate additional metrics (handle NaN values)
         return_pct_raw = stats.get("Return [%]", 0)
-        return_pct = float(return_pct_raw) if return_pct_raw and not np.isnan(return_pct_raw) else 0.0
+        return_pct = (
+            float(return_pct_raw)
+            if return_pct_raw and not np.isnan(return_pct_raw)
+            else 0.0
+        )
         max_dd_raw = stats.get("Max. Drawdown [%]", 0)
         max_dd = float(max_dd_raw) if max_dd_raw and not np.isnan(max_dd_raw) else 0.0
         sharpe = stats.get("Sharpe Ratio")
@@ -184,12 +188,22 @@ class BacktestingPyEngine:
             warnings.append("Sharpe ratio could not be calculated")
 
         win_rate_raw = stats.get("Win Rate [%]", 0)
-        win_rate = float(win_rate_raw) / 100 if win_rate_raw and not np.isnan(win_rate_raw) else 0.0
+        win_rate = (
+            float(win_rate_raw) / 100
+            if win_rate_raw and not np.isnan(win_rate_raw)
+            else 0.0
+        )
         num_trades = int(stats.get("# Trades", 0))
         buy_hold_raw = stats.get("Buy & Hold Return [%]", 0)
-        buy_hold = float(buy_hold_raw) if buy_hold_raw and not np.isnan(buy_hold_raw) else 0.0
+        buy_hold = (
+            float(buy_hold_raw) if buy_hold_raw and not np.isnan(buy_hold_raw) else 0.0
+        )
         avg_trade_raw = stats.get("Avg. Trade [%]", 0)
-        avg_trade = float(avg_trade_raw) if avg_trade_raw and not np.isnan(avg_trade_raw) else 0.0
+        avg_trade = (
+            float(avg_trade_raw)
+            if avg_trade_raw and not np.isnan(avg_trade_raw)
+            else 0.0
+        )
         max_duration_raw = stats.get("Max. Trade Duration", 0)
         # Max Trade Duration can be a timedelta or NaN
         if hasattr(max_duration_raw, "total_seconds"):
@@ -206,7 +220,9 @@ class BacktestingPyEngine:
             profit_factor = None
 
         if num_trades == 0:
-            warnings.append("No trades were executed - strategy may need parameter adjustment")
+            warnings.append(
+                "No trades were executed - strategy may need parameter adjustment"
+            )
 
         logger.info(
             "Backtest completed",
@@ -240,10 +256,16 @@ class BacktestingPyEngine:
             equity_df = stats._equity_curve
             if equity_df is not None and "Equity" in equity_df.columns:
                 for idx, row in equity_df.iterrows():
-                    equity_curve.append({
-                        "t": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
-                        "equity": float(row["Equity"]),
-                    })
+                    equity_curve.append(
+                        {
+                            "t": (
+                                idx.isoformat()
+                                if hasattr(idx, "isoformat")
+                                else str(idx)
+                            ),
+                            "equity": float(row["Equity"]),
+                        }
+                    )
         except Exception as e:
             logger.warning("Could not extract equity curve", error=str(e))
 
@@ -260,17 +282,31 @@ class BacktestingPyEngine:
                     entry_time = trade.get("EntryTime")
                     exit_time = trade.get("ExitTime")
 
-                    trades.append({
-                        "entry_time": entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
-                        "exit_time": exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
-                        "side": "long" if trade.get("Size", 0) > 0 else "short",
-                        "entry_price": float(trade.get("EntryPrice", 0)),
-                        "exit_price": float(trade.get("ExitPrice", 0)),
-                        "size": abs(float(trade.get("Size", 0))),
-                        "pnl": float(trade.get("PnL", 0)),
-                        "return_pct": float(trade.get("ReturnPct", 0)) * 100,
-                        "duration_bars": int(trade.get("Duration", 0).total_seconds() / 3600) if hasattr(trade.get("Duration"), "total_seconds") else 0,
-                    })
+                    trades.append(
+                        {
+                            "entry_time": (
+                                entry_time.isoformat()
+                                if hasattr(entry_time, "isoformat")
+                                else str(entry_time)
+                            ),
+                            "exit_time": (
+                                exit_time.isoformat()
+                                if hasattr(exit_time, "isoformat")
+                                else str(exit_time)
+                            ),
+                            "side": "long" if trade.get("Size", 0) > 0 else "short",
+                            "entry_price": float(trade.get("EntryPrice", 0)),
+                            "exit_price": float(trade.get("ExitPrice", 0)),
+                            "size": abs(float(trade.get("Size", 0))),
+                            "pnl": float(trade.get("PnL", 0)),
+                            "return_pct": float(trade.get("ReturnPct", 0)) * 100,
+                            "duration_bars": (
+                                int(trade.get("Duration", 0).total_seconds() / 3600)
+                                if hasattr(trade.get("Duration"), "total_seconds")
+                                else 0
+                            ),
+                        }
+                    )
         except Exception as e:
             logger.warning("Could not extract trades", error=str(e))
 

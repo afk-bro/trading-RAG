@@ -65,7 +65,9 @@ async def reembed_chunks_task(
         # Initialize repositories
         chunk_repo = ChunkRepository(_db_pool)
         chunk_vector_repo = ChunkVectorRepository(_db_pool)
-        vector_repo = VectorRepository(client=_qdrant_client, collection=target_collection)
+        vector_repo = VectorRepository(
+            client=_qdrant_client, collection=target_collection
+        )
 
         # Initialize embedder for new model
         embedder = OllamaEmbedder(model=embed_model)
@@ -103,7 +105,7 @@ async def reembed_chunks_task(
         processed = 0
 
         for i in range(0, total_chunks, batch_size):
-            batch = chunks[i:i + batch_size]
+            batch = chunks[i : i + batch_size]
 
             # Extract texts
             texts = [c["content"] for c in batch]
@@ -116,27 +118,31 @@ async def reembed_chunks_task(
             for chunk, embedding in zip(batch, embeddings):
                 # Get published_at as unix timestamp if available
                 published_at = chunk.get("published_at")
-                published_at_ts = int(published_at.timestamp()) if published_at else None
+                published_at_ts = (
+                    int(published_at.timestamp()) if published_at else None
+                )
 
                 # Get author/channel - prefer author, fallback to channel
                 author_value = chunk.get("author") or chunk.get("channel")
 
-                points.append({
-                    "id": chunk["id"],
-                    "vector": embedding,
-                    "payload": {
-                        "workspace_id": str(workspace_id),
-                        "doc_id": str(chunk["doc_id"]),
-                        "source_type": chunk.get("source_type", ""),
-                        "author": author_value,
-                        "channel": author_value,  # Same as author for consistency
-                        "symbols": chunk.get("symbols", []),
-                        "topics": chunk.get("topics", []),
-                        "entities": chunk.get("entities", []),
-                        "time_start_secs": chunk.get("time_start_secs"),
-                        "published_at": published_at_ts,
-                    },
-                })
+                points.append(
+                    {
+                        "id": chunk["id"],
+                        "vector": embedding,
+                        "payload": {
+                            "workspace_id": str(workspace_id),
+                            "doc_id": str(chunk["doc_id"]),
+                            "source_type": chunk.get("source_type", ""),
+                            "author": author_value,
+                            "channel": author_value,  # Same as author for consistency
+                            "symbols": chunk.get("symbols", []),
+                            "topics": chunk.get("topics", []),
+                            "entities": chunk.get("entities", []),
+                            "time_start_secs": chunk.get("time_start_secs"),
+                            "published_at": published_at_ts,
+                        },
+                    }
+                )
 
             # Upsert to Qdrant
             await vector_repo.upsert_batch(points)

@@ -64,7 +64,9 @@ def _compute_return_score(summary: dict[str, Any]) -> Optional[float]:
     if return_pct is None:
         return None
 
-    if isinstance(return_pct, float) and (math.isnan(return_pct) or math.isinf(return_pct)):
+    if isinstance(return_pct, float) and (
+        math.isnan(return_pct) or math.isinf(return_pct)
+    ):
         return None
 
     return float(return_pct)
@@ -83,7 +85,9 @@ def _compute_calmar_score(summary: dict[str, Any]) -> Optional[float]:
         return None
 
     # Handle NaN/Inf
-    if isinstance(return_pct, float) and (math.isnan(return_pct) or math.isinf(return_pct)):
+    if isinstance(return_pct, float) and (
+        math.isnan(return_pct) or math.isinf(return_pct)
+    ):
         return None
     if isinstance(max_dd, float) and (math.isnan(max_dd) or math.isinf(max_dd)):
         return None
@@ -126,10 +130,12 @@ def rank_trials(
         score = compute_score(summary, objective, min_trades)
 
         if score is not None:
-            scored.append({
-                **trial,
-                "score": score,
-            })
+            scored.append(
+                {
+                    **trial,
+                    "score": score,
+                }
+            )
 
     # Sort by score descending
     scored.sort(key=lambda x: x["score"], reverse=True)
@@ -137,9 +143,11 @@ def rank_trials(
     # Add ranks and return top N
     result = []
     for i, trial in enumerate(scored[:top_n]):
-        result.append({
-            **trial,
-            "rank": i + 1,
-        })
+        result.append(
+            {
+                **trial,
+                "rank": i + 1,
+            }
+        )
 
     return result

@@ -303,9 +303,7 @@ def compute_regime_distance_z(
     # Determine variance to use for distance scaling
     if cluster_var is not None:
         # Blend cluster prior with observed via shrinkage
-        variance = _shrink_variance(
-            cluster_var, observed_var, n_neighbors, shrinkage_c
-        )
+        variance = _shrink_variance(cluster_var, observed_var, n_neighbors, shrinkage_c)
         baseline = "composite"
     else:
         # Use only observed variance

@@ -180,7 +180,9 @@ class TestRequestOverridePriority:
         filters = build_filters(req, strict=True, strategy_floors=strategy_floors)
         assert filters["min_trades"] == 8, "Request override"
         assert filters["max_overfit_gap"] == 0.4, "Strategy floor"
-        assert filters["max_drawdown"] == DEFAULT_STRICT_FILTERS["max_drawdown"], "Workspace default"
+        assert (
+            filters["max_drawdown"] == DEFAULT_STRICT_FILTERS["max_drawdown"]
+        ), "Workspace default"
 
 
 # =============================================================================
@@ -250,7 +252,9 @@ class TestRecommendedRelaxedSettings:
 
         assert result is not None
         for suggestion in result.suggestions:
-            assert suggestion.risk_note, f"Missing risk note for {suggestion.filter_name}"
+            assert (
+                suggestion.risk_note
+            ), f"Missing risk note for {suggestion.filter_name}"
             assert len(suggestion.risk_note) > 10, "Risk note should be descriptive"
 
     def test_no_suggestions_when_no_rejections(self):
@@ -338,7 +342,12 @@ class TestRecommendedRelaxedSettings:
         # Each should be a unique single filter
         assert len(filter_names) == len(set(filter_names)), "Duplicate filter names"
         for name in filter_names:
-            assert name in ["min_trades", "max_drawdown", "max_overfit_gap", "require_oos"]
+            assert name in [
+                "min_trades",
+                "max_drawdown",
+                "max_overfit_gap",
+                "require_oos",
+            ]
 
 
 # =============================================================================

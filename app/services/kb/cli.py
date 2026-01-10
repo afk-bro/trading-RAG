@@ -161,7 +161,9 @@ async def cmd_ingest(args: argparse.Namespace) -> int:
             print("\nSample Actions:")
             for sample in preview.samples:
                 print(f"  [{sample.action.upper():7}] {sample.tune_run_id[:8]}...")
-                print(f"           strategy={sample.strategy_name}, objective={sample.objective_type}")
+                print(
+                    f"           strategy={sample.strategy_name}, objective={sample.objective_type}"
+                )
                 print(f"           reason: {sample.reason}")
         print("-" * 60)
 
@@ -273,7 +275,8 @@ async def cmd_collection_info(args: argparse.Namespace) -> int:
         # List all KB collections
         collections = await client.get_collections()
         kb_collections = [
-            c.name for c in collections.collections
+            c.name
+            for c in collections.collections
             if c.name.startswith("trading_kb_trials")
         ]
 
@@ -301,21 +304,25 @@ def main():
     # Ingest command
     ingest_parser = subparsers.add_parser("ingest", help="Ingest tune_runs into KB")
     ingest_parser.add_argument(
-        "--workspace", "-w",
+        "--workspace",
+        "-w",
         required=True,
         help="Workspace ID",
     )
     ingest_parser.add_argument(
-        "--since", "-s",
+        "--since",
+        "-s",
         help="Only process runs created after this date (ISO format)",
     )
     ingest_parser.add_argument(
-        "--limit", "-l",
+        "--limit",
+        "-l",
         type=int,
         help="Maximum number of runs to process",
     )
     ingest_parser.add_argument(
-        "--dry-run", "-n",
+        "--dry-run",
+        "-n",
         action="store_true",
         help="Don't actually upsert to Qdrant",
     )
@@ -340,7 +347,8 @@ def main():
     # Status command
     status_parser = subparsers.add_parser("status", help="Show ingestion status")
     status_parser.add_argument(
-        "--workspace", "-w",
+        "--workspace",
+        "-w",
         required=True,
         help="Workspace ID",
     )

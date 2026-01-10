@@ -13,8 +13,10 @@ from pydantic import BaseModel, Field
 # Enums matching database constraints
 # ===========================================
 
+
 class EntityType(str, Enum):
     """Types of knowledge entities."""
+
     CONCEPT = "concept"
     INDICATOR = "indicator"
     STRATEGY = "strategy"
@@ -29,6 +31,7 @@ class EntityType(str, Enum):
 
 class ClaimType(str, Enum):
     """Types of knowledge claims."""
+
     DEFINITION = "definition"
     RULE = "rule"
     ASSUMPTION = "assumption"
@@ -42,6 +45,7 @@ class ClaimType(str, Enum):
 
 class RelationType(str, Enum):
     """Types of entity relationships."""
+
     USES = "uses"
     REQUIRES = "requires"
     DERIVED_FROM = "derived_from"
@@ -58,6 +62,7 @@ class RelationType(str, Enum):
 
 class VerificationStatus(str, Enum):
     """Verification status for claims."""
+
     PENDING = "pending"
     VERIFIED = "verified"
     WEAK = "weak"
@@ -68,34 +73,49 @@ class VerificationStatus(str, Enum):
 # Pass 1: Extraction output models
 # ===========================================
 
+
 class EvidencePointer(BaseModel):
     """Reference to supporting evidence in a chunk."""
-    chunk_index: int = Field(..., description="Index of chunk in provided context (0-based)")
-    quote: str = Field(..., description="Short verbatim quote from chunk (max 200 chars)")
+
+    chunk_index: int = Field(
+        ..., description="Index of chunk in provided context (0-based)"
+    )
+    quote: str = Field(
+        ..., description="Short verbatim quote from chunk (max 200 chars)"
+    )
     relevance: float = Field(default=1.0, ge=0, le=1, description="Relevance score 0-1")
 
 
 class ExtractedEntity(BaseModel):
     """An entity extracted from context."""
+
     type: EntityType
     name: str = Field(..., description="Primary name of the entity")
     aliases: list[str] = Field(default_factory=list, description="Alternative names")
-    description: Optional[str] = Field(None, description="Grounded description if found")
+    description: Optional[str] = Field(
+        None, description="Grounded description if found"
+    )
     evidence: list[EvidencePointer] = Field(default_factory=list)
 
 
 class ExtractedClaim(BaseModel):
     """A claim extracted from context."""
+
     claim_type: ClaimType
     text: str = Field(..., description="Atomic truth statement")
-    entity_name: Optional[str] = Field(None, description="Related entity name if applicable")
+    entity_name: Optional[str] = Field(
+        None, description="Related entity name if applicable"
+    )
     entity_type: Optional[EntityType] = Field(None, description="Related entity type")
     confidence: float = Field(default=0.5, ge=0, le=1, description="Initial confidence")
-    evidence: list[EvidencePointer] = Field(..., min_length=1, description="Must have at least one evidence")
+    evidence: list[EvidencePointer] = Field(
+        ..., min_length=1, description="Must have at least one evidence"
+    )
 
 
 class ExtractedRelation(BaseModel):
     """A relationship between entities extracted from context."""
+
     from_entity: str = Field(..., description="Source entity name")
     from_type: EntityType
     relation: RelationType
@@ -106,6 +126,7 @@ class ExtractedRelation(BaseModel):
 
 class ExtractionResult(BaseModel):
     """Complete output of Pass 1 extraction."""
+
     entities: list[ExtractedEntity] = Field(default_factory=list)
     claims: list[ExtractedClaim] = Field(default_factory=list)
     relations: list[ExtractedRelation] = Field(default_factory=list)
@@ -115,17 +136,26 @@ class ExtractionResult(BaseModel):
 # Pass 2: Verification output models
 # ===========================================
 
+
 class ClaimVerdict(BaseModel):
     """Verification result for a single claim."""
-    claim_index: int = Field(..., description="Index of claim in extraction result (0-based)")
+
+    claim_index: int = Field(
+        ..., description="Index of claim in extraction result (0-based)"
+    )
     status: VerificationStatus
-    confidence: float = Field(..., ge=0, le=1, description="Adjusted confidence after verification")
+    confidence: float = Field(
+        ..., ge=0, le=1, description="Adjusted confidence after verification"
+    )
     reason: str = Field(..., description="Brief explanation of verdict")
-    corrected_text: Optional[str] = Field(None, description="Rewritten claim if needed for accuracy")
+    corrected_text: Optional[str] = Field(
+        None, description="Rewritten claim if needed for accuracy"
+    )
 
 
 class VerificationResult(BaseModel):
     """Complete output of Pass 2 verification."""
+
     verdicts: list[ClaimVerdict] = Field(default_factory=list)
 
 
@@ -133,8 +163,10 @@ class VerificationResult(BaseModel):
 # Pipeline result models
 # ===========================================
 
+
 class PersistenceStats(BaseModel):
     """Statistics from persisting to database."""
+
     entities_created: int = 0
     entities_updated: int = 0
     claims_created: int = 0
@@ -146,6 +178,7 @@ class PersistenceStats(BaseModel):
 
 class PipelineResult(BaseModel):
     """Complete result of the extraction → verification → persist pipeline."""
+
     extraction: ExtractionResult
     verification: VerificationResult
     persistence: PersistenceStats
@@ -172,7 +205,7 @@ MAX_QUOTE_LENGTH = 300  # Max characters for evidence quotes
 def normalize_text(text: str) -> str:
     """Normalize text for fingerprinting (lowercase, collapse whitespace)."""
     text = text.lower().strip()
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"\s+", " ", text)
     return text
 
 
@@ -196,7 +229,9 @@ def compute_claim_fingerprint(
     """
     # Normalize inputs
     normalized_text = normalize_text(claim_text)
-    type_str = claim_type.value if isinstance(claim_type, ClaimType) else str(claim_type)
+    type_str = (
+        claim_type.value if isinstance(claim_type, ClaimType) else str(claim_type)
+    )
     entity_str = normalize_text(entity_name) if entity_name else ""
     workspace_str = str(workspace_id)
 
@@ -207,6 +242,7 @@ def compute_claim_fingerprint(
 
 class EvidenceValidationResult(BaseModel):
     """Result of evidence validation."""
+
     is_valid: bool = True
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -239,7 +275,9 @@ def validate_evidence(
     # Check chunk index exists
     if evidence.chunk_index not in available_chunk_indices:
         result.is_valid = False
-        result.errors.append(f"chunk_index {evidence.chunk_index} not in available chunks")
+        result.errors.append(
+            f"chunk_index {evidence.chunk_index} not in available chunks"
+        )
         return result
 
     # Check quote is not empty
@@ -251,7 +289,9 @@ def validate_evidence(
     # Sanitize and truncate quote
     sanitized = evidence.quote.strip()
     if len(sanitized) > max_quote_length:
-        result.warnings.append(f"quote truncated from {len(sanitized)} to {max_quote_length} chars")
+        result.warnings.append(
+            f"quote truncated from {len(sanitized)} to {max_quote_length} chars"
+        )
         sanitized = sanitized[:max_quote_length]
 
     result.sanitized_quote = sanitized
@@ -278,11 +318,13 @@ def validate_claim_evidence(
         result = validate_evidence(ev, available_chunk_indices)
         if result.is_valid:
             # Create sanitized evidence pointer
-            validated_evidence.append(EvidencePointer(
-                chunk_index=ev.chunk_index,
-                quote=result.sanitized_quote or ev.quote[:MAX_QUOTE_LENGTH],
-                relevance=ev.relevance,
-            ))
+            validated_evidence.append(
+                EvidencePointer(
+                    chunk_index=ev.chunk_index,
+                    quote=result.sanitized_quote or ev.quote[:MAX_QUOTE_LENGTH],
+                    relevance=ev.relevance,
+                )
+            )
         else:
             errors.extend(result.errors)
 

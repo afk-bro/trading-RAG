@@ -277,6 +277,7 @@ def compute_overfit_gap(
 def utc_now_iso() -> str:
     """Get current UTC time as ISO string."""
     from datetime import timezone as tz
+
     return datetime.now(tz.utc).isoformat().replace("+00:00", "Z")
 
 

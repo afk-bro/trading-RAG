@@ -16,7 +16,16 @@ from uuid import UUID
 import anyio
 import sentry_sdk
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field, model_validator
 
 from app.config import Settings, get_settings
@@ -95,12 +104,14 @@ WORKSPACE_MAX_CONCURRENT = 2  # max concurrent recommend requests per workspace
 
 class RecommendMode(str, Enum):
     """Recommendation mode."""
+
     FULL = "full"  # Full pipeline with aggregation
     DEBUG = "debug"  # Return candidates without aggregation
 
 
 class RecommendStatus(str, Enum):
     """Recommendation result status."""
+
     OK = "ok"
     DEGRADED = "degraded"
     NONE = "none"
@@ -116,8 +127,12 @@ class RecommendRequest(BaseModel):
 
     # Required
     workspace_id: UUID = Field(..., description="Workspace ID")
-    strategy_name: str = Field(..., min_length=1, max_length=100, description="Strategy name from registry")
-    objective_type: str = Field(..., min_length=1, max_length=50, description="Objective function type")
+    strategy_name: str = Field(
+        ..., min_length=1, max_length=100, description="Strategy name from registry"
+    )
+    objective_type: str = Field(
+        ..., min_length=1, max_length=50, description="Objective function type"
+    )
 
     # Dataset source (exactly one required)
     dataset_id: Optional[str] = Field(
@@ -136,28 +151,52 @@ class RecommendRequest(BaseModel):
 
     # Filter overrides (bounded by workspace defaults)
     require_oos: Optional[bool] = Field(None, description="Require OOS metrics")
-    max_overfit_gap: Optional[float] = Field(None, ge=0, le=1, description="Max overfit gap (0-1)")
-    min_trades: Optional[int] = Field(None, ge=1, le=1000, description="Minimum trade count")
-    max_drawdown: Optional[float] = Field(None, ge=0, le=1, description="Max drawdown fraction (0-1)")
+    max_overfit_gap: Optional[float] = Field(
+        None, ge=0, le=1, description="Max overfit gap (0-1)"
+    )
+    min_trades: Optional[int] = Field(
+        None, ge=1, le=1000, description="Minimum trade count"
+    )
+    max_drawdown: Optional[float] = Field(
+        None, ge=0, le=1, description="Max drawdown fraction (0-1)"
+    )
 
     # Retrieval knobs (bounded)
-    retrieve_k: int = Field(DEFAULT_RETRIEVE_K, ge=1, le=MAX_RETRIEVE_K, description="Max candidates to retrieve")
-    rerank_keep: int = Field(DEFAULT_RERANK_KEEP, ge=1, le=MAX_RERANK_KEEP, description="Top M after reranking")
-    top_k: int = Field(DEFAULT_TOP_K, ge=1, le=MAX_TOP_K, description="Top K for aggregation")
+    retrieve_k: int = Field(
+        DEFAULT_RETRIEVE_K,
+        ge=1,
+        le=MAX_RETRIEVE_K,
+        description="Max candidates to retrieve",
+    )
+    rerank_keep: int = Field(
+        DEFAULT_RERANK_KEEP,
+        ge=1,
+        le=MAX_RERANK_KEEP,
+        description="Top M after reranking",
+    )
+    top_k: int = Field(
+        DEFAULT_TOP_K, ge=1, le=MAX_TOP_K, description="Top K for aggregation"
+    )
 
     # v1.5 context (for duration stats, cluster stats lookups)
     symbol: Optional[str] = Field(
-        None, max_length=50, description="Trading symbol (e.g., 'BTC/USDT') for duration stats"
+        None,
+        max_length=50,
+        description="Trading symbol (e.g., 'BTC/USDT') for duration stats",
     )
     strategy_entity_id: Optional[UUID] = Field(
         None, description="Strategy entity ID for cluster stats lookup"
     )
     timeframe: Optional[str] = Field(
-        None, max_length=10, description="Timeframe (e.g., '5m', '1h') for stats lookups"
+        None,
+        max_length=10,
+        description="Timeframe (e.g., '5m', '1h') for stats lookups",
     )
 
     # Debug options
-    include_candidates: bool = Field(False, description="Include top candidates in response (debug)")
+    include_candidates: bool = Field(
+        False, description="Include top candidates in response (debug)"
+    )
 
     model_config = {"extra": "forbid"}
 
@@ -167,7 +206,9 @@ class RecommendRequest(BaseModel):
         if self.regime_tags:
             for tag in self.regime_tags:
                 if len(tag) > MAX_STRING_LENGTH:
-                    raise ValueError(f"Regime tag too long: max {MAX_STRING_LENGTH} chars")
+                    raise ValueError(
+                        f"Regime tag too long: max {MAX_STRING_LENGTH} chars"
+                    )
         return self
 
 
@@ -175,8 +216,12 @@ class IngestRequest(BaseModel):
     """Request for ingesting trials from tune runs."""
 
     workspace_id: UUID = Field(..., description="Workspace ID")
-    since: Optional[datetime] = Field(None, description="Only ingest runs after this time")
-    tune_ids: Optional[list[UUID]] = Field(None, max_length=100, description="Specific tune IDs to ingest")
+    since: Optional[datetime] = Field(
+        None, description="Only ingest runs after this time"
+    )
+    tune_ids: Optional[list[UUID]] = Field(
+        None, max_length=100, description="Specific tune IDs to ingest"
+    )
     dry_run: bool = Field(False, description="Preview without writing")
     reembed: bool = Field(False, description="Re-embed existing trials")
     batch_size: int = Field(50, ge=1, le=200, description="Ingestion batch size")
@@ -219,7 +264,9 @@ class ParamSpreadInfo(BaseModel):
 class FilterRejectionsInfo(BaseModel):
     """Filter rejection counts for debug diagnostics."""
 
-    total_before_filters: int = Field(0, description="Total candidates before quality filters")
+    total_before_filters: int = Field(
+        0, description="Total candidates before quality filters"
+    )
     by_oos: int = Field(0, description="Rejected by require_oos=True")
     by_trades: int = Field(0, description="Rejected by min_trades")
     by_drawdown: int = Field(0, description="Rejected by max_drawdown")
@@ -231,9 +278,15 @@ class RelaxationSuggestionInfo(BaseModel):
     """Single-axis relaxation suggestion with risk note."""
 
     filter_name: str = Field(..., description="Name of the filter to relax")
-    current_value: Optional[float | int | bool] = Field(None, description="Current filter value")
-    suggested_value: Optional[float | int | bool] = Field(None, description="Suggested relaxed value")
-    estimated_candidates: int = Field(0, description="Estimated candidates with this single change")
+    current_value: Optional[float | int | bool] = Field(
+        None, description="Current filter value"
+    )
+    suggested_value: Optional[float | int | bool] = Field(
+        None, description="Suggested relaxed value"
+    )
+    estimated_candidates: int = Field(
+        0, description="Estimated candidates with this single change"
+    )
     risk_note: str = Field("", description="Warning about the trade-off")
 
 
@@ -261,10 +314,14 @@ class RecommendedRelaxedSettingsInfo(BaseModel):
 class RegimeStateStabilityInfo(BaseModel):
     """FSM state info for regime stability (v1.5)."""
 
-    candidate_key: Optional[str] = Field(None, description="Current candidate regime key")
+    candidate_key: Optional[str] = Field(
+        None, description="Current candidate regime key"
+    )
     candidate_bars: int = Field(0, description="Bars candidate has persisted")
     M: int = Field(20, description="Persistence bars required for transition")
-    C_enter: float = Field(0.75, description="Confidence threshold to confirm transition")
+    C_enter: float = Field(
+        0.75, description="Confidence threshold to confirm transition"
+    )
     C_exit: float = Field(0.55, description="Confidence threshold to consider change")
 
 
@@ -272,8 +329,12 @@ class WindowMetadataInfo(BaseModel):
     """Window metadata for rolling computations (v1.5)."""
 
     regime_age_bars: int = Field(0, description="Bars since stable regime confirmed")
-    performance_window: Optional[dict] = Field(None, description="Performance window config")
-    distance_window: Optional[dict] = Field(None, description="Distance computation window config")
+    performance_window: Optional[dict] = Field(
+        None, description="Performance window config"
+    )
+    distance_window: Optional[dict] = Field(
+        None, description="Distance computation window config"
+    )
 
 
 class RecommendResponse(BaseModel):
@@ -285,7 +346,9 @@ class RecommendResponse(BaseModel):
     # Core result
     params: dict = Field(default_factory=dict, description="Recommended parameters")
     status: RecommendStatus = Field(..., description="Recommendation quality status")
-    confidence: Optional[float] = Field(None, ge=0, le=1, description="Confidence score (0-1)")
+    confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="Confidence score (0-1)"
+    )
 
     # Counts
     count_used: int = Field(0, description="Trials used in aggregation")
@@ -293,23 +356,39 @@ class RecommendResponse(BaseModel):
     retrieval_relaxed_count: int = Field(0, description="Trials from relaxed filters")
 
     # Flags
-    used_relaxed_filters: bool = Field(False, description="Whether relaxed filters were used")
-    used_metadata_fallback: bool = Field(False, description="Whether metadata-only fallback was used")
+    used_relaxed_filters: bool = Field(
+        False, description="Whether relaxed filters were used"
+    )
+    used_metadata_fallback: bool = Field(
+        False, description="Whether metadata-only fallback was used"
+    )
 
     # Quality indicators
     warnings: list[str] = Field(default_factory=list, description="Warning codes")
-    reasons: list[str] = Field(default_factory=list, description="Reason codes for status")
-    suggested_actions: list[str] = Field(default_factory=list, description="Suggested actions")
+    reasons: list[str] = Field(
+        default_factory=list, description="Reason codes for status"
+    )
+    suggested_actions: list[str] = Field(
+        default_factory=list, description="Suggested actions"
+    )
 
     # Context (for debugging)
-    query_regime_tags: list[str] = Field(default_factory=list, description="Query regime tags used")
+    query_regime_tags: list[str] = Field(
+        default_factory=list, description="Query regime tags used"
+    )
     active_collection: str = Field("", description="Qdrant collection used")
     embedding_model_id: str = Field("", description="Embedding model used")
 
     # Optional debug data
-    top_candidates: Optional[list[CandidateSummary]] = Field(None, description="Top candidates (debug mode)")
-    param_spreads: Optional[dict[str, ParamSpreadInfo]] = Field(None, description="Parameter spread info")
-    filter_rejections: Optional[FilterRejectionsInfo] = Field(None, description="Filter rejection counts (debug mode)")
+    top_candidates: Optional[list[CandidateSummary]] = Field(
+        None, description="Top candidates (debug mode)"
+    )
+    param_spreads: Optional[dict[str, ParamSpreadInfo]] = Field(
+        None, description="Parameter spread info"
+    )
+    filter_rejections: Optional[FilterRejectionsInfo] = Field(
+        None, description="Filter rejection counts (debug mode)"
+    )
 
     # Self-healing guidance (only when status='none')
     recommended_relaxed_settings: Optional[RecommendedRelaxedSettingsInfo] = Field(
@@ -323,13 +402,17 @@ class RecommendResponse(BaseModel):
 
     # Confidence decomposition (v1.5)
     regime_fit_confidence: Optional[float] = Field(
-        None, ge=0, le=1, description="How well current market matches historical regime (0-1)"
+        None,
+        ge=0,
+        le=1,
+        description="How well current market matches historical regime (0-1)",
     )
     regime_distance_z: Optional[float] = Field(
         None, description="Z-score distance from neighborhood"
     )
     distance_baseline: Optional[str] = Field(
-        None, description="Baseline used for distance: 'composite' | 'marginal' | 'neighbors_only'"
+        None,
+        description="Baseline used for distance: 'composite' | 'marginal' | 'neighbors_only'",
     )
     distance_n: Optional[int] = Field(
         None, ge=0, description="Number of neighbors used for distance computation"
@@ -352,7 +435,8 @@ class RecommendResponse(BaseModel):
         None, description="[max(0, p25-age), max(0, p75-age)]"
     )
     duration_baseline: Optional[str] = Field(
-        None, description="Baseline: 'composite_symbol' | 'marginal' | 'global_timeframe'"
+        None,
+        description="Baseline: 'composite_symbol' | 'marginal' | 'global_timeframe'",
     )
     duration_n: Optional[int] = Field(
         None, ge=0, description="Number of segments used for duration stats"
@@ -522,7 +606,9 @@ async def recommend(
     mode: RecommendMode = Query(RecommendMode.FULL, description="Recommendation mode"),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
-    _rate_ip: None = Depends(get_rate_limiter().check("recommend_ip", RATE_LIMIT_RECOMMEND_PER_MIN_IP)),
+    _rate_ip: None = Depends(
+        get_rate_limiter().check("recommend_ip", RATE_LIMIT_RECOMMEND_PER_MIN_IP)
+    ),
 ) -> RecommendResponse:
     """Generate parameter recommendations."""
     request_id = str(uuid.uuid4())
@@ -546,18 +632,21 @@ async def recommend(
     sentry_sdk.set_tag("mode", mode.value)
 
     # Set detailed context (don't include large payloads like OHLCV)
-    sentry_sdk.set_context("kb_recommend_request", {
-        "request_id": request_id,
-        "retrieve_k": request.retrieve_k,
-        "rerank_keep": request.rerank_keep,
-        "top_k": request.top_k,
-        "require_oos": request.require_oos,
-        "min_trades": request.min_trades,
-        "max_drawdown": request.max_drawdown,
-        "max_overfit_gap": request.max_overfit_gap,
-        "has_regime_tags": bool(request.regime_tags),
-        "has_dataset_id": bool(request.dataset_id),
-    })
+    sentry_sdk.set_context(
+        "kb_recommend_request",
+        {
+            "request_id": request_id,
+            "retrieve_k": request.retrieve_k,
+            "rerank_keep": request.rerank_keep,
+            "top_k": request.top_k,
+            "require_oos": request.require_oos,
+            "min_trades": request.min_trades,
+            "max_drawdown": request.max_drawdown,
+            "max_overfit_gap": request.max_overfit_gap,
+            "has_regime_tags": bool(request.regime_tags),
+            "has_dataset_id": bool(request.dataset_id),
+        },
+    )
 
     logger.info(
         "kb_recommend_start",
@@ -574,7 +663,9 @@ async def recommend(
     )
 
     # Validate strategy and objective
-    with sentry_sdk.start_span(op="validate", description="Validate strategy and objective"):
+    with sentry_sdk.start_span(
+        op="validate", description="Validate strategy and objective"
+    ):
         _validate_strategy(request.strategy_name)
         _validate_objective(request.strategy_name, request.objective_type)
 
@@ -682,11 +773,14 @@ async def recommend(
         # Use workspace_id tag (set at request start) to correlate with workspace config
         with sentry_sdk.push_scope() as scope:
             scope.fingerprint = ["kb", "recommend_timeout"]
-            scope.set_context("kb_error", {
-                "elapsed_ms": round(elapsed_ms, 1),
-                "timeout_s": RECOMMEND_TIMEOUT_S,
-                "retrieve_k": request.retrieve_k,
-            })
+            scope.set_context(
+                "kb_error",
+                {
+                    "elapsed_ms": round(elapsed_ms, 1),
+                    "timeout_s": RECOMMEND_TIMEOUT_S,
+                    "retrieve_k": request.retrieve_k,
+                },
+            )
             sentry_sdk.capture_exception(e)
 
         raise HTTPException(
@@ -826,7 +920,10 @@ async def recommend(
             )
 
     # Add recommended relaxed settings when status='none'
-    if result.recommended_relaxed_settings and result.recommended_relaxed_settings.suggestions:
+    if (
+        result.recommended_relaxed_settings
+        and result.recommended_relaxed_settings.suggestions
+    ):
         response.recommended_relaxed_settings = RecommendedRelaxedSettingsInfo(
             suggestions=[
                 RelaxationSuggestionInfo(
@@ -842,7 +939,9 @@ async def recommend(
 
     # Extract timings from result
     timings = result.timings
-    total_ms = timings.total_ms if timings else (time.perf_counter() - start_time) * 1000
+    total_ms = (
+        timings.total_ms if timings else (time.perf_counter() - start_time) * 1000
+    )
     qdrant_ms = timings.qdrant_ms if timings else 0.0
     embed_ms = timings.embed_ms if timings else 0.0
     regime_ms = timings.regime_ms if timings else 0.0
@@ -851,8 +950,7 @@ async def recommend(
 
     # Check for params repair (any warning starting with param_ or constraint_)
     params_repaired = any(
-        w.startswith("param_") or w.startswith("constraint_")
-        for w in result.warnings
+        w.startswith("param_") or w.startswith("constraint_") for w in result.warnings
     )
     incomplete_regime = "query_regime_computation_failed" in result.warnings
 
@@ -910,9 +1008,13 @@ async def recommend(
     sentry_sdk.set_tag("embed_model", result.embedding_model)
     sentry_sdk.set_tag("collection", result.collection_name)
     confidence_bucket = (
-        "high" if result.confidence and result.confidence >= 0.7 else
-        "medium" if result.confidence and result.confidence >= 0.4 else
-        "low" if result.confidence else "none"
+        "high"
+        if result.confidence and result.confidence >= 0.7
+        else (
+            "medium"
+            if result.confidence and result.confidence >= 0.4
+            else "low" if result.confidence else "none"
+        )
     )
     sentry_sdk.set_tag("kb_confidence", confidence_bucket)
 
@@ -1105,7 +1207,9 @@ open,high,low,close,volume
 )
 async def upload_ohlcv(
     ohlcv_file: UploadFile = File(..., description="OHLCV data file (CSV/JSON)"),
-    _rate: None = Depends(get_rate_limiter().check("upload_ohlcv", RATE_LIMIT_UPLOAD_PER_MIN)),
+    _rate: None = Depends(
+        get_rate_limiter().check("upload_ohlcv", RATE_LIMIT_UPLOAD_PER_MIN)
+    ),
 ) -> OHLCVUploadResponse:
     """Upload OHLCV file and compute regime tags."""
     request_id = str(uuid.uuid4())

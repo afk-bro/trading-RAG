@@ -164,7 +164,11 @@ async def submit_metrics(request: ForwardMetricsRequest) -> ForwardMetricsRespon
         logger.warning(
             "forward_metrics_record_not_active",
             record_id=str(request.record_id),
-            status=record.status.value if hasattr(record.status, "value") else str(record.status),
+            status=(
+                record.status.value
+                if hasattr(record.status, "value")
+                else str(record.status)
+            ),
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

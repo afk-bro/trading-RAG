@@ -227,7 +227,9 @@ def _extract_instrument(filename: str, df: pd.DataFrame) -> Optional[str]:
     # Try to extract known patterns
 
     # Pattern: BTCUSD or BTC_USD or btcusdt
-    crypto_pattern = r"(btc|eth|sol|xrp|ada|doge|bnb|ltc|dot|link)[-_]?(usd[t]?|usdc|busd|eur|gbp)"
+    crypto_pattern = (
+        r"(btc|eth|sol|xrp|ada|doge|bnb|ltc|dot|link)[-_]?(usd[t]?|usdc|busd|eur|gbp)"
+    )
     crypto_match = re.search(crypto_pattern, name, re.IGNORECASE)
     if crypto_match:
         return crypto_match.group().upper().replace("-", "").replace("_", "")

@@ -110,7 +110,9 @@ class TestCrossEncoderReranker:
     @pytest.fixture
     def mock_cross_encoder(self):
         """Mock the CrossEncoder class."""
-        with patch("app.services.reranker.CrossEncoderReranker._load_model") as mock_load:
+        with patch(
+            "app.services.reranker.CrossEncoderReranker._load_model"
+        ) as mock_load:
             mock_model = Mock()
             mock_model.predict.return_value = [0.9, 0.7, 0.8, 0.6, 0.5]
             mock_load.return_value = mock_model
@@ -169,10 +171,7 @@ class TestCrossEncoderReranker:
         config = {"device": "cpu"}
         reranker = CrossEncoderReranker(config)
         # Create more than MAX_CANDIDATES
-        candidates = [
-            make_candidate(f"c{i}", vector_score=i / 300)
-            for i in range(300)
-        ]
+        candidates = [make_candidate(f"c{i}", vector_score=i / 300) for i in range(300)]
         # Mock predict to return scores for truncated list
         mock_cross_encoder.predict.return_value = [0.5] * 200
 

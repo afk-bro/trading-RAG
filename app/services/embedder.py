@@ -134,7 +134,9 @@ class OllamaEmbedder:
                     return False
 
                 data = response.json()
-                models = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+                models = [
+                    m.get("name", "").split(":")[0] for m in data.get("models", [])
+                ]
                 return self.model in models
         except Exception as e:
             logger.error("Ollama health check failed", error=str(e))

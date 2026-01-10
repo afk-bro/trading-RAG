@@ -12,6 +12,7 @@ logger = structlog.get_logger(__name__)
 
 class LLMNotConfiguredError(Exception):
     """Raised when LLM generation is requested but no API key is configured."""
+
     pass
 
 

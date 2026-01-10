@@ -48,19 +48,21 @@ class TestClusterStatsRepository:
 
         # Mock found result
         conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value={
-            "strategy_entity_id": strategy_id,
-            "timeframe": "5m",
-            "regime_key": "trend=uptrend|vol=high_vol",
-            "regime_dims": {"trend": "uptrend", "vol": "high_vol"},
-            "n": 50,
-            "feature_schema_version": 1,
-            "feature_mean": {"atr_pct": 0.02, "rsi": 50.0},
-            "feature_var": {"atr_pct": 0.001, "rsi": 100.0},
-            "feature_min": None,
-            "feature_max": None,
-            "updated_at": None,
-        })
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "strategy_entity_id": strategy_id,
+                "timeframe": "5m",
+                "regime_key": "trend=uptrend|vol=high_vol",
+                "regime_dims": {"trend": "uptrend", "vol": "high_vol"},
+                "n": 50,
+                "feature_schema_version": 1,
+                "feature_mean": {"atr_pct": 0.02, "rsi": 50.0},
+                "feature_var": {"atr_pct": 0.001, "rsi": 100.0},
+                "feature_min": None,
+                "feature_max": None,
+                "updated_at": None,
+            }
+        )
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock()
 
@@ -83,19 +85,21 @@ class TestClusterStatsRepository:
         strategy_id = uuid4()
 
         conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value={
-            "strategy_entity_id": strategy_id,
-            "timeframe": "5m",
-            "regime_key": "trend=uptrend|vol=high_vol",
-            "regime_dims": {"trend": "uptrend", "vol": "high_vol"},
-            "n": 50,
-            "feature_schema_version": 1,
-            "feature_mean": {"atr_pct": 0.02},
-            "feature_var": {"atr_pct": 0.001},
-            "feature_min": None,
-            "feature_max": None,
-            "updated_at": None,
-        })
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "strategy_entity_id": strategy_id,
+                "timeframe": "5m",
+                "regime_key": "trend=uptrend|vol=high_vol",
+                "regime_dims": {"trend": "uptrend", "vol": "high_vol"},
+                "n": 50,
+                "feature_schema_version": 1,
+                "feature_mean": {"atr_pct": 0.02},
+                "feature_var": {"atr_pct": 0.001},
+                "feature_min": None,
+                "feature_max": None,
+                "updated_at": None,
+            }
+        )
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock()
 
@@ -153,7 +157,9 @@ class TestClusterStatsRepository:
         assert result.baseline == "marginal"
 
     @pytest.mark.asyncio
-    async def test_get_stats_with_backoff_returns_none_when_all_missing(self, mock_pool):
+    async def test_get_stats_with_backoff_returns_none_when_all_missing(
+        self, mock_pool
+    ):
         """Returns None when composite and all marginals are missing."""
         repo = ClusterStatsRepository(mock_pool)
 
@@ -354,6 +360,8 @@ class TestCombineMarginals:
         assert result.feature_var["atr_pct"] == 0.002  # max of 0.001, 0.002
         assert result.feature_var["rsi"] == 100.0  # max of 50.0, 100.0
         # Mean should be averaged
-        assert result.feature_mean["atr_pct"] == pytest.approx(0.0225)  # avg of 0.02, 0.025
+        assert result.feature_mean["atr_pct"] == pytest.approx(
+            0.0225
+        )  # avg of 0.02, 0.025
         # n should be sum
         assert result.n == 70  # 30 + 40

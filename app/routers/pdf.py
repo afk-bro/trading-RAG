@@ -172,7 +172,9 @@ async def ingest_pdf(
         for i, prev_chunk in enumerate(raw_chunks):
             if prev_chunk is chunk:
                 break
-            chunk_start_char += len(prev_chunk.content) + len(pdf_config.join_pages_with)
+            chunk_start_char += len(prev_chunk.content) + len(
+                pdf_config.join_pages_with
+            )
 
         # Find page for this position
         page_num = 1
@@ -196,7 +198,11 @@ async def ingest_pdf(
                 token_count=chunk.token_count,
                 page_start=page_num,
                 page_end=end_page if end_page != page_num else None,
-                locator_label=f"p. {page_num}" if page_num == end_page else f"pp. {page_num}-{end_page}",
+                locator_label=(
+                    f"p. {page_num}"
+                    if page_num == end_page
+                    else f"pp. {page_num}-{end_page}"
+                ),
             )
         )
 

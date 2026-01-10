@@ -83,7 +83,9 @@ class TestKBTypes:
             name="RSI",
             aliases=["Relative Strength Index"],
             description="Momentum indicator",
-            evidence=[EvidencePointer(chunk_index=0, quote="RSI measures...", relevance=0.9)],
+            evidence=[
+                EvidencePointer(chunk_index=0, quote="RSI measures...", relevance=0.9)
+            ],
         )
         assert entity.type == EntityType.INDICATOR
         assert entity.name == "RSI"
@@ -106,7 +108,9 @@ class TestKBTypes:
             entity_name="RSI",
             entity_type=EntityType.INDICATOR,
             confidence=0.8,
-            evidence=[EvidencePointer(chunk_index=0, quote="When RSI > 70...", relevance=0.9)],
+            evidence=[
+                EvidencePointer(chunk_index=0, quote="When RSI > 70...", relevance=0.9)
+            ],
         )
         assert claim.claim_type == ClaimType.RULE
         assert claim.confidence == 0.8
@@ -169,7 +173,9 @@ class TestKBPrompts:
             {
                 "claim_type": "rule",
                 "text": "RSI above 70 indicates overbought conditions",
-                "evidence": [{"chunk_index": 0, "quote": "RSI above 70 indicates overbought"}],
+                "evidence": [
+                    {"chunk_index": 0, "quote": "RSI above 70 indicates overbought"}
+                ],
             }
         ]
         prompt = build_verification_prompt(chunks, claims)
@@ -181,8 +187,18 @@ class TestKBPrompts:
     def test_synthesis_prompt_includes_verified_claims(self):
         """Test synthesis prompt includes verified claims."""
         claims = [
-            {"claim_type": "rule", "text": "RSI > 70 means overbought", "entity_name": "RSI", "confidence": 0.9},
-            {"claim_type": "definition", "text": "RSI is a momentum indicator", "entity_name": "RSI", "confidence": 0.85},
+            {
+                "claim_type": "rule",
+                "text": "RSI > 70 means overbought",
+                "entity_name": "RSI",
+                "confidence": 0.9,
+            },
+            {
+                "claim_type": "definition",
+                "text": "RSI is a momentum indicator",
+                "entity_name": "RSI",
+                "confidence": 0.85,
+            },
         ]
         prompt = build_synthesis_prompt("What is RSI?", claims)
 
@@ -196,7 +212,11 @@ class TestKBPrompts:
         """Test synthesis prompt includes entity context."""
         claims = [{"claim_type": "definition", "text": "Test claim", "confidence": 0.9}]
         entities = [
-            {"name": "RSI", "type": "indicator", "description": "Relative Strength Index"},
+            {
+                "name": "RSI",
+                "type": "indicator",
+                "description": "Relative Strength Index",
+            },
         ]
         prompt = build_synthesis_prompt("Test?", claims, entities)
 
@@ -215,11 +235,11 @@ class TestKBPrompts:
 
     def test_extract_json_from_code_fence(self):
         """Test JSON extraction from markdown code fence."""
-        response = '''Here's the extraction:
+        response = """Here's the extraction:
 ```json
 {"entities": [{"name": "RSI", "type": "indicator"}], "claims": [], "relations": []}
 ```
-'''
+"""
         result = extract_json_from_response(response)
 
         assert len(result["entities"]) == 1
@@ -227,9 +247,9 @@ class TestKBPrompts:
 
     def test_extract_json_from_plain_fence(self):
         """Test JSON extraction from plain code fence."""
-        response = '''```
+        response = """```
 {"entities": [], "claims": [{"text": "Test"}], "relations": []}
-```'''
+```"""
         result = extract_json_from_response(response)
 
         assert len(result["claims"]) == 1
@@ -278,16 +298,18 @@ class MockLLMClient:
         # Check for verification (before extraction since extraction is more specific)
         if "SOURCE CHUNKS" in user_content and "CLAIMS TO VERIFY" in user_content:
             return LLMResponse(
-                text=json.dumps({
-                    "verdicts": [
-                        {
-                            "claim_index": 0,
-                            "status": "verified",
-                            "confidence": 0.85,
-                            "reason": "Evidence supports claim",
-                        }
-                    ]
-                }),
+                text=json.dumps(
+                    {
+                        "verdicts": [
+                            {
+                                "claim_index": 0,
+                                "status": "verified",
+                                "confidence": 0.85,
+                                "reason": "Evidence supports claim",
+                            }
+                        ]
+                    }
+                ),
                 model=model or self.answer_model,
                 provider=self.provider,
             )
@@ -313,34 +335,50 @@ When RSI is above 70, it indicates overbought conditions [C1].
         # Extraction response (check last - most general)
         if "CONTEXT CHUNKS" in user_content or "Extract all" in user_content:
             return LLMResponse(
-                text=json.dumps({
-                    "entities": [
-                        {
-                            "type": "indicator",
-                            "name": "RSI",
-                            "aliases": ["Relative Strength Index"],
-                            "description": "Momentum indicator",
-                            "evidence": [{"chunk_index": 0, "quote": "RSI is...", "relevance": 0.9}],
-                        }
-                    ],
-                    "claims": [
-                        {
-                            "claim_type": "rule",
-                            "text": "RSI above 70 indicates overbought",
-                            "entity_name": "RSI",
-                            "entity_type": "indicator",
-                            "confidence": 0.8,
-                            "evidence": [{"chunk_index": 0, "quote": "When RSI > 70...", "relevance": 0.9}],
-                        }
-                    ],
-                    "relations": [],
-                }),
+                text=json.dumps(
+                    {
+                        "entities": [
+                            {
+                                "type": "indicator",
+                                "name": "RSI",
+                                "aliases": ["Relative Strength Index"],
+                                "description": "Momentum indicator",
+                                "evidence": [
+                                    {
+                                        "chunk_index": 0,
+                                        "quote": "RSI is...",
+                                        "relevance": 0.9,
+                                    }
+                                ],
+                            }
+                        ],
+                        "claims": [
+                            {
+                                "claim_type": "rule",
+                                "text": "RSI above 70 indicates overbought",
+                                "entity_name": "RSI",
+                                "entity_type": "indicator",
+                                "confidence": 0.8,
+                                "evidence": [
+                                    {
+                                        "chunk_index": 0,
+                                        "quote": "When RSI > 70...",
+                                        "relevance": 0.9,
+                                    }
+                                ],
+                            }
+                        ],
+                        "relations": [],
+                    }
+                ),
                 model=model or self.answer_model,
                 provider=self.provider,
             )
 
         # Default response
-        return LLMResponse(text="{}", model=model or self.answer_model, provider=self.provider)
+        return LLMResponse(
+            text="{}", model=model or self.answer_model, provider=self.provider
+        )
 
 
 class TestKBPipeline:
@@ -410,7 +448,9 @@ class TestKBPipeline:
         from app.services.kb_pipeline import KBPipeline
 
         pipeline = KBPipeline(llm=mock_llm)
-        result = await pipeline.run(sample_chunks, question="What is RSI?", synthesize=True)
+        result = await pipeline.run(
+            sample_chunks, question="What is RSI?", synthesize=True
+        )
 
         assert isinstance(result, PipelineResult)
         assert len(result.extraction.entities) >= 1

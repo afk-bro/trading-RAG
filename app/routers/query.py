@@ -220,7 +220,9 @@ async def query(
         request.rerank_method if request.rerank_method else workspace_rerank["method"]
     )
     candidates_k = (
-        request.retrieve_k if request.retrieve_k is not None else workspace_rerank["candidates_k"]
+        request.retrieve_k
+        if request.retrieve_k is not None
+        else workspace_rerank["candidates_k"]
     )
     final_k = (
         request.top_k if request.top_k is not None else workspace_rerank["final_k"]
@@ -262,12 +264,16 @@ async def query(
 
     # When rerank disabled, search only final_k (no over-fetch needed)
     if not rerank_enabled:
-        candidates_k = request.top_k if request.top_k is not None else workspace_retrieval["top_k"]
+        candidates_k = (
+            request.top_k if request.top_k is not None else workspace_retrieval["top_k"]
+        )
         candidates_k = min(candidates_k, MAX_FINAL_K)  # Apply cap
         final_k = candidates_k
 
     # Get reranker singleton (only if enabled)
-    reranker: BaseReranker | None = get_reranker(rerank_config) if rerank_enabled else None
+    reranker: BaseReranker | None = (
+        get_reranker(rerank_config) if rerank_enabled else None
+    )
 
     # Timing tracking
     embed_ms = 0
@@ -604,7 +610,8 @@ async def query(
                 response = await llm.generate_answer(
                     question=request.question,
                     chunks=context_chunks,
-                    max_context_tokens=request.max_context_tokens or settings.max_context_tokens,
+                    max_context_tokens=request.max_context_tokens
+                    or settings.max_context_tokens,
                 )
                 answer = response.text
 
@@ -677,6 +684,7 @@ async def query(
                     )
                 else:
                     from app.services.kb_types import PersistenceStats
+
                     persistence_stats = PersistenceStats()
 
                 # Use synthesized answer from pipeline
@@ -690,7 +698,8 @@ async def query(
                     claims_verified=pipeline_result.verified_claims_count,
                     claims_weak=pipeline_result.weak_claims_count,
                     claims_rejected=pipeline_result.rejected_claims_count,
-                    entities_persisted=persistence_stats.entities_created + persistence_stats.entities_updated,
+                    entities_persisted=persistence_stats.entities_created
+                    + persistence_stats.entities_updated,
                     claims_persisted=persistence_stats.claims_created,
                     claims_skipped_duplicate=persistence_stats.claims_skipped_duplicate,
                     claims_skipped_invalid=persistence_stats.claims_skipped_invalid,
@@ -822,7 +831,8 @@ async def query(
                         response = await llm.generate_answer(
                             question=request.question,
                             chunks=context_chunks,
-                            max_context_tokens=request.max_context_tokens or settings.max_context_tokens,
+                            max_context_tokens=request.max_context_tokens
+                            or settings.max_context_tokens,
                         )
                         answer = response.text
 
@@ -831,7 +841,9 @@ async def query(
                             llm_enabled=True,
                             answer=answer,
                             supported=[],
-                            not_specified=["Insufficient verified claims in knowledge base, used chunk RAG fallback"],
+                            not_specified=[
+                                "Insufficient verified claims in knowledge base, used chunk RAG fallback"
+                            ],
                             claims_used=[],
                             fallback_used=True,
                             fallback_reason=f"Only {len(verified_claims)} verified claims found (minimum {MIN_CLAIMS_FOR_KB_ANSWER} required)",

@@ -25,9 +25,9 @@ class TestHealthEndpoint:
     def client(self):
         """Create test client with mocked dependencies."""
         # Mock the database and Qdrant connections for health endpoint tests
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
@@ -42,8 +42,14 @@ class TestHealthEndpoint:
         data = response.json()
 
         required_fields = [
-            "status", "qdrant", "supabase", "ollama",
-            "active_collection", "embed_model", "latency_ms", "version"
+            "status",
+            "qdrant",
+            "supabase",
+            "ollama",
+            "active_collection",
+            "embed_model",
+            "latency_ms",
+            "version",
         ]
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
@@ -65,9 +71,9 @@ class TestRootEndpoint:
     @pytest.fixture
     def client(self):
         """Create test client."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
@@ -92,37 +98,46 @@ class TestIngestEndpoint:
     @pytest.fixture
     def client(self):
         """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
     def test_ingest_validates_required_fields(self, client):
         """Test that ingest validates required fields."""
         # Missing workspace_id
-        response = client.post("/ingest", json={
-            "source": {"type": "article", "url": "https://example.com"},
-            "content": "Test content"
-        })
+        response = client.post(
+            "/ingest",
+            json={
+                "source": {"type": "article", "url": "https://example.com"},
+                "content": "Test content",
+            },
+        )
         assert response.status_code == 422
 
     def test_ingest_validates_workspace_id_format(self, client):
         """Test that workspace_id must be a valid UUID."""
-        response = client.post("/ingest", json={
-            "workspace_id": "not-a-uuid",
-            "source": {"type": "article", "url": "https://example.com"},
-            "content": "Test content"
-        })
+        response = client.post(
+            "/ingest",
+            json={
+                "workspace_id": "not-a-uuid",
+                "source": {"type": "article", "url": "https://example.com"},
+                "content": "Test content",
+            },
+        )
         assert response.status_code == 422
 
     def test_ingest_validates_source_type(self, client):
         """Test that source type must be valid."""
-        response = client.post("/ingest", json={
-            "workspace_id": str(uuid.uuid4()),
-            "source": {"type": "invalid_type", "url": "https://example.com"},
-            "content": "Test content"
-        })
+        response = client.post(
+            "/ingest",
+            json={
+                "workspace_id": str(uuid.uuid4()),
+                "source": {"type": "invalid_type", "url": "https://example.com"},
+                "content": "Test content",
+            },
+        )
         assert response.status_code == 422
 
     def test_ingest_returns_503_without_db(self):
@@ -130,17 +145,21 @@ class TestIngestEndpoint:
         import app.routers.ingest as ingest_module
 
         from app.main import app
+
         with TestClient(app, raise_server_exceptions=False) as client:
             # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
             original_pool = ingest_module._db_pool
             ingest_module._db_pool = None
             try:
-                response = client.post("/ingest", json={
-                    "workspace_id": str(uuid.uuid4()),
-                    "source": {"type": "article", "url": "https://example.com"},
-                    "content": "Test content for ingestion",
-                    "metadata": {"title": "Test Article"}
-                })
+                response = client.post(
+                    "/ingest",
+                    json={
+                        "workspace_id": str(uuid.uuid4()),
+                        "source": {"type": "article", "url": "https://example.com"},
+                        "content": "Test content for ingestion",
+                        "metadata": {"title": "Test Article"},
+                    },
+                )
                 assert response.status_code == 503
                 assert "Database" in response.json().get("detail", "")
             finally:
@@ -153,26 +172,26 @@ class TestYouTubeEndpoint:
     @pytest.fixture
     def client(self):
         """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
     def test_youtube_validates_required_fields(self, client):
         """Test that YouTube ingest validates required fields."""
         # Missing url
-        response = client.post("/sources/youtube/ingest", json={
-            "workspace_id": str(uuid.uuid4())
-        })
+        response = client.post(
+            "/sources/youtube/ingest", json={"workspace_id": str(uuid.uuid4())}
+        )
         assert response.status_code == 422
 
     def test_youtube_invalid_url_returns_error(self, client):
         """Test that invalid URL returns error response."""
-        response = client.post("/sources/youtube/ingest", json={
-            "workspace_id": str(uuid.uuid4()),
-            "url": "not-a-youtube-url"
-        })
+        response = client.post(
+            "/sources/youtube/ingest",
+            json={"workspace_id": str(uuid.uuid4()), "url": "not-a-youtube-url"},
+        )
         assert response.status_code == 200  # Returns 200 with error status
         data = response.json()
         assert data.get("status") == "error"
@@ -181,10 +200,10 @@ class TestYouTubeEndpoint:
 
     def test_youtube_error_includes_retryable_flag(self, client):
         """Test that YouTube error response includes retryable flag."""
-        response = client.post("/sources/youtube/ingest", json={
-            "workspace_id": str(uuid.uuid4()),
-            "url": "invalid"
-        })
+        response = client.post(
+            "/sources/youtube/ingest",
+            json={"workspace_id": str(uuid.uuid4()), "url": "invalid"},
+        )
         data = response.json()
         assert "retryable" in data
 
@@ -195,36 +214,42 @@ class TestQueryEndpoint:
     @pytest.fixture
     def client(self):
         """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
     def test_query_validates_required_fields(self, client):
         """Test that query validates required fields."""
         # Missing workspace_id
-        response = client.post("/query", json={
-            "question": "What is the market outlook?"
-        })
+        response = client.post(
+            "/query", json={"question": "What is the market outlook?"}
+        )
         assert response.status_code == 422
 
     def test_query_validates_mode(self, client):
         """Test that query mode must be valid."""
-        response = client.post("/query", json={
-            "workspace_id": str(uuid.uuid4()),
-            "question": "What is the market outlook?",
-            "mode": "invalid_mode"
-        })
+        response = client.post(
+            "/query",
+            json={
+                "workspace_id": str(uuid.uuid4()),
+                "question": "What is the market outlook?",
+                "mode": "invalid_mode",
+            },
+        )
         assert response.status_code == 422
 
     def test_query_returns_503_without_db(self, client):
         """Test that query returns 503 when DB is not available."""
-        response = client.post("/query", json={
-            "workspace_id": str(uuid.uuid4()),
-            "question": "What is the market outlook?",
-            "mode": "retrieve"
-        })
+        response = client.post(
+            "/query",
+            json={
+                "workspace_id": str(uuid.uuid4()),
+                "question": "What is the market outlook?",
+                "mode": "retrieve",
+            },
+        )
         assert response.status_code == 503
 
 
@@ -234,9 +259,9 @@ class TestJobsEndpoint:
     @pytest.fixture
     def client(self):
         """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
@@ -252,18 +277,18 @@ class TestReembedEndpoint:
     @pytest.fixture
     def client(self):
         """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
     def test_reembed_validates_required_fields(self, client):
         """Test that reembed validates required fields."""
         # Missing workspace_id
-        response = client.post("/reembed", json={
-            "target_collection": "test_collection"
-        })
+        response = client.post(
+            "/reembed", json={"target_collection": "test_collection"}
+        )
         assert response.status_code == 422
 
     def test_reembed_returns_503_without_db(self):
@@ -271,17 +296,21 @@ class TestReembedEndpoint:
         import app.routers.reembed as reembed_module
 
         from app.main import app
+
         with TestClient(app, raise_server_exceptions=False) as client:
             # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
             original_pool = reembed_module._db_pool
             reembed_module._db_pool = None
             try:
-                response = client.post("/reembed", json={
-                    "workspace_id": str(uuid.uuid4()),
-                    "target_collection": "test_collection",
-                    "embed_provider": "ollama",
-                    "embed_model": "nomic-embed-text"
-                })
+                response = client.post(
+                    "/reembed",
+                    json={
+                        "workspace_id": str(uuid.uuid4()),
+                        "target_collection": "test_collection",
+                        "embed_provider": "ollama",
+                        "embed_model": "nomic-embed-text",
+                    },
+                )
                 assert response.status_code == 503
             finally:
                 reembed_module._db_pool = original_pool
@@ -293,25 +322,26 @@ class TestCORSHeaders:
     @pytest.fixture
     def client(self):
         """Create test client."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
     def test_cors_headers_on_options(self, client):
         """Test that OPTIONS request returns CORS headers."""
-        response = client.options("/health", headers={
-            "Origin": "http://localhost:3000",
-            "Access-Control-Request-Method": "GET"
-        })
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
         assert "access-control-allow-origin" in response.headers
 
     def test_cors_allows_all_origins(self, client):
         """Test that CORS allows all origins (development mode)."""
-        response = client.get("/health", headers={
-            "Origin": "http://example.com"
-        })
+        response = client.get("/health", headers={"Origin": "http://example.com"})
         assert response.headers.get("access-control-allow-origin") == "*"
 
 
@@ -321,9 +351,9 @@ class TestErrorHandling:
     @pytest.fixture
     def client(self):
         """Create test client."""
-        with patch("app.main._db_pool", None), \
-             patch("app.main._qdrant_client", None):
+        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client
 
@@ -332,7 +362,7 @@ class TestErrorHandling:
         response = client.post(
             "/ingest",
             content="{invalid json}",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
         assert response.status_code == 422
 
@@ -362,18 +392,22 @@ class TestIngestFlow:
         """Create test client with real connections."""
         # These tests require actual services running
         from app.main import app
+
         with TestClient(app) as client:
             yield client
 
     @pytest.mark.skip(reason="Requires Supabase connection")
     def test_ingest_creates_document(self, client):
         """Test that ingest creates a document with chunks and vectors."""
-        response = client.post("/ingest", json={
-            "workspace_id": str(uuid.uuid4()),
-            "source": {"type": "article", "url": "https://example.com/test"},
-            "content": "This is a test article about AAPL stock. The Fed announced new policy.",
-            "metadata": {"title": "Test Article", "author": "Test Author"}
-        })
+        response = client.post(
+            "/ingest",
+            json={
+                "workspace_id": str(uuid.uuid4()),
+                "source": {"type": "article", "url": "https://example.com/test"},
+                "content": "This is a test article about AAPL stock. The Fed announced new policy.",
+                "metadata": {"title": "Test Article", "author": "Test Author"},
+            },
+        )
 
         assert response.status_code in [200, 201]
         data = response.json()

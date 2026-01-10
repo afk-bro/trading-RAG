@@ -78,9 +78,7 @@ class TestCollectionManagement:
     """Tests for collection creation and validation."""
 
     @pytest.mark.asyncio
-    async def test_ensure_collection_creates_new(
-        self, repository, mock_qdrant_client
-    ):
+    async def test_ensure_collection_creates_new(self, repository, mock_qdrant_client):
         """Should create collection when it doesn't exist."""
         await repository.ensure_collection(dimension=768)
 
@@ -291,9 +289,7 @@ class TestDelete:
         mock_qdrant_client.delete.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_delete_by_tune_id_none_found(
-        self, repository, mock_qdrant_client
-    ):
+    async def test_delete_by_tune_id_none_found(self, repository, mock_qdrant_client):
         """Should handle case with no matching trials."""
         tune_id = uuid4()
 
@@ -316,9 +312,7 @@ class TestSearch:
     """Tests for vector similarity search."""
 
     @pytest.mark.asyncio
-    async def test_search_basic(
-        self, repository, mock_qdrant_client, sample_vector
-    ):
+    async def test_search_basic(self, repository, mock_qdrant_client, sample_vector):
         """Should perform vector similarity search."""
         workspace_id = uuid4()
 
@@ -400,9 +394,7 @@ class TestSearch:
         assert query_filter is not None
 
     @pytest.mark.asyncio
-    async def test_search_by_filters_only(
-        self, repository, mock_qdrant_client
-    ):
+    async def test_search_by_filters_only(self, repository, mock_qdrant_client):
         """Should search by filters only (no vector)."""
         workspace_id = uuid4()
 
@@ -470,29 +462,33 @@ class TestFilterBuilding:
 
     def test_build_filter_regime_tags(self, repository):
         """Should build regime tags match-any filter."""
-        conditions = repository._build_filter_conditions({
-            "regime_tags": ["uptrend", "low_vol"]
-        })
+        conditions = repository._build_filter_conditions(
+            {"regime_tags": ["uptrend", "low_vol"]}
+        )
 
         assert len(conditions) == 1
         assert conditions[0].key == "regime_tags"
 
     def test_build_filter_multiple(self, repository):
         """Should combine multiple filter conditions."""
-        conditions = repository._build_filter_conditions({
-            "require_oos": True,
-            "min_sharpe": 1.0,
-            "max_drawdown": 0.2,
-        })
+        conditions = repository._build_filter_conditions(
+            {
+                "require_oos": True,
+                "min_sharpe": 1.0,
+                "max_drawdown": 0.2,
+            }
+        )
 
         assert len(conditions) == 3
 
     def test_build_filter_ignores_none(self, repository):
         """Should ignore None values."""
-        conditions = repository._build_filter_conditions({
-            "min_sharpe": None,
-            "min_trades": 10,
-        })
+        conditions = repository._build_filter_conditions(
+            {
+                "min_sharpe": None,
+                "min_trades": 10,
+            }
+        )
 
         assert len(conditions) == 1
         assert conditions[0].key == "n_trades_oos"
@@ -565,9 +561,7 @@ class TestCountAndInfo:
         assert info["status"] == "green"
 
     @pytest.mark.asyncio
-    async def test_get_collection_info_error(
-        self, repository, mock_qdrant_client
-    ):
+    async def test_get_collection_info_error(self, repository, mock_qdrant_client):
         """Should handle collection info error gracefully."""
         mock_qdrant_client.get_collection.side_effect = Exception("Not found")
 

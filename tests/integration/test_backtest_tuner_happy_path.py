@@ -13,7 +13,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 # Fixture path
-SYNTH_FIXTURE = Path(__file__).parent.parent / "unit" / "fixtures" / "ohlcv_synth_trendy_range.csv"
+SYNTH_FIXTURE = (
+    Path(__file__).parent.parent / "unit" / "fixtures" / "ohlcv_synth_trendy_range.csv"
+)
 
 # Test strategy with tunable params (period: integer 1-200)
 # This must exist in your test database
@@ -26,7 +28,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
         not os.getenv("DATABASE_URL") and not os.getenv("SUPABASE_URL"),
-        reason="Requires DATABASE_URL or SUPABASE_URL"
+        reason="Requires DATABASE_URL or SUPABASE_URL",
     ),
 ]
 
@@ -39,6 +41,7 @@ class TestTunerHappyPath:
     def client(self):
         """Create test client with real database connection."""
         from app.main import app
+
         with TestClient(app, raise_server_exceptions=False) as client:
             yield client
 
@@ -72,9 +75,15 @@ class TestTunerHappyPath:
         assert result["trials_completed"] >= 1, "Expected at least 1 completed trial"
 
         # Assert: best results populated
-        assert result["best_score"] is not None, "Expected best_score when trials complete"
-        assert result["best_params"] is not None, "Expected best_params when trials complete"
-        assert result["best_run_id"] is not None, "Expected best_run_id when trials complete"
+        assert (
+            result["best_score"] is not None
+        ), "Expected best_score when trials complete"
+        assert (
+            result["best_params"] is not None
+        ), "Expected best_params when trials complete"
+        assert (
+            result["best_run_id"] is not None
+        ), "Expected best_run_id when trials complete"
 
         # Assert: leaderboard has entries
         assert len(result["leaderboard"]) >= 1, "Expected leaderboard entries"
@@ -153,7 +162,9 @@ class TestTunerHappyPath:
     def test_skipped_runs_have_skip_reason(self, client):
         """Skipped trials should have skip_reason populated."""
         # Use the tiny fixture that doesn't generate trades
-        tiny_fixture = Path(__file__).parent.parent / "unit" / "fixtures" / "valid_ohlcv.csv"
+        tiny_fixture = (
+            Path(__file__).parent.parent / "unit" / "fixtures" / "valid_ohlcv.csv"
+        )
 
         with open(tiny_fixture, "rb") as f:
             create_resp = client.post(
@@ -178,8 +189,12 @@ class TestTunerHappyPath:
             # Skipped runs should have skip_reason
             for run in runs["items"]:
                 assert run["status"] == "skipped"
-                assert run["skip_reason"] is not None, f"Skipped run missing skip_reason: {run}"
-                assert "min_trades" in run["skip_reason"].lower(), f"Expected min_trades in reason: {run}"
+                assert (
+                    run["skip_reason"] is not None
+                ), f"Skipped run missing skip_reason: {run}"
+                assert (
+                    "min_trades" in run["skip_reason"].lower()
+                ), f"Expected min_trades in reason: {run}"
 
     def test_persistence_integrity(self, client, synth_csv):
         """Verify data integrity: completed trials have run_id, FK valid."""
@@ -211,16 +226,22 @@ class TestTunerHappyPath:
             trial_index = run["trial_index"]
 
             # Check: no duplicate trial_index (PK integrity)
-            assert trial_index not in seen_indices, f"Duplicate trial_index: {trial_index}"
+            assert (
+                trial_index not in seen_indices
+            ), f"Duplicate trial_index: {trial_index}"
             seen_indices.add(trial_index)
 
             # Check: completed trials MUST have run_id
             if run["status"] == "completed":
-                assert run["run_id"] is not None, f"Completed trial {trial_index} missing run_id"
+                assert (
+                    run["run_id"] is not None
+                ), f"Completed trial {trial_index} missing run_id"
 
                 # Verify run_id exists in backtest_runs (FK integrity)
                 run_resp = client.get(f"/backtests/{run['run_id']}")
-                assert run_resp.status_code == 200, f"run_id {run['run_id']} not found in backtest_runs"
+                assert (
+                    run_resp.status_code == 200
+                ), f"run_id {run['run_id']} not found in backtest_runs"
 
         # Verify tune has best_* persisted (not just derived)
         detail_resp = client.get(f"/backtests/tunes/{tune_id}")

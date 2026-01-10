@@ -140,6 +140,7 @@ def regime_distance(
 
     # Euclidean distance normalized by sqrt(n_features)
     import math
+
     sq_diff = sum((a - b) ** 2 for a, b in zip(features_a, features_b))
     distance = math.sqrt(sq_diff / len(features_a))
 
@@ -214,13 +215,15 @@ def compute_rerank_score(
     # Normalize objective score
     norm_objective = 0.5  # Default if no max
     if max_objective > 0:
-        norm_objective = min(objective_score / max_objective, 1.0) if objective_score else 0.0
+        norm_objective = (
+            min(objective_score / max_objective, 1.0) if objective_score else 0.0
+        )
 
     # Base score
     score = (
-        SIMILARITY_WEIGHT * similarity +
-        JACCARD_WEIGHT * jaccard_score +
-        OBJECTIVE_WEIGHT * norm_objective
+        SIMILARITY_WEIGHT * similarity
+        + JACCARD_WEIGHT * jaccard_score
+        + OBJECTIVE_WEIGHT * norm_objective
     )
 
     # Apply penalties
@@ -281,16 +284,18 @@ def rerank_candidates(
             is_metadata_only=candidate._metadata_only,
         )
 
-        reranked.append(RerankedCandidate(
-            point_id=candidate.point_id,
-            payload=candidate.payload,
-            similarity_score=candidate.similarity_score,
-            jaccard_score=jaccard_score,
-            rerank_score=rerank_score,
-            used_regime_source=regime_source,
-            _relaxed=candidate._relaxed,
-            _metadata_only=candidate._metadata_only,
-        ))
+        reranked.append(
+            RerankedCandidate(
+                point_id=candidate.point_id,
+                payload=candidate.payload,
+                similarity_score=candidate.similarity_score,
+                jaccard_score=jaccard_score,
+                rerank_score=rerank_score,
+                used_regime_source=regime_source,
+                _relaxed=candidate._relaxed,
+                _metadata_only=candidate._metadata_only,
+            )
+        )
 
     # Sort by rerank score descending, with tiebreakers for stability
     # Tiebreakers: objective_score desc, point_id asc (guaranteed unique)

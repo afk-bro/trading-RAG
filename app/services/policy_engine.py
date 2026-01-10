@@ -242,6 +242,7 @@ class MaxDrawdownRule(PolicyRule):
     ) -> RuleResult:
         # Only check for opening positions
         from app.schemas import IntentAction
+
         opening_actions = {
             IntentAction.OPEN_LONG,
             IntentAction.OPEN_SHORT,

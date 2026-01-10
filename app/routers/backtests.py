@@ -6,7 +6,16 @@ from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
@@ -34,7 +43,11 @@ def _get_repos():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection not available",
         )
-    return KnowledgeBaseRepository(_db_pool), BacktestRepository(_db_pool), TuneRepository(_db_pool)
+    return (
+        KnowledgeBaseRepository(_db_pool),
+        BacktestRepository(_db_pool),
+        TuneRepository(_db_pool),
+    )
 
 
 # ===========================================
@@ -50,9 +63,15 @@ class BacktestSummary(BaseModel):
     sharpe: Optional[float] = Field(None, description="Sharpe ratio")
     win_rate: float = Field(..., description="Win rate (0-1)")
     trades: int = Field(..., description="Number of trades")
-    buy_hold_return_pct: Optional[float] = Field(None, description="Buy & hold return for comparison")
-    avg_trade_pct: Optional[float] = Field(None, description="Average trade return percentage")
-    profit_factor: Optional[float] = Field(None, description="Profit factor (gross profit / gross loss)")
+    buy_hold_return_pct: Optional[float] = Field(
+        None, description="Buy & hold return for comparison"
+    )
+    avg_trade_pct: Optional[float] = Field(
+        None, description="Average trade return percentage"
+    )
+    profit_factor: Optional[float] = Field(
+        None, description="Profit factor (gross profit / gross loss)"
+    )
 
 
 class EquityPoint(BaseModel):
@@ -84,7 +103,9 @@ class BacktestRunResponse(BaseModel):
     summary: BacktestSummary = Field(..., description="Summary metrics")
     equity_curve: list[dict[str, Any]] = Field(..., description="Equity curve points")
     trades: list[dict[str, Any]] = Field(..., description="Trade records")
-    warnings: list[str] = Field(default_factory=list, description="Warnings generated during run")
+    warnings: list[str] = Field(
+        default_factory=list, description="Warnings generated during run"
+    )
 
 
 class BacktestRunListItem(BaseModel):
@@ -144,9 +165,13 @@ class StatusCounts(BaseModel):
 class GatesSnapshot(BaseModel):
     """Gate policy snapshot persisted with tune."""
 
-    max_drawdown_pct: float = Field(..., description="Max allowed drawdown percent (gate threshold)")
+    max_drawdown_pct: float = Field(
+        ..., description="Max allowed drawdown percent (gate threshold)"
+    )
     min_trades: int = Field(..., description="Min required trades (gate threshold)")
-    evaluated_on: str = Field(..., description="Which metrics gates were evaluated on: 'oos' or 'primary'")
+    evaluated_on: str = Field(
+        ..., description="Which metrics gates were evaluated on: 'oos' or 'primary'"
+    )
 
 
 class TuneResponse(BaseModel):
@@ -162,7 +187,9 @@ class TuneResponse(BaseModel):
     best_score: Optional[float] = None
     leaderboard: list[LeaderboardEntry]
     counts: Optional[StatusCounts] = None
-    gates: Optional[GatesSnapshot] = Field(None, description="Gate policy snapshot at tune creation")
+    gates: Optional[GatesSnapshot] = Field(
+        None, description="Gate policy snapshot at tune creation"
+    )
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -219,11 +246,21 @@ class GlobalLeaderboardEntry(BaseModel):
     status: str
     best_run_id: Optional[str] = None
     best_score: Optional[float] = None
-    best_objective_score: Optional[float] = Field(None, description="Objective score from winning trial")
-    score_is: Optional[float] = Field(None, description="In-sample score from winning trial")
-    score_oos: Optional[float] = Field(None, description="Out-of-sample score from winning trial")
-    overfit_gap: Optional[float] = Field(None, description="Computed: score_is - score_oos")
-    best_metrics_oos: Optional[BestRunMetrics] = Field(None, description="OOS metrics from winning trial")
+    best_objective_score: Optional[float] = Field(
+        None, description="Objective score from winning trial"
+    )
+    score_is: Optional[float] = Field(
+        None, description="In-sample score from winning trial"
+    )
+    score_oos: Optional[float] = Field(
+        None, description="Out-of-sample score from winning trial"
+    )
+    overfit_gap: Optional[float] = Field(
+        None, description="Computed: score_is - score_oos"
+    )
+    best_metrics_oos: Optional[BestRunMetrics] = Field(
+        None, description="OOS metrics from winning trial"
+    )
 
 
 class GlobalLeaderboardResponse(BaseModel):
@@ -244,8 +281,12 @@ class TuneRunListItem(BaseModel):
     score: Optional[float]
     score_is: Optional[float] = None
     score_oos: Optional[float] = None
-    objective_score: Optional[float] = None  # Composite objective score (when using dd_penalty, etc.)
-    overfit_gap: Optional[float] = None  # Computed: score_is - score_oos (when split enabled)
+    objective_score: Optional[float] = (
+        None  # Composite objective score (when using dd_penalty, etc.)
+    )
+    overfit_gap: Optional[float] = (
+        None  # Computed: score_is - score_oos (when split enabled)
+    )
     metrics_is: Optional[dict[str, Any]] = None
     metrics_oos: Optional[dict[str, Any]] = None
     status: str
@@ -281,16 +322,29 @@ class TuneRunListResponse(BaseModel):
     description="Execute a backtest using a strategy spec and uploaded OHLCV CSV data.",
 )
 async def run_backtest(
-    file: UploadFile = File(..., description="OHLCV CSV file (columns: date, open, high, low, close, volume)"),
+    file: UploadFile = File(
+        ...,
+        description="OHLCV CSV file (columns: date, open, high, low, close, volume)",
+    ),
     strategy_entity_id: UUID = Form(..., description="Strategy entity UUID"),
     workspace_id: UUID = Form(..., description="Workspace UUID"),
     params: str = Form(default="{}", description="Strategy parameters as JSON string"),
     initial_cash: float = Form(default=10000, ge=100, description="Starting capital"),
-    commission_bps: float = Form(default=10, ge=0, le=1000, description="Commission in basis points (10 = 0.1%)"),
-    slippage_bps: float = Form(default=0, ge=0, le=1000, description="Slippage in basis points"),
-    date_from: Optional[str] = Form(default=None, description="Filter: start date (ISO format)"),
-    date_to: Optional[str] = Form(default=None, description="Filter: end date (ISO format)"),
-    allow_draft: bool = Form(default=False, description="Allow running on draft (unapproved) specs"),
+    commission_bps: float = Form(
+        default=10, ge=0, le=1000, description="Commission in basis points (10 = 0.1%)"
+    ),
+    slippage_bps: float = Form(
+        default=0, ge=0, le=1000, description="Slippage in basis points"
+    ),
+    date_from: Optional[str] = Form(
+        default=None, description="Filter: start date (ISO format)"
+    ),
+    date_to: Optional[str] = Form(
+        default=None, description="Filter: end date (ISO format)"
+    ),
+    allow_draft: bool = Form(
+        default=False, description="Allow running on draft (unapproved) specs"
+    ),
 ):
     """
     Run a backtest with uploaded OHLCV data.
@@ -327,7 +381,10 @@ async def run_backtest(
     except json.JSONDecodeError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": f"Invalid params JSON: {e}", "code": "INVALID_PARAMS_JSON"},
+            detail={
+                "detail": f"Invalid params JSON: {e}",
+                "code": "INVALID_PARAMS_JSON",
+            },
         )
 
     # Parse date filters
@@ -341,7 +398,10 @@ async def run_backtest(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": f"Invalid date format: {e}", "code": "INVALID_DATE_FORMAT"},
+            detail={
+                "detail": f"Invalid date format: {e}",
+                "code": "INVALID_DATE_FORMAT",
+            },
         )
 
     # Read file content
@@ -532,18 +592,38 @@ async def create_tune(
     file: UploadFile = File(..., description="OHLCV CSV file"),
     strategy_entity_id: UUID = Form(..., description="Strategy entity UUID"),
     workspace_id: UUID = Form(..., description="Workspace UUID"),
-    search_type: str = Form(default="random", description="Search type: grid or random"),
+    search_type: str = Form(
+        default="random", description="Search type: grid or random"
+    ),
     n_trials: int = Form(default=50, ge=1, le=200, description="Number of trials"),
-    seed: Optional[int] = Form(default=None, description="Random seed for reproducibility"),
-    param_space: Optional[str] = Form(default=None, description="Parameter space JSON (auto-derived if omitted)"),
+    seed: Optional[int] = Form(
+        default=None, description="Random seed for reproducibility"
+    ),
+    param_space: Optional[str] = Form(
+        default=None, description="Parameter space JSON (auto-derived if omitted)"
+    ),
     initial_cash: float = Form(default=10000, ge=100),
     commission_bps: float = Form(default=10, ge=0, le=1000),
     slippage_bps: float = Form(default=0, ge=0, le=1000),
-    objective_metric: str = Form(default="sharpe", description="Objective: sharpe, return, or calmar"),
-    min_trades: int = Form(default=5, ge=1, description="Minimum trades for valid trial"),
-    oos_ratio: Optional[float] = Form(default=None, ge=0.01, le=0.5, description="Out-of-sample split ratio (0.01-0.5). When set, score=score_oos."),
-    objective_type: str = Form(default="sharpe", description="Objective function type: sharpe, sharpe_dd_penalty, return, return_dd_penalty, calmar"),
-    objective_params: Optional[str] = Form(default=None, description="Objective params JSON (e.g., {\"dd_lambda\": 0.02})"),
+    objective_metric: str = Form(
+        default="sharpe", description="Objective: sharpe, return, or calmar"
+    ),
+    min_trades: int = Form(
+        default=5, ge=1, description="Minimum trades for valid trial"
+    ),
+    oos_ratio: Optional[float] = Form(
+        default=None,
+        ge=0.01,
+        le=0.5,
+        description="Out-of-sample split ratio (0.01-0.5). When set, score=score_oos.",
+    ),
+    objective_type: str = Form(
+        default="sharpe",
+        description="Objective function type: sharpe, sharpe_dd_penalty, return, return_dd_penalty, calmar",
+    ),
+    objective_params: Optional[str] = Form(
+        default=None, description='Objective params JSON (e.g., {"dd_lambda": 0.02})'
+    ),
     date_from: Optional[str] = Form(default=None),
     date_to: Optional[str] = Form(default=None),
 ):
@@ -574,22 +654,37 @@ async def create_tune(
     if search_type not in ("grid", "random"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": "search_type must be 'grid' or 'random'", "code": "INVALID_SEARCH_TYPE"},
+            detail={
+                "detail": "search_type must be 'grid' or 'random'",
+                "code": "INVALID_SEARCH_TYPE",
+            },
         )
 
     # Validate objective
     if objective_metric not in ("sharpe", "return", "calmar"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": "objective_metric must be 'sharpe', 'return', or 'calmar'", "code": "INVALID_OBJECTIVE"},
+            detail={
+                "detail": "objective_metric must be 'sharpe', 'return', or 'calmar'",
+                "code": "INVALID_OBJECTIVE",
+            },
         )
 
     # Validate objective_type
-    valid_objective_types = ("sharpe", "sharpe_dd_penalty", "return", "return_dd_penalty", "calmar")
+    valid_objective_types = (
+        "sharpe",
+        "sharpe_dd_penalty",
+        "return",
+        "return_dd_penalty",
+        "calmar",
+    )
     if objective_type not in valid_objective_types:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": f"objective_type must be one of: {', '.join(valid_objective_types)}", "code": "INVALID_OBJECTIVE_TYPE"},
+            detail={
+                "detail": f"objective_type must be one of: {', '.join(valid_objective_types)}",
+                "code": "INVALID_OBJECTIVE_TYPE",
+            },
         )
 
     # Parse objective_params if provided
@@ -600,7 +695,10 @@ async def create_tune(
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"detail": f"Invalid objective_params JSON: {e}", "code": "INVALID_OBJECTIVE_PARAMS"},
+                detail={
+                    "detail": f"Invalid objective_params JSON: {e}",
+                    "code": "INVALID_OBJECTIVE_PARAMS",
+                },
             )
 
     # Parse param_space if provided
@@ -611,7 +709,10 @@ async def create_tune(
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"detail": f"Invalid param_space JSON: {e}", "code": "INVALID_PARAM_SPACE"},
+                detail={
+                    "detail": f"Invalid param_space JSON: {e}",
+                    "code": "INVALID_PARAM_SPACE",
+                },
             )
 
     # Parse date filters
@@ -625,7 +726,10 @@ async def create_tune(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": f"Invalid date format: {e}", "code": "INVALID_DATE_FORMAT"},
+            detail={
+                "detail": f"Invalid date format: {e}",
+                "code": "INVALID_DATE_FORMAT",
+            },
         )
 
     # Read file content
@@ -659,7 +763,10 @@ async def create_tune(
     if not parsed_param_space:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"detail": "No tunable parameters found in param_schema", "code": "NO_TUNABLE_PARAMS"},
+            detail={
+                "detail": "No tunable parameters found in param_schema",
+                "code": "NO_TUNABLE_PARAMS",
+            },
         )
 
     logger.info(
@@ -674,6 +781,7 @@ async def create_tune(
 
     # Build gates snapshot (audit trail for gate policy at tune creation)
     from app.services.backtest.tuner import GATE_MAX_DD_PCT, GATE_MIN_TRADES
+
     gates_snapshot = {
         "max_drawdown_pct": GATE_MAX_DD_PCT,
         "min_trades": GATE_MIN_TRADES,
@@ -778,7 +886,7 @@ async def get_tune(tune_id: UUID):
 
     # Build leaderboard
     leaderboard = []
-    for entry in (tune.get("leaderboard") or []):
+    for entry in tune.get("leaderboard") or []:
         summary = entry.get("summary")
         leaderboard.append(
             LeaderboardEntry(
@@ -931,9 +1039,16 @@ async def list_tunes(
     workspace_id: UUID = Query(..., description="Workspace UUID"),
     strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
     status_filter: Optional[str] = Query(None, description="Filter by status"),
-    valid_only: bool = Query(False, description="Only show tunes with valid results (best_run_id not null)"),
-    objective_type: Optional[str] = Query(None, description="Filter by objective type (sharpe, sharpe_dd_penalty, etc.)"),
-    oos_enabled: Optional[bool] = Query(None, description="Filter by OOS split: true=with OOS, false=without OOS, null=all"),
+    valid_only: bool = Query(
+        False, description="Only show tunes with valid results (best_run_id not null)"
+    ),
+    objective_type: Optional[str] = Query(
+        None, description="Filter by objective type (sharpe, sharpe_dd_penalty, etc.)"
+    ),
+    oos_enabled: Optional[bool] = Query(
+        None,
+        description="Filter by OOS split: true=with OOS, false=without OOS, null=all",
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -1012,9 +1127,16 @@ async def list_tunes(
 async def get_leaderboard(
     workspace_id: UUID = Query(..., description="Workspace UUID"),
     strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
-    valid_only: bool = Query(True, description="Only tunes with valid winning trial (default True for leaderboard)"),
-    objective_type: Optional[str] = Query(None, description="Filter by objective type: sharpe, sharpe_dd_penalty, etc."),
-    oos_enabled: Optional[str] = Query(None, description="Filter by OOS enabled: 'true' or 'false'"),
+    valid_only: bool = Query(
+        True,
+        description="Only tunes with valid winning trial (default True for leaderboard)",
+    ),
+    objective_type: Optional[str] = Query(
+        None, description="Filter by objective type: sharpe, sharpe_dd_penalty, etc."
+    ),
+    oos_enabled: Optional[str] = Query(
+        None, description="Filter by OOS enabled: 'true' or 'false'"
+    ),
     include_canceled: bool = Query(False, description="Include canceled tunes"),
     limit: int = Query(default=50, ge=1, le=100, description="Max results"),
     offset: int = Query(default=0, ge=0, description="Pagination offset"),
@@ -1075,7 +1197,9 @@ async def get_leaderboard(
                 oos_ratio=entry.get("oos_ratio"),
                 gates=gates,
                 status=entry["status"],
-                best_run_id=str(entry["best_run_id"]) if entry.get("best_run_id") else None,
+                best_run_id=(
+                    str(entry["best_run_id"]) if entry.get("best_run_id") else None
+                ),
                 best_score=entry.get("best_score"),
                 best_objective_score=entry.get("best_objective_score"),
                 score_is=entry.get("score_is"),

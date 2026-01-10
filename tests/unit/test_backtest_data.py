@@ -115,7 +115,9 @@ class TestParseOhlcvCsv:
         assert result.row_count == 10  # 12 - 2 with NaN
 
         # Should have warning about dropped rows
-        assert any("dropped" in w.lower() and "nan" in w.lower() for w in result.warnings)
+        assert any(
+            "dropped" in w.lower() and "nan" in w.lower() for w in result.warnings
+        )
 
     def test_duplicate_dates_are_removed_with_warning(self):
         """Duplicate dates should be removed with warning."""
@@ -189,7 +191,10 @@ class TestParseOhlcvCsv:
         with pytest.raises(OHLCVParseError) as exc_info:
             parse_ohlcv_csv(csv_content, filename="empty.csv")
 
-        assert "no data" in str(exc_info.value).lower() or "no rows" in str(exc_info.value).lower()
+        assert (
+            "no data" in str(exc_info.value).lower()
+            or "no rows" in str(exc_info.value).lower()
+        )
 
     def test_insufficient_rows_raises_error(self):
         """Less than 10 rows should raise OHLCVParseError."""
@@ -241,7 +246,10 @@ class TestParseOhlcvCsv:
     def test_file_too_large_raises_error(self):
         """File exceeding max size should raise OHLCVParseError."""
         # Create content larger than 1KB limit
-        csv_content = b"date,open,high,low,close,volume\n" + b"2024-01-01,100,105,99,104,1000000\n" * 1000
+        csv_content = (
+            b"date,open,high,low,close,volume\n"
+            + b"2024-01-01,100,105,99,104,1000000\n" * 1000
+        )
 
         with pytest.raises(OHLCVParseError) as exc_info:
             parse_ohlcv_csv(csv_content, filename="large.csv", max_file_size_mb=0.001)

@@ -382,9 +382,7 @@ class TestTextTemplate:
 
     def test_text_with_timeframe(self, flat_series):
         """Text should include timeframe when provided."""
-        snapshot = compute_regime_snapshot(
-            flat_series, source="test", timeframe="1h"
-        )
+        snapshot = compute_regime_snapshot(flat_series, source="test", timeframe="1h")
         text = regime_snapshot_to_text(snapshot)
 
         assert "(1h)" in text

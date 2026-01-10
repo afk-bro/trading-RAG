@@ -44,7 +44,14 @@ GATE_MAX_DD_PCT = float(os.environ.get("TUNER_GATE_MAX_DD_PCT", "20"))
 GATE_MIN_TRADES = int(os.environ.get("TUNER_GATE_MIN_TRADES", "10"))
 
 # Canonical metrics keys to persist
-METRICS_KEYS = ["return_pct", "sharpe", "max_drawdown_pct", "win_rate", "trades", "profit_factor"]
+METRICS_KEYS = [
+    "return_pct",
+    "sharpe",
+    "max_drawdown_pct",
+    "win_rate",
+    "trades",
+    "profit_factor",
+]
 
 
 def serialize_metrics(summary: dict) -> dict:
@@ -196,7 +203,9 @@ def compute_objective_score(
 
     else:
         # Unknown type, fallback to sharpe
-        logger.warning("Unknown objective_type, using sharpe", objective_type=objective_type)
+        logger.warning(
+            "Unknown objective_type, using sharpe", objective_type=objective_type
+        )
         return metrics.get("sharpe")
 
 
@@ -254,14 +263,20 @@ class ParamTuner:
             # Find date column (common aliases)
             dates = []
             for row in reader:
-                date_val = row.get("date") or row.get("timestamp") or row.get("datetime")
+                date_val = (
+                    row.get("date") or row.get("timestamp") or row.get("datetime")
+                )
                 if date_val:
                     # Parse date string
                     try:
                         dt = datetime.fromisoformat(date_val.replace("Z", "+00:00"))
                     except ValueError:
                         # Try other formats
-                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S"]:
+                        for fmt in [
+                            "%Y-%m-%d %H:%M:%S",
+                            "%Y-%m-%d",
+                            "%Y/%m/%d %H:%M:%S",
+                        ]:
                             try:
                                 dt = datetime.strptime(date_val, fmt)
                                 break
@@ -411,7 +426,9 @@ class ParamTuner:
                 )
 
         # Update tune status to running
-        await self.tune_repo.update_tune_status(tune_id, "running", started_at=datetime.utcnow())
+        await self.tune_repo.update_tune_status(
+            tune_id, "running", started_at=datetime.utcnow()
+        )
 
         # Detect timeframe and instrument for regime computation
         detected_timeframe = detect_timeframe_from_ohlcv(file_content, filename)
@@ -485,7 +502,9 @@ class ParamTuner:
                                 timeout=self.trial_timeout,
                             )
                             is_summary = is_result["summary"]
-                            score_is = compute_score(is_summary, objective_metric, min_trades)
+                            score_is = compute_score(
+                                is_summary, objective_metric, min_trades
+                            )
 
                             # Run OOS backtest (validation window)
                             oos_result = await asyncio.wait_for(
@@ -505,7 +524,9 @@ class ParamTuner:
                                 timeout=self.trial_timeout,
                             )
                             oos_summary = oos_result["summary"]
-                            score_oos = compute_score(oos_summary, objective_metric, min_trades)
+                            score_oos = compute_score(
+                                oos_summary, objective_metric, min_trades
+                            )
 
                             # Use OOS run_id as the canonical run (per design decision)
                             run_id = UUID(oos_result["run_id"])
@@ -520,7 +541,9 @@ class ParamTuner:
                                 if oos_trades < min_trades:
                                     skip_reason = f"oos_min_trades_not_met ({oos_trades}<{min_trades})"
                                 elif oos_summary.get(objective_metric) is None:
-                                    skip_reason = f"oos_metric_unavailable ({objective_metric})"
+                                    skip_reason = (
+                                        f"oos_metric_unavailable ({objective_metric})"
+                                    )
                                 else:
                                     skip_reason = "oos_score_unavailable"
 
@@ -570,7 +593,9 @@ class ParamTuner:
                             )
 
                             # Evaluate gates on OOS metrics
-                            gates_passed, gate_failures = evaluate_gates(metrics_oos_data)
+                            gates_passed, gate_failures = evaluate_gates(
+                                metrics_oos_data
+                            )
 
                             if not gates_passed:
                                 # Gate failure → skipped (not failed)
@@ -618,7 +643,9 @@ class ParamTuner:
                             trials_completed += 1
 
                             if trials_completed % 5 == 0:
-                                await self.tune_repo.update_tune_progress(tune_id, trials_completed)
+                                await self.tune_repo.update_tune_progress(
+                                    tune_id, trials_completed
+                                )
 
                             return {
                                 "trial_index": idx,
@@ -659,9 +686,13 @@ class ParamTuner:
                             if score is None:
                                 trades = summary.get("trades", 0)
                                 if trades < min_trades:
-                                    skip_reason = f"min_trades_not_met ({trades}<{min_trades})"
+                                    skip_reason = (
+                                        f"min_trades_not_met ({trades}<{min_trades})"
+                                    )
                                 elif summary.get(objective_metric) is None:
-                                    skip_reason = f"metric_unavailable ({objective_metric})"
+                                    skip_reason = (
+                                        f"metric_unavailable ({objective_metric})"
+                                    )
                                 else:
                                     skip_reason = "unknown"
 
@@ -739,7 +770,9 @@ class ParamTuner:
                             trials_completed += 1
 
                             if trials_completed % 5 == 0:
-                                await self.tune_repo.update_tune_progress(tune_id, trials_completed)
+                                await self.tune_repo.update_tune_progress(
+                                    tune_id, trials_completed
+                                )
 
                             return {
                                 "trial_index": idx,
@@ -807,7 +840,9 @@ class ParamTuner:
             trial_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Filter successful results
-            valid_results = [r for r in trial_results if isinstance(r, dict) and r is not None]
+            valid_results = [
+                r for r in trial_results if isinstance(r, dict) and r is not None
+            ]
 
             # Sort by objective_score (composite) → score_oos (OOS) → score (raw)
             def sort_key(r):
@@ -833,14 +868,16 @@ class ParamTuner:
                     or trial.get("score_oos")
                     or trial.get("score")
                 )
-                leaderboard.append({
-                    "rank": rank,
-                    "run_id": trial["run_id"],
-                    "params": trial["params"],
-                    "score": display_score,
-                    "objective_score": trial.get("objective_score"),
-                    "summary": trial.get("summary"),
-                })
+                leaderboard.append(
+                    {
+                        "rank": rank,
+                        "run_id": trial["run_id"],
+                        "params": trial["params"],
+                        "score": display_score,
+                        "objective_score": trial.get("objective_score"),
+                        "summary": trial.get("summary"),
+                    }
+                )
 
             # Determine best
             best_run_id = None
@@ -1041,9 +1078,9 @@ def derive_param_space(
                     int(default * 1.3),
                 ]
                 # Clamp and dedupe
-                clamped = sorted(set(
-                    max(int(minimum), min(int(maximum), p)) for p in points
-                ))
+                clamped = sorted(
+                    set(max(int(minimum), min(int(maximum), p)) for p in points)
+                )
                 space[name] = clamped
 
             elif search_type == "random":
@@ -1057,10 +1094,7 @@ def derive_param_space(
             else:
                 # Grid with floats - 5 discrete points
                 points = [default * m for m in [0.7, 0.85, 1.0, 1.15, 1.3]]
-                clamped = [
-                    round(max(minimum, min(maximum, p)), 4)
-                    for p in points
-                ]
+                clamped = [round(max(minimum, min(maximum, p)), 4) for p in points]
                 space[name] = sorted(set(clamped))
 
         # Default only - fixed value

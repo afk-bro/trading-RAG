@@ -12,6 +12,7 @@ import pandas as pd
 import structlog
 
 from app.services.backtest.data import parse_ohlcv_csv, OHLCVParseError
+
 # Import directly from submodules to avoid circular import
 from app.services.kb.types import RegimeSnapshot
 from app.services.kb.regime import compute_regime_snapshot
@@ -210,7 +211,9 @@ def extract_instrument_from_filename(filename: str) -> Optional[str]:
     name = re.sub(r"\.(csv|txt|data)$", "", name)
 
     # Crypto patterns
-    crypto_pattern = r"(btc|eth|sol|xrp|ada|doge|bnb|ltc|dot|link)[-_]?(usd[t]?|usdc|busd|eur|gbp)"
+    crypto_pattern = (
+        r"(btc|eth|sol|xrp|ada|doge|bnb|ltc|dot|link)[-_]?(usd[t]?|usdc|busd|eur|gbp)"
+    )
     crypto_match = re.search(crypto_pattern, name, re.IGNORECASE)
     if crypto_match:
         return crypto_match.group().upper().replace("-", "").replace("_", "")

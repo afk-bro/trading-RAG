@@ -61,7 +61,11 @@ class TestListEntities:
             id=row["id"],
             type=KBEntityType(row["type"]),
             name=row["name"],
-            aliases=json.loads(row["aliases"]) if isinstance(row["aliases"], str) else row["aliases"],
+            aliases=(
+                json.loads(row["aliases"])
+                if isinstance(row["aliases"], str)
+                else row["aliases"]
+            ),
             description=row["description"],
             verified_claim_count=row["verified_claim_count"],
             created_at=row["created_at"],
@@ -479,7 +483,9 @@ class TestKBRepositorySearchClaimsForAnswer:
         # Verify word-based search was used
         fetch_call = conn.fetch.call_args
         params = fetch_call[0]
-        assert any("%what%" in str(p) for p in params) or any("%rsi%" in str(p) for p in params)
+        assert any("%what%" in str(p) for p in params) or any(
+            "%rsi%" in str(p) for p in params
+        )
 
     @pytest.mark.asyncio
     async def test_search_limits_words(self, mock_pool):

@@ -47,7 +47,9 @@ def require_admin_token(request: Request) -> bool:
     if not admin_token:
         # In development without token, allow localhost only
         # In production, ADMIN_TOKEN should always be set
-        allow_localhost = os.environ.get("ALLOW_LOCALHOST_ADMIN", "false").lower() == "true"
+        allow_localhost = (
+            os.environ.get("ALLOW_LOCALHOST_ADMIN", "false").lower() == "true"
+        )
         if allow_localhost:
             host = request.headers.get("host", "")
             if "localhost" in host or "127.0.0.1" in host:
@@ -236,7 +238,9 @@ class RateLimiter:
 
                 if len(self._requests[key]) >= requests_per_minute:
                     # Calculate retry-after
-                    oldest = min(self._requests[key]) if self._requests[key] else time.time()
+                    oldest = (
+                        min(self._requests[key]) if self._requests[key] else time.time()
+                    )
                     retry_after = int(60 - (time.time() - oldest)) + 1
 
                     logger.warning(
@@ -308,7 +312,9 @@ class WorkspaceSemaphore:
     class _SemaphoreContext:
         """Context manager for semaphore acquisition with timeout."""
 
-        def __init__(self, semaphore: asyncio.Semaphore, workspace_id: UUID, timeout: float):
+        def __init__(
+            self, semaphore: asyncio.Semaphore, workspace_id: UUID, timeout: float
+        ):
             self.semaphore = semaphore
             self.workspace_id = workspace_id
             self.timeout = timeout

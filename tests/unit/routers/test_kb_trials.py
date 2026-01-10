@@ -234,6 +234,7 @@ class TestRecommendHappyPath:
             assert "request_id" in data
             # Should be valid UUID
             import uuid
+
             uuid.UUID(data["request_id"])
 
 

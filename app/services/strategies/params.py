@@ -69,28 +69,46 @@ class ParamSpec:
         # Type validation
         if self.type == ParamType.INT:
             if not isinstance(value, (int, float)):
-                return False, f"Parameter '{self.name}' must be numeric, got {type(value).__name__}"
+                return (
+                    False,
+                    f"Parameter '{self.name}' must be numeric, got {type(value).__name__}",
+                )
             if isinstance(value, float) and not value.is_integer():
                 return False, f"Parameter '{self.name}' must be an integer"
 
         elif self.type == ParamType.FLOAT:
             if not isinstance(value, (int, float)):
-                return False, f"Parameter '{self.name}' must be numeric, got {type(value).__name__}"
+                return (
+                    False,
+                    f"Parameter '{self.name}' must be numeric, got {type(value).__name__}",
+                )
 
         elif self.type == ParamType.BOOL:
             if not isinstance(value, bool):
-                return False, f"Parameter '{self.name}' must be boolean, got {type(value).__name__}"
+                return (
+                    False,
+                    f"Parameter '{self.name}' must be boolean, got {type(value).__name__}",
+                )
 
         elif self.type == ParamType.ENUM:
             if self.choices and value not in self.choices:
-                return False, f"Parameter '{self.name}' must be one of {self.choices}, got {value}"
+                return (
+                    False,
+                    f"Parameter '{self.name}' must be one of {self.choices}, got {value}",
+                )
 
         # Bounds validation (for numeric types)
         if self.type in (ParamType.INT, ParamType.FLOAT):
             if self.min_value is not None and value < self.min_value:
-                return False, f"Parameter '{self.name}' must be >= {self.min_value}, got {value}"
+                return (
+                    False,
+                    f"Parameter '{self.name}' must be >= {self.min_value}, got {value}",
+                )
             if self.max_value is not None and value > self.max_value:
-                return False, f"Parameter '{self.name}' must be <= {self.max_value}, got {value}"
+                return (
+                    False,
+                    f"Parameter '{self.name}' must be <= {self.max_value}, got {value}",
+                )
 
         return True, None
 
@@ -104,20 +122,29 @@ class ParamSpec:
         if value is None:
             if self.nullable:
                 return None, None
-            return self.default, f"Parameter '{self.name}' was None, using default {self.default}"
+            return (
+                self.default,
+                f"Parameter '{self.name}' was None, using default {self.default}",
+            )
 
         # Type coercion
         if self.type == ParamType.INT:
             try:
                 value = int(round(float(value)))
             except (ValueError, TypeError):
-                return self.default, f"Parameter '{self.name}' could not be converted to int"
+                return (
+                    self.default,
+                    f"Parameter '{self.name}' could not be converted to int",
+                )
 
         elif self.type == ParamType.FLOAT:
             try:
                 value = float(value)
             except (ValueError, TypeError):
-                return self.default, f"Parameter '{self.name}' could not be converted to float"
+                return (
+                    self.default,
+                    f"Parameter '{self.name}' could not be converted to float",
+                )
 
         elif self.type == ParamType.BOOL:
             if not isinstance(value, bool):
@@ -128,13 +155,19 @@ class ParamSpec:
                     elif value.lower() in ("false", "0", "no"):
                         value = False
                     else:
-                        return self.default, f"Parameter '{self.name}' could not be converted to bool"
+                        return (
+                            self.default,
+                            f"Parameter '{self.name}' could not be converted to bool",
+                        )
                 else:
                     value = bool(value)
 
         elif self.type == ParamType.ENUM:
             if self.choices and value not in self.choices:
-                return self.default, f"Parameter '{self.name}' value {value} not in choices, using default"
+                return (
+                    self.default,
+                    f"Parameter '{self.name}' value {value} not in choices, using default",
+                )
 
         # Clamp to bounds
         warning = None
@@ -340,5 +373,7 @@ def validate_and_repair_params(
             is_valid=revalidate.is_valid,
             errors=revalidate.errors,
             warnings=result.warnings + repair_result.warnings,
-            repaired_params=repair_result.repaired_params if revalidate.is_valid else None,
+            repaired_params=(
+                repair_result.repaired_params if revalidate.is_valid else None
+            ),
         )

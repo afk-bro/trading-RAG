@@ -177,9 +177,7 @@ class KBEmbeddingAdapter:
             batch_indices = list(range(batch_start, batch_end))
 
             try:
-                batch_vectors = await self._embed_batch_with_retry(
-                    batch, batch_indices
-                )
+                batch_vectors = await self._embed_batch_with_retry(batch, batch_indices)
                 vectors.extend(batch_vectors)
             except EmbeddingError as e:
                 if skip_failures:

@@ -148,7 +148,10 @@ class TestValidateParams:
             validate_params(params, schema)
 
         error = next(e for e in exc_info.value.errors if e["param"] == "direction")
-        assert "enum" in error["error"].lower() or "must be one of" in error["error"].lower()
+        assert (
+            "enum" in error["error"].lower()
+            or "must be one of" in error["error"].lower()
+        )
 
     def test_extra_params_passed_through(self):
         """Parameters not in schema should be passed through."""

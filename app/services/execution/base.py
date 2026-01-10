@@ -78,9 +78,7 @@ class BrokerAdapter(ABC):
         pass
 
     @abstractmethod
-    async def reconcile_from_journal(
-        self, workspace_id: UUID
-    ) -> ReconciliationResult:
+    async def reconcile_from_journal(self, workspace_id: UUID) -> ReconciliationResult:
         """
         Rebuild state from journal events.
 

@@ -105,19 +105,26 @@ def generate_ohlcv(num_bars: int = NUM_BARS) -> list[dict]:
         # Volume: higher in volatile segments, spikes on trend changes
         segment_vol_mult = 1.0 + volatility * 50
         spike = 1.5 if (abs(t - SEG_A_END) < 0.02 or abs(t - SEG_B_END) < 0.02) else 1.0
-        volume = int(BASE_VOLUME * segment_vol_mult * spike * (0.8 + 0.4 * abs(math.sin(i * 0.1))))
+        volume = int(
+            BASE_VOLUME
+            * segment_vol_mult
+            * spike
+            * (0.8 + 0.4 * abs(math.sin(i * 0.1)))
+        )
 
         # Timestamp
         timestamp = START_DATE + i * INTERVAL
 
-        bars.append({
-            "date": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "open": round(open_price, 4),
-            "high": round(high, 4),
-            "low": round(low, 4),
-            "close": round(close, 4),
-            "volume": volume,
-        })
+        bars.append(
+            {
+                "date": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": round(open_price, 4),
+                "high": round(high, 4),
+                "low": round(low, 4),
+                "close": round(close, 4),
+                "volume": volume,
+            }
+        )
 
     return bars
 
@@ -125,7 +132,9 @@ def generate_ohlcv(num_bars: int = NUM_BARS) -> list[dict]:
 def write_csv(bars: list[dict], output_path: Path) -> None:
     """Write bars to CSV file."""
     with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["date", "open", "high", "low", "close", "volume"])
+        writer = csv.DictWriter(
+            f, fieldnames=["date", "open", "high", "low", "close", "volume"]
+        )
         writer.writeheader()
         writer.writerows(bars)
     print(f"Wrote {len(bars)} bars to {output_path}")
@@ -144,9 +153,15 @@ def main():
     # Segment breakdown
     seg_a = int(NUM_BARS * SEG_A_END)
     seg_b = int(NUM_BARS * SEG_B_END)
-    print(f"Segment A (uptrend): bars 0-{seg_a}, close {prices[0]:.2f} -> {prices[seg_a-1]:.2f}")
-    print(f"Segment B (chop): bars {seg_a}-{seg_b}, close {prices[seg_a]:.2f} -> {prices[seg_b-1]:.2f}")
-    print(f"Segment C (downtrend): bars {seg_b}-{NUM_BARS}, close {prices[seg_b]:.2f} -> {prices[-1]:.2f}")
+    print(
+        f"Segment A (uptrend): bars 0-{seg_a}, close {prices[0]:.2f} -> {prices[seg_a-1]:.2f}"
+    )
+    print(
+        f"Segment B (chop): bars {seg_a}-{seg_b}, close {prices[seg_a]:.2f} -> {prices[seg_b-1]:.2f}"
+    )
+    print(
+        f"Segment C (downtrend): bars {seg_b}-{NUM_BARS}, close {prices[seg_b]:.2f} -> {prices[-1]:.2f}"
+    )
 
     # Write output
     output_path = Path(__file__).parent / "ohlcv_synth_trendy_range.csv"

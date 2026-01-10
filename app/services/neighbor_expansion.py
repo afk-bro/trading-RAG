@@ -93,7 +93,9 @@ async def expand_neighbors(
     # Build deduped neighbor requests
     # For overlapping neighbors, best seed (lowest rank) wins attribution
     seed_set = {s.chunk_id for s in seeds}
-    req_map: dict[tuple[str, int], tuple[int, str]] = {}  # (doc_id, idx) -> (rank, seed_id)
+    req_map: dict[tuple[str, int], tuple[int, str]] = (
+        {}
+    )  # (doc_id, idx) -> (rank, seed_id)
 
     for seed in seeds:
         st = (seed.source_type or "").lower()
@@ -112,8 +114,7 @@ async def expand_neighbors(
                 req_map[key] = (seed.rerank_rank, seed.chunk_id)
 
     neighbor_requests = [
-        (doc_id, idx, seed_id)
-        for (doc_id, idx), (_, seed_id) in req_map.items()
+        (doc_id, idx, seed_id) for (doc_id, idx), (_, seed_id) in req_map.items()
     ]
 
     if not neighbor_requests:

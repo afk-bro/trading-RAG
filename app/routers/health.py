@@ -69,7 +69,9 @@ async def check_ollama_health(settings: Settings) -> DependencyHealth:
             if response.status_code == 200:
                 # Check if the embed model is available
                 data = response.json()
-                models = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+                models = [
+                    m.get("name", "").split(":")[0] for m in data.get("models", [])
+                ]
                 if settings.embed_model in models:
                     return DependencyHealth(status="ok", latency_ms=latency)
                 return DependencyHealth(
@@ -119,14 +121,12 @@ async def check_database_health(settings: Settings) -> DependencyHealth:
     start = time.perf_counter()
     if not settings.database_url:
         return DependencyHealth(
-            status="error",
-            latency_ms=0,
-            error="DATABASE_URL not configured"
+            status="error", latency_ms=0, error="DATABASE_URL not configured"
         )
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=10,
             statement_cache_size=0,  # Required for pgbouncer
         )
@@ -171,19 +171,19 @@ async def check_qdrant_collection(settings: Settings) -> DependencyHealth:
                     return DependencyHealth(
                         status="error",
                         latency_ms=latency,
-                        error=f"Collection dim mismatch: {dim} vs expected {expected_dim}"
+                        error=f"Collection dim mismatch: {dim} vs expected {expected_dim}",
                     )
                 return DependencyHealth(status="ok", latency_ms=latency)
             elif response.status_code == 404:
                 return DependencyHealth(
                     status="error",
                     latency_ms=latency,
-                    error=f"Collection '{collection}' not found"
+                    error=f"Collection '{collection}' not found",
                 )
             return DependencyHealth(
                 status="error",
                 latency_ms=latency,
-                error=f"Unexpected status: {response.status_code}"
+                error=f"Unexpected status: {response.status_code}",
             )
     except Exception as e:
         latency = (time.perf_counter() - start) * 1000
@@ -199,18 +199,20 @@ async def check_embed_service(settings: Settings) -> DependencyHealth:
             latency = (time.perf_counter() - start) * 1000
             if response.status_code == 200:
                 data = response.json()
-                models = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+                models = [
+                    m.get("name", "").split(":")[0] for m in data.get("models", [])
+                ]
                 if settings.embed_model in models:
                     return DependencyHealth(status="ok", latency_ms=latency)
                 return DependencyHealth(
                     status="error",
                     latency_ms=latency,
-                    error=f"Embed model '{settings.embed_model}' not loaded"
+                    error=f"Embed model '{settings.embed_model}' not loaded",
                 )
             return DependencyHealth(
                 status="error",
                 latency_ms=latency,
-                error=f"Unexpected status: {response.status_code}"
+                error=f"Unexpected status: {response.status_code}",
             )
     except Exception as e:
         latency = (time.perf_counter() - start) * 1000
@@ -218,9 +220,7 @@ async def check_embed_service(settings: Settings) -> DependencyHealth:
 
 
 async def _timed_check(
-    name: str,
-    coro,
-    timeout: float = READINESS_CHECK_TIMEOUT_S
+    name: str, coro, timeout: float = READINESS_CHECK_TIMEOUT_S
 ) -> DependencyHealth:
     """
     Run a health check with hard timeout to prevent blocking.
@@ -235,21 +235,16 @@ async def _timed_check(
         return DependencyHealth(
             status="error",
             latency_ms=latency,
-            error=f"Check timed out after {timeout}s"
+            error=f"Check timed out after {timeout}s",
         )
     except Exception as e:
         latency = (time.perf_counter() - start) * 1000
-        return DependencyHealth(
-            status="error",
-            latency_ms=latency,
-            error=str(e)
-        )
+        return DependencyHealth(status="error", latency_ms=latency, error=str(e))
 
 
 @router.get("/ready", response_model=ReadinessResponse)
 async def readiness_check(
-    response: Response,
-    settings: Settings = Depends(get_settings)
+    response: Response, settings: Settings = Depends(get_settings)
 ) -> ReadinessResponse:
     """
     Kubernetes readiness probe. Returns 200 if ready, 503 if not.
@@ -366,7 +361,9 @@ async def debug_db_pool(settings: Settings = Depends(get_settings)):
 
     return {
         "database_url_configured": bool(settings.database_url),
-        "database_url_prefix": settings.database_url[:50] + "..." if settings.database_url else None,
+        "database_url_prefix": (
+            settings.database_url[:50] + "..." if settings.database_url else None
+        ),
         "supabase_db_password_configured": bool(settings.supabase_db_password),
         "pool_initialized": pool is not None,
         "pool_size": pool.get_size() if pool else None,
@@ -387,7 +384,7 @@ async def debug_db_test(settings: Settings = Depends(get_settings)):
         # Try to connect directly (disable statement cache for pgbouncer)
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
@@ -468,7 +465,10 @@ async def debug_network(settings: Settings = Depends(get_settings)):
             sock.close()
             results["tcp_tests"][f"{host}:{port}"] = {"connected": True}
         except Exception as e:
-            results["tcp_tests"][f"{host}:{port}"] = {"connected": False, "error": str(e)}
+            results["tcp_tests"][f"{host}:{port}"] = {
+                "connected": False,
+                "error": str(e),
+            }
 
     return results
 
@@ -485,7 +485,7 @@ async def list_workspaces(settings: Settings = Depends(get_settings)):
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
@@ -501,7 +501,9 @@ async def list_workspaces(settings: Settings = Depends(get_settings)):
                 "slug": row["slug"],
                 "is_active": row["is_active"],
                 "ingestion_enabled": row["ingestion_enabled"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "created_at": (
+                    row["created_at"].isoformat() if row["created_at"] else None
+                ),
             }
             for row in rows
         ]
@@ -517,6 +519,7 @@ async def list_workspaces(settings: Settings = Depends(get_settings)):
 
 class CreateWorkspaceRequest(BaseModel):
     """Request for creating a workspace."""
+
     name: str = "Test Workspace"
     slug: str = "test-workspace"
 
@@ -524,7 +527,7 @@ class CreateWorkspaceRequest(BaseModel):
 @router.post("/debug/workspaces")
 async def create_workspace(
     request: CreateWorkspaceRequest = CreateWorkspaceRequest(),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
 ):
     """Create a test workspace for testing."""
     import asyncpg
@@ -537,7 +540,7 @@ async def create_workspace(
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
@@ -566,7 +569,7 @@ async def create_workspace(
                 "id": str(result["id"]),
                 "name": result["name"],
                 "slug": result["slug"],
-            }
+            },
         }
     except Exception as e:
         return {
@@ -589,7 +592,7 @@ async def list_chunk_vectors(settings: Settings = Depends(get_settings)):
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
@@ -618,12 +621,20 @@ async def list_chunk_vectors(settings: Settings = Depends(get_settings)):
                 "vector_dim": row["vector_dim"],
                 "qdrant_point_id": row["qdrant_point_id"],
                 "status": row["status"],
-                "indexed_at": row["indexed_at"].isoformat() if row["indexed_at"] else None,
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "indexed_at": (
+                    row["indexed_at"].isoformat() if row["indexed_at"] else None
+                ),
+                "created_at": (
+                    row["created_at"].isoformat() if row["created_at"] else None
+                ),
             }
             for row in rows
         ]
-        return {"success": True, "chunk_vectors": chunk_vectors, "count": len(chunk_vectors)}
+        return {
+            "success": True,
+            "chunk_vectors": chunk_vectors,
+            "count": len(chunk_vectors),
+        }
     except Exception as e:
         return {
             "success": False,
@@ -645,7 +656,7 @@ async def list_documents(settings: Settings = Depends(get_settings)):
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
@@ -674,9 +685,17 @@ async def list_documents(settings: Settings = Depends(get_settings)):
                 "language": row["language"],
                 "status": row["status"],
                 "version": row["version"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                "last_indexed_at": row["last_indexed_at"].isoformat() if row["last_indexed_at"] else None,
+                "created_at": (
+                    row["created_at"].isoformat() if row["created_at"] else None
+                ),
+                "updated_at": (
+                    row["updated_at"].isoformat() if row["updated_at"] else None
+                ),
+                "last_indexed_at": (
+                    row["last_indexed_at"].isoformat()
+                    if row["last_indexed_at"]
+                    else None
+                ),
             }
             for row in rows
         ]
@@ -692,8 +711,7 @@ async def list_documents(settings: Settings = Depends(get_settings)):
 
 @router.get("/debug/chunks/count")
 async def count_chunks_by_workspace(
-    workspace_id: str,
-    settings: Settings = Depends(get_settings)
+    workspace_id: str, settings: Settings = Depends(get_settings)
 ):
     """Count chunks for a specific workspace."""
     import asyncpg
@@ -705,13 +723,12 @@ async def count_chunks_by_workspace(
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
         count = await conn.fetchval(
-            "SELECT COUNT(*) FROM chunks WHERE workspace_id = $1::uuid",
-            workspace_id
+            "SELECT COUNT(*) FROM chunks WHERE workspace_id = $1::uuid", workspace_id
         )
         await conn.close()
         return {"success": True, "workspace_id": workspace_id, "count": count}
@@ -728,7 +745,7 @@ async def count_chunks_by_workspace(
 async def list_chunks(
     doc_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
 ):
     """List chunks table to verify chunking. Optionally filter by doc_id or workspace_id."""
     import asyncpg
@@ -740,7 +757,7 @@ async def list_chunks(
     try:
         conn = await asyncpg.connect(
             settings.database_url,
-            ssl='require',
+            ssl="require",
             timeout=30,
             statement_cache_size=0,
         )
@@ -758,7 +775,7 @@ async def list_chunks(
                 WHERE doc_id = $1::uuid
                 ORDER BY chunk_index
                 """,
-                doc_id
+                doc_id,
             )
         elif workspace_id:
             rows = await conn.fetch(
@@ -774,7 +791,7 @@ async def list_chunks(
                 ORDER BY created_at DESC
                 LIMIT 100
                 """,
-                workspace_id
+                workspace_id,
             )
         else:
             rows = await conn.fetch(
@@ -809,7 +826,9 @@ async def list_chunks(
                 "symbols": row["symbols"],
                 "entities": row["entities"],
                 "topics": row["topics"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "created_at": (
+                    row["created_at"].isoformat() if row["created_at"] else None
+                ),
             }
             for row in rows
         ]

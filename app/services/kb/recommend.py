@@ -216,9 +216,13 @@ class RecommendResponse:
     # ==========================================================================
 
     # Confidence decomposition (v1.5)
-    regime_fit_confidence: Optional[float] = None  # How well current market matches historical (0-1)
+    regime_fit_confidence: Optional[float] = (
+        None  # How well current market matches historical (0-1)
+    )
     regime_distance_z: Optional[float] = None  # Z-score distance from neighborhood
-    distance_baseline: Optional[str] = None  # "composite" | "marginal" | "neighbors_only"
+    distance_baseline: Optional[str] = (
+        None  # "composite" | "marginal" | "neighbors_only"
+    )
     distance_n: Optional[int] = None  # Number of neighbors used for distance
 
     # Duration fields (v1.5)
@@ -227,7 +231,9 @@ class RecommendResponse:
     expected_remaining_bars: Optional[int] = None  # max(0, median - age)
     duration_iqr_bars: Optional[list[int]] = None  # [p25, p75]
     remaining_iqr_bars: Optional[list[int]] = None  # [max(0, p25-age), max(0, p75-age)]
-    duration_baseline: Optional[str] = None  # "composite_symbol" | "marginal" | "global_timeframe"
+    duration_baseline: Optional[str] = (
+        None  # "composite_symbol" | "marginal" | "global_timeframe"
+    )
     duration_n: Optional[int] = None  # Number of segments used
 
     # FSM state (v1.5)
@@ -239,7 +245,9 @@ class RecommendResponse:
     windows: Optional[WindowMetadata] = None
 
     # Missing field reasons (v1.5)
-    missing: list[str] = field(default_factory=list)  # ["no_duration_stats", "no_cluster_stats", etc.]
+    missing: list[str] = field(
+        default_factory=list
+    )  # ["no_duration_stats", "no_cluster_stats", etc.]
 
 
 # =============================================================================
@@ -312,7 +320,9 @@ class KBRecommender:
         query_regime = req.query_regime
 
         if query_regime is None and req.ohlcv_data:
-            with sentry_sdk.start_span(op="regime", description="Compute regime from OHLCV"):
+            with sentry_sdk.start_span(
+                op="regime", description="Compute regime from OHLCV"
+            ):
                 try:
                     query_regime = compute_regime_from_ohlcv(
                         ohlcv=req.ohlcv_data,
@@ -347,13 +357,17 @@ class KBRecommender:
             diagnostic=req.diagnostic,
         )
 
-        with sentry_sdk.start_span(op="retrieve", description="Retrieve candidates from Qdrant") as span:
+        with sentry_sdk.start_span(
+            op="retrieve", description="Retrieve candidates from Qdrant"
+        ) as span:
             retrieval_result = await self.retriever.retrieve(retrieval_req)
             if span:
                 span.set_data("strict_count", retrieval_result.stats.strict_count)
                 span.set_data("relaxed_count", retrieval_result.stats.relaxed_count)
                 span.set_data("total_returned", retrieval_result.stats.total_returned)
-                span.set_data("used_relaxed", retrieval_result.stats.used_relaxed_filters)
+                span.set_data(
+                    "used_relaxed", retrieval_result.stats.used_relaxed_filters
+                )
         retrieval_ms = (time.perf_counter() - start_retrieval) * 1000
         # Note: embed_ms and qdrant_ms are sub-components of retrieval
         # If retriever provides breakdown, use it; otherwise estimate
@@ -381,7 +395,9 @@ class KBRecommender:
 
         # Step 3: Rerank candidates
         start_rerank = time.perf_counter()
-        with sentry_sdk.start_span(op="rerank", description="Rerank candidates by combined score") as span:
+        with sentry_sdk.start_span(
+            op="rerank", description="Rerank candidates by combined score"
+        ) as span:
             rerank_result = rerank_candidates(
                 candidates=retrieval_result.candidates,
                 query_tags=query_tags,
@@ -394,7 +410,7 @@ class KBRecommender:
         warnings.extend(rerank_result.warnings)
 
         # Step 4: Select top M reranked, then top K by objective_score
-        top_m = rerank_result.candidates[:req.rerank_top_m]
+        top_m = rerank_result.candidates[: req.rerank_top_m]
 
         # Sort top M by objective_score and take top K
         top_m_sorted = sorted(
@@ -402,7 +418,7 @@ class KBRecommender:
             key=lambda c: c.payload.get("objective_score") or 0,
             reverse=True,
         )
-        top_k = top_m_sorted[:req.aggregate_top_k]
+        top_k = top_m_sorted[: req.aggregate_top_k]
 
         # Step 5: Get strategy spec and aggregate
         start_aggregate = time.perf_counter()
@@ -461,9 +477,7 @@ class KBRecommender:
             if c.payload.get("n_trades_oos") is not None
         ]
         median_oos_trades = (
-            int(statistics.median(oos_trades_list))
-            if oos_trades_list
-            else None
+            int(statistics.median(oos_trades_list)) if oos_trades_list else None
         )
 
         # Add low_trade_count reason if median < trust threshold
@@ -606,7 +620,10 @@ class KBRecommender:
 
         if query_regime:
             # Get features from regime snapshot
-            if hasattr(query_regime, "regime_features") and query_regime.regime_features:
+            if (
+                hasattr(query_regime, "regime_features")
+                and query_regime.regime_features
+            ):
                 current_features = query_regime.regime_features
             # Get raw regime key from tags
             raw_regime_key = self._build_regime_key_from_tags(query_regime.regime_tags)
@@ -717,15 +734,21 @@ class KBRecommender:
                     regime_key=fsm_state.stable_regime_key,
                 )
                 if duration_stats:
-                    result["regime_half_life_bars"] = duration_stats.median_duration_bars
+                    result["regime_half_life_bars"] = (
+                        duration_stats.median_duration_bars
+                    )
                     result["duration_iqr_bars"] = duration_stats.duration_iqr_bars
                     result["duration_baseline"] = duration_stats.baseline
                     result["duration_n"] = duration_stats.n_segments
 
                     # Compute expected remaining based on regime age
                     if regime_age_bars is not None:
-                        remaining = duration_stats.compute_expected_remaining(regime_age_bars)
-                        result["expected_remaining_bars"] = remaining.expected_remaining_bars
+                        remaining = duration_stats.compute_expected_remaining(
+                            regime_age_bars
+                        )
+                        result["expected_remaining_bars"] = (
+                            remaining.expected_remaining_bars
+                        )
                         result["remaining_iqr_bars"] = remaining.remaining_iqr_bars
                 else:
                     result["missing"].append("no_duration_stats")
@@ -750,10 +773,14 @@ class KBRecommender:
         result["windows"] = WindowMetadata(
             regime_age_bars=regime_age_bars or 0,
             performance_window=None,  # To be populated by forward run system
-            distance_window={
-                "bars": len(neighbor_features),
-                "timeframe": req.timeframe,
-            } if neighbor_features else None,
+            distance_window=(
+                {
+                    "bars": len(neighbor_features),
+                    "timeframe": req.timeframe,
+                }
+                if neighbor_features
+                else None
+            ),
         )
 
         return result
@@ -851,11 +878,27 @@ class KBRecommender:
         if filter_rejections:
             # Sort rejection types by count (highest first)
             rejection_types = [
-                ("trades", filter_rejections.by_trades, "lower_min_trades_or_run_longer_backtest"),
-                ("drawdown", filter_rejections.by_drawdown, "increase_max_drawdown_threshold"),
-                ("overfit_gap", filter_rejections.by_overfit_gap, "increase_max_overfit_gap_or_longer_oos"),
+                (
+                    "trades",
+                    filter_rejections.by_trades,
+                    "lower_min_trades_or_run_longer_backtest",
+                ),
+                (
+                    "drawdown",
+                    filter_rejections.by_drawdown,
+                    "increase_max_drawdown_threshold",
+                ),
+                (
+                    "overfit_gap",
+                    filter_rejections.by_overfit_gap,
+                    "increase_max_overfit_gap_or_longer_oos",
+                ),
                 ("oos", filter_rejections.by_oos, "enable_oos_split_in_tuner"),
-                ("regime", filter_rejections.by_regime, "backfill_regime_tags_for_strategy"),
+                (
+                    "regime",
+                    filter_rejections.by_regime,
+                    "backfill_regime_tags_for_strategy",
+                ),
             ]
 
             # Add action for largest rejection source
@@ -871,11 +914,13 @@ class KBRecommender:
 
         elif status == "none":
             # Generic actions when no filter rejection data
-            actions.extend([
-                "ingest_more_trials",
-                "check_strategy_name_spelling",
-                "verify_objective_type_match",
-            ])
+            actions.extend(
+                [
+                    "ingest_more_trials",
+                    "check_strategy_name_spelling",
+                    "verify_objective_type_match",
+                ]
+            )
 
         elif status == "degraded":
             # Check specific reasons
@@ -917,10 +962,20 @@ class KBRecommender:
         suggestions: list[RelaxationSuggestion] = []
 
         # Current values (from request or defaults)
-        current_min_trades = current_request.min_trades or DEFAULT_STRICT_FILTERS["min_trades"]
-        current_max_dd = current_request.max_drawdown or DEFAULT_STRICT_FILTERS["max_drawdown"]
-        current_max_overfit = current_request.max_overfit_gap or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
-        current_require_oos = current_request.require_oos if current_request.require_oos is not None else DEFAULT_STRICT_FILTERS["require_oos"]
+        current_min_trades = (
+            current_request.min_trades or DEFAULT_STRICT_FILTERS["min_trades"]
+        )
+        current_max_dd = (
+            current_request.max_drawdown or DEFAULT_STRICT_FILTERS["max_drawdown"]
+        )
+        current_max_overfit = (
+            current_request.max_overfit_gap or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
+        )
+        current_require_oos = (
+            current_request.require_oos
+            if current_request.require_oos is not None
+            else DEFAULT_STRICT_FILTERS["require_oos"]
+        )
 
         # Baseline: total candidates before quality filters
         baseline = filter_rejections.total_before_filters
@@ -929,47 +984,62 @@ class KBRecommender:
         if filter_rejections.by_trades > 0:
             # Estimate: baseline minus other rejections
             estimated = baseline - filter_rejections.by_oos
-            suggestions.append(RelaxationSuggestion(
-                filter_name="min_trades",
-                current_value=current_min_trades,
-                suggested_value=1,
-                estimated_candidates=estimated,
-                risk_note="lowering min_trades increases statistical noise",
-            ))
+            suggestions.append(
+                RelaxationSuggestion(
+                    filter_name="min_trades",
+                    current_value=current_min_trades,
+                    suggested_value=1,
+                    estimated_candidates=estimated,
+                    risk_note="lowering min_trades increases statistical noise",
+                )
+            )
 
         # Single-axis suggestion 2: Increase max_drawdown
         if filter_rejections.by_drawdown > 0:
-            estimated = baseline - filter_rejections.by_oos - filter_rejections.by_trades
-            suggestions.append(RelaxationSuggestion(
-                filter_name="max_drawdown",
-                current_value=current_max_dd,
-                suggested_value=0.50,
-                estimated_candidates=estimated,
-                risk_note="increasing max_drawdown increases risk tolerance",
-            ))
+            estimated = (
+                baseline - filter_rejections.by_oos - filter_rejections.by_trades
+            )
+            suggestions.append(
+                RelaxationSuggestion(
+                    filter_name="max_drawdown",
+                    current_value=current_max_dd,
+                    suggested_value=0.50,
+                    estimated_candidates=estimated,
+                    risk_note="increasing max_drawdown increases risk tolerance",
+                )
+            )
 
         # Single-axis suggestion 3: Increase max_overfit_gap
         if filter_rejections.by_overfit_gap > 0:
-            estimated = baseline - filter_rejections.by_oos - filter_rejections.by_trades - filter_rejections.by_drawdown
-            suggestions.append(RelaxationSuggestion(
-                filter_name="max_overfit_gap",
-                current_value=current_max_overfit,
-                suggested_value=1.0,
-                estimated_candidates=estimated,
-                risk_note="increasing max_overfit_gap increases overfit risk",
-            ))
+            estimated = (
+                baseline
+                - filter_rejections.by_oos
+                - filter_rejections.by_trades
+                - filter_rejections.by_drawdown
+            )
+            suggestions.append(
+                RelaxationSuggestion(
+                    filter_name="max_overfit_gap",
+                    current_value=current_max_overfit,
+                    suggested_value=1.0,
+                    estimated_candidates=estimated,
+                    risk_note="increasing max_overfit_gap increases overfit risk",
+                )
+            )
 
         # Single-axis suggestion 4: Disable OOS requirement
         if filter_rejections.by_oos > 0:
             # Disabling OOS recovers those rejected by OOS
             estimated = baseline
-            suggestions.append(RelaxationSuggestion(
-                filter_name="require_oos",
-                current_value=current_require_oos,
-                suggested_value=False,
-                estimated_candidates=estimated,
-                risk_note="disabling OOS validation increases overfit risk",
-            ))
+            suggestions.append(
+                RelaxationSuggestion(
+                    filter_name="require_oos",
+                    current_value=current_require_oos,
+                    suggested_value=False,
+                    estimated_candidates=estimated,
+                    risk_note="disabling OOS validation increases overfit risk",
+                )
+            )
 
         if not suggestions:
             return None

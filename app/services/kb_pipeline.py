@@ -145,20 +145,22 @@ class KBPipeline:
         entities = []
         for e in data.get("entities", []):
             try:
-                entities.append(ExtractedEntity(
-                    type=EntityType(e.get("type", "other")),
-                    name=e.get("name", "Unknown"),
-                    aliases=e.get("aliases", []),
-                    description=e.get("description"),
-                    evidence=[
-                        EvidencePointer(
-                            chunk_index=ev.get("chunk_index", 0),
-                            quote=ev.get("quote", "")[:200],
-                            relevance=ev.get("relevance", 1.0),
-                        )
-                        for ev in e.get("evidence", [])
-                    ],
-                ))
+                entities.append(
+                    ExtractedEntity(
+                        type=EntityType(e.get("type", "other")),
+                        name=e.get("name", "Unknown"),
+                        aliases=e.get("aliases", []),
+                        description=e.get("description"),
+                        evidence=[
+                            EvidencePointer(
+                                chunk_index=ev.get("chunk_index", 0),
+                                quote=ev.get("quote", "")[:200],
+                                relevance=ev.get("relevance", 1.0),
+                            )
+                            for ev in e.get("evidence", [])
+                        ],
+                    )
+                )
             except (ValueError, KeyError) as err:
                 logger.warning("Skipping invalid entity", error=str(err), entity=e)
 
@@ -174,7 +176,9 @@ class KBPipeline:
                     for ev in c.get("evidence", [])
                 ]
                 if not evidence:
-                    logger.warning("Skipping claim without evidence", claim=c.get("text", ""))
+                    logger.warning(
+                        "Skipping claim without evidence", claim=c.get("text", "")
+                    )
                     continue
 
                 entity_type = None
@@ -184,35 +188,39 @@ class KBPipeline:
                     except ValueError:
                         pass
 
-                claims.append(ExtractedClaim(
-                    claim_type=ClaimType(c.get("claim_type", "other")),
-                    text=c.get("text", ""),
-                    entity_name=c.get("entity_name"),
-                    entity_type=entity_type,
-                    confidence=c.get("confidence", 0.5),
-                    evidence=evidence,
-                ))
+                claims.append(
+                    ExtractedClaim(
+                        claim_type=ClaimType(c.get("claim_type", "other")),
+                        text=c.get("text", ""),
+                        entity_name=c.get("entity_name"),
+                        entity_type=entity_type,
+                        confidence=c.get("confidence", 0.5),
+                        evidence=evidence,
+                    )
+                )
             except (ValueError, KeyError) as err:
                 logger.warning("Skipping invalid claim", error=str(err), claim=c)
 
         relations = []
         for r in data.get("relations", []):
             try:
-                relations.append(ExtractedRelation(
-                    from_entity=r.get("from_entity", ""),
-                    from_type=EntityType(r.get("from_type", "other")),
-                    relation=RelationType(r.get("relation", "mentions")),
-                    to_entity=r.get("to_entity", ""),
-                    to_type=EntityType(r.get("to_type", "other")),
-                    evidence=[
-                        EvidencePointer(
-                            chunk_index=ev.get("chunk_index", 0),
-                            quote=ev.get("quote", "")[:200],
-                            relevance=ev.get("relevance", 1.0),
-                        )
-                        for ev in r.get("evidence", [])
-                    ],
-                ))
+                relations.append(
+                    ExtractedRelation(
+                        from_entity=r.get("from_entity", ""),
+                        from_type=EntityType(r.get("from_type", "other")),
+                        relation=RelationType(r.get("relation", "mentions")),
+                        to_entity=r.get("to_entity", ""),
+                        to_type=EntityType(r.get("to_type", "other")),
+                        evidence=[
+                            EvidencePointer(
+                                chunk_index=ev.get("chunk_index", 0),
+                                quote=ev.get("quote", "")[:200],
+                                relevance=ev.get("relevance", 1.0),
+                            )
+                            for ev in r.get("evidence", [])
+                        ],
+                    )
+                )
             except (ValueError, KeyError) as err:
                 logger.warning("Skipping invalid relation", error=str(err), relation=r)
 
@@ -255,8 +263,7 @@ class KBPipeline:
                 "claim_type": c.claim_type.value,
                 "text": c.text,
                 "evidence": [
-                    {"chunk_index": e.chunk_index, "quote": e.quote}
-                    for e in c.evidence
+                    {"chunk_index": e.chunk_index, "quote": e.quote} for e in c.evidence
                 ],
             }
             for c in extraction.claims
@@ -301,13 +308,15 @@ class KBPipeline:
         verdicts = []
         for v in data.get("verdicts", []):
             try:
-                verdicts.append(ClaimVerdict(
-                    claim_index=v.get("claim_index", 0),
-                    status=VerificationStatus(v.get("status", "pending")),
-                    confidence=v.get("confidence", 0.5),
-                    reason=v.get("reason", ""),
-                    corrected_text=v.get("corrected_text"),
-                ))
+                verdicts.append(
+                    ClaimVerdict(
+                        claim_index=v.get("claim_index", 0),
+                        status=VerificationStatus(v.get("status", "pending")),
+                        confidence=v.get("confidence", 0.5),
+                        reason=v.get("reason", ""),
+                        corrected_text=v.get("corrected_text"),
+                    )
+                )
             except (ValueError, KeyError) as err:
                 logger.warning("Skipping invalid verdict", error=str(err), verdict=v)
 
@@ -432,18 +441,23 @@ class KBPipeline:
         # Check for extraction failure (empty result suggests parse error)
         if chunks and not extraction.entities and not extraction.claims:
             had_extraction_error = True
-            parse_errors.append("Extraction returned no entities or claims (possible JSON parse error)")
+            parse_errors.append(
+                "Extraction returned no entities or claims (possible JSON parse error)"
+            )
 
         # Pass 2: Verify
         verification = await self.verify(chunks, extraction)
 
         # Check for verification failure (all pending suggests parse error)
         if extraction.claims and all(
-            v.status == VerificationStatus.PENDING and v.reason == "Verification failed to parse"
+            v.status == VerificationStatus.PENDING
+            and v.reason == "Verification failed to parse"
             for v in verification.verdicts
         ):
             had_verification_error = True
-            parse_errors.append("Verification failed to parse (all claims marked pending)")
+            parse_errors.append(
+                "Verification failed to parse (all claims marked pending)"
+            )
 
         # Count verdicts
         verified_count = 0
@@ -460,7 +474,9 @@ class KBPipeline:
         # Pass 3: Synthesize (optional)
         synthesized_answer = None
         if synthesize and question:
-            synthesized_answer = await self.synthesize(question, extraction, verification)
+            synthesized_answer = await self.synthesize(
+                question, extraction, verification
+            )
 
         from app.services.kb_types import PersistenceStats
 

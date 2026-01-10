@@ -26,14 +26,19 @@ class RegimeDims:
 
     Immutable to ensure consistent hashing.
     """
+
     trend: TrendValue
     vol: VolValue
 
     def __post_init__(self):
         if self.trend not in VALID_TREND_VALUES:
-            raise ValueError(f"Invalid trend value: {self.trend}. Must be one of {VALID_TREND_VALUES}")
+            raise ValueError(
+                f"Invalid trend value: {self.trend}. Must be one of {VALID_TREND_VALUES}"
+            )
         if self.vol not in VALID_VOL_VALUES:
-            raise ValueError(f"Invalid vol value: {self.vol}. Must be one of {VALID_VOL_VALUES}")
+            raise ValueError(
+                f"Invalid vol value: {self.vol}. Must be one of {VALID_VOL_VALUES}"
+            )
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
@@ -71,17 +76,23 @@ def parse_regime_key(key: str) -> RegimeDims:
     """
     parts = key.split("|")
     if len(parts) != 2:
-        raise ValueError(f"Invalid regime key format: {key}. Expected 2 parts, got {len(parts)}")
+        raise ValueError(
+            f"Invalid regime key format: {key}. Expected 2 parts, got {len(parts)}"
+        )
 
     dims_dict = {}
     for part in parts:
         if "=" not in part:
-            raise ValueError(f"Invalid regime key format: {key}. Part missing '=': {part}")
+            raise ValueError(
+                f"Invalid regime key format: {key}. Part missing '=': {part}"
+            )
         dim_name, dim_value = part.split("=", 1)
         dims_dict[dim_name] = dim_value
 
     if "trend" not in dims_dict or "vol" not in dims_dict:
-        raise ValueError(f"Invalid regime key format: {key}. Missing trend or vol dimension")
+        raise ValueError(
+            f"Invalid regime key format: {key}. Missing trend or vol dimension"
+        )
 
     return RegimeDims(trend=dims_dict["trend"], vol=dims_dict["vol"])
 

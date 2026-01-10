@@ -140,7 +140,9 @@ Trend: strength 0.72, direction +1.
 Position: z-score 0.45, RSI 58.
 Efficiency: 0.65."""
 
-        assert text == expected, f"Text mismatch:\nGot:\n{text}\n\nExpected:\n{expected}"
+        assert (
+            text == expected
+        ), f"Text mismatch:\nGot:\n{text}\n\nExpected:\n{expected}"
 
     def test_text_without_timeframe(self):
         """Text without timeframe should format correctly."""
@@ -183,7 +185,9 @@ Regime: efficient, uptrend.
 Strategy: mean_reversion with period=20, stop_loss=0.02, threshold=2.0.
 Performance: OOS Sharpe 1.12, return 18.0%, max DD 12.0%. Objective: sharpe (score 1.12). (moderate overfit)"""
 
-        assert text == expected, f"Text mismatch:\nGot:\n{text}\n\nExpected:\n{expected}"
+        assert (
+            text == expected
+        ), f"Text mismatch:\nGot:\n{text}\n\nExpected:\n{expected}"
 
     def test_text_without_oos(self):
         """Text without OOS should use IS metrics."""

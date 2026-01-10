@@ -24,28 +24,26 @@ class Settings(BaseSettings):
 
     # Build/Release Metadata (set by CI/CD or container build)
     git_sha: Optional[str] = Field(
-        default=None,
-        description="Git commit SHA (set by CI/CD)"
+        default=None, description="Git commit SHA (set by CI/CD)"
     )
     build_time: Optional[str] = Field(
-        default=None,
-        description="Build timestamp ISO8601 (set by CI/CD)"
+        default=None, description="Build timestamp ISO8601 (set by CI/CD)"
     )
     config_profile: str = Field(
         default="development",
-        description="Configuration profile (development, staging, production)"
+        description="Configuration profile (development, staging, production)",
     )
 
     # Supabase Configuration
     supabase_url: str = Field(..., description="Supabase project URL")
-    supabase_service_role_key: str = Field(
-        ..., description="Supabase service role key"
-    )
+    supabase_service_role_key: str = Field(..., description="Supabase service role key")
     supabase_db_password: Optional[str] = Field(
-        default=None, description="Supabase database password for direct PostgreSQL connection"
+        default=None,
+        description="Supabase database password for direct PostgreSQL connection",
     )
     database_url: Optional[str] = Field(
-        default=None, description="Direct PostgreSQL connection URL (overrides Supabase URL construction)"
+        default=None,
+        description="Direct PostgreSQL connection URL (overrides Supabase URL construction)",
     )
 
     # LLM Provider Configuration
@@ -64,7 +62,8 @@ class Settings(BaseSettings):
 
     # LLM API Keys
     anthropic_api_key: Optional[str] = Field(
-        default=None, description="Anthropic API key (sk-ant-* format, preferred provider)"
+        default=None,
+        description="Anthropic API key (sk-ant-* format, preferred provider)",
     )
     # NOTE: claude_code_oauth_token does NOT work with Anthropic API.
     # It's reserved for future Claude Code CLI proxy provider.
@@ -88,9 +87,7 @@ class Settings(BaseSettings):
     max_context_tokens: int = Field(
         default=8000, description="Maximum context tokens for LLM"
     )
-    llm_timeout: int = Field(
-        default=60, description="LLM request timeout in seconds"
-    )
+    llm_timeout: int = Field(default=60, description="LLM request timeout in seconds")
 
     # Qdrant Configuration
     qdrant_host: str = Field(default="localhost", description="Qdrant host")
@@ -111,30 +108,27 @@ class Settings(BaseSettings):
 
     # Database Connection Pool
     db_pool_min_size: int = Field(default=5, description="Minimum connection pool size")
-    db_pool_max_size: int = Field(default=20, description="Maximum connection pool size")
+    db_pool_max_size: int = Field(
+        default=20, description="Maximum connection pool size"
+    )
 
     # Optional YouTube API
     youtube_api_key: Optional[str] = Field(
         default=None, description="YouTube Data API key"
     )
 
-
     # Chunking configuration
-    chunk_max_tokens: int = Field(
-        default=512, description="Maximum tokens per chunk"
-    )
+    chunk_max_tokens: int = Field(default=512, description="Maximum tokens per chunk")
     chunk_overlap_tokens: int = Field(
         default=50, description="Overlap tokens between chunks for context preservation"
     )
     chunk_tokenizer_encoding: str = Field(
         default="cl100k_base",
-        description="Tiktoken encoding name for tokenization (e.g., cl100k_base, p50k_base, r50k_base)"
+        description="Tiktoken encoding name for tokenization (e.g., cl100k_base, p50k_base, r50k_base)",
     )
 
     # Rate limiting
-    rate_limit_enabled: bool = Field(
-        default=True, description="Enable rate limiting"
-    )
+    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
     rate_limit_requests_per_minute: int = Field(
         default=60, description="Maximum requests per minute per IP"
     )
@@ -145,78 +139,75 @@ class Settings(BaseSettings):
     # Request size limits
     max_request_body_size: int = Field(
         default=10 * 1024 * 1024,  # 10 MB
-        description="Maximum request body size in bytes"
+        description="Maximum request body size in bytes",
     )
 
     # API Key Authentication
     api_key: Optional[str] = Field(
         default=None,
-        description="Optional API key for authentication. If set, all requests must include X-API-Key header"
+        description="Optional API key for authentication. If set, all requests must include X-API-Key header",
     )
     api_key_header_name: str = Field(
-        default="X-API-Key",
-        description="Header name for API key"
+        default="X-API-Key", description="Header name for API key"
     )
 
     # Cross-encoder Reranker
     warmup_reranker: bool = Field(
         default=False,
-        description="Pre-load cross-encoder model at startup (uses GPU memory)"
+        description="Pre-load cross-encoder model at startup (uses GPU memory)",
     )
     rerank_timeout_s: float = Field(
         default=10.0,
-        description="Rerank timeout in seconds. Fails open to vector fallback on timeout."
+        description="Rerank timeout in seconds. Fails open to vector fallback on timeout.",
     )
 
     # Evaluation Persistence (PR3)
     eval_persist_enabled: bool = Field(
         default=False,
-        description="Persist /query/compare evaluations to query_compare_evals table"
+        description="Persist /query/compare evaluations to query_compare_evals table",
     )
     eval_store_question_preview: bool = Field(
         default=False,
-        description="Store first 80 chars of question (otherwise hash only)"
+        description="Store first 80 chars of question (otherwise hash only)",
     )
 
     # API Documentation
     docs_enabled: bool = Field(
         default=True,
-        description="Enable /docs and /openapi.json endpoints (disable in production)"
+        description="Enable /docs and /openapi.json endpoints (disable in production)",
     )
 
     # Sentry Observability
     sentry_dsn: Optional[str] = Field(
         default=None,
-        description="Sentry DSN for error tracking and performance monitoring"
+        description="Sentry DSN for error tracking and performance monitoring",
     )
     sentry_environment: str = Field(
         default="development",
-        description="Sentry environment tag (development, staging, production)"
+        description="Sentry environment tag (development, staging, production)",
     )
     sentry_traces_sample_rate: float = Field(
         default=0.1,
         ge=0.0,
         le=1.0,
-        description="Sentry performance tracing sample rate (0.0-1.0)"
+        description="Sentry performance tracing sample rate (0.0-1.0)",
     )
     sentry_profiles_sample_rate: float = Field(
         default=0.1,
         ge=0.0,
         le=1.0,
-        description="Sentry profiling sample rate (0.0-1.0)"
+        description="Sentry profiling sample rate (0.0-1.0)",
     )
 
     # Paper Trading Configuration
     paper_starting_equity: float = Field(
-        default=10000.0,
-        gt=0,
-        description="Starting equity for paper trading accounts"
+        default=10000.0, gt=0, description="Starting equity for paper trading accounts"
     )
     paper_max_position_size_pct: float = Field(
         default=0.20,
         ge=0.0,
         le=1.0,
-        description="Maximum position size as percentage of equity (0.20 = 20%)"
+        description="Maximum position size as percentage of equity (0.20 = 20%)",
     )
 
     @property

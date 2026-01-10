@@ -55,8 +55,7 @@ class TestAdminAuth:
         with patch.dict(os.environ, {"ADMIN_TOKEN": "secret123"}, clear=False):
             client = TestClient(app_with_admin_route, raise_server_exceptions=False)
             response = client.get(
-                "/admin/test",
-                headers={"X-Admin-Token": "wrong_token"}
+                "/admin/test", headers={"X-Admin-Token": "wrong_token"}
             )
             assert response.status_code == 403
             assert "invalid" in response.json()["detail"].lower()
@@ -65,10 +64,7 @@ class TestAdminAuth:
         """Request with correct token should return 200."""
         with patch.dict(os.environ, {"ADMIN_TOKEN": "secret123"}, clear=False):
             client = TestClient(app_with_admin_route, raise_server_exceptions=False)
-            response = client.get(
-                "/admin/test",
-                headers={"X-Admin-Token": "secret123"}
-            )
+            response = client.get("/admin/test", headers={"X-Admin-Token": "secret123"})
             assert response.status_code == 200
             assert response.json() == {"status": "ok"}
 
@@ -81,10 +77,9 @@ class TestAdminAuth:
 
     def test_no_debug_bypass(self, app_with_admin_route):
         """LOG_LEVEL=DEBUG should not bypass auth."""
-        with patch.dict(os.environ, {
-            "ADMIN_TOKEN": "secret123",
-            "LOG_LEVEL": "DEBUG"
-        }, clear=False):
+        with patch.dict(
+            os.environ, {"ADMIN_TOKEN": "secret123", "LOG_LEVEL": "DEBUG"}, clear=False
+        ):
             client = TestClient(app_with_admin_route, raise_server_exceptions=False)
             response = client.get("/admin/test")
             # Should still require token even in debug mode
@@ -112,7 +107,7 @@ class TestRateLimiting:
         @app.post("/limited")
         async def limited_route(
             request: Request,
-            _: None = Depends(rate_limiter.check("test_limit", 3))  # 3 per minute
+            _: None = Depends(rate_limiter.check("test_limit", 3)),  # 3 per minute
         ):
             return {"status": "ok"}
 
@@ -191,7 +186,9 @@ class TestConcurrencyLimiting:
 
         # At least 2 should have failed with 429 (couldn't acquire within timeout)
         # The other 2 acquired but may have been cancelled
-        assert len(errors) >= 2, f"Expected at least 2 errors, got {len(errors)}: {errors}"
+        assert (
+            len(errors) >= 2
+        ), f"Expected at least 2 errors, got {len(errors)}: {errors}"
         assert all(status == 429 for _, status in errors)
 
     @pytest.mark.asyncio
@@ -289,7 +286,10 @@ class TestReadinessCheck:
         from app.routers.health import check_database_health
 
         # Simulate DB connection failure
-        with patch("app.routers.health.asyncpg.connect", side_effect=Exception("Connection refused")):
+        with patch(
+            "app.routers.health.asyncpg.connect",
+            side_effect=Exception("Connection refused"),
+        ):
             result = await check_database_health(mock_settings)
             assert result.status == "error"
             assert "Connection refused" in result.error
@@ -333,9 +333,7 @@ class TestReadinessCheck:
         mock_response.json.return_value = {
             "result": {
                 "config": {
-                    "params": {
-                        "vectors": {"size": 1024}  # Wrong! Config expects 768
-                    }
+                    "params": {"vectors": {"size": 1024}}  # Wrong! Config expects 768
                 }
             }
         }

@@ -98,7 +98,11 @@ def make_ohlcv_series(
         high = price * (1 + vol_mult)
         low = price * (1 - vol_mult)
         open_ = price * (1 + (vol_mult * 0.3))
-        close = price * (1 - (vol_mult * 0.3)) if trend == "down" else price * (1 + (vol_mult * 0.3))
+        close = (
+            price * (1 - (vol_mult * 0.3))
+            if trend == "down"
+            else price * (1 + (vol_mult * 0.3))
+        )
 
         ts = f"2025-01-01T{i // 60:02d}:{i % 60:02d}:00Z"
         bars.append(make_ohlcv_bar(ts, open_, high, low, close))
@@ -434,13 +438,15 @@ class TestBackfillJobConstantRegime:
         upserted_stats = []
 
         async def mock_execute(query, *args):
-            upserted_stats.append({
-                "symbol": args[0],
-                "timeframe": args[1],
-                "regime_key": args[2],
-                "n_segments": args[3],
-                "median_duration_bars": args[4],
-            })
+            upserted_stats.append(
+                {
+                    "symbol": args[0],
+                    "timeframe": args[1],
+                    "regime_key": args[2],
+                    "n_segments": args[3],
+                    "median_duration_bars": args[4],
+                }
+            )
 
         conn = AsyncMock()
         conn.execute = mock_execute
@@ -493,10 +499,12 @@ class TestBackfillJobTransition:
         upserted_stats = []
 
         async def mock_execute(query, *args):
-            upserted_stats.append({
-                "regime_key": args[2],
-                "n_segments": args[3],
-            })
+            upserted_stats.append(
+                {
+                    "regime_key": args[2],
+                    "n_segments": args[3],
+                }
+            )
 
         conn = AsyncMock()
         conn.execute = mock_execute
@@ -530,32 +538,38 @@ class TestBackfillJobMultipleRegimeKeys:
 
         # Uptrend high vol block
         for i in range(30):
-            bars.append(make_ohlcv_bar(
-                f"2025-01-01T00:{i:02d}:00Z",
-                base_price + i * 0.5,
-                base_price + i * 0.5 + 3,
-                base_price + i * 0.5 - 3,
-                base_price + i * 0.5 + 0.4,
-            ))
+            bars.append(
+                make_ohlcv_bar(
+                    f"2025-01-01T00:{i:02d}:00Z",
+                    base_price + i * 0.5,
+                    base_price + i * 0.5 + 3,
+                    base_price + i * 0.5 - 3,
+                    base_price + i * 0.5 + 0.4,
+                )
+            )
 
         # Flat low vol block
         for i in range(30, 60):
-            bars.append(make_ohlcv_bar(
-                f"2025-01-01T01:{(i-30):02d}:00Z",
-                base_price + 15,
-                base_price + 15.5,
-                base_price + 14.5,
-                base_price + 15,
-            ))
+            bars.append(
+                make_ohlcv_bar(
+                    f"2025-01-01T01:{(i-30):02d}:00Z",
+                    base_price + 15,
+                    base_price + 15.5,
+                    base_price + 14.5,
+                    base_price + 15,
+                )
+            )
 
         fsm_config = FSMConfig(M=5, C_enter=0.6, C_exit=0.4)
 
         upserted_stats = []
 
         async def mock_execute(query, *args):
-            upserted_stats.append({
-                "regime_key": args[2],
-            })
+            upserted_stats.append(
+                {
+                    "regime_key": args[2],
+                }
+            )
 
         conn = AsyncMock()
         conn.execute = mock_execute

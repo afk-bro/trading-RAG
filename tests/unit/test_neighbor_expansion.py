@@ -168,7 +168,9 @@ class TestExpandNeighbors:
     @pytest.mark.asyncio
     async def test_soft_cap_preserves_all_seeds(self, mock_chunk_repo):
         """max_total soft cap preserves all seeds even if exceeded."""
-        seeds = [make_seed(f"s{i}", chunk_index=i * 10, rerank_rank=i) for i in range(5)]
+        seeds = [
+            make_seed(f"s{i}", chunk_index=i * 10, rerank_rank=i) for i in range(5)
+        ]
         config = {"enabled": True, "window": 1, "max_total": 3}
 
         # Return many neighbors

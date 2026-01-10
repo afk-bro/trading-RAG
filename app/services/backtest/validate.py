@@ -44,10 +44,12 @@ def validate_params(
     # Check required params
     for req in required:
         if req not in params:
-            errors.append({
-                "param": req,
-                "error": "required parameter missing",
-            })
+            errors.append(
+                {
+                    "param": req,
+                    "error": "required parameter missing",
+                }
+            )
 
     # Validate each property
     for prop_name, prop_schema in properties.items():
@@ -62,11 +64,13 @@ def validate_params(
                     try:
                         value = int(value)
                     except (ValueError, TypeError):
-                        errors.append({
-                            "param": prop_name,
-                            "error": f"expected integer, got {type(value).__name__}",
-                            "value": value,
-                        })
+                        errors.append(
+                            {
+                                "param": prop_name,
+                                "error": f"expected integer, got {type(value).__name__}",
+                                "value": value,
+                            }
+                        )
                         continue
 
             elif prop_type == "number":
@@ -74,11 +78,13 @@ def validate_params(
                     try:
                         value = float(value)
                     except (ValueError, TypeError):
-                        errors.append({
-                            "param": prop_name,
-                            "error": f"expected number, got {type(value).__name__}",
-                            "value": value,
-                        })
+                        errors.append(
+                            {
+                                "param": prop_name,
+                                "error": f"expected number, got {type(value).__name__}",
+                                "value": value,
+                            }
+                        )
                         continue
 
             elif prop_type == "string":
@@ -87,38 +93,46 @@ def validate_params(
 
             elif prop_type == "boolean":
                 if not isinstance(value, bool):
-                    errors.append({
-                        "param": prop_name,
-                        "error": f"expected boolean, got {type(value).__name__}",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "param": prop_name,
+                            "error": f"expected boolean, got {type(value).__name__}",
+                            "value": value,
+                        }
+                    )
                     continue
 
             # Range validation (for numeric types)
             if prop_type in ("integer", "number"):
                 if "minimum" in prop_schema and value < prop_schema["minimum"]:
-                    errors.append({
-                        "param": prop_name,
-                        "error": f"value {value} below minimum {prop_schema['minimum']}",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "param": prop_name,
+                            "error": f"value {value} below minimum {prop_schema['minimum']}",
+                            "value": value,
+                        }
+                    )
                     continue
 
                 if "maximum" in prop_schema and value > prop_schema["maximum"]:
-                    errors.append({
-                        "param": prop_name,
-                        "error": f"value {value} above maximum {prop_schema['maximum']}",
-                        "value": value,
-                    })
+                    errors.append(
+                        {
+                            "param": prop_name,
+                            "error": f"value {value} above maximum {prop_schema['maximum']}",
+                            "value": value,
+                        }
+                    )
                     continue
 
             # Enum validation
             if "enum" in prop_schema and value not in prop_schema["enum"]:
-                errors.append({
-                    "param": prop_name,
-                    "error": f"value must be one of {prop_schema['enum']}",
-                    "value": value,
-                })
+                errors.append(
+                    {
+                        "param": prop_name,
+                        "error": f"value must be one of {prop_schema['enum']}",
+                        "value": value,
+                    }
+                )
                 continue
 
             validated[prop_name] = value

@@ -223,7 +223,9 @@ class TestExtractPDFIntegration:
         result = extract_pdf(pdf_bytes, PDFConfig(backend=PDFBackend.PYMUPDF))
         assert result.backend_used == "pymupdf"
         assert result.page_count >= 1
-        assert "Hello" in result.text or len(result.text) == 0  # May be empty for minimal PDF
+        assert (
+            "Hello" in result.text or len(result.text) == 0
+        )  # May be empty for minimal PDF
 
     def test_pdfplumber_extraction(self):
         """Test full extraction with pdfplumber."""
@@ -243,10 +245,12 @@ class TestExtractPDFIntegration:
 
 # Helper functions to create test PDFs
 
+
 def create_minimal_pdf() -> bytes:
     """Create a minimal valid PDF for testing."""
     try:
         import fitz  # pymupdf
+
         doc = fitz.open()
         page = doc.new_page()
         page.insert_text((72, 72), "Test PDF content for unit testing.")
@@ -262,6 +266,7 @@ def create_multi_page_pdf(num_pages: int) -> bytes:
     """Create a PDF with multiple pages for testing."""
     try:
         import fitz  # pymupdf
+
         doc = fitz.open()
         for i in range(num_pages):
             page = doc.new_page()
@@ -277,6 +282,7 @@ def create_text_pdf(text: str) -> bytes:
     """Create a PDF with specific text content."""
     try:
         import fitz  # pymupdf
+
         doc = fitz.open()
         page = doc.new_page()
         page.insert_text((72, 72), text)

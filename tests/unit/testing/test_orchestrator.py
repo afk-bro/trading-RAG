@@ -517,7 +517,9 @@ class TestParseOhlcvCsv:
         """Less than 2 bars should raise ValueError."""
         from app.services.testing.run_orchestrator import RunOrchestrator
 
-        single_bar_csv = b"ts,open,high,low,close,volume\n2023-01-01T00:00:00,100,105,99,104,1000"
+        single_bar_csv = (
+            b"ts,open,high,low,close,volume\n2023-01-01T00:00:00,100,105,99,104,1000"
+        )
 
         with pytest.raises(ValueError, match="at least 2 bars"):
             RunOrchestrator._parse_ohlcv_csv(single_bar_csv)
@@ -849,7 +851,9 @@ class TestOrchestratorExecute:
                 completed_at=datetime.now(timezone.utc),
             )
 
-        with patch.object(orchestrator, "_execute_variant", side_effect=mock_execute_variant):
+        with patch.object(
+            orchestrator, "_execute_variant", side_effect=mock_execute_variant
+        ):
             results = await orchestrator.execute(sample_run_plan, sample_csv_5_bars)
 
         # Should have one result per variant
@@ -890,7 +894,9 @@ class TestOrchestratorExecute:
                 completed_at=datetime.now(timezone.utc),
             )
 
-        with patch.object(orchestrator, "_execute_variant", side_effect=mock_execute_variant):
+        with patch.object(
+            orchestrator, "_execute_variant", side_effect=mock_execute_variant
+        ):
             await orchestrator.execute(sample_run_plan, sample_csv_5_bars)
 
         # Check that insert was called (for RUN_STARTED and RUN_COMPLETED)

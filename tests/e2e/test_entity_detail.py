@@ -14,9 +14,7 @@ pytestmark = pytest.mark.e2e
 class TestEntityDetailPage:
     """Tests for entity detail page structure."""
 
-    def test_page_handles_invalid_uuid(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_page_handles_invalid_uuid(self, admin_page: Page, base_url: str):
         """Page handles invalid UUID gracefully with 404."""
         admin_page.goto(
             f"{base_url}/admin/kb/entities/00000000-0000-0000-0000-000000000001"
@@ -25,9 +23,7 @@ class TestEntityDetailPage:
         # Should show 404 or error - just verify no crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_breadcrumb_navigation(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_breadcrumb_navigation(self, admin_page: Page, base_url: str):
         """Breadcrumb back to entities list exists."""
         admin_page.goto(
             f"{base_url}/admin/kb/entities/00000000-0000-0000-0000-000000000001"
@@ -58,9 +54,7 @@ class TestEntityDetailStats:
 class TestEntityDetailClaims:
     """Tests for claims list within entity detail."""
 
-    def test_claims_filter_controls_present(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_claims_filter_controls_present(self, admin_page: Page, base_url: str):
         """Claims filter dropdowns are present."""
         admin_page.goto(
             f"{base_url}/admin/kb/entities/00000000-0000-0000-0000-000000000001"
@@ -69,9 +63,7 @@ class TestEntityDetailClaims:
         # Filters only shown if entity exists - verify no crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_claims_table_has_expected_columns(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_claims_table_has_expected_columns(self, admin_page: Page, base_url: str):
         """Claims table shows claim, type, status, confidence columns."""
         admin_page.goto(
             f"{base_url}/admin/kb/entities/00000000-0000-0000-0000-000000000001"

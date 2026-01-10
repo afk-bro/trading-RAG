@@ -138,7 +138,14 @@ class BacktestRepository:
             result = dict(row)
 
             # Parse JSONB fields
-            for field in ["params", "dataset_meta", "summary", "equity_curve", "trades", "warnings"]:
+            for field in [
+                "params",
+                "dataset_meta",
+                "summary",
+                "equity_curve",
+                "trades",
+                "warnings",
+            ]:
                 if result.get(field) and isinstance(result[field], str):
                     result[field] = json.loads(result[field])
 
@@ -462,8 +469,16 @@ class TuneRepository:
 
         async with self.pool.acquire() as conn:
             await conn.execute(
-                query, tune_id, trial_index, run_id, score, status, skip_reason, failed_reason,
-                score_is, score_oos,
+                query,
+                tune_id,
+                trial_index,
+                run_id,
+                score,
+                status,
+                skip_reason,
+                failed_reason,
+                score_is,
+                score_oos,
                 json.dumps(metrics_is) if metrics_is else None,
                 json.dumps(metrics_oos) if metrics_oos else None,
                 objective_score,
@@ -981,8 +996,12 @@ class TuneRepository:
 
         async with self.pool.acquire() as conn:
             await conn.execute(
-                query, tune_run_id, kb_ingested_at, kb_embedding_model_id,
-                kb_vector_dim, kb_text_hash
+                query,
+                tune_run_id,
+                kb_ingested_at,
+                kb_embedding_model_id,
+                kb_vector_dim,
+                kb_text_hash,
             )
 
     async def try_advisory_lock(self, lock_id: int) -> bool:

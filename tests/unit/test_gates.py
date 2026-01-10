@@ -157,6 +157,7 @@ class TestGateConfiguration:
             # Re-import to pick up new value
             import importlib
             from app.services.backtest import tuner
+
             importlib.reload(tuner)
 
             assert tuner.GATE_MAX_DD_PCT == 30.0
@@ -169,6 +170,7 @@ class TestGateConfiguration:
         with patch.dict(os.environ, {"TUNER_GATE_MIN_TRADES": "20"}):
             import importlib
             from app.services.backtest import tuner
+
             importlib.reload(tuner)
 
             assert tuner.GATE_MIN_TRADES == 20

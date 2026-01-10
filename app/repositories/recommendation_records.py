@@ -343,7 +343,11 @@ class RecommendationRecordsRepository:
                 json.dumps(slice_.realized_summary_json),
                 json.dumps(slice_.expected_summary_json),
                 slice_.performance_surprise_z,
-                json.dumps(slice_.drift_flags_json) if slice_.drift_flags_json else None,
+                (
+                    json.dumps(slice_.drift_flags_json)
+                    if slice_.drift_flags_json
+                    else None
+                ),
             )
 
             logger.info(

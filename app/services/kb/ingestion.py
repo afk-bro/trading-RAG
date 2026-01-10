@@ -166,7 +166,9 @@ class KBIngestionPipeline:
 
         try:
             # Combine base lock ID with workspace hash for unique per-workspace lock
-            workspace_hash = int(hashlib.md5(str(workspace_id).encode()).hexdigest()[:8], 16)
+            workspace_hash = int(
+                hashlib.md5(str(workspace_id).encode()).hexdigest()[:8], 16
+            )
             lock_id = KB_INGESTION_LOCK_ID ^ workspace_hash
 
             result = await self._tune_repo.try_advisory_lock(lock_id)
@@ -188,7 +190,9 @@ class KBIngestionPipeline:
             return
 
         try:
-            workspace_hash = int(hashlib.md5(str(workspace_id).encode()).hexdigest()[:8], 16)
+            workspace_hash = int(
+                hashlib.md5(str(workspace_id).encode()).hexdigest()[:8], 16
+            )
             lock_id = KB_INGESTION_LOCK_ID ^ workspace_hash
             await self._tune_repo.release_advisory_lock(lock_id)
         except AttributeError:
@@ -401,7 +405,9 @@ class KBIngestionPipeline:
                         current_hash = compute_text_hash(trial_to_text(doc))
                         if stored_hash != current_hash:
                             action = "reembed"
-                            reason = f"hash drift ({stored_hash[:8]}→{current_hash[:8]})"
+                            reason = (
+                                f"hash drift ({stored_hash[:8]}→{current_hash[:8]})"
+                            )
                             would_reembed += 1
                         else:
                             action = "reembed"
@@ -422,13 +428,15 @@ class KBIngestionPipeline:
 
             # Collect samples
             if len(samples) < sample_count and action != "skip":
-                samples.append(DryRunSample(
-                    tune_run_id=tune_run_id,
-                    strategy_name=strategy_name,
-                    objective_type=objective_type,
-                    action=action,
-                    reason=reason,
-                ))
+                samples.append(
+                    DryRunSample(
+                        tune_run_id=tune_run_id,
+                        strategy_name=strategy_name,
+                        objective_type=objective_type,
+                        action=action,
+                        reason=reason,
+                    )
+                )
 
         return DryRunPreview(
             total_candidates=len(tune_runs),
@@ -472,9 +480,7 @@ class KBIngestionPipeline:
             )
             return runs
         except AttributeError:
-            logger.warning(
-                "list_tune_runs_for_kb not implemented in tune repository"
-            )
+            logger.warning("list_tune_runs_for_kb not implemented in tune repository")
             return []
 
     async def _process_batch(
@@ -527,9 +533,7 @@ class KBIngestionPipeline:
 
         # Embed texts
         try:
-            embed_result = await self.embedder.embed_texts(
-                texts, skip_failures=True
-            )
+            embed_result = await self.embedder.embed_texts(texts, skip_failures=True)
             stats.total_embedded = len(texts) - len(embed_result.failed_indices)
             stats.embedding_failures = len(embed_result.failed_indices)
         except EmbeddingError as e:
@@ -560,12 +564,14 @@ class KBIngestionPipeline:
                 vector_dim=vector_dim,
             )
 
-            points.append({
-                "id": str(doc.tune_run_id),
-                "vector": vector,
-                "payload": payload,
-                "text_hash": text_hashes[i],  # For DB tracking
-            })
+            points.append(
+                {
+                    "id": str(doc.tune_run_id),
+                    "vector": vector,
+                    "payload": payload,
+                    "text_hash": text_hashes[i],  # For DB tracking
+                }
+            )
 
         # Upsert to Qdrant (if not dry run)
         if not dry_run and points and self._repository:

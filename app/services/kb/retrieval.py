@@ -261,14 +261,20 @@ class KBRetriever:
                     "max_drawdown": strategy_spec.kb_floors.max_drawdown,
                 }
                 # Remove None values to allow default fallback
-                strategy_floors = {k: v for k, v in strategy_floors.items() if v is not None}
+                strategy_floors = {
+                    k: v for k, v in strategy_floors.items() if v is not None
+                }
                 logger.debug(
                     "Using strategy-specific KB floors",
                     strategy=req.strategy_name,
                     floors=strategy_floors,
                 )
         except Exception as e:
-            logger.warning("Failed to lookup strategy floors", strategy=req.strategy_name, error=str(e))
+            logger.warning(
+                "Failed to lookup strategy floors",
+                strategy=req.strategy_name,
+                error=str(e),
+            )
 
         # Get query vector (embed if not provided)
         query_vector = req.query_vector
@@ -277,6 +283,7 @@ class KBRetriever:
         if query_vector is None and req.query_regime is not None:
             try:
                 from app.services.kb.trial_doc import regime_to_text
+
                 regime_text = regime_to_text(req.query_regime)
                 query_vector = await self.embedder.embed_single(regime_text)
             except EmbeddingError as e:
@@ -288,7 +295,9 @@ class KBRetriever:
         candidates: list[RetrievalCandidate] = []
 
         if query_vector is not None:
-            strict_filters = build_filters(req, strict=True, strategy_floors=strategy_floors)
+            strict_filters = build_filters(
+                req, strict=True, strategy_floors=strategy_floors
+            )
             strict_results = await self.repository.search(
                 vector=query_vector,
                 workspace_id=req.workspace_id,
@@ -299,13 +308,15 @@ class KBRetriever:
             )
 
             for r in strict_results:
-                candidates.append(RetrievalCandidate(
-                    point_id=r["id"],
-                    payload=r["payload"],
-                    similarity_score=r["score"],
-                    _relaxed=False,
-                    _metadata_only=False,
-                ))
+                candidates.append(
+                    RetrievalCandidate(
+                        point_id=r["id"],
+                        payload=r["payload"],
+                        similarity_score=r["score"],
+                        _relaxed=False,
+                        _metadata_only=False,
+                    )
+                )
 
             stats.strict_count = len(candidates)
 
@@ -317,7 +328,9 @@ class KBRetriever:
                     threshold=req.min_candidates,
                 )
 
-                relaxed_filters = build_filters(req, strict=False, strategy_floors=strategy_floors)
+                relaxed_filters = build_filters(
+                    req, strict=False, strategy_floors=strategy_floors
+                )
                 relaxed_results = await self.repository.search(
                     vector=query_vector,
                     workspace_id=req.workspace_id,
@@ -331,13 +344,15 @@ class KBRetriever:
                 strict_ids = {c.point_id for c in candidates}
                 for r in relaxed_results:
                     if r["id"] not in strict_ids:
-                        candidates.append(RetrievalCandidate(
-                            point_id=r["id"],
-                            payload=r["payload"],
-                            similarity_score=r["score"],
-                            _relaxed=True,
-                            _metadata_only=False,
-                        ))
+                        candidates.append(
+                            RetrievalCandidate(
+                                point_id=r["id"],
+                                payload=r["payload"],
+                                similarity_score=r["score"],
+                                _relaxed=True,
+                                _metadata_only=False,
+                            )
+                        )
 
                 stats.relaxed_count = len(candidates) - stats.strict_count
                 stats.used_relaxed_filters = stats.relaxed_count > 0
@@ -354,7 +369,9 @@ class KBRetriever:
             logger.info("Using metadata-only fallback")
 
             # Use relaxed filters for fallback
-            relaxed_filters = build_filters(req, strict=False, strategy_floors=strategy_floors)
+            relaxed_filters = build_filters(
+                req, strict=False, strategy_floors=strategy_floors
+            )
             fallback_results = await self.repository.search_by_filters(
                 workspace_id=req.workspace_id,
                 strategy_name=req.strategy_name,
@@ -370,13 +387,15 @@ class KBRetriever:
             )
 
             for r in fallback_results:
-                candidates.append(RetrievalCandidate(
-                    point_id=r["id"],
-                    payload=r["payload"],
-                    similarity_score=0.0,  # No similarity without embedding
-                    _relaxed=True,
-                    _metadata_only=True,
-                ))
+                candidates.append(
+                    RetrievalCandidate(
+                        point_id=r["id"],
+                        payload=r["payload"],
+                        similarity_score=0.0,  # No similarity without embedding
+                        _relaxed=True,
+                        _metadata_only=True,
+                    )
+                )
 
             stats.used_metadata_fallback = True
             warnings.append("metadata_only_fallback")
@@ -448,7 +467,11 @@ class KBRetriever:
 
         # Query 3: With require_oos + min_trades
         # Priority: request override > strategy default > workspace default
-        min_trades = req.min_trades or sf.get("min_trades") or DEFAULT_STRICT_FILTERS["min_trades"]
+        min_trades = (
+            req.min_trades
+            or sf.get("min_trades")
+            or DEFAULT_STRICT_FILTERS["min_trades"]
+        )
         trades_count = await self.repository.count(
             vector=query_vector,
             workspace_id=req.workspace_id,
@@ -460,7 +483,11 @@ class KBRetriever:
         rejections.by_trades = oos_count - trades_count
 
         # Query 4: With require_oos + min_trades + max_drawdown
-        max_dd = req.max_drawdown or sf.get("max_drawdown") or DEFAULT_STRICT_FILTERS["max_drawdown"]
+        max_dd = (
+            req.max_drawdown
+            or sf.get("max_drawdown")
+            or DEFAULT_STRICT_FILTERS["max_drawdown"]
+        )
         dd_count = await self.repository.count(
             vector=query_vector,
             workspace_id=req.workspace_id,
@@ -476,7 +503,11 @@ class KBRetriever:
         rejections.by_drawdown = trades_count - dd_count
 
         # Query 5: All strict filters (including overfit_gap)
-        max_overfit = req.max_overfit_gap or sf.get("max_overfit_gap") or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
+        max_overfit = (
+            req.max_overfit_gap
+            or sf.get("max_overfit_gap")
+            or DEFAULT_STRICT_FILTERS["max_overfit_gap"]
+        )
         strict_count = await self.repository.count(
             vector=query_vector,
             workspace_id=req.workspace_id,

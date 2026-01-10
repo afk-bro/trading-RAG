@@ -287,7 +287,9 @@ class DurationStatsRepository:
             baseline=stats.baseline,
         )
 
-    def _row_to_stats(self, row: dict, baseline: str = "composite_symbol") -> DurationStats:
+    def _row_to_stats(
+        self, row: dict, baseline: str = "composite_symbol"
+    ) -> DurationStats:
         """
         Convert database row to DurationStats.
 

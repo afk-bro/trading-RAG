@@ -59,7 +59,9 @@ class TestQueryMetaContract:
 
         # Check for unexpected new fields (schema drift - update test if intentional)
         extra = actual_fields - expected_fields
-        assert not extra, f"QueryMeta has unexpected fields: {extra}. Update test if intentional."
+        assert (
+            not extra
+        ), f"QueryMeta has unexpected fields: {extra}. Update test if intentional."
 
     def test_querymeta_field_types_match_contract(self):
         """Verify field types match the contract."""
@@ -159,6 +161,7 @@ class TestQueryMetaContract:
 
         # All values should be JSON-serializable types
         import json
+
         json_str = json.dumps(data)  # Should not raise
         assert json_str is not None
 

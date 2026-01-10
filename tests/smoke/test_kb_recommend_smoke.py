@@ -104,7 +104,9 @@ class TestKBRecommendSmoke:
             headers=headers,
         )
 
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.text}"
 
         data = response.json()
 
@@ -114,10 +116,16 @@ class TestKBRecommendSmoke:
         assert "params" in data, "Missing params"
 
         # Status should not be error
-        assert data["status"] in ["ok", "degraded", "none"], f"Invalid status: {data['status']}"
+        assert data["status"] in [
+            "ok",
+            "degraded",
+            "none",
+        ], f"Invalid status: {data['status']}"
 
         # Log for debugging
-        print(f"\n{strategy}: status={data['status']}, confidence={data.get('confidence')}, count_used={data.get('count_used')}")
+        print(
+            f"\n{strategy}: status={data['status']}, confidence={data.get('confidence')}, count_used={data.get('count_used')}"
+        )
 
     @pytest.mark.parametrize("strategy", TEST_STRATEGIES[:2])  # Test subset for speed
     def test_recommend_debug_mode_returns_candidates(self, client, headers, strategy):
@@ -165,7 +173,9 @@ class TestKBRecommendSmoke:
 
         # Should include valid options
         assert "INVALID_STRATEGY" in str(detail), "Should indicate invalid strategy"
-        assert "valid_options" in str(detail) or "strategies" in str(detail), "Should include valid options"
+        assert "valid_options" in str(detail) or "strategies" in str(
+            detail
+        ), "Should include valid options"
 
     def test_recommend_with_regime_tags(self, client, headers):
         """Recommend with explicit regime tags should work."""
@@ -187,7 +197,10 @@ class TestKBRecommendSmoke:
 
         # Query regime tags should reflect what we sent
         if data.get("query_regime_tags"):
-            assert "uptrend" in data["query_regime_tags"] or len(data["query_regime_tags"]) >= 0
+            assert (
+                "uptrend" in data["query_regime_tags"]
+                or len(data["query_regime_tags"]) >= 0
+            )
 
 
 # =============================================================================
@@ -332,29 +345,33 @@ def test_export_smoke_results(client, headers):
             if data.get("used_metadata_fallback"):
                 degradation_reasons.append("used_metadata_fallback")
 
-            results["responses"].append({
-                "strategy": strategy,
-                "status_code": response.status_code,
-                "kb_status": status,
-                "confidence": data.get("confidence"),
-                "count_used": data.get("count_used"),
-                "used_relaxed_filters": data.get("used_relaxed_filters"),
-                "used_metadata_fallback": data.get("used_metadata_fallback"),
-                "degradation_reasons": degradation_reasons,
-                "suggested_actions": data.get("suggested_actions", []),
-                "warnings": data.get("warnings", []),
-                "active_collection": data.get("active_collection"),
-                "embedding_model_id": data.get("embedding_model_id"),
-                "params": data.get("params", {}),
-            })
+            results["responses"].append(
+                {
+                    "strategy": strategy,
+                    "status_code": response.status_code,
+                    "kb_status": status,
+                    "confidence": data.get("confidence"),
+                    "count_used": data.get("count_used"),
+                    "used_relaxed_filters": data.get("used_relaxed_filters"),
+                    "used_metadata_fallback": data.get("used_metadata_fallback"),
+                    "degradation_reasons": degradation_reasons,
+                    "suggested_actions": data.get("suggested_actions", []),
+                    "warnings": data.get("warnings", []),
+                    "active_collection": data.get("active_collection"),
+                    "embedding_model_id": data.get("embedding_model_id"),
+                    "params": data.get("params", {}),
+                }
+            )
         else:
             results["summary"]["failed"] += 1
-            results["responses"].append({
-                "strategy": strategy,
-                "status_code": response.status_code,
-                "kb_status": "error",
-                "error": response.text[:500],  # Truncate long errors
-            })
+            results["responses"].append(
+                {
+                    "strategy": strategy,
+                    "status_code": response.status_code,
+                    "kb_status": "error",
+                    "error": response.text[:500],  # Truncate long errors
+                }
+            )
 
     # Write to predictable location for CI artifact upload
     output_file = output_dir / "smoke_test_results.json"
@@ -373,7 +390,9 @@ def test_export_smoke_results(client, headers):
 
     # Assert all HTTP requests succeeded (200)
     http_failed = [r for r in results["responses"] if r["status_code"] != 200]
-    assert len(http_failed) == 0, f"HTTP failures: {[r['strategy'] for r in http_failed]}"
+    assert (
+        len(http_failed) == 0
+    ), f"HTTP failures: {[r['strategy'] for r in http_failed]}"
 
 
 def test_relaxed_smoke_diagnostic(client, headers):
@@ -439,14 +458,24 @@ def test_relaxed_smoke_diagnostic(client, headers):
         elif strict_status in ["ok", "degraded"]:
             diagnosis = "healthy"
 
-        results["strategies"].append({
-            "strategy": strategy,
-            "strict_status": strict_status,
-            "relaxed_status": relaxed_status,
-            "diagnosis": diagnosis,
-            "strict_count": strict_response.json().get("count_used", 0) if strict_response.status_code == 200 else 0,
-            "relaxed_count": relaxed_response.json().get("count_used", 0) if relaxed_response.status_code == 200 else 0,
-        })
+        results["strategies"].append(
+            {
+                "strategy": strategy,
+                "strict_status": strict_status,
+                "relaxed_status": relaxed_status,
+                "diagnosis": diagnosis,
+                "strict_count": (
+                    strict_response.json().get("count_used", 0)
+                    if strict_response.status_code == 200
+                    else 0
+                ),
+                "relaxed_count": (
+                    relaxed_response.json().get("count_used", 0)
+                    if relaxed_response.status_code == 200
+                    else 0
+                ),
+            }
+        )
 
     # Write diagnostic results
     output_file = output_dir / "relaxed_diagnostic_results.json"
@@ -457,8 +486,14 @@ def test_relaxed_smoke_diagnostic(client, headers):
     print("Relaxed Diagnostic Summary")
     print(f"{'='*60}")
     for s in results["strategies"]:
-        emoji = {"healthy": "✓", "filters_too_strict": "⚠", "no_data_for_strategy": "✗"}.get(s["diagnosis"], "?")
-        print(f"  {emoji} {s['strategy']}: {s['diagnosis']} (strict={s['strict_status']}, relaxed={s['relaxed_status']})")
+        emoji = {
+            "healthy": "✓",
+            "filters_too_strict": "⚠",
+            "no_data_for_strategy": "✗",
+        }.get(s["diagnosis"], "?")
+        print(
+            f"  {emoji} {s['strategy']}: {s['diagnosis']} (strict={s['strict_status']}, relaxed={s['relaxed_status']})"
+        )
     print(f"\nResults written to: {output_file}")
     print(f"{'='*60}")
 

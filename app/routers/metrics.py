@@ -89,7 +89,10 @@ QDRANT_VECTORS_COUNT = Gauge(
 KB_RECOMMEND_REQUESTS = Counter(
     "kb_recommend_requests_total",
     "Total KB recommend requests",
-    ["status", "confidence_bucket"],  # confidence_bucket: high (>0.7), medium (0.4-0.7), low (<0.4), none
+    [
+        "status",
+        "confidence_bucket",
+    ],  # confidence_bucket: high (>0.7), medium (0.4-0.7), low (<0.4), none
 )
 
 KB_RECOMMEND_FALLBACK = Counter(
@@ -129,7 +132,9 @@ KB_QDRANT_ERRORS = Counter(
 
 def record_request(method: str, endpoint: str, status_code: int, duration: float):
     """Record request metrics."""
-    REQUEST_COUNT.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
+    REQUEST_COUNT.labels(
+        method=method, endpoint=endpoint, status_code=status_code
+    ).inc()
     REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(duration)
 
 

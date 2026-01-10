@@ -77,9 +77,16 @@ class TestRealCrossEncoderInference:
 
         try:
             candidates = [
-                make_candidate("weather", "The weather today is sunny and warm with clear skies."),
-                make_candidate("python", "Python is a high-level programming language used for web development and data science."),
-                make_candidate("random", "The cat sat on the mat and looked out the window."),
+                make_candidate(
+                    "weather", "The weather today is sunny and warm with clear skies."
+                ),
+                make_candidate(
+                    "python",
+                    "Python is a high-level programming language used for web development and data science.",
+                ),
+                make_candidate(
+                    "random", "The cat sat on the mat and looked out the window."
+                ),
             ]
 
             results = await reranker.rerank("What is Python?", candidates, top_k=3)
@@ -109,16 +116,28 @@ class TestRealCrossEncoderInference:
 
         try:
             candidates = [
-                make_candidate("python", "Python is a programming language for building applications."),
-                make_candidate("weather", "Tomorrow's weather forecast shows rain and thunderstorms expected."),
-                make_candidate("random", "The stock market closed up 2% today on earnings news."),
+                make_candidate(
+                    "python",
+                    "Python is a programming language for building applications.",
+                ),
+                make_candidate(
+                    "weather",
+                    "Tomorrow's weather forecast shows rain and thunderstorms expected.",
+                ),
+                make_candidate(
+                    "random", "The stock market closed up 2% today on earnings news."
+                ),
             ]
 
-            results = await reranker.rerank("What is the weather forecast?", candidates, top_k=3)
+            results = await reranker.rerank(
+                "What is the weather forecast?", candidates, top_k=3
+            )
 
             # Weather content should be in top 2 (robust to model variance)
             top_2_ids = {results[0].chunk_id, results[1].chunk_id}
-            assert "weather" in top_2_ids, f"Expected 'weather' in top 2, got {top_2_ids}"
+            assert (
+                "weather" in top_2_ids
+            ), f"Expected 'weather' in top 2, got {top_2_ids}"
 
         finally:
             reranker.close()
@@ -131,7 +150,9 @@ class TestRealCrossEncoderInference:
 
         try:
             candidates = [
-                make_candidate("c1", "Text about machine learning algorithms.", vector_score=0.95),
+                make_candidate(
+                    "c1", "Text about machine learning algorithms.", vector_score=0.95
+                ),
                 make_candidate("c2", "Text about cooking recipes.", vector_score=0.85),
             ]
 
@@ -164,7 +185,9 @@ class TestRealCrossEncoderInference:
             # Scores should be reasonable (model outputs sigmoid in 0-1 range typically)
             for r in results:
                 # BGE reranker outputs can be outside 0-1, but should be finite
-                assert -100 < r.rerank_score < 100, f"Score {r.rerank_score} out of expected range"
+                assert (
+                    -100 < r.rerank_score < 100
+                ), f"Score {r.rerank_score} out of expected range"
 
         finally:
             reranker.close()
@@ -207,10 +230,7 @@ class TestRealCrossEncoderInference:
         reranker = CrossEncoderReranker(config)
 
         try:
-            candidates = [
-                make_candidate(f"c{i}", f"Content {i}")
-                for i in range(5)
-            ]
+            candidates = [make_candidate(f"c{i}", f"Content {i}") for i in range(5)]
 
             results = await reranker.rerank("content", candidates, top_k=5)
 
@@ -307,16 +327,14 @@ class TestConcurrentReranking:
 
         try:
             candidates = [
-                make_candidate(f"c{i}", f"Content about topic {i}")
-                for i in range(5)
+                make_candidate(f"c{i}", f"Content about topic {i}") for i in range(5)
             ]
 
             top_k = 3
 
             # Run 5 concurrent rerank calls
             tasks = [
-                reranker.rerank(f"query {i}", candidates, top_k=top_k)
-                for i in range(5)
+                reranker.rerank(f"query {i}", candidates, top_k=top_k) for i in range(5)
             ]
 
             results = await asyncio.gather(*tasks)
@@ -327,17 +345,23 @@ class TestConcurrentReranking:
             for i, r in enumerate(results):
                 # Result count should respect top_k
                 assert len(r) <= top_k, f"Result {i} exceeded top_k: {len(r)} > {top_k}"
-                assert len(r) == top_k, f"Result {i} has fewer than top_k: {len(r)} < {top_k}"
+                assert (
+                    len(r) == top_k
+                ), f"Result {i} has fewer than top_k: {len(r)} < {top_k}"
 
                 # Ranks should be sequential 0..N-1
                 ranks = [item.rerank_rank for item in r]
                 expected_ranks = list(range(len(r)))
-                assert ranks == expected_ranks, f"Result {i} has non-sequential ranks: {ranks}"
+                assert (
+                    ranks == expected_ranks
+                ), f"Result {i} has non-sequential ranks: {ranks}"
 
                 # Scores should be finite numbers
                 for item in r:
                     assert item.rerank_score is not None
-                    assert -100 < item.rerank_score < 100, f"Score out of range: {item.rerank_score}"
+                    assert (
+                        -100 < item.rerank_score < 100
+                    ), f"Score out of range: {item.rerank_score}"
 
         finally:
             reranker.close()

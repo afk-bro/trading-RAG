@@ -117,7 +117,13 @@ class TestFSMGoldenScenarios:
                 )
 
                 if "median_confidence" in expected_event:
-                    assert abs(event.median_confidence - expected_event["median_confidence"]) < 0.01, (
+                    assert (
+                        abs(
+                            event.median_confidence
+                            - expected_event["median_confidence"]
+                        )
+                        < 0.01
+                    ), (
                         f"{step_comment}: median_confidence mismatch. "
                         f"Got {event.median_confidence}, "
                         f"expected {expected_event['median_confidence']}"
@@ -154,9 +160,9 @@ class TestFSMGoldenFixtureIntegrity:
         assert "C_exit" in config, "Missing 'C_exit' in config"
 
         # Steps required fields
-        assert len(scenario["steps"]) >= 10, (
-            f"Fixture should have at least 10 steps, got {len(scenario['steps'])}"
-        )
+        assert (
+            len(scenario["steps"]) >= 10
+        ), f"Fixture should have at least 10 steps, got {len(scenario['steps'])}"
 
         for i, step in enumerate(scenario["steps"]):
             assert "raw_key" in step, f"Step {i}: missing 'raw_key'"
@@ -184,9 +190,9 @@ class TestFSMGoldenFixtureIntegrity:
         config = scenario["config"]
 
         assert config["M"] >= 1, "M must be >= 1"
-        assert 0 < config["C_exit"] < config["C_enter"] <= 1.0, (
-            "Must have 0 < C_exit < C_enter <= 1.0"
-        )
+        assert (
+            0 < config["C_exit"] < config["C_enter"] <= 1.0
+        ), "Must have 0 < C_exit < C_enter <= 1.0"
 
     @pytest.mark.parametrize(
         "scenario_name",
@@ -204,9 +210,7 @@ class TestFSMGoldenFixtureIntegrity:
 
         for i, step in enumerate(scenario["steps"]):
             conf = step["confidence"]
-            assert 0 <= conf <= 1.0, (
-                f"Step {i}: confidence {conf} out of range [0, 1]"
-            )
+            assert 0 <= conf <= 1.0, f"Step {i}: confidence {conf} out of range [0, 1]"
 
 
 class TestFSMGoldenScenarioDocumentation:
@@ -217,9 +221,9 @@ class TestFSMGoldenScenarioDocumentation:
         scenario = load_scenario("stable_regime")
 
         transitions = [s for s in scenario["steps"] if s.get("transition", False)]
-        assert len(transitions) == 0, (
-            "stable_regime scenario should have no transitions"
-        )
+        assert (
+            len(transitions) == 0
+        ), "stable_regime scenario should have no transitions"
 
         # Verify age increments
         ages = [s["expected_state"]["regime_age_bars"] for s in scenario["steps"]]
@@ -230,34 +234,35 @@ class TestFSMGoldenScenarioDocumentation:
         scenario = load_scenario("clean_transition")
 
         transitions = [s for s in scenario["steps"] if s.get("transition", False)]
-        assert len(transitions) >= 1, (
-            "clean_transition scenario should have at least one transition"
-        )
+        assert (
+            len(transitions) >= 1
+        ), "clean_transition scenario should have at least one transition"
 
         # Verify transition resets age to 1
         for step in scenario["steps"]:
             if step.get("transition", False):
-                assert step["expected_state"]["regime_age_bars"] == 1, (
-                    "After transition, regime_age_bars should be 1"
-                )
+                assert (
+                    step["expected_state"]["regime_age_bars"] == 1
+                ), "After transition, regime_age_bars should be 1"
 
     def test_flicker_suppressed_scenario_has_no_transitions(self):
         """Verify flicker_suppressed scenario has no transitions despite candidates."""
         scenario = load_scenario("flicker_suppressed")
 
         transitions = [s for s in scenario["steps"] if s.get("transition", False)]
-        assert len(transitions) == 0, (
-            "flicker_suppressed scenario should have no transitions"
-        )
+        assert (
+            len(transitions) == 0
+        ), "flicker_suppressed scenario should have no transitions"
 
         # Verify candidates appear and are cleared
         candidates = [
-            s for s in scenario["steps"]
+            s
+            for s in scenario["steps"]
             if s["expected_state"].get("candidate_key") is not None
         ]
-        assert len(candidates) >= 3, (
-            "flicker_suppressed should have multiple candidate appearances"
-        )
+        assert (
+            len(candidates) >= 3
+        ), "flicker_suppressed should have multiple candidate appearances"
 
     def test_low_confidence_ignored_scenario_filters_noise(self):
         """Verify low_confidence_ignored scenario properly filters low-confidence signals."""
@@ -267,20 +272,22 @@ class TestFSMGoldenScenarioDocumentation:
 
         # Find steps with low confidence different regimes
         low_conf_different = [
-            s for s in scenario["steps"]
+            s
+            for s in scenario["steps"]
             if s["confidence"] < c_exit
-            and s["raw_key"] != scenario["steps"][0]["raw_key"]  # Different from initial
+            and s["raw_key"]
+            != scenario["steps"][0]["raw_key"]  # Different from initial
         ]
 
-        assert len(low_conf_different) >= 3, (
-            "low_confidence_ignored should have multiple low-confidence different regimes"
-        )
+        assert (
+            len(low_conf_different) >= 3
+        ), "low_confidence_ignored should have multiple low-confidence different regimes"
 
         # These should all have candidate_count = 0
         for step in low_conf_different:
-            assert step["expected_state"]["candidate_count"] == 0, (
-                "Low confidence different regime should not build candidate"
-            )
+            assert (
+                step["expected_state"]["candidate_count"] == 0
+            ), "Low confidence different regime should not build candidate"
 
     def test_hysteresis_boundary_tests_c_enter_threshold(self):
         """Verify hysteresis_boundary tests the C_enter threshold behavior."""
@@ -291,18 +298,18 @@ class TestFSMGoldenScenarioDocumentation:
 
         # Find steps with confidence in hysteresis band
         hysteresis_band = [
-            s for s in scenario["steps"]
-            if c_exit < s["confidence"] < c_enter
+            s for s in scenario["steps"] if c_exit < s["confidence"] < c_enter
         ]
 
-        assert len(hysteresis_band) >= 3, (
-            "hysteresis_boundary should have steps in the (C_exit, C_enter) band"
-        )
+        assert (
+            len(hysteresis_band) >= 3
+        ), "hysteresis_boundary should have steps in the (C_exit, C_enter) band"
 
         # Verify there's at least one case where candidate builds but no transition
         # due to median being below C_enter
         candidate_no_transition = [
-            s for s in scenario["steps"]
+            s
+            for s in scenario["steps"]
             if s["expected_state"]["candidate_count"] >= config["M"]
             and not s.get("transition", False)
         ]

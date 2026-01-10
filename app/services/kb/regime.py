@@ -451,7 +451,9 @@ def compute_regime_snapshot(
     # Rolling std
     std_series = close.rolling(window=params["bb_period"]).std()
     std_pct = (
-        (std_series.iloc[-1] / close_last) if close_last != 0 and not std_series.empty else 0.0
+        (std_series.iloc[-1] / close_last)
+        if close_last != 0 and not std_series.empty
+        else 0.0
     )
 
     # Range over window
@@ -466,13 +468,21 @@ def compute_regime_snapshot(
     trend_dir = compute_trend_direction(close, lookback=params["trend_lookback"])
 
     # Efficiency ratio
-    er_series = compute_efficiency_ratio(close, period=min(params["trend_lookback"], n_bars // 2))
+    er_series = compute_efficiency_ratio(
+        close, period=min(params["trend_lookback"], n_bars // 2)
+    )
     efficiency_ratio = er_series.iloc[-1] if not er_series.empty else 0.5
 
     # Return metrics
     if len(close) >= 2:
-        return_pct = (close.iloc[-1] - close.iloc[0]) / close.iloc[0] if close.iloc[0] != 0 else 0.0
-        drift_bps_per_bar = (return_pct * 10000) / (len(close) - 1) if len(close) > 1 else 0.0
+        return_pct = (
+            (close.iloc[-1] - close.iloc[0]) / close.iloc[0]
+            if close.iloc[0] != 0
+            else 0.0
+        )
+        drift_bps_per_bar = (
+            (return_pct * 10000) / (len(close) - 1) if len(close) > 1 else 0.0
+        )
     else:
         return_pct = 0.0
         drift_bps_per_bar = 0.0

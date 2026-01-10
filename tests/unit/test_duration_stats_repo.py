@@ -45,16 +45,18 @@ class TestDurationStatsRepository:
         repo = DurationStatsRepository(mock_pool)
 
         conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value={
-            "symbol": "BTC/USDT",
-            "timeframe": "5m",
-            "regime_key": "trend=uptrend|vol=high_vol",
-            "n_segments": 50,
-            "median_duration_bars": 240,
-            "p25_duration_bars": 180,
-            "p75_duration_bars": 310,
-            "updated_at": None,
-        })
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "symbol": "BTC/USDT",
+                "timeframe": "5m",
+                "regime_key": "trend=uptrend|vol=high_vol",
+                "n_segments": 50,
+                "median_duration_bars": 240,
+                "p25_duration_bars": 180,
+                "p75_duration_bars": 310,
+                "updated_at": None,
+            }
+        )
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock()
 
@@ -77,16 +79,18 @@ class TestDurationStatsRepository:
         repo = DurationStatsRepository(mock_pool)
 
         conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value={
-            "symbol": "BTC/USDT",
-            "timeframe": "5m",
-            "regime_key": "trend=uptrend|vol=high_vol",
-            "n_segments": 50,
-            "median_duration_bars": 240,
-            "p25_duration_bars": 180,
-            "p75_duration_bars": 310,
-            "updated_at": None,
-        })
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "symbol": "BTC/USDT",
+                "timeframe": "5m",
+                "regime_key": "trend=uptrend|vol=high_vol",
+                "n_segments": 50,
+                "median_duration_bars": 240,
+                "p25_duration_bars": 180,
+                "p75_duration_bars": 310,
+                "updated_at": None,
+            }
+        )
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock()
 
@@ -180,7 +184,9 @@ class TestDurationStatsRepository:
         assert result.baseline == "global_timeframe"
 
     @pytest.mark.asyncio
-    async def test_get_stats_with_backoff_returns_none_when_all_missing(self, mock_pool):
+    async def test_get_stats_with_backoff_returns_none_when_all_missing(
+        self, mock_pool
+    ):
         """Returns None when composite, marginals, and global all missing."""
         repo = DurationStatsRepository(mock_pool)
 
@@ -253,16 +259,18 @@ class TestDurationStatsRepository:
         repo = DurationStatsRepository(mock_pool)
 
         conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value={
-            "symbol": "BTC/USDT",
-            "timeframe": "5m",
-            "regime_key": "trend=uptrend|vol=high_vol",
-            "n_segments": 50,
-            "median_duration_bars": 240,
-            "p25_duration_bars": 180,
-            "p75_duration_bars": 310,
-            "updated_at": None,
-        })
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "symbol": "BTC/USDT",
+                "timeframe": "5m",
+                "regime_key": "trend=uptrend|vol=high_vol",
+                "n_segments": 50,
+                "median_duration_bars": 240,
+                "p25_duration_bars": 180,
+                "p75_duration_bars": 310,
+                "updated_at": None,
+            }
+        )
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock()
 
@@ -384,7 +392,10 @@ class TestComputeExpectedRemaining:
         remaining = stats.compute_expected_remaining(regime_age_bars=300)
 
         assert remaining.expected_remaining_bars == 0  # max(0, 240 - 300)
-        assert remaining.remaining_iqr_bars == [0, 10]  # [max(0, 180-300), max(0, 310-300)]
+        assert remaining.remaining_iqr_bars == [
+            0,
+            10,
+        ]  # [max(0, 180-300), max(0, 310-300)]
 
     def test_expected_remaining_all_zero_when_very_old(self):
         """All remaining estimates are zero when regime is very old."""

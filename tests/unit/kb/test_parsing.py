@@ -166,7 +166,9 @@ class TestFingerprinting:
             day = i // 24 + 1
             hour = i % 24
             price = 100 + i * 0.1
-            base_sorted.append(f"2024-01-{day:02d} {hour:02d}:00:00,{price},{price+1},{price-1},{price+0.5},1000")
+            base_sorted.append(
+                f"2024-01-{day:02d} {hour:02d}:00:00,{price},{price+1},{price-1},{price+0.5},1000"
+            )
 
         # Reverse middle portion to create unsorted data
         base_unsorted = base_sorted[:1] + base_sorted[25:] + base_sorted[1:25]
@@ -292,7 +294,9 @@ class TestValidation:
         """Should warn about large timestamp gaps."""
         # Create data with a large gap
         dates1 = pd.date_range("2024-01-01", periods=100, freq="1h", tz="UTC")
-        dates2 = pd.date_range("2024-01-15", periods=100, freq="1h", tz="UTC")  # 2 week gap
+        dates2 = pd.date_range(
+            "2024-01-15", periods=100, freq="1h", tz="UTC"
+        )  # 2 week gap
         dates = dates1.append(dates2)
 
         df = pd.DataFrame({"close": [100] * 200}, index=dates)
@@ -329,7 +333,9 @@ class TestErrorHandling:
     def test_invalid_csv_raises(self):
         """Invalid CSV should raise OHLCVParseError."""
         with pytest.raises(OHLCVParseError):
-            parse_ohlcv_for_kb(b"not,valid,csv\nwith,missing,columns", filename="bad.csv")
+            parse_ohlcv_for_kb(
+                b"not,valid,csv\nwith,missing,columns", filename="bad.csv"
+            )
 
     def test_missing_columns_raises(self):
         """Missing required columns should raise error."""
@@ -338,7 +344,9 @@ class TestErrorHandling:
         with pytest.raises(OHLCVParseError) as exc_info:
             parse_ohlcv_for_kb(csv, filename="test.csv")
 
-        assert "Missing required columns" in str(exc_info.value) or "low" in str(exc_info.value)
+        assert "Missing required columns" in str(exc_info.value) or "low" in str(
+            exc_info.value
+        )
 
     def test_empty_csv_raises(self):
         """Empty CSV should raise error."""

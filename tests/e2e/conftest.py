@@ -106,6 +106,7 @@ def assert_no_500(page: Page) -> None:
     gracefully handle missing data (404) but never crash (500).
     """
     from playwright.sync_api import expect
+
     expect(page.locator("body")).not_to_contain_text("Internal Server Error")
 
 
@@ -122,7 +123,9 @@ def visit_admin_page(page: Page, base_url: str, path: str) -> None:
     assert_no_500(page)
 
 
-def visit_detail_page(page: Page, base_url: str, path_template: str, uuid: str = FAKE_UUID) -> None:
+def visit_detail_page(
+    page: Page, base_url: str, path_template: str, uuid: str = FAKE_UUID
+) -> None:
     """
     Navigate to a detail page with a UUID parameter.
 
@@ -146,6 +149,7 @@ def e2e_helpers():
         def test_my_page(admin_page, base_url, e2e_helpers):
             e2e_helpers.visit_detail_page(admin_page, base_url, "/admin/foo/{id}")
     """
+
     class E2EHelpers:
         FAKE_UUID = FAKE_UUID
 
@@ -186,7 +190,7 @@ def api_request(playwright, base_url: str, admin_token: str):
         extra_http_headers={
             "X-Admin-Token": admin_token,
             "Content-Type": "application/json",
-        }
+        },
     )
     yield context
     context.dispose()
@@ -203,7 +207,7 @@ def api_request_no_auth(playwright, base_url: str):
         base_url=base_url,
         extra_http_headers={
             "Content-Type": "application/json",
-        }
+        },
     )
     yield context
     context.dispose()

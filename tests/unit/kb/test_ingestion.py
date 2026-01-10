@@ -110,7 +110,9 @@ def make_tune_run(run_id=None, status="completed"):
 class TestPipelineInit:
     """Tests for pipeline initialization."""
 
-    def test_creates_with_dependencies(self, mock_embedder, mock_repository, mock_tune_repo):
+    def test_creates_with_dependencies(
+        self, mock_embedder, mock_repository, mock_tune_repo
+    ):
         """Should initialize with provided dependencies."""
         pipeline = KBIngestionPipeline(
             embedder=mock_embedder,
@@ -148,7 +150,9 @@ class TestIngestTuneRuns:
         assert report.dry_run is False
 
     @pytest.mark.asyncio
-    async def test_single_run_success(self, pipeline, mock_embedder, mock_tune_repo, mock_repository):
+    async def test_single_run_success(
+        self, pipeline, mock_embedder, mock_tune_repo, mock_repository
+    ):
         """Should ingest a single run successfully."""
         run = make_tune_run()
         mock_tune_repo.list_tune_runs_for_kb.return_value = [run]
@@ -245,7 +249,9 @@ class TestBatchProcessing:
     """Tests for batch processing logic."""
 
     @pytest.mark.asyncio
-    async def test_batches_correctly(self, mock_embedder, mock_repository, mock_tune_repo):
+    async def test_batches_correctly(
+        self, mock_embedder, mock_repository, mock_tune_repo
+    ):
         """Should process runs in batches."""
         pipeline = KBIngestionPipeline(
             embedder=mock_embedder,
@@ -313,7 +319,9 @@ class TestErrorHandling:
     """Tests for error handling."""
 
     @pytest.mark.asyncio
-    async def test_embedding_failure_tracked(self, pipeline, mock_embedder, mock_tune_repo):
+    async def test_embedding_failure_tracked(
+        self, pipeline, mock_embedder, mock_tune_repo
+    ):
         """Should track embedding failures."""
         run = make_tune_run()
         mock_tune_repo.list_tune_runs_for_kb.return_value = [run]
@@ -332,7 +340,9 @@ class TestErrorHandling:
         assert len(report.stats.failed_tune_run_ids) == 1
 
     @pytest.mark.asyncio
-    async def test_upsert_failure_tracked(self, pipeline, mock_embedder, mock_tune_repo, mock_repository):
+    async def test_upsert_failure_tracked(
+        self, pipeline, mock_embedder, mock_tune_repo, mock_repository
+    ):
         """Should track upsert failures."""
         run = make_tune_run()
         mock_tune_repo.list_tune_runs_for_kb.return_value = [run]
@@ -368,7 +378,9 @@ class TestIngestSingle:
     """Tests for ingest_single method."""
 
     @pytest.mark.asyncio
-    async def test_single_success(self, pipeline, mock_embedder, mock_repository, mock_tune_repo):
+    async def test_single_success(
+        self, pipeline, mock_embedder, mock_repository, mock_tune_repo
+    ):
         """Should ingest single run successfully."""
         run_data = make_tune_run()
         workspace_id = uuid4()
@@ -385,7 +397,9 @@ class TestIngestSingle:
         mock_tune_repo.mark_kb_ingested.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_single_dry_run(self, pipeline, mock_embedder, mock_repository, mock_tune_repo):
+    async def test_single_dry_run(
+        self, pipeline, mock_embedder, mock_repository, mock_tune_repo
+    ):
         """Should not upsert in dry run mode."""
         run_data = make_tune_run()
         workspace_id = uuid4()

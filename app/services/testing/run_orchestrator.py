@@ -226,9 +226,7 @@ class RunOrchestrator:
             )
 
             # Compute objective score
-            objective_score = self._compute_objective_score(
-                metrics, run_plan.objective
-            )
+            objective_score = self._compute_objective_score(metrics, run_plan.objective)
 
             completed_at = datetime.now(timezone.utc)
             duration_ms = int((completed_at - started_at).total_seconds() * 1000)
@@ -469,7 +467,7 @@ class RunOrchestrator:
         # Calculate mean and std
         mean_ret = sum(returns) / len(returns)
         variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
-        std_ret = variance ** 0.5
+        std_ret = variance**0.5
 
         if std_ret == 0:
             return None

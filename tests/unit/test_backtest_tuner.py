@@ -82,11 +82,7 @@ class TestDeriveParamSpace:
 
     def test_default_only_creates_single_value(self):
         """Param with only default should create single-value list."""
-        schema = {
-            "properties": {
-                "fixed": {"type": "integer", "default": 42}
-            }
-        }
+        schema = {"properties": {"fixed": {"type": "integer", "default": 42}}}
         space = derive_param_space(schema)
 
         assert space["fixed"] == [42]
@@ -107,8 +103,18 @@ class TestDeriveParamSpace:
         """Multiple parameters should all be processed."""
         schema = {
             "properties": {
-                "period": {"type": "integer", "minimum": 5, "maximum": 30, "default": 14},
-                "threshold": {"type": "number", "minimum": 1.0, "maximum": 3.0, "default": 2.0},
+                "period": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 30,
+                    "default": 14,
+                },
+                "threshold": {
+                    "type": "number",
+                    "minimum": 1.0,
+                    "maximum": 3.0,
+                    "default": 2.0,
+                },
                 "direction": {"type": "string", "enum": ["long", "short"]},
             }
         }
@@ -370,10 +376,14 @@ class TestWinnerSelectionWithObjectiveScore:
 
         # With higher lambda, B wins
         obj_a_high = compute_objective_score(
-            trial_a, objective_type="sharpe_dd_penalty", objective_params={"dd_lambda": 0.03}
+            trial_a,
+            objective_type="sharpe_dd_penalty",
+            objective_params={"dd_lambda": 0.03},
         )
         obj_b_high = compute_objective_score(
-            trial_b, objective_type="sharpe_dd_penalty", objective_params={"dd_lambda": 0.03}
+            trial_b,
+            objective_type="sharpe_dd_penalty",
+            objective_params={"dd_lambda": 0.03},
         )
         # A: 2.0 - 0.03*30 = 2.0 - 0.9 = 1.1
         # B: 1.5 - 0.03*5 = 1.5 - 0.15 = 1.35
@@ -451,7 +461,11 @@ class TestGatesSnapshot:
 
     def test_evaluate_gates_uses_constants(self):
         """evaluate_gates function should use the gate constants."""
-        from app.services.backtest.tuner import evaluate_gates, GATE_MAX_DD_PCT, GATE_MIN_TRADES
+        from app.services.backtest.tuner import (
+            evaluate_gates,
+            GATE_MAX_DD_PCT,
+            GATE_MIN_TRADES,
+        )
 
         # Metrics that pass gates
         passing_metrics = {

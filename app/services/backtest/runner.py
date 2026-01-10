@@ -7,7 +7,11 @@ from uuid import UUID
 
 import structlog
 
-from app.services.backtest.data import parse_ohlcv_csv, OHLCVParseResult, OHLCVParseError
+from app.services.backtest.data import (
+    parse_ohlcv_csv,
+    OHLCVParseResult,
+    OHLCVParseError,
+)
 from app.services.backtest.validate import validate_params, ParamValidationError
 from app.services.backtest.engines.base import BacktestResult
 from app.services.backtest.engines.backtestingpy import BacktestingPyEngine
@@ -18,7 +22,9 @@ logger = structlog.get_logger(__name__)
 class BacktestRunError(Exception):
     """Error during backtest execution."""
 
-    def __init__(self, message: str, code: str = "BACKTEST_ERROR", details: Optional[dict] = None):
+    def __init__(
+        self, message: str, code: str = "BACKTEST_ERROR", details: Optional[dict] = None
+    ):
         super().__init__(message)
         self.message = message
         self.code = code

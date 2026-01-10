@@ -340,7 +340,9 @@ def get_reranker(config: dict) -> BaseReranker | None:
         return _llm_reranker
 
     else:
-        logger.warning(f"Unknown rerank method '{method}', falling back to cross_encoder")
+        logger.warning(
+            f"Unknown rerank method '{method}', falling back to cross_encoder"
+        )
         if _cross_encoder_reranker is None:
             _cross_encoder_reranker = CrossEncoderReranker(
                 config.get("cross_encoder", {})

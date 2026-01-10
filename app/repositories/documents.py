@@ -234,8 +234,7 @@ class DocumentRepository:
             async with conn.transaction():
                 # Get old document's version
                 old_row = await conn.fetchrow(
-                    "SELECT version FROM documents WHERE id = $1",
-                    old_doc_id
+                    "SELECT version FROM documents WHERE id = $1", old_doc_id
                 )
                 old_version = old_row["version"] if old_row else 1
                 new_version = old_version + 1
@@ -247,7 +246,7 @@ class DocumentRepository:
                     SET status = 'superseded', updated_at = NOW()
                     WHERE id = $1
                     """,
-                    old_doc_id
+                    old_doc_id,
                 )
 
                 logger.info(

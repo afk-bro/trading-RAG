@@ -75,9 +75,7 @@ def _resolve_provider(settings: Settings) -> tuple[ProviderResolved | None, str 
     if provider == "openai":
         key = (settings.openai_api_key or "").strip() or None
         if not key:
-            raise LLMStartupError(
-                "LLM_PROVIDER=openai but OPENAI_API_KEY not set"
-            )
+            raise LLMStartupError("LLM_PROVIDER=openai but OPENAI_API_KEY not set")
         return "openai", key
 
     if provider == "openrouter":

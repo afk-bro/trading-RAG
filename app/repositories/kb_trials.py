@@ -116,18 +116,14 @@ class KBTrialRepository:
             ("dataset_id", qmodels.PayloadSchemaType.KEYWORD),
             ("instrument", qmodels.PayloadSchemaType.KEYWORD),
             ("timeframe", qmodels.PayloadSchemaType.KEYWORD),
-
             # Strategy
             ("strategy_name", qmodels.PayloadSchemaType.KEYWORD),
             ("objective_type", qmodels.PayloadSchemaType.KEYWORD),
-
             # Quality flags
             ("has_oos", qmodels.PayloadSchemaType.BOOL),
             ("is_valid", qmodels.PayloadSchemaType.BOOL),
-
             # Regime tags
             ("regime_tags", qmodels.PayloadSchemaType.KEYWORD),
-
             # Numeric (for range filters)
             ("sharpe_oos", qmodels.PayloadSchemaType.FLOAT),
             ("return_frac_oos", qmodels.PayloadSchemaType.FLOAT),

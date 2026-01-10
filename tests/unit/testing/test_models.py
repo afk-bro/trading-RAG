@@ -220,7 +220,9 @@ class TestRunVariantCreate:
         base = {"strategy": "bb_reversal", "params": {"window": 20}}
         spec_overrides = {"params.window": 30}
 
-        variant = RunVariant.create(base_spec=base, spec_overrides=spec_overrides, label="window=30")
+        variant = RunVariant.create(
+            base_spec=base, spec_overrides=spec_overrides, label="window=30"
+        )
 
         assert variant.spec_overrides == spec_overrides
         assert variant.label == "window=30"
@@ -247,7 +249,9 @@ class TestRunPlanNVariants:
         workspace_id = uuid4()
 
         variants = [
-            RunVariant.create(base_spec=base, spec_overrides={"params.window": i}, label=f"window={i}")
+            RunVariant.create(
+                base_spec=base, spec_overrides={"params.window": i}, label=f"window={i}"
+            )
             for i in [20, 30, 40]
         ]
 

@@ -160,11 +160,9 @@ def trial_to_metadata(
     payload = {
         # Schema
         "schema_version": t.schema_version,
-
         # Embedding info (for forward compatibility)
         "embedding_model_id": embedding_model_id,
         "vector_dim": vector_dim,
-
         # Identity
         "doc_type": t.doc_type,
         "tune_run_id": str(t.tune_run_id),
@@ -174,11 +172,9 @@ def trial_to_metadata(
         "instrument": t.instrument,
         "timeframe": t.timeframe,
         "exchange": t.exchange,
-
         # Strategy
         "strategy_name": t.strategy_name,
         "params": t.params,
-
         # Performance (numeric filters)
         "sharpe_is": t.sharpe_is,
         "sharpe_oos": t.sharpe_oos,
@@ -189,26 +185,21 @@ def trial_to_metadata(
         "n_trades_is": t.n_trades_is,
         "n_trades_oos": t.n_trades_oos,
         "overfit_gap": t.overfit_gap,
-
         # Regime - tags for filtering
         "regime_tags": t.regime_tags,
         "regime_tags_is": t.regime_tags_is,
         "regime_tags_oos": t.regime_tags_oos,
         "regime_tags_str": " ".join(t.regime_tags),  # For text search
-
         # Regime - full snapshots for analysis (NaN cleaned)
         "regime_snapshot_is": t.regime_is.to_dict() if t.regime_is else None,
         "regime_snapshot_oos": t.regime_oos.to_dict() if t.regime_oos else None,
-
         # Quality
         "has_oos": t.has_oos,
         "is_valid": t.is_valid,
         "warnings": t.warnings,
-
         # Scoring
         "objective_type": t.objective_type,
         "objective_score": t.objective_score,
-
         "created_at": t.created_at,
     }
     # Clean any remaining NaN values at the top level
@@ -269,7 +260,9 @@ def build_trial_doc_from_tune_run(
     overfit_gap = compute_overfit_gap(sharpe_is, sharpe_oos)
 
     # Quality flags
-    is_valid = tune_run.get("skip_reason") is None and tune_run.get("failed_reason") is None
+    is_valid = (
+        tune_run.get("skip_reason") is None and tune_run.get("failed_reason") is None
+    )
 
     # Compute warnings
     warnings = compute_trial_warnings(

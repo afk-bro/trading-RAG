@@ -72,7 +72,9 @@ class TestCancellationInvariants:
         # Verify queued trials are marked as skipped
         execute_calls = [str(c) for c in conn.execute.call_args_list]
         skip_call = [c for c in execute_calls if "skipped" in c and "canceled" in c]
-        assert len(skip_call) > 0, "Should mark queued trials as skipped with skip_reason='canceled'"
+        assert (
+            len(skip_call) > 0
+        ), "Should mark queued trials as skipped with skip_reason='canceled'"
 
     @pytest.mark.asyncio
     async def test_canceled_status_never_overwritten_by_complete_tune(self, mock_pool):
@@ -183,7 +185,9 @@ class TestRunningTrialsDontFlipCanceledStatus:
     """
 
     @pytest.mark.asyncio
-    async def test_late_finishing_trial_preserves_canceled_status(self, ):
+    async def test_late_finishing_trial_preserves_canceled_status(
+        self,
+    ):
         """
         Simulates a trial completing after tune was canceled.
 

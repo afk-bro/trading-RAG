@@ -44,7 +44,9 @@ def sample_ohlcv_csv() -> bytes:
     for i in range(50):
         ts = (start_date + timedelta(days=i)).isoformat()
         # Simulate some price movement with trend and volatility
-        change_pct = ((i % 7) - 3) * 0.02 + (i / 50) * 0.01  # ~-6% to +8% with upward drift
+        change_pct = ((i % 7) - 3) * 0.02 + (
+            i / 50
+        ) * 0.01  # ~-6% to +8% with upward drift
         price = price * (1 + change_pct)
 
         open_price = price
@@ -53,8 +55,16 @@ def sample_ohlcv_csv() -> bytes:
         close_price = price * (1 + ((i % 3) - 1) * 0.005)  # Small close variation
         volume = 1000000 + (i % 10) * 100000
 
-        writer.writerow([ts, f"{open_price:.2f}", f"{high_price:.2f}",
-                        f"{low_price:.2f}", f"{close_price:.2f}", str(volume)])
+        writer.writerow(
+            [
+                ts,
+                f"{open_price:.2f}",
+                f"{high_price:.2f}",
+                f"{low_price:.2f}",
+                f"{close_price:.2f}",
+                str(volume),
+            ]
+        )
 
     return output.getvalue().encode("utf-8")
 
@@ -119,6 +129,7 @@ def mock_db_pool():
 @pytest.fixture
 def mock_events_insert(mock_db_pool):
     """Mock the events repository insert method."""
+
     async def mock_insert(event):
         """Capture the event and return a fake ID."""
         # Store the event type for assertions
@@ -152,15 +163,15 @@ class TestGenerateAndExecuteIntegration:
         set_db_pool(mock_db_pool)
 
         # Patch the TradeEventsRepository to use our mock
-        with patch(
-            "app.routers.testing.TradeEventsRepository"
-        ) as MockEventsRepo:
+        with patch("app.routers.testing.TradeEventsRepository") as MockEventsRepo:
             mock_repo_instance = AsyncMock()
             mock_repo_instance.insert = mock_events_insert
             MockEventsRepo.return_value = mock_repo_instance
 
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 # Create multipart form data
                 files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                 data = {
@@ -208,15 +219,15 @@ class TestGenerateAndExecuteIntegration:
             recorded_events.append(event)
             return uuid4()
 
-        with patch(
-            "app.routers.testing.TradeEventsRepository"
-        ) as MockEventsRepo:
+        with patch("app.routers.testing.TradeEventsRepository") as MockEventsRepo:
             mock_repo_instance = AsyncMock()
             mock_repo_instance.insert = capture_event
             MockEventsRepo.return_value = mock_repo_instance
 
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                 data = {
                     "workspace_id": minimal_execution_spec["workspace_id"],
@@ -234,15 +245,19 @@ class TestGenerateAndExecuteIntegration:
         assert response.status_code == 200
 
         # Check events were recorded
-        assert len(recorded_events) >= 2, "Should have at least RUN_STARTED and RUN_COMPLETED"
+        assert (
+            len(recorded_events) >= 2
+        ), "Should have at least RUN_STARTED and RUN_COMPLETED"
 
         # Find RUN_STARTED and RUN_COMPLETED events
         run_started_count = sum(
-            1 for e in recorded_events
+            1
+            for e in recorded_events
             if e.payload.get("run_event_type") == "RUN_STARTED"
         )
         run_completed_count = sum(
-            1 for e in recorded_events
+            1
+            for e in recorded_events
             if e.payload.get("run_event_type") == "RUN_COMPLETED"
         )
 
@@ -264,15 +279,15 @@ class TestGenerateAndExecuteIntegration:
 
         # Run twice with identical inputs
         for _ in range(2):
-            with patch(
-                "app.routers.testing.TradeEventsRepository"
-            ) as MockEventsRepo:
+            with patch("app.routers.testing.TradeEventsRepository") as MockEventsRepo:
                 mock_repo_instance = AsyncMock()
                 mock_repo_instance.insert = AsyncMock(return_value=uuid4())
                 MockEventsRepo.return_value = mock_repo_instance
 
                 transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
                     files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                     data = {
                         "workspace_id": minimal_execution_spec["workspace_id"],
@@ -293,13 +308,12 @@ class TestGenerateAndExecuteIntegration:
         # Best variant should be the same
         # Note: With placeholder implementation, this tests the selection logic
         assert (
-            results_from_runs[0]["best_variant_id"] ==
-            results_from_runs[1]["best_variant_id"]
+            results_from_runs[0]["best_variant_id"]
+            == results_from_runs[1]["best_variant_id"]
         ), "Best variant ID should be deterministic"
 
         assert (
-            results_from_runs[0]["best_score"] ==
-            results_from_runs[1]["best_score"]
+            results_from_runs[0]["best_score"] == results_from_runs[1]["best_score"]
         ), "Best score should be deterministic"
 
     @pytest.mark.asyncio
@@ -316,15 +330,15 @@ class TestGenerateAndExecuteIntegration:
         variant_ids_from_runs = []
 
         for _ in range(2):
-            with patch(
-                "app.routers.testing.TradeEventsRepository"
-            ) as MockEventsRepo:
+            with patch("app.routers.testing.TradeEventsRepository") as MockEventsRepo:
                 mock_repo_instance = AsyncMock()
                 mock_repo_instance.insert = AsyncMock(return_value=uuid4())
                 MockEventsRepo.return_value = mock_repo_instance
 
                 transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
                     files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                     data = {
                         "workspace_id": minimal_execution_spec["workspace_id"],
@@ -345,9 +359,9 @@ class TestGenerateAndExecuteIntegration:
             variant_ids_from_runs.append(variant_ids)
 
         # Variant IDs should be identical across runs
-        assert variant_ids_from_runs[0] == variant_ids_from_runs[1], (
-            "Variant IDs should be stable/deterministic across runs"
-        )
+        assert (
+            variant_ids_from_runs[0] == variant_ids_from_runs[1]
+        ), "Variant IDs should be stable/deterministic across runs"
 
     @pytest.mark.asyncio
     async def test_invalid_csv_returns_422(
@@ -362,14 +376,14 @@ class TestGenerateAndExecuteIntegration:
         # CSV with missing columns
         bad_csv = b"ts,open,high,low\n2023-01-01,100,105,99\n"
 
-        with patch(
-            "app.routers.testing.TradeEventsRepository"
-        ) as MockEventsRepo:
+        with patch("app.routers.testing.TradeEventsRepository") as MockEventsRepo:
             mock_repo_instance = AsyncMock()
             MockEventsRepo.return_value = mock_repo_instance
 
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 files = {"file": ("bad.csv", bad_csv, "text/csv")}
                 data = {
                     "workspace_id": minimal_execution_spec["workspace_id"],
@@ -404,14 +418,14 @@ class TestGenerateAndExecuteIntegration:
         bad_csv += b"2023-01-02T00:00:00,104,108,103,107,1200\n"
         bad_csv += b"2023-01-01T00:00:00,100,105,99,104,1000\n"  # Earlier timestamp!
 
-        with patch(
-            "app.routers.testing.TradeEventsRepository"
-        ) as MockEventsRepo:
+        with patch("app.routers.testing.TradeEventsRepository") as MockEventsRepo:
             mock_repo_instance = AsyncMock()
             MockEventsRepo.return_value = mock_repo_instance
 
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 files = {"file": ("bad.csv", bad_csv, "text/csv")}
                 data = {
                     "workspace_id": minimal_execution_spec["workspace_id"],

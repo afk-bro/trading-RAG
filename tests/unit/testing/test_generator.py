@@ -101,7 +101,9 @@ class TestBaselineVariant:
 class TestGridSweep:
     """Tests for grid sweep variant generation."""
 
-    def test_grid_sweep_count_is_cartesian_product(self, generator, base_spec, grid_constraints):
+    def test_grid_sweep_count_is_cartesian_product(
+        self, generator, base_spec, grid_constraints
+    ):
         """Grid sweep should produce 2x2x2=8 variants."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
@@ -120,7 +122,9 @@ class TestGridSweep:
         for v in grid_variants:
             assert "grid" in v.tags
 
-    def test_grid_variants_have_all_three_overrides(self, generator, base_spec, grid_constraints):
+    def test_grid_variants_have_all_three_overrides(
+        self, generator, base_spec, grid_constraints
+    ):
         """Grid variants should override all three parameters."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
@@ -158,7 +162,9 @@ class TestAblations:
         # 3 ablation variants (one per param)
         assert len(ablation_variants) == 3
 
-    def test_no_ablations_when_include_ablations_false(self, generator, base_spec, grid_constraints):
+    def test_no_ablations_when_include_ablations_false(
+        self, generator, base_spec, grid_constraints
+    ):
         """No ablations when include_ablations=False."""
         grid_constraints.include_ablations = False
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
@@ -191,7 +197,9 @@ class TestAblations:
 class TestAblationLogic:
     """Tests for ablation logic - based on first grid variant."""
 
-    def test_ablations_based_on_first_grid_variant(self, generator, base_spec, grid_constraints):
+    def test_ablations_based_on_first_grid_variant(
+        self, generator, base_spec, grid_constraints
+    ):
         """Ablations should be based on first grid variant's overrides."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
@@ -213,15 +221,18 @@ class TestAblationLogic:
 
         # Check we have one ablation for each param
         lookback_ablations = [
-            v for v in ablation_variants
+            v
+            for v in ablation_variants
             if v.spec_overrides.get("entry.lookback_days") == base_lookback
         ]
         dollars_ablations = [
-            v for v in ablation_variants
+            v
+            for v in ablation_variants
             if v.spec_overrides.get("risk.dollars_per_trade") == base_dollars
         ]
         max_pos_ablations = [
-            v for v in ablation_variants
+            v
+            for v in ablation_variants
             if v.spec_overrides.get("risk.max_positions") == base_max_pos
         ]
 
@@ -249,7 +260,9 @@ class TestDeduplication:
         variant_ids = [v.variant_id for v in plan.variants]
         assert len(variant_ids) == len(set(variant_ids))
 
-    def test_baseline_always_stays_first_after_dedup(self, generator, base_spec, grid_constraints):
+    def test_baseline_always_stays_first_after_dedup(
+        self, generator, base_spec, grid_constraints
+    ):
         """Baseline should remain first even after dedup."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
@@ -329,13 +342,18 @@ class TestGoldenOrdering:
         if first_ablation_idx is not None and first_grid_idx is not None:
             # All grids should come before first ablation
             for i in range(first_grid_idx, first_ablation_idx):
-                assert "grid" in plan.variants[i].tags or "baseline" in plan.variants[i].tags
+                assert (
+                    "grid" in plan.variants[i].tags
+                    or "baseline" in plan.variants[i].tags
+                )
 
 
 class TestRunPlanMetadata:
     """Tests for RunPlan metadata."""
 
-    def test_plan_has_correct_workspace_id(self, generator, base_spec, grid_constraints):
+    def test_plan_has_correct_workspace_id(
+        self, generator, base_spec, grid_constraints
+    ):
         """RunPlan should have workspace_id from base_spec."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
         assert plan.workspace_id == base_spec.workspace_id
@@ -351,13 +369,17 @@ class TestRunPlanMetadata:
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
         assert plan.objective == "sharpe"
 
-    def test_plan_base_spec_is_serialized_dict(self, generator, base_spec, grid_constraints):
+    def test_plan_base_spec_is_serialized_dict(
+        self, generator, base_spec, grid_constraints
+    ):
         """RunPlan.base_spec should be a dict (JSON-serializable)."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
         assert isinstance(plan.base_spec, dict)
         assert plan.base_spec["strategy_id"] == base_spec.strategy_id
 
-    def test_base_spec_uses_json_mode_dump(self, generator, base_spec, grid_constraints):
+    def test_base_spec_uses_json_mode_dump(
+        self, generator, base_spec, grid_constraints
+    ):
         """RunPlan.base_spec should use model_dump(mode='json') for consistent serialization."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
@@ -404,12 +426,14 @@ class TestNumericDiscipline:
 
         assert grid1[0].variant_id == grid2[0].variant_id
 
-    def test_overrides_contain_primitives_only(self, generator, base_spec, grid_constraints):
+    def test_overrides_contain_primitives_only(
+        self, generator, base_spec, grid_constraints
+    ):
         """All override values should be JSON primitives (int, float, str, bool, None)."""
         plan = generator.generate(base_spec, "btc_2023", grid_constraints)
 
         for variant in plan.variants:
             for key, value in variant.spec_overrides.items():
-                assert isinstance(value, (int, float, str, bool, type(None))), (
-                    f"Override {key}={value} is type {type(value).__name__}, expected primitive"
-                )
+                assert isinstance(
+                    value, (int, float, str, bool, type(None))
+                ), f"Override {key}={value} is type {type(value).__name__}, expected primitive"

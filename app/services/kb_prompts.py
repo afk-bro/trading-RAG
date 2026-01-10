@@ -276,15 +276,21 @@ def build_synthesis_prompt(
             f"     Confidence: {confidence:.0%}"
         )
 
-    claims_text = "\n".join(claims_parts) if claims_parts else "(No verified claims available)"
+    claims_text = (
+        "\n".join(claims_parts) if claims_parts else "(No verified claims available)"
+    )
 
     # Format entities if provided
     entities_text = ""
     if entities:
         entity_parts = []
         for e in entities:
-            desc = f": {e.get('description', '')[:100]}..." if e.get("description") else ""
-            entity_parts.append(f"- {e.get('name', 'Unknown')} ({e.get('type', 'unknown')}){desc}")
+            desc = (
+                f": {e.get('description', '')[:100]}..." if e.get("description") else ""
+            )
+            entity_parts.append(
+                f"- {e.get('name', 'Unknown')} ({e.get('type', 'unknown')}){desc}"
+            )
         entities_text = f"""
 ## RELEVANT ENTITIES
 {chr(10).join(entity_parts)}
@@ -364,7 +370,9 @@ def build_kb_answer_prompt(
             f"     Confidence: {confidence:.0%}"
         )
 
-    claims_text = "\n".join(claims_parts) if claims_parts else "(No verified claims available)"
+    claims_text = (
+        "\n".join(claims_parts) if claims_parts else "(No verified claims available)"
+    )
 
     return f"""## VERIFIED CLAIMS FROM TRUTH STORE
 {claims_text}
@@ -383,6 +391,7 @@ Return valid JSON with answer, supported, and not_specified fields. No markdown 
 # ===========================================
 # JSON Parsing Helpers
 # ===========================================
+
 
 def extract_json_from_response(text: str) -> dict[str, Any]:
     """Extract JSON from LLM response, handling markdown code fences.
@@ -409,8 +418,8 @@ def extract_json_from_response(text: str) -> dict[str, Any]:
     # Try to extract from markdown code fence
     patterns = [
         r"```json\s*([\s\S]*?)\s*```",  # ```json ... ```
-        r"```\s*([\s\S]*?)\s*```",       # ``` ... ```
-        r"\{[\s\S]*\}",                   # Raw JSON object
+        r"```\s*([\s\S]*?)\s*```",  # ``` ... ```
+        r"\{[\s\S]*\}",  # Raw JSON object
     ]
 
     for pattern in patterns:

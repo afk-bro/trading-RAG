@@ -242,8 +242,9 @@ class TestMetricsDataContract:
         metrics = serialize_metrics(summary)
 
         for key, value in metrics.items():
-            assert value is None or isinstance(value, (int, float)), \
-                f"{key} should be numeric or None, got {type(value)}"
+            assert value is None or isinstance(
+                value, (int, float)
+            ), f"{key} should be numeric or None, got {type(value)}"
 
     def test_no_string_values(self):
         """Metrics should never contain string values."""

@@ -55,7 +55,9 @@ class TestVectorRepositoryEnsureCollection:
     @pytest.mark.asyncio
     async def test_validates_dimension_on_existing_collection(self, mock_client):
         """Test that dimension is validated for existing collection."""
-        mock_client.get_collections.return_value = MockCollectionList(["test_collection"])
+        mock_client.get_collections.return_value = MockCollectionList(
+            ["test_collection"]
+        )
         mock_client.get_collection.return_value = MockCollectionInfo(dimension=768)
 
         repo = VectorRepository(client=mock_client, collection="test_collection")
@@ -68,7 +70,9 @@ class TestVectorRepositoryEnsureCollection:
     @pytest.mark.asyncio
     async def test_recreates_collection_on_dimension_mismatch(self, mock_client):
         """Test that collection is recreated on dimension mismatch."""
-        mock_client.get_collections.return_value = MockCollectionList(["test_collection"])
+        mock_client.get_collections.return_value = MockCollectionList(
+            ["test_collection"]
+        )
         mock_client.get_collection.return_value = MockCollectionInfo(dimension=512)
 
         repo = VectorRepository(client=mock_client, collection="test_collection")
@@ -85,7 +89,9 @@ class TestVectorRepositoryEnsureCollection:
         """Test that warning is logged on dimension mismatch."""
         import logging
 
-        mock_client.get_collections.return_value = MockCollectionList(["test_collection"])
+        mock_client.get_collections.return_value = MockCollectionList(
+            ["test_collection"]
+        )
         mock_client.get_collection.return_value = MockCollectionInfo(dimension=512)
 
         repo = VectorRepository(client=mock_client, collection="test_collection")
@@ -100,7 +106,9 @@ class TestVectorRepositoryEnsureCollection:
     @pytest.mark.asyncio
     async def test_recreate_forces_new_collection(self, mock_client):
         """Test that recreate=True forces collection recreation."""
-        mock_client.get_collections.return_value = MockCollectionList(["test_collection"])
+        mock_client.get_collections.return_value = MockCollectionList(
+            ["test_collection"]
+        )
 
         repo = VectorRepository(client=mock_client, collection="test_collection")
         await repo.ensure_collection(dimension=768, recreate=True)

@@ -235,11 +235,13 @@ async def list_rules(
     engine = get_policy_engine()
     rules = []
     for rule in engine.rules:
-        rules.append({
-            "name": rule.name,
-            "priority": rule.priority,
-            "enabled": rule.enabled,
-        })
+        rules.append(
+            {
+                "name": rule.name,
+                "priority": rule.priority,
+                "enabled": rule.enabled,
+            }
+        )
 
     return {
         "rules": rules,

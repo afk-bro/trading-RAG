@@ -74,9 +74,9 @@ class TestDistanceZGoldenScenarios:
                 f"got {result.z_score}, expected {expected['z_score']}"
             )
         else:
-            assert result.z_score is None, (
-                f"z_score should be None in {scenario_name}, got {result.z_score}"
-            )
+            assert (
+                result.z_score is None
+            ), f"z_score should be None in {scenario_name}, got {result.z_score}"
 
         # Check baseline type
         assert result.baseline == expected["baseline"], (
@@ -204,17 +204,17 @@ class TestDistanceZGoldenScenarioDocumentation:
         """Verify identical_features scenario has z=0."""
         scenario = load_scenario("identical_features")
 
-        assert scenario["expected"]["z_score"] == pytest.approx(0.0, abs=0.01), (
-            "identical_features scenario should have z_score of 0"
-        )
+        assert scenario["expected"]["z_score"] == pytest.approx(
+            0.0, abs=0.01
+        ), "identical_features scenario should have z_score of 0"
 
         # Verify all neighbors match current
         current = scenario["current_features"]
         for neighbor in scenario["neighbor_features"]:
             for key in current:
-                assert current[key] == neighbor[key], (
-                    f"identical_features: neighbor should match current for {key}"
-                )
+                assert (
+                    current[key] == neighbor[key]
+                ), f"identical_features: neighbor should match current for {key}"
 
     def test_outlier_current_has_large_distance(self):
         """Verify outlier_current scenario has large distance_now."""
@@ -222,9 +222,9 @@ class TestDistanceZGoldenScenarioDocumentation:
 
         # The outlier should have a large distance from neighbors
         assert scenario["expected"]["distance_now"] is not None
-        assert scenario["expected"]["distance_now"] > 2.0, (
-            "outlier_current scenario should have distance_now > 2.0"
-        )
+        assert (
+            scenario["expected"]["distance_now"] > 2.0
+        ), "outlier_current scenario should have distance_now > 2.0"
 
     def test_tight_neighborhood_has_small_sigma(self):
         """Verify tight_neighborhood tests MAD stability with small sigma."""
@@ -232,26 +232,26 @@ class TestDistanceZGoldenScenarioDocumentation:
 
         # Sigma should be small due to tight clustering
         assert scenario["expected"]["sigma"] is not None
-        assert scenario["expected"]["sigma"] < 0.5, (
-            "tight_neighborhood should have small sigma"
-        )
+        assert (
+            scenario["expected"]["sigma"] < 0.5
+        ), "tight_neighborhood should have small sigma"
 
     def test_sparse_neighbors_handles_few_points(self):
         """Verify sparse_neighbors tests edge case with few neighbors."""
         scenario = load_scenario("sparse_neighbors")
 
         n_neighbors = scenario["expected"]["n_neighbors"]
-        assert 2 <= n_neighbors <= 3, (
-            f"sparse_neighbors should have 2-3 neighbors, got {n_neighbors}"
-        )
+        assert (
+            2 <= n_neighbors <= 3
+        ), f"sparse_neighbors should have 2-3 neighbors, got {n_neighbors}"
 
     def test_backoff_marginal_uses_neighbors_only(self):
         """Verify backoff_marginal tests neighbors_only baseline."""
         scenario = load_scenario("backoff_marginal")
 
-        assert scenario.get("cluster_var") is None, (
-            "backoff_marginal should have cluster_var=None"
-        )
-        assert scenario["expected"]["baseline"] == "neighbors_only", (
-            "backoff_marginal should use 'neighbors_only' baseline"
-        )
+        assert (
+            scenario.get("cluster_var") is None
+        ), "backoff_marginal should have cluster_var=None"
+        assert (
+            scenario["expected"]["baseline"] == "neighbors_only"
+        ), "backoff_marginal should use 'neighbors_only' baseline"

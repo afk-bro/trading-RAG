@@ -135,4 +135,6 @@ class TestGroundingBehavior:
         """Verify contract requires stating when context doesn't specify."""
         contract = BaseLLMClient.GROUNDING_CONTRACT
         # Should mention what to do when context doesn't have the answer
-        assert "does not specify" in contract.lower() or "not specify" in contract.lower()
+        assert (
+            "does not specify" in contract.lower() or "not specify" in contract.lower()
+        )

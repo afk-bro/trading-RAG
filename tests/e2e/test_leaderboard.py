@@ -14,18 +14,14 @@ pytestmark = pytest.mark.e2e
 class TestLeaderboardPage:
     """Tests for the leaderboard page structure."""
 
-    def test_page_loads_successfully(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_page_loads_successfully(self, admin_page: Page, base_url: str):
         """Leaderboard page loads without crashing."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
         # Page should load without internal server error
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_table_has_ranking_columns(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_table_has_ranking_columns(self, admin_page: Page, base_url: str):
         """Leaderboard table has ranking-related columns when data exists."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -37,9 +33,7 @@ class TestLeaderboardPage:
             expect(table_header).to_contain_text("Strategy")
             expect(table_header).to_contain_text("Objective")
 
-    def test_filters_present(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_filters_present(self, admin_page: Page, base_url: str):
         """Filter controls are present when page loads successfully."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -51,9 +45,7 @@ class TestLeaderboardPage:
 class TestLeaderboardSelection:
     """Tests for tune selection functionality."""
 
-    def test_checkboxes_present_in_rows(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_checkboxes_present_in_rows(self, admin_page: Page, base_url: str):
         """Each row has a selection checkbox."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -67,15 +59,15 @@ class TestLeaderboardSelection:
         """Compare button is disabled until 2+ items selected."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
-        compare_button = admin_page.locator("button:has-text('Compare'), a:has-text('Compare')")
+        compare_button = admin_page.locator(
+            "button:has-text('Compare'), a:has-text('Compare')"
+        )
         if compare_button.count() > 0:
             # Button should be disabled or have disabled styling initially
             # (Implementation may vary)
             pass
 
-    def test_select_all_checkbox(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_select_all_checkbox(self, admin_page: Page, base_url: str):
         """Select all checkbox exists in header."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -87,9 +79,7 @@ class TestLeaderboardSelection:
 class TestLeaderboardExport:
     """Tests for export functionality."""
 
-    def test_csv_download_button_present(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_csv_download_button_present(self, admin_page: Page, base_url: str):
         """CSV download button is present when data exists."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -98,9 +88,7 @@ class TestLeaderboardExport:
         # Just verify page loads - button depends on data state
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_csv_download_link_has_format_param(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_csv_download_link_has_format_param(self, admin_page: Page, base_url: str):
         """CSV download link includes format=csv parameter when visible."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -113,9 +101,7 @@ class TestLeaderboardExport:
 class TestLeaderboardFiltering:
     """Tests for leaderboard filtering."""
 
-    def test_valid_only_filter(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_valid_only_filter(self, admin_page: Page, base_url: str):
         """Valid only checkbox filters results when present."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -135,9 +121,7 @@ class TestLeaderboardFiltering:
         # Just verify page loads without crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_objective_type_filter(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_objective_type_filter(self, admin_page: Page, base_url: str):
         """Objective type dropdown filters results (auto-submits on change)."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -154,9 +138,7 @@ class TestLeaderboardFiltering:
 class TestLeaderboardRanking:
     """Tests for ranking display."""
 
-    def test_rank_badges_styled(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_rank_badges_styled(self, admin_page: Page, base_url: str):
         """Top 3 ranks have special styling."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 
@@ -164,9 +146,7 @@ class TestLeaderboardRanking:
         # Just verify page loads correctly
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_overfit_gap_color_coding(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_overfit_gap_color_coding(self, admin_page: Page, base_url: str):
         """Overfit gap values have appropriate color coding."""
         admin_page.goto(f"{base_url}/admin/backtests/leaderboard")
 

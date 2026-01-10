@@ -60,11 +60,11 @@ class Chunker:
         Returns:
             Section name if found, None otherwise
         """
-        lines = text.strip().split('\n')
+        lines = text.strip().split("\n")
         for line in lines[:5]:  # Check first 5 lines
             line = line.strip()
             # Markdown headers
-            match = re.match(r'^#{1,6}\s+(.+)$', line)
+            match = re.match(r"^#{1,6}\s+(.+)$", line)
             if match:
                 return match.group(1).strip()
             # ALL CAPS lines (common section headers)
@@ -128,7 +128,9 @@ class Chunker:
             )
 
             # Move start index forward (accounting for overlap)
-            start_idx = end_idx - self.overlap_tokens if end_idx < total_tokens else end_idx
+            start_idx = (
+                end_idx - self.overlap_tokens if end_idx < total_tokens else end_idx
+            )
             chunk_index += 1
 
         return chunks

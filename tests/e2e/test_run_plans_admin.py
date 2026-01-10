@@ -18,16 +18,12 @@ FAKE_RUN_PLAN_ID = "00000000-0000-0000-0000-000000000001"
 class TestRunPlansListPage:
     """Tests for /admin/testing/run-plans list page."""
 
-    def test_run_plans_list_returns_200(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plans_list_returns_200(self, admin_page: Page, base_url: str):
         """Run plans list page returns 200 with valid auth."""
         response = admin_page.goto(f"{base_url}/admin/testing/run-plans")
         assert response.status == 200
 
-    def test_run_plans_list_shows_empty_state(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plans_list_shows_empty_state(self, admin_page: Page, base_url: str):
         """Run plans list shows empty state when no run plans exist."""
         admin_page.goto(f"{base_url}/admin/testing/run-plans")
 
@@ -35,9 +31,7 @@ class TestRunPlansListPage:
         # Both are valid - page should not crash
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_run_plans_list_no_500(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plans_list_no_500(self, admin_page: Page, base_url: str):
         """Run plans list never returns 500 error."""
         admin_page.goto(f"{base_url}/admin/testing/run-plans")
 
@@ -45,22 +39,20 @@ class TestRunPlansListPage:
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
         expect(admin_page.locator("body")).not_to_contain_text("500")
 
-    def test_run_plans_list_has_nav_link(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plans_list_has_nav_link(self, admin_page: Page, base_url: str):
         """Run Plans link exists in navigation."""
         admin_page.goto(f"{base_url}/admin/testing/run-plans")
 
         # Nav link should be visible
-        expect(admin_page.locator("nav a[href='/admin/testing/run-plans']")).to_be_visible()
+        expect(
+            admin_page.locator("nav a[href='/admin/testing/run-plans']")
+        ).to_be_visible()
 
 
 class TestRunPlanDetailPage:
     """Tests for /admin/testing/run-plans/{run_plan_id} detail page."""
 
-    def test_run_plan_detail_fake_uuid_graceful(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plan_detail_fake_uuid_graceful(self, admin_page: Page, base_url: str):
         """Run plan detail page handles non-existent UUID gracefully (not 500)."""
         response = admin_page.goto(
             f"{base_url}/admin/testing/run-plans/{FAKE_RUN_PLAN_ID}"
@@ -77,19 +69,16 @@ class TestRunPlanDetailPage:
     ):
         """Run plan detail page handles random UUID gracefully."""
         import uuid
+
         random_uuid = str(uuid.uuid4())
 
-        response = admin_page.goto(
-            f"{base_url}/admin/testing/run-plans/{random_uuid}"
-        )
+        response = admin_page.goto(f"{base_url}/admin/testing/run-plans/{random_uuid}")
 
         # Should return 200 with graceful error, not 500
         assert response.status == 200
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_run_plan_detail_invalid_id_graceful(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plan_detail_invalid_id_graceful(self, admin_page: Page, base_url: str):
         """Run plan detail page handles invalid ID formats gracefully."""
         # Non-UUID string
         response = admin_page.goto(
@@ -117,9 +106,7 @@ class TestRunPlansNavigation:
         # Should navigate to run plans page
         expect(admin_page).to_have_url(f"{base_url}/admin/testing/run-plans")
 
-    def test_run_plans_active_in_nav(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_run_plans_active_in_nav(self, admin_page: Page, base_url: str):
         """Run Plans nav link is active when on run plans page."""
         admin_page.goto(f"{base_url}/admin/testing/run-plans")
 

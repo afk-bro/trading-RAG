@@ -16,25 +16,19 @@ pytestmark = pytest.mark.e2e
 class TestTradeEventsListPage:
     """Tests for the trade events list page structure."""
 
-    def test_page_loads_successfully(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_page_loads_successfully(self, admin_page: Page, base_url: str):
         """Trade events page loads without crashing."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
 
-    def test_page_title_correct(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_page_title_correct(self, admin_page: Page, base_url: str):
         """Page has correct title."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
         # Card title should mention events
         expect(admin_page.locator("body")).to_contain_text("Trade Events")
 
-    def test_filters_present(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_filters_present(self, admin_page: Page, base_url: str):
         """Filter controls are present."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
@@ -53,9 +47,7 @@ class TestTradeEventsListPage:
 class TestTradeEventsListFilters:
     """Tests for trade events filtering."""
 
-    def test_event_type_filter(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_event_type_filter(self, admin_page: Page, base_url: str):
         """Event type filter dropdown works."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
@@ -67,9 +59,7 @@ class TestTradeEventsListFilters:
             admin_page.wait_for_load_state("networkidle")
             assert_no_500(admin_page)
 
-    def test_time_window_filter(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_time_window_filter(self, admin_page: Page, base_url: str):
         """Time window filter changes URL."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
@@ -80,9 +70,7 @@ class TestTradeEventsListFilters:
             admin_page.wait_for_load_state("networkidle")
             assert_no_500(admin_page)
 
-    def test_symbol_filter_input(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_symbol_filter_input(self, admin_page: Page, base_url: str):
         """Symbol filter input exists."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
@@ -95,9 +83,7 @@ class TestTradeEventsListFilters:
 class TestTradeEventsListTable:
     """Tests for events table."""
 
-    def test_table_or_empty_state(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_table_or_empty_state(self, admin_page: Page, base_url: str):
         """Page shows either table or empty state."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
@@ -116,9 +102,7 @@ class TestTradeEventsListTable:
 class TestTradeEventsListNavigation:
     """Tests for navigation elements."""
 
-    def test_navbar_events_link_highlighted(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_navbar_events_link_highlighted(self, admin_page: Page, base_url: str):
         """Events link in navbar is highlighted when on events page."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)
@@ -128,9 +112,7 @@ class TestTradeEventsListNavigation:
         if events_link.count() > 0:
             expect(events_link).to_be_visible()
 
-    def test_pagination_controls(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_pagination_controls(self, admin_page: Page, base_url: str):
         """Pagination info is present."""
         admin_page.goto(f"{base_url}/admin/trade/events")
         assert_no_500(admin_page)

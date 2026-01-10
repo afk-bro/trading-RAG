@@ -23,9 +23,7 @@ class TestAdminAuthentication:
         # Without token: 401 (server has ADMIN_TOKEN) or 403 (server has no ADMIN_TOKEN)
         assert response.status in (401, 403)
 
-    def test_authenticated_request_succeeds(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_authenticated_request_succeeds(self, admin_page: Page, base_url: str):
         """Admin routes work with valid token."""
         response = admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -35,9 +33,7 @@ class TestAdminAuthentication:
             "Ensure server is started with ADMIN_TOKEN=e2e-test-token"
         )
 
-    def test_invalid_token_returns_403(
-        self, browser, base_url: str
-    ):
+    def test_invalid_token_returns_403(self, browser, base_url: str):
         """Admin routes return 403 with invalid token."""
         context = browser.new_context(
             extra_http_headers={
@@ -58,29 +54,25 @@ class TestAdminAuthentication:
 class TestAdminNavigation:
     """Tests for admin navigation structure."""
 
-    def test_home_redirects_to_entities(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_home_redirects_to_entities(self, admin_page: Page, base_url: str):
         """Admin home redirects to entities list."""
         admin_page.goto(f"{base_url}/admin", wait_until="networkidle")
 
         # Should redirect to entities page
         expect(admin_page).to_have_url(f"{base_url}/admin/kb/entities")
 
-    def test_navbar_links_present(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_navbar_links_present(self, admin_page: Page, base_url: str):
         """Navigation bar contains all main links."""
         admin_page.goto(f"{base_url}/admin/kb/entities")
 
         # Check navbar links exist (nav element with anchor tags)
         expect(admin_page.locator("nav a[href='/admin/kb/entities']")).to_be_visible()
         expect(admin_page.locator("nav a[href='/admin/kb/claims']")).to_be_visible()
-        expect(admin_page.locator("nav a[href='/admin/backtests/tunes']")).to_be_visible()
+        expect(
+            admin_page.locator("nav a[href='/admin/backtests/tunes']")
+        ).to_be_visible()
 
-    def test_navbar_navigation_works(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_navbar_navigation_works(self, admin_page: Page, base_url: str):
         """Clicking navbar links navigates correctly."""
         admin_page.goto(f"{base_url}/admin/kb/entities")
 

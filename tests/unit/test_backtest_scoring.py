@@ -151,7 +151,11 @@ class TestRankTrials:
     def test_preserves_original_fields(self):
         """Original trial fields should be preserved."""
         trials = [
-            {"params": {"a": 1}, "summary": {"sharpe": 1.0, "trades": 10}, "run_id": "abc"},
+            {
+                "params": {"a": 1},
+                "summary": {"sharpe": 1.0, "trades": 10},
+                "run_id": "abc",
+            },
         ]
         ranked = rank_trials(trials)
 

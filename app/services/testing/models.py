@@ -68,14 +68,22 @@ def validate_variant_params(materialized_spec: dict) -> tuple[bool, str | None]:
         prefixed with "invalid_params:" if invalid.
     """
     try:
-        dollars_per_trade = materialized_spec.get("risk", {}).get("dollars_per_trade", 0)
+        dollars_per_trade = materialized_spec.get("risk", {}).get(
+            "dollars_per_trade", 0
+        )
         max_positions = materialized_spec.get("risk", {}).get("max_positions", 0)
 
         if dollars_per_trade <= 0:
-            return False, f"invalid_params: dollars_per_trade must be > 0, got {dollars_per_trade}"
+            return (
+                False,
+                f"invalid_params: dollars_per_trade must be > 0, got {dollars_per_trade}",
+            )
 
         if max_positions < 1:
-            return False, f"invalid_params: max_positions must be >= 1, got {max_positions}"
+            return (
+                False,
+                f"invalid_params: max_positions must be >= 1, got {max_positions}",
+            )
 
         return True, None
     except (KeyError, TypeError) as e:
@@ -141,7 +149,9 @@ class GeneratorConstraints(BaseModel):
     dollars_per_trade_values: list[float] = Field(default_factory=list)
     max_positions_values: list[int] = Field(default_factory=list)
     include_ablations: bool = True
-    max_variants: int = Field(default=25, le=200, description="Max variants (hard cap at 200)")
+    max_variants: int = Field(
+        default=25, le=200, description="Max variants (hard cap at 200)"
+    )
     objective: str = "sharpe_dd_penalty"
 
 
@@ -153,7 +163,9 @@ class RunVariant(BaseModel):
     and the specific overrides to apply to the base specification.
     """
 
-    variant_id: str = Field(description="16-char hex ID derived from base+overrides hash")
+    variant_id: str = Field(
+        description="16-char hex ID derived from base+overrides hash"
+    )
     label: str = Field(description="Human-readable label for the variant")
     spec_overrides: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
@@ -219,12 +231,18 @@ class RunPlan(BaseModel):
     objective function, and dataset reference.
     """
 
-    run_plan_id: UUID = Field(default_factory=uuid4, description="Unique identifier for the run plan")
+    run_plan_id: UUID = Field(
+        default_factory=uuid4, description="Unique identifier for the run plan"
+    )
     workspace_id: UUID = Field(description="Workspace this plan belongs to")
     base_spec: dict = Field(description="Base strategy specification")
     variants: list[RunVariant] = Field(default_factory=list)
-    objective: str = Field(default="sharpe_dd_penalty", description="Objective function for optimization")
-    dataset_ref: str = Field(description="Reference to the dataset used for backtesting")
+    objective: str = Field(
+        default="sharpe_dd_penalty", description="Objective function for optimization"
+    )
+    dataset_ref: str = Field(
+        description="Reference to the dataset used for backtesting"
+    )
     status: RunPlanStatus = RunPlanStatus.pending
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -242,14 +260,18 @@ class VariantMetrics(BaseModel):
     from a backtest execution.
     """
 
-    sharpe: Optional[float] = Field(default=None, description="Sharpe ratio (None if <2 trades)")
+    sharpe: Optional[float] = Field(
+        default=None, description="Sharpe ratio (None if <2 trades)"
+    )
     return_pct: float
     max_drawdown_pct: float
     trade_count: int
     win_rate: float = Field(default=0.0, description="Win rate (0.0 if no trades)")
     ending_equity: float = Field(description="Final equity value")
     gross_profit: float = Field(description="Total profit from winning trades")
-    gross_loss: float = Field(description="Total loss from losing trades (should be <= 0)")
+    gross_loss: float = Field(
+        description="Total loss from losing trades (should be <= 0)"
+    )
     profit_factor: Optional[float] = None
 
 
@@ -263,12 +285,22 @@ class RunResult(BaseModel):
 
     run_plan_id: UUID = Field(description="ID of the run plan this result belongs to")
     variant_id: str = Field(description="ID of the variant that was run")
-    status: RunResultStatus = Field(description="Result status: success, failed, or skipped")
+    status: RunResultStatus = Field(
+        description="Result status: success, failed, or skipped"
+    )
     metrics: Optional[VariantMetrics] = None
-    objective_score: Optional[float] = Field(default=None, description="Computed objective score")
+    objective_score: Optional[float] = Field(
+        default=None, description="Computed objective score"
+    )
     error: Optional[str] = Field(default=None, description="Error message if failed")
-    skip_reason: Optional[str] = Field(default=None, description="Reason if skipped (invalid params)")
+    skip_reason: Optional[str] = Field(
+        default=None, description="Reason if skipped (invalid params)"
+    )
     started_at: datetime = Field(description="When the run started")
     completed_at: Optional[datetime] = None
-    duration_ms: Optional[int] = Field(default=None, description="Duration in milliseconds")
-    events_recorded: int = Field(default=0, description="Number of events recorded during run")
+    duration_ms: Optional[int] = Field(
+        default=None, description="Duration in milliseconds"
+    )
+    events_recorded: int = Field(
+        default=0, description="Number of events recorded during run"
+    )

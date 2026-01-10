@@ -278,14 +278,10 @@ class ClusterStatsRepository:
 
         for feat in all_features:
             means = [
-                m.feature_mean.get(feat)
-                for m in marginals
-                if feat in m.feature_mean
+                m.feature_mean.get(feat) for m in marginals if feat in m.feature_mean
             ]
             vars_ = [
-                m.feature_var.get(feat)
-                for m in marginals
-                if feat in m.feature_var
+                m.feature_var.get(feat) for m in marginals if feat in m.feature_var
             ]
 
             if means:

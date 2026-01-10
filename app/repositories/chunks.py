@@ -281,15 +281,9 @@ class ChunkRepository:
             return []
 
         # Parse and prepare arrays for unnest
-        doc_ids = [
-            UUID(r[0]) if isinstance(r[0], str) else r[0]
-            for r in requests
-        ]
+        doc_ids = [UUID(r[0]) if isinstance(r[0], str) else r[0] for r in requests]
         indices = [r[1] for r in requests]
-        seed_ids = [
-            UUID(r[2]) if isinstance(r[2], str) else r[2]
-            for r in requests
-        ]
+        seed_ids = [UUID(r[2]) if isinstance(r[2], str) else r[2] for r in requests]
 
         query = """
             WITH req(document_id, chunk_index, seed_chunk_id) AS (

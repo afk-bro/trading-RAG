@@ -124,7 +124,9 @@ class TestKBRetriever:
         assert result.stats.total_returned == 0
 
     @pytest.mark.asyncio
-    async def test_strict_search_sufficient(self, mock_repository, mock_embedder, basic_request):
+    async def test_strict_search_sufficient(
+        self, mock_repository, mock_embedder, basic_request
+    ):
         """Should not use relaxed filters when strict has enough candidates."""
         # Return enough candidates
         mock_repository.search.return_value = [
@@ -143,7 +145,9 @@ class TestKBRetriever:
         assert "used_relaxed_filters" not in result.warnings
 
     @pytest.mark.asyncio
-    async def test_relaxed_fallback(self, mock_repository, mock_embedder, basic_request):
+    async def test_relaxed_fallback(
+        self, mock_repository, mock_embedder, basic_request
+    ):
         """Should fall back to relaxed when strict has too few."""
         # First call (strict) returns few
         # Second call (relaxed) returns more
@@ -190,8 +194,7 @@ class TestKBRetriever:
 
         mock_embedder.embed_single.side_effect = EmbeddingError("timeout")
         mock_repository.search_by_filters.return_value = [
-            {"id": f"meta_{i}", "payload": {"objective_score": 1.0}}
-            for i in range(10)
+            {"id": f"meta_{i}", "payload": {"objective_score": 1.0}} for i in range(10)
         ]
 
         retriever = KBRetriever(repository=mock_repository, embedder=mock_embedder)
@@ -205,7 +208,9 @@ class TestKBRetriever:
         assert len(result.candidates) == 10
 
     @pytest.mark.asyncio
-    async def test_candidates_tagged_relaxed(self, mock_repository, mock_embedder, basic_request):
+    async def test_candidates_tagged_relaxed(
+        self, mock_repository, mock_embedder, basic_request
+    ):
         """Should tag relaxed candidates correctly."""
         mock_repository.search.side_effect = [
             [{"id": "strict_0", "score": 0.9, "payload": {}}],

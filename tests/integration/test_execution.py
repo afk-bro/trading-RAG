@@ -40,18 +40,20 @@ def client(mock_settings):
     """Create test client with mocked dependencies."""
     # Reset the broker singleton to ensure clean state
     from app.services.execution import factory
+
     factory.reset_paper_broker()
 
     # Set admin token in environment and patch settings
-    with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), \
-         patch("app.routers.execution.get_settings", return_value=mock_settings), \
-         patch("app.main._db_pool", MagicMock()), \
-         patch("app.main._qdrant_client", None):
+    with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), patch(
+        "app.routers.execution.get_settings", return_value=mock_settings
+    ), patch("app.main._db_pool", MagicMock()), patch("app.main._qdrant_client", None):
         # Also need to patch the execution router's _db_pool
         import app.routers.execution as execution_module
+
         execution_module._db_pool = MagicMock()
 
         from app.main import app
+
         with TestClient(app, raise_server_exceptions=False) as test_client:
             yield test_client
 
@@ -66,7 +68,9 @@ class TestPaperStateEndpoint:
     def test_state_does_not_500(self, client, admin_headers):
         """Test that state endpoint returns 200, not 500, for any UUID."""
         fake_uuid = str(uuid.uuid4())
-        response = client.get(f"/execute/paper/state/{fake_uuid}", headers=admin_headers)
+        response = client.get(
+            f"/execute/paper/state/{fake_uuid}", headers=admin_headers
+        )
 
         # Should return 200 with fresh state, not crash
         assert response.status_code == 200
@@ -78,7 +82,9 @@ class TestPaperStateEndpoint:
     def test_state_returns_default_values(self, client, admin_headers):
         """Test that fresh state has correct defaults."""
         fake_uuid = str(uuid.uuid4())
-        response = client.get(f"/execute/paper/state/{fake_uuid}", headers=admin_headers)
+        response = client.get(
+            f"/execute/paper/state/{fake_uuid}", headers=admin_headers
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -110,7 +116,9 @@ class TestPaperPositionsEndpoint:
     def test_positions_does_not_500(self, client, admin_headers):
         """Test that positions endpoint returns 200, not 500."""
         fake_uuid = str(uuid.uuid4())
-        response = client.get(f"/execute/paper/positions/{fake_uuid}", headers=admin_headers)
+        response = client.get(
+            f"/execute/paper/positions/{fake_uuid}", headers=admin_headers
+        )
 
         # Should return empty list, not crash
         assert response.status_code == 200
@@ -145,7 +153,9 @@ class TestPaperResetEndpoint:
         fake_uuid = str(uuid.uuid4())
 
         # Default config_profile is not "production"
-        response = client.post(f"/execute/paper/reset/{fake_uuid}", headers=admin_headers)
+        response = client.post(
+            f"/execute/paper/reset/{fake_uuid}", headers=admin_headers
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -155,25 +165,28 @@ class TestPaperResetEndpoint:
     def test_reset_forbidden_in_production(self, admin_headers):
         """Test that reset returns 403 in production mode."""
         from app.services.execution import factory
+
         factory.reset_paper_broker()
 
         # Mock settings for production mode
         prod_settings = MagicMock()
         prod_settings.config_profile = "production"
 
-        with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), \
-             patch("app.routers.execution.get_settings", return_value=prod_settings), \
-             patch("app.main._db_pool", MagicMock()), \
-             patch("app.main._qdrant_client", None):
+        with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), patch(
+            "app.routers.execution.get_settings", return_value=prod_settings
+        ), patch("app.main._db_pool", MagicMock()), patch(
+            "app.main._qdrant_client", None
+        ):
             import app.routers.execution as execution_module
+
             execution_module._db_pool = MagicMock()
 
             from app.main import app
+
             with TestClient(app, raise_server_exceptions=False) as test_client:
                 fake_uuid = str(uuid.uuid4())
                 response = test_client.post(
-                    f"/execute/paper/reset/{fake_uuid}",
-                    headers=admin_headers
+                    f"/execute/paper/reset/{fake_uuid}", headers=admin_headers
                 )
 
             execution_module._db_pool = None
@@ -225,12 +238,16 @@ class TestExecuteIntentEndpoint:
             mock_repo = MagicMock()
             mock_get_repo.return_value = mock_repo
 
-            response = client.post("/execute/intents", json=valid_intent_request, headers=admin_headers)
+            response = client.post(
+                "/execute/intents", json=valid_intent_request, headers=admin_headers
+            )
 
         assert response.status_code == 400
         assert "paper mode" in response.json()["detail"]["error"].lower()
 
-    def test_execute_validates_action(self, client, admin_headers, valid_intent_request):
+    def test_execute_validates_action(
+        self, client, admin_headers, valid_intent_request
+    ):
         """Test that unsupported actions return 400."""
         valid_intent_request["intent"]["action"] = "open_short"
 
@@ -239,17 +256,23 @@ class TestExecuteIntentEndpoint:
             mock_repo.get_order_filled_by_intent = AsyncMock(return_value=None)
             mock_get_repo.return_value = mock_repo
 
-            response = client.post("/execute/intents", json=valid_intent_request, headers=admin_headers)
+            response = client.post(
+                "/execute/intents", json=valid_intent_request, headers=admin_headers
+            )
 
         assert response.status_code == 400
         data = response.json()
         assert data["detail"]["error_code"] == "UNSUPPORTED_ACTION"
 
-    def test_execute_validates_fill_price_schema(self, client, admin_headers, valid_intent_request):
+    def test_execute_validates_fill_price_schema(
+        self, client, admin_headers, valid_intent_request
+    ):
         """Test that fill_price must be provided (FastAPI schema validation)."""
         del valid_intent_request["fill_price"]
 
-        response = client.post("/execute/intents", json=valid_intent_request, headers=admin_headers)
+        response = client.post(
+            "/execute/intents", json=valid_intent_request, headers=admin_headers
+        )
 
         # Should fail schema validation (422)
         assert response.status_code == 422

@@ -16,9 +16,7 @@ pytestmark = pytest.mark.e2e
 class TestTunesListPage:
     """Tests for the tunes list page structure."""
 
-    def test_page_loads_successfully(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_page_loads_successfully(self, admin_page: Page, base_url: str):
         """Tunes list page loads with expected elements."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -29,9 +27,7 @@ class TestTunesListPage:
         expect(admin_page.locator("select[name='status']")).to_be_visible()
         expect(admin_page.locator("input[name='valid_only']")).to_be_visible()
 
-    def test_table_has_expected_columns(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_table_has_expected_columns(self, admin_page: Page, base_url: str):
         """Tunes table has all expected column headers."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -42,9 +38,7 @@ class TestTunesListPage:
             expect(table_header).to_contain_text("Status")
             expect(table_header).to_contain_text("Strategy")
 
-    def test_empty_state_displays_correctly(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_empty_state_displays_correctly(self, admin_page: Page, base_url: str):
         """Shows appropriate message when no tunes match filters."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes?status=failed")
 
@@ -55,9 +49,7 @@ class TestTunesListPage:
 class TestTunesListFilters:
     """Tests for tunes list filtering functionality."""
 
-    def test_status_filter_changes_url(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_status_filter_changes_url(self, admin_page: Page, base_url: str):
         """Changing status filter updates URL (auto-submits on change)."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -68,9 +60,7 @@ class TestTunesListFilters:
         # URL should include status parameter (use regex, not lambda)
         expect(admin_page).to_have_url(re.compile(r"status=completed"))
 
-    def test_valid_only_checkbox(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_valid_only_checkbox(self, admin_page: Page, base_url: str):
         """Valid only checkbox filters results (auto-submits on change)."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -83,12 +73,12 @@ class TestTunesListFilters:
         # URL should include valid_only parameter (use regex, not lambda)
         expect(admin_page).to_have_url(re.compile(r"valid_only=true"))
 
-    def test_reset_filters_via_url(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_reset_filters_via_url(self, admin_page: Page, base_url: str):
         """Navigate to base URL resets all filters."""
         # Start with some filters
-        admin_page.goto(f"{base_url}/admin/backtests/tunes?status=completed&valid_only=true")
+        admin_page.goto(
+            f"{base_url}/admin/backtests/tunes?status=completed&valid_only=true"
+        )
 
         # Navigate to base URL (no clear button in UI, just use URL)
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
@@ -100,9 +90,7 @@ class TestTunesListFilters:
 class TestTunesListTableInteraction:
     """Tests for table row interactions."""
 
-    def test_row_click_navigates_to_detail(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_row_click_navigates_to_detail(self, admin_page: Page, base_url: str):
         """Clicking a tune row navigates to detail page."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -114,23 +102,21 @@ class TestTunesListTableInteraction:
             # Should navigate to tune detail (use regex, not lambda)
             expect(admin_page).to_have_url(re.compile(r"/admin/backtests/tunes/"))
 
-    def test_copy_button_exists(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_copy_button_exists(self, admin_page: Page, base_url: str):
         """Copy tune ID button is present in rows."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
         # Check for copy buttons (usually have a copy icon or title)
-        copy_buttons = admin_page.locator("button[title*='Copy'], button[aria-label*='Copy']")
+        copy_buttons = admin_page.locator(
+            "button[title*='Copy'], button[aria-label*='Copy']"
+        )
         # Just verify the page loads - copy buttons may not exist if no tunes
 
 
 class TestTunesListPagination:
     """Tests for pagination controls."""
 
-    def test_pagination_controls_present(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_pagination_controls_present(self, admin_page: Page, base_url: str):
         """Pagination controls are visible when needed."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 
@@ -138,9 +124,7 @@ class TestTunesListPagination:
         # Just verify page loads without error
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
 
-    def test_next_page_updates_offset(
-        self, admin_page: Page, base_url: str
-    ):
+    def test_next_page_updates_offset(self, admin_page: Page, base_url: str):
         """Clicking Next updates the offset parameter."""
         admin_page.goto(f"{base_url}/admin/backtests/tunes")
 

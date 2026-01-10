@@ -323,14 +323,16 @@ class TestBackfillJobSingleTrial:
 
         async def mock_execute(query, *args):
             # Capture the ClusterStats arguments
-            upserted_stats.append({
-                "strategy_entity_id": args[0],
-                "timeframe": args[1],
-                "regime_key": args[2],
-                "n": args[4],
-                "feature_mean": args[6],
-                "feature_var": args[7],
-            })
+            upserted_stats.append(
+                {
+                    "strategy_entity_id": args[0],
+                    "timeframe": args[1],
+                    "regime_key": args[2],
+                    "n": args[4],
+                    "feature_mean": args[6],
+                    "feature_var": args[7],
+                }
+            )
 
         conn = AsyncMock()
         conn.execute = mock_execute
@@ -352,6 +354,7 @@ class TestBackfillJobSingleTrial:
         assert stats["n"] == 1
         # Zero variance for single sample
         import json
+
         var = json.loads(stats["feature_var"])
         assert var["atr_pct"] == pytest.approx(0.0)
         assert var["rsi"] == pytest.approx(0.0)
@@ -395,14 +398,16 @@ class TestBackfillJobMultipleTrials:
         upserted_stats = []
 
         async def mock_execute(query, *args):
-            upserted_stats.append({
-                "strategy_entity_id": args[0],
-                "timeframe": args[1],
-                "regime_key": args[2],
-                "n": args[4],
-                "feature_mean": args[6],
-                "feature_var": args[7],
-            })
+            upserted_stats.append(
+                {
+                    "strategy_entity_id": args[0],
+                    "timeframe": args[1],
+                    "regime_key": args[2],
+                    "n": args[4],
+                    "feature_mean": args[6],
+                    "feature_var": args[7],
+                }
+            )
 
         conn = AsyncMock()
         conn.execute = mock_execute
@@ -420,6 +425,7 @@ class TestBackfillJobMultipleTrials:
         assert result.stats_written == 1
 
         import json
+
         stats = upserted_stats[0]
         assert stats["n"] == 2
         mean = json.loads(stats["feature_mean"])
@@ -464,10 +470,12 @@ class TestBackfillJobMultipleKeys:
         upserted_stats = []
 
         async def mock_execute(query, *args):
-            upserted_stats.append({
-                "regime_key": args[2],
-                "n": args[4],
-            })
+            upserted_stats.append(
+                {
+                    "regime_key": args[2],
+                    "n": args[4],
+                }
+            )
 
         conn = AsyncMock()
         conn.execute = mock_execute
@@ -693,6 +701,7 @@ class TestBackfillJobStrategyFilter:
         assert result.stats_written == 1
         # Should only write stats for target strategy
         from uuid import UUID
+
         assert str(upserted_stats[0]["strategy_entity_id"]) == target_strategy_id
 
 
@@ -740,6 +749,7 @@ class TestBackfillJobPagination:
 
         # Mock pagination: first call returns page1 with offset, second returns page2 with None
         call_count = 0
+
         async def mock_scroll(*args, **kwargs):
             nonlocal call_count
             call_count += 1
@@ -771,4 +781,5 @@ class TestBackfillJobPagination:
         assert result.stats_written == 1
         # Both trials should be aggregated (n=2)
         import json
+
         assert upserted_stats[0]["n"] == 2
