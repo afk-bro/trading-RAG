@@ -94,9 +94,17 @@ def evaluate_breakout_52w_high(
         )
 
     # Compute 52w high from PRIOR bars (exclude current bar!)
+    # Use up to `lookback` prior bars (excluding the most recent bar),
+    # explicitly clamping to the available history for clarity.
     lookback = spec.entry.lookback_days
-    # snapshot.bars[-(lookback + 1):-1] gives us lookback bars BEFORE current
-    prior_bars = snapshot.bars[-(lookback + 1) : -1]
+    bars = snapshot.bars
+    num_bars = len(bars)
+
+    if num_bars < 2:
+        prior_bars = []
+    else:
+        history_len = min(lookback, num_bars - 1)
+        prior_bars = bars[-(history_len + 1) : -1]
 
     # Guard: no history to compute high_52w
     if not prior_bars and snapshot.high_52w is None:

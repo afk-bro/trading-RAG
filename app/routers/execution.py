@@ -47,7 +47,9 @@ def _get_events_repo() -> TradeEventsRepository:
     response_model=ExecutionResult,
     responses={
         200: {"description": "Intent executed successfully"},
-        400: {"description": "Validation error (unsupported action, invalid quantity, etc.)"},
+        400: {
+            "description": "Validation error (unsupported action, invalid quantity, etc.)"
+        },
         409: {"description": "Intent already executed (idempotency)"},
         503: {"description": "Service unavailable"},
     },
@@ -109,7 +111,13 @@ async def execute_intent(
                     "prior_correlation_id": result.correlation_id,
                 },
             )
-        elif result.error_code in {"UNSUPPORTED_ACTION", "INVALID_FILL_PRICE", "INVALID_QUANTITY", "NO_POSITION", "PARTIAL_CLOSE_NOT_SUPPORTED"}:
+        elif result.error_code in {
+            "UNSUPPORTED_ACTION",
+            "INVALID_FILL_PRICE",
+            "INVALID_QUANTITY",
+            "NO_POSITION",
+            "PARTIAL_CLOSE_NOT_SUPPORTED",
+        }:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -121,6 +129,15 @@ async def execute_intent(
             # Policy rejection is not an HTTP error - return success=false
             log.info("policy_rejected", error=result.error)
             return result
+        else:
+            # Catch-all for unhandled error codes
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": result.error,
+                    "error_code": result.error_code,
+                },
+            )
 
     log.info(
         "execute_intent_complete",

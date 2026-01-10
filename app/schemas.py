@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -125,7 +125,7 @@ class IngestRequest(BaseModel):
     )
     update_existing: bool = Field(
         default=False,
-        description="If true, supersede existing document at same canonical_url and create new version"
+        description="If true, supersede existing document at same canonical_url and create new version",
     )
 
 
@@ -153,7 +153,9 @@ class PDFConfig(BaseModel):
     backend: PDFBackendType = Field(
         default=PDFBackendType.PYMUPDF, description="PDF extraction backend"
     )
-    max_pages: Optional[int] = Field(None, description="Max pages to extract (None=all)")
+    max_pages: Optional[int] = Field(
+        None, description="Max pages to extract (None=all)"
+    )
     min_chars_per_page: int = Field(10, description="Skip pages with fewer chars")
     join_pages_with: str = Field("\n\n", description="Separator between pages")
     enable_ocr: bool = Field(False, description="Enable OCR (reserved for future)")
@@ -164,7 +166,9 @@ class PDFIngestRequest(BaseModel):
 
     workspace_id: UUID = Field(..., description="Workspace identifier")
     idempotency_key: Optional[str] = Field(None, description="Idempotency key")
-    title: Optional[str] = Field(None, description="Document title (auto-detected if not set)")
+    title: Optional[str] = Field(
+        None, description="Document title (auto-detected if not set)"
+    )
     author: Optional[str] = Field(None, description="Author name")
     pdf_config: Optional[PDFConfig] = Field(None, description="PDF extraction config")
 
@@ -277,10 +281,18 @@ class ChunkResultDebug(BaseModel):
     """Debug information for a chunk result (populated when rerank is enabled)."""
 
     vector_score: float = Field(..., description="Original vector similarity score")
-    rerank_score: Optional[float] = Field(None, description="Rerank score (None if no rerank)")
-    rerank_rank: Optional[int] = Field(None, description="Rank after reranking (0-based)")
-    is_neighbor: bool = Field(default=False, description="Whether this is a neighbor chunk")
-    neighbor_of: Optional[str] = Field(None, description="Chunk ID this is a neighbor of")
+    rerank_score: Optional[float] = Field(
+        None, description="Rerank score (None if no rerank)"
+    )
+    rerank_rank: Optional[int] = Field(
+        None, description="Rank after reranking (0-based)"
+    )
+    is_neighbor: bool = Field(
+        default=False, description="Whether this is a neighbor chunk"
+    )
+    neighbor_of: Optional[str] = Field(
+        None, description="Chunk ID this is a neighbor of"
+    )
 
 
 class ChunkResult(BaseModel):
@@ -298,7 +310,9 @@ class ChunkResult(BaseModel):
     locator_label: Optional[str] = Field(None, description="Locator label")
     symbols: list[str] = Field(default_factory=list, description="Detected symbols")
     topics: list[str] = Field(default_factory=list, description="Detected topics")
-    debug: Optional[ChunkResultDebug] = Field(None, description="Debug info (when rerank enabled)")
+    debug: Optional[ChunkResultDebug] = Field(
+        None, description="Debug info (when rerank enabled)"
+    )
 
 
 class KnowledgeExtractionStats(BaseModel):
@@ -307,13 +321,23 @@ class KnowledgeExtractionStats(BaseModel):
     entities_extracted: int = Field(default=0, description="Entities extracted")
     claims_extracted: int = Field(default=0, description="Claims extracted")
     relations_extracted: int = Field(default=0, description="Relations extracted")
-    claims_verified: int = Field(default=0, description="Claims verified (high confidence)")
+    claims_verified: int = Field(
+        default=0, description="Claims verified (high confidence)"
+    )
     claims_weak: int = Field(default=0, description="Claims with weak support")
     claims_rejected: int = Field(default=0, description="Claims rejected")
-    entities_persisted: int = Field(default=0, description="Entities persisted to truth store")
-    claims_persisted: int = Field(default=0, description="Claims persisted to truth store")
-    claims_skipped_duplicate: int = Field(default=0, description="Claims skipped (already in truth store)")
-    claims_skipped_invalid: int = Field(default=0, description="Claims skipped (invalid evidence)")
+    entities_persisted: int = Field(
+        default=0, description="Entities persisted to truth store"
+    )
+    claims_persisted: int = Field(
+        default=0, description="Claims persisted to truth store"
+    )
+    claims_skipped_duplicate: int = Field(
+        default=0, description="Claims skipped (already in truth store)"
+    )
+    claims_skipped_invalid: int = Field(
+        default=0, description="Claims skipped (invalid evidence)"
+    )
 
 
 class QueryMeta(BaseModel):
@@ -323,8 +347,12 @@ class QueryMeta(BaseModel):
     embed_ms: int = Field(..., description="Query embedding time")
     search_ms: int = Field(..., description="Vector search time")
     rerank_ms: Optional[int] = Field(None, description="Reranking time (if enabled)")
-    expand_ms: Optional[int] = Field(None, description="Neighbor expansion time (if enabled)")
-    answer_ms: Optional[int] = Field(None, description="Answer generation time (if mode=answer)")
+    expand_ms: Optional[int] = Field(
+        None, description="Neighbor expansion time (if enabled)"
+    )
+    answer_ms: Optional[int] = Field(
+        None, description="Answer generation time (if mode=answer)"
+    )
     total_ms: int = Field(..., description="Total query time")
 
     # Counts
@@ -338,21 +366,31 @@ class QueryMeta(BaseModel):
         default=RerankState.DISABLED,
         description="Rerank execution state: disabled, ok, timeout_fallback, error_fallback",
     )
-    rerank_enabled: bool = Field(default=False, description="Whether reranking was enabled")
-    rerank_method: Optional[str] = Field(None, description="Rerank method (cross_encoder/llm)")
+    rerank_enabled: bool = Field(
+        default=False, description="Whether reranking was enabled"
+    )
+    rerank_method: Optional[str] = Field(
+        None, description="Rerank method (cross_encoder/llm)"
+    )
     rerank_model: Optional[str] = Field(None, description="Rerank model used")
     rerank_timeout: bool = Field(default=False, description="True if rerank timed out")
-    rerank_fallback: bool = Field(default=False, description="True if fell back to vector order")
+    rerank_fallback: bool = Field(
+        default=False, description="True if fell back to vector order"
+    )
 
     # Neighbor info
-    neighbor_enabled: bool = Field(default=True, description="Whether neighbor expansion was enabled")
+    neighbor_enabled: bool = Field(
+        default=True, description="Whether neighbor expansion was enabled"
+    )
 
 
 class QueryResponse(BaseModel):
     """Response for query endpoint."""
 
     results: list[ChunkResult] = Field(..., description="Matching chunks")
-    answer: Optional[str] = Field(None, description="Generated answer if mode=answer/learn/kb_answer")
+    answer: Optional[str] = Field(
+        None, description="Generated answer if mode=answer/learn/kb_answer"
+    )
     knowledge_stats: Optional[KnowledgeExtractionStats] = Field(
         None, description="Knowledge extraction stats if mode=learn"
     )
@@ -406,11 +444,15 @@ class ReadinessResponse(BaseModel):
     """Response for readiness endpoint (Kubernetes /ready probe)."""
 
     ready: bool = Field(..., description="True if service is ready to accept traffic")
-    checks: dict[str, DependencyHealth] = Field(..., description="Individual check results")
+    checks: dict[str, DependencyHealth] = Field(
+        ..., description="Individual check results"
+    )
     version: str = Field(..., description="Service version")
     git_sha: Optional[str] = Field(None, description="Git commit SHA")
     build_time: Optional[str] = Field(None, description="Build timestamp ISO8601")
-    config_profile: str = Field(..., description="Configuration profile (dev/staging/prod)")
+    config_profile: str = Field(
+        ..., description="Configuration profile (dev/staging/prod)"
+    )
 
 
 class ErrorResponse(BaseModel):
@@ -424,6 +466,7 @@ class ErrorResponse(BaseModel):
 # ===========================================
 # Knowledge Base (KB) Endpoint Models
 # ===========================================
+
 
 class KBEntityType(str, Enum):
     """Entity types for KB filtering."""
@@ -471,7 +514,9 @@ class KBEntityItem(BaseModel):
     name: str = Field(..., description="Entity name")
     aliases: list[str] = Field(default_factory=list, description="Alternative names")
     description: Optional[str] = Field(None, description="Entity description")
-    verified_claim_count: Optional[int] = Field(None, description="Number of verified claims")
+    verified_claim_count: Optional[int] = Field(
+        None, description="Number of verified claims"
+    )
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
 
 
@@ -551,7 +596,9 @@ class KBClaimDetailResponse(BaseModel):
     entity_id: Optional[UUID] = Field(None, description="Linked entity ID")
     entity_name: Optional[str] = Field(None, description="Linked entity name")
     entity_type: Optional[KBEntityType] = Field(None, description="Linked entity type")
-    evidence: list[KBEvidenceItem] = Field(default_factory=list, description="Supporting evidence")
+    evidence: list[KBEvidenceItem] = Field(
+        default_factory=list, description="Supporting evidence"
+    )
     extraction_model: Optional[str] = Field(None, description="Extraction model")
     verification_model: Optional[str] = Field(None, description="Verification model")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
@@ -572,11 +619,21 @@ class KBAnswerResponse(BaseModel):
     mode: str = Field(default="kb_answer", description="Query mode")
     llm_enabled: bool = Field(..., description="Whether LLM was used")
     answer: Optional[str] = Field(None, description="Synthesized answer")
-    supported: list[str] = Field(default_factory=list, description="Supported statements with claim refs")
-    not_specified: list[str] = Field(default_factory=list, description="Unanswered aspects")
-    claims_used: list[KBAnswerClaimRef] = Field(default_factory=list, description="Claims used in answer")
-    fallback_used: bool = Field(default=False, description="Whether chunk RAG fallback was used")
-    fallback_reason: Optional[str] = Field(None, description="Reason for fallback if used")
+    supported: list[str] = Field(
+        default_factory=list, description="Supported statements with claim refs"
+    )
+    not_specified: list[str] = Field(
+        default_factory=list, description="Unanswered aspects"
+    )
+    claims_used: list[KBAnswerClaimRef] = Field(
+        default_factory=list, description="Claims used in answer"
+    )
+    fallback_used: bool = Field(
+        default=False, description="Whether chunk RAG fallback was used"
+    )
+    fallback_reason: Optional[str] = Field(
+        None, description="Reason for fallback if used"
+    )
 
 
 # ============================================================================
@@ -601,7 +658,9 @@ class StrategySpecResponse(BaseModel):
     spec_json: dict = Field(..., description="The compiled specification")
     status: StrategySpecStatus = Field(..., description="Approval status")
     version: int = Field(..., description="Spec version number")
-    derived_from_claim_ids: list[str] = Field(default_factory=list, description="Source claim IDs")
+    derived_from_claim_ids: list[str] = Field(
+        default_factory=list, description="Source claim IDs"
+    )
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
     approved_at: Optional[datetime] = Field(None, description="Approval timestamp")
@@ -621,7 +680,9 @@ class StrategyCompileResponse(BaseModel):
     spec_version: int = Field(..., description="Spec version used")
     spec_status: StrategySpecStatus = Field(..., description="Spec approval status")
     param_schema: dict = Field(..., description="JSON Schema for parameter UI form")
-    backtest_config: dict = Field(..., description="Engine-agnostic backtest configuration")
+    backtest_config: dict = Field(
+        ..., description="Engine-agnostic backtest configuration"
+    )
     pseudocode: str = Field(..., description="Human-readable strategy description")
     citations: list[str] = Field(..., description="Claim IDs used to derive the spec")
 
@@ -630,7 +691,9 @@ class StrategySpecStatusUpdate(BaseModel):
     """Request for PATCH /kb/strategies/{entity_id}/spec."""
 
     status: StrategySpecStatus = Field(..., description="New status")
-    approved_by: Optional[str] = Field(None, description="Approver identifier (for approved status)")
+    approved_by: Optional[str] = Field(
+        None, description="Approver identifier (for approved status)"
+    )
 
 
 # ===========================================
@@ -729,14 +792,19 @@ class QueryCompareRequest(BaseModel):
     """Request for A/B comparison between vector-only and reranked retrieval."""
 
     workspace_id: UUID = Field(..., description="Workspace to search within")
-    question: str = Field(..., min_length=1, max_length=2000, description="Query question")
+    question: str = Field(
+        ..., min_length=1, max_length=2000, description="Query question"
+    )
 
     # Filters (same as QueryRequest)
     filters: Optional[QueryFilters] = Field(None, description="Optional search filters")
 
     # Retrieval parameters
     retrieve_k: Optional[int] = Field(
-        default=None, ge=1, le=200, description="Candidates to retrieve (shared by both runs)"
+        default=None,
+        ge=1,
+        le=200,
+        description="Candidates to retrieve (shared by both runs)",
     )
     top_k: Optional[int] = Field(
         default=None, ge=1, le=50, description="Results to return from each run"
@@ -777,7 +845,9 @@ class CompareMetrics(BaseModel):
     )
 
     # Raw lists for UI rendering
-    vector_only_ids: list[str] = Field(..., description="Chunk IDs from vector-only run")
+    vector_only_ids: list[str] = Field(
+        ..., description="Chunk IDs from vector-only run"
+    )
     reranked_ids: list[str] = Field(..., description="Chunk IDs from reranked run")
     intersection_ids: list[str] = Field(..., description="Chunk IDs in both runs")
 
@@ -816,7 +886,9 @@ class TradeIntent(BaseModel):
     """
 
     # Identity
-    id: UUID = Field(default_factory=lambda: __import__("uuid").uuid4(), description="Intent UUID")
+    id: UUID = Field(
+        default_factory=lambda: __import__("uuid").uuid4(), description="Intent UUID"
+    )
     correlation_id: str = Field(..., description="Correlation ID for tracing")
     workspace_id: UUID = Field(..., description="Workspace this intent belongs to")
 
@@ -833,12 +905,16 @@ class TradeIntent(BaseModel):
     take_profit: Optional[float] = Field(None, description="Take profit price")
 
     # Context
-    signal_strength: Optional[float] = Field(None, ge=0.0, le=1.0, description="Signal confidence [0,1]")
+    signal_strength: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Signal confidence [0,1]"
+    )
     regime_snapshot: Optional[dict] = Field(None, description="Current regime state")
     reason: Optional[str] = Field(None, description="Human-readable reason for intent")
 
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="When intent was created")
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow, description="When intent was created"
+    )
     metadata: dict = Field(default_factory=dict, description="Additional metadata")
 
 
@@ -875,13 +951,23 @@ class PolicyDecision(BaseModel):
     reason_details: Optional[str] = Field(None, description="Additional details")
 
     # Audit trail
-    rules_evaluated: list[str] = Field(default_factory=list, description="Rules that were evaluated")
-    rules_passed: list[str] = Field(default_factory=list, description="Rules that passed")
-    rules_failed: list[str] = Field(default_factory=list, description="Rules that failed")
+    rules_evaluated: list[str] = Field(
+        default_factory=list, description="Rules that were evaluated"
+    )
+    rules_passed: list[str] = Field(
+        default_factory=list, description="Rules that passed"
+    )
+    rules_failed: list[str] = Field(
+        default_factory=list, description="Rules that failed"
+    )
 
     # Modifications (for partial approvals)
-    modified_quantity: Optional[float] = Field(None, description="Adjusted quantity if capped")
-    warnings: list[str] = Field(default_factory=list, description="Non-blocking warnings")
+    modified_quantity: Optional[float] = Field(
+        None, description="Adjusted quantity if capped"
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Non-blocking warnings"
+    )
 
     # Context
     evaluated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -912,16 +998,22 @@ class CurrentState(BaseModel):
     trading_enabled: bool = Field(default=True, description="Trading allowed")
 
     # Positions (optional - may not be available)
-    positions: list[PositionState] = Field(default_factory=list, description="Current positions")
+    positions: list[PositionState] = Field(
+        default_factory=list, description="Current positions"
+    )
 
     # Account metrics (optional)
     account_equity: Optional[float] = Field(None, description="Current account equity")
     daily_pnl: Optional[float] = Field(None, description="Today's realized P&L")
-    max_drawdown_today: Optional[float] = Field(None, description="Today's max drawdown %")
+    max_drawdown_today: Optional[float] = Field(
+        None, description="Today's max drawdown %"
+    )
 
     # Regime (from v1.5)
     current_regime: Optional[dict] = Field(None, description="Current regime snapshot")
-    regime_distance_z: Optional[float] = Field(None, description="Z-score from training regime")
+    regime_distance_z: Optional[float] = Field(
+        None, description="Z-score from training regime"
+    )
 
     # Timestamps
     snapshot_at: datetime = Field(default_factory=datetime.utcnow)
@@ -979,7 +1071,9 @@ class TradeEvent(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Context
-    strategy_entity_id: Optional[UUID] = Field(None, description="Strategy that triggered event")
+    strategy_entity_id: Optional[UUID] = Field(
+        None, description="Strategy that triggered event"
+    )
     symbol: Optional[str] = Field(None, description="Trading symbol if applicable")
     timeframe: Optional[str] = Field(None, description="Timeframe if applicable")
 
@@ -1008,7 +1102,9 @@ class IntentEvaluateRequest(BaseModel):
     """Request for POST /intents/evaluate."""
 
     intent: TradeIntent = Field(..., description="Intent to evaluate")
-    state: Optional[CurrentState] = Field(None, description="Current state (uses defaults if not provided)")
+    state: Optional[CurrentState] = Field(
+        None, description="Current state (uses defaults if not provided)"
+    )
     dry_run: bool = Field(default=False, description="If true, don't journal the event")
 
 
@@ -1052,7 +1148,7 @@ class ExecutionMode(str, Enum):
 class PaperOrder(BaseModel):
     """Simulated order for paper trading."""
 
-    id: UUID = Field(default_factory=lambda: __import__("uuid").uuid4())
+    id: UUID = Field(default_factory=uuid4)
     intent_id: UUID = Field(..., description="Intent that triggered this order")
     correlation_id: str = Field(..., description="Correlation ID for tracing")
     workspace_id: UUID = Field(..., description="Workspace this order belongs to")
@@ -1066,7 +1162,9 @@ class PaperOrder(BaseModel):
     fees: float = Field(default=0.0, ge=0, description="Execution fees")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    filled_at: Optional[datetime] = Field(default=None, description="When order was filled")
+    filled_at: Optional[datetime] = Field(
+        default=None, description="When order was filled"
+    )
 
     metadata: dict = Field(default_factory=dict, description="Additional metadata")
 
@@ -1076,19 +1174,27 @@ class PaperPosition(BaseModel):
 
     workspace_id: UUID = Field(..., description="Workspace this position belongs to")
     symbol: str = Field(..., description="Trading symbol")
-    side: Optional[str] = Field(None, description="Position side ('long' or None if flat)")
+    side: Optional[str] = Field(
+        None, description="Position side ('long' or None if flat)"
+    )
     quantity: float = Field(default=0.0, ge=0, description="Position size")
     avg_price: float = Field(default=0.0, ge=0, description="Average entry price")
 
     unrealized_pnl: float = Field(default=0.0, description="Unrealized P&L")
-    realized_pnl: float = Field(default=0.0, description="Realized P&L from this position")
+    realized_pnl: float = Field(
+        default=0.0, description="Realized P&L from this position"
+    )
 
     opened_at: Optional[datetime] = Field(None, description="When position was opened")
     last_updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Tracking
-    order_ids: list[str] = Field(default_factory=list, description="Orders that built this position")
-    intent_ids: list[str] = Field(default_factory=list, description="Intents that triggered orders")
+    order_ids: list[str] = Field(
+        default_factory=list, description="Orders that built this position"
+    )
+    intent_ids: list[str] = Field(
+        default_factory=list, description="Intents that triggered orders"
+    )
 
 
 class PaperState(BaseModel):
@@ -1113,7 +1219,9 @@ class PaperState(BaseModel):
     # Reconciliation
     last_event_id: Optional[UUID] = Field(None, description="Last processed event ID")
     last_event_at: Optional[datetime] = Field(None, description="Last event timestamp")
-    reconciled_at: Optional[datetime] = Field(None, description="When state was reconciled")
+    reconciled_at: Optional[datetime] = Field(
+        None, description="When state was reconciled"
+    )
 
 
 class ExecutionRequest(BaseModel):
@@ -1121,7 +1229,9 @@ class ExecutionRequest(BaseModel):
 
     intent: TradeIntent = Field(..., description="Intent to execute")
     fill_price: float = Field(..., gt=0, description="Fill price (required)")
-    mode: ExecutionMode = Field(default=ExecutionMode.PAPER, description="Execution mode")
+    mode: ExecutionMode = Field(
+        default=ExecutionMode.PAPER, description="Execution mode"
+    )
 
 
 class ExecutionResult(BaseModel):
@@ -1141,7 +1251,9 @@ class ExecutionResult(BaseModel):
     position: Optional[PaperPosition] = Field(None, description="Updated position")
 
     events_recorded: int = Field(default=0, description="Events journaled")
-    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing")
+    correlation_id: Optional[str] = Field(
+        None, description="Correlation ID for tracing"
+    )
 
     # Error info
     error: Optional[str] = Field(None, description="Error message if failed")

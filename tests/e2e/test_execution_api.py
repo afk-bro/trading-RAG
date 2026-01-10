@@ -11,8 +11,6 @@ import uuid
 import pytest
 from playwright.sync_api import APIRequestContext
 
-from tests.e2e.conftest import FAKE_UUID
-
 
 pytestmark = pytest.mark.e2e
 
@@ -378,7 +376,9 @@ class TestExecutionWorkflow:
         state_before = api_request.get(f"/execute/paper/state/{workspace_id}").json()
 
         # Reconcile
-        reconcile_response = api_request.post(f"/execute/paper/reconcile/{workspace_id}")
+        reconcile_response = api_request.post(
+            f"/execute/paper/reconcile/{workspace_id}"
+        )
         assert reconcile_response.status == 200
         reconcile_data = reconcile_response.json()
         assert reconcile_data["success"] is True

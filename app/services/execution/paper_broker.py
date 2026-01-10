@@ -183,7 +183,9 @@ class PaperBroker(BrokerAdapter):
 
         # 10. Update cash ledger
         fees = 0.0  # PR1: constant, configurable later
-        self._update_cash_ledger(state, side, quantity, fill_price, fees, position_result)
+        self._update_cash_ledger(
+            state, side, quantity, fill_price, fees, position_result
+        )
 
         # 11. Create order record
         order = PaperOrder(
@@ -251,7 +253,9 @@ class PaperBroker(BrokerAdapter):
                 return event
         return None
 
-    def _build_current_state(self, state: PaperState, workspace_id: UUID) -> CurrentState:
+    def _build_current_state(
+        self, state: PaperState, workspace_id: UUID
+    ) -> CurrentState:
         """Build CurrentState for policy evaluation."""
         # Convert positions to PositionState format
         from app.schemas import PositionState
@@ -274,9 +278,8 @@ class PaperBroker(BrokerAdapter):
             kill_switch_active=False,
             trading_enabled=True,
             positions=positions,
-            account_equity=state.cash + sum(
-                p.quantity * p.avg_price for p in state.positions.values()
-            ),
+            account_equity=state.cash
+            + sum(p.quantity * p.avg_price for p in state.positions.values()),
             daily_pnl=state.realized_pnl,
         )
 
@@ -323,7 +326,9 @@ class PaperBroker(BrokerAdapter):
                 # Scale position
                 old_qty = existing.quantity
                 new_qty = old_qty + quantity
-                new_avg = (existing.avg_price * old_qty + fill_price * quantity) / new_qty
+                new_avg = (
+                    existing.avg_price * old_qty + fill_price * quantity
+                ) / new_qty
 
                 existing.quantity = new_qty
                 existing.avg_price = new_avg
@@ -479,9 +484,7 @@ class PaperBroker(BrokerAdapter):
         """Get complete paper state."""
         return self._get_or_create_state(workspace_id)
 
-    async def reconcile_from_journal(
-        self, workspace_id: UUID
-    ) -> ReconciliationResult:
+    async def reconcile_from_journal(self, workspace_id: UUID) -> ReconciliationResult:
         """Rebuild state from journal events."""
         log = logger.bind(workspace_id=str(workspace_id))
         log.info("reconcile_start")
@@ -494,15 +497,32 @@ class PaperBroker(BrokerAdapter):
         )
 
         # Fetch ORDER_FILLED events only (source of truth)
+        # Paginate through all matching events to avoid missing fills in
+        # workspaces with more than the per-page limit.
         filters = EventFilters(
             workspace_id=workspace_id,
             event_types=[TradeEventType.ORDER_FILLED],
         )
-        events, total = await self._events_repo.list_events(
-            filters=filters,
-            limit=10000,
-            offset=0,
-        )
+        events: list[TradeEvent] = []
+        offset = 0
+        page_size = 10000
+        total = 0
+
+        while True:
+            page, page_total = await self._events_repo.list_events(
+                filters=filters,
+                limit=page_size,
+                offset=offset,
+            )
+            if not page:
+                break
+
+            events.extend(page)
+            total = page_total
+            offset += len(page)
+
+            if offset >= total:
+                break
 
         errors: list[str] = []
         processed_order_ids: set[str] = set()
@@ -602,7 +622,9 @@ class PaperBroker(BrokerAdapter):
                 # Scale position
                 old_qty = position.quantity
                 new_qty = old_qty + qty
-                position.avg_price = (position.avg_price * old_qty + fill_price * qty) / new_qty
+                position.avg_price = (
+                    position.avg_price * old_qty + fill_price * qty
+                ) / new_qty
                 position.quantity = new_qty
 
             position.last_updated_at = event.created_at
@@ -621,6 +643,12 @@ class PaperBroker(BrokerAdapter):
                 # Still process to maintain cash consistency
                 qty = min(qty, position.quantity)
 
+            # Cash accounting:
+            # - We add gross sale proceeds and subtract fees to reflect the actual cash movement.
+            # P&L accounting:
+            # - realized_pnl is tracked *net of fees* so performance metrics include trading costs.
+            # - This means fees affect both the cash ledger (as an outflow) and the realized_pnl metric.
+            # - Equity is only reduced once in aggregate (via cash); realized_pnl is a reporting figure.
             state.cash += (qty * fill_price) - fees
             realized_pnl = (fill_price - position.avg_price) * qty - fees
             state.realized_pnl += realized_pnl
