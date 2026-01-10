@@ -1019,3 +1019,147 @@ class IntentEvaluateResponse(BaseModel):
     decision: PolicyDecision = Field(..., description="Policy engine decision")
     events_recorded: int = Field(default=0, description="Number of events journaled")
     correlation_id: str = Field(..., description="Correlation ID for tracing")
+
+
+# ===========================================
+# Paper Execution Schemas
+# ===========================================
+
+
+class OrderSide(str, Enum):
+    """Order side for execution."""
+
+    BUY = "buy"
+    SELL = "sell"
+
+
+class OrderStatus(str, Enum):
+    """Order lifecycle status."""
+
+    PENDING = "pending"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+
+
+class ExecutionMode(str, Enum):
+    """Execution mode."""
+
+    PAPER = "paper"
+    LIVE = "live"  # Future
+
+
+class PaperOrder(BaseModel):
+    """Simulated order for paper trading."""
+
+    id: UUID = Field(default_factory=lambda: __import__("uuid").uuid4())
+    intent_id: UUID = Field(..., description="Intent that triggered this order")
+    correlation_id: str = Field(..., description="Correlation ID for tracing")
+    workspace_id: UUID = Field(..., description="Workspace this order belongs to")
+
+    symbol: str = Field(..., description="Trading symbol")
+    side: OrderSide = Field(..., description="Order side (buy/sell)")
+    quantity: float = Field(..., gt=0, description="Order quantity")
+    fill_price: float = Field(..., gt=0, description="Execution price")
+
+    status: OrderStatus = Field(default=OrderStatus.FILLED, description="Order status")
+    fees: float = Field(default=0.0, ge=0, description="Execution fees")
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    filled_at: Optional[datetime] = Field(default=None, description="When order was filled")
+
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")
+
+
+class PaperPosition(BaseModel):
+    """Paper trading position state."""
+
+    workspace_id: UUID = Field(..., description="Workspace this position belongs to")
+    symbol: str = Field(..., description="Trading symbol")
+    side: Optional[str] = Field(None, description="Position side ('long' or None if flat)")
+    quantity: float = Field(default=0.0, ge=0, description="Position size")
+    avg_price: float = Field(default=0.0, ge=0, description="Average entry price")
+
+    unrealized_pnl: float = Field(default=0.0, description="Unrealized P&L")
+    realized_pnl: float = Field(default=0.0, description="Realized P&L from this position")
+
+    opened_at: Optional[datetime] = Field(None, description="When position was opened")
+    last_updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Tracking
+    order_ids: list[str] = Field(default_factory=list, description="Orders that built this position")
+    intent_ids: list[str] = Field(default_factory=list, description="Intents that triggered orders")
+
+
+class PaperState(BaseModel):
+    """Complete paper trading state for a workspace."""
+
+    workspace_id: UUID = Field(..., description="Workspace this state belongs to")
+
+    # Cash ledger
+    starting_equity: float = Field(default=10000.0, description="Starting equity")
+    cash: float = Field(default=10000.0, description="Current cash balance")
+    realized_pnl: float = Field(default=0.0, description="Total realized P&L")
+
+    # Positions by symbol
+    positions: dict[str, PaperPosition] = Field(
+        default_factory=dict, description="Positions keyed by symbol"
+    )
+
+    # Tracking
+    orders_count: int = Field(default=0, description="Total orders executed")
+    trades_count: int = Field(default=0, description="Total trades (round trips)")
+
+    # Reconciliation
+    last_event_id: Optional[UUID] = Field(None, description="Last processed event ID")
+    last_event_at: Optional[datetime] = Field(None, description="Last event timestamp")
+    reconciled_at: Optional[datetime] = Field(None, description="When state was reconciled")
+
+
+class ExecutionRequest(BaseModel):
+    """Request for POST /execute/intents."""
+
+    intent: TradeIntent = Field(..., description="Intent to execute")
+    fill_price: float = Field(..., gt=0, description="Fill price (required)")
+    mode: ExecutionMode = Field(default=ExecutionMode.PAPER, description="Execution mode")
+
+
+class ExecutionResult(BaseModel):
+    """Result of intent execution."""
+
+    success: bool = Field(..., description="Whether execution succeeded")
+    intent_id: UUID = Field(..., description="Intent that was executed")
+
+    order_id: Optional[UUID] = Field(None, description="Order ID if created")
+    fill_price: Optional[float] = Field(None, description="Actual fill price")
+    quantity_filled: float = Field(default=0.0, description="Quantity filled")
+    fees: float = Field(default=0.0, description="Fees charged")
+
+    position_action: Optional[str] = Field(
+        None, description="Position action: opened, closed, scaled"
+    )
+    position: Optional[PaperPosition] = Field(None, description="Updated position")
+
+    events_recorded: int = Field(default=0, description="Events journaled")
+    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing")
+
+    # Error info
+    error: Optional[str] = Field(None, description="Error message if failed")
+    error_code: Optional[str] = Field(None, description="Error code if failed")
+
+
+class ReconciliationResult(BaseModel):
+    """Result of journal reconciliation."""
+
+    success: bool = Field(..., description="Whether reconciliation succeeded")
+    workspace_id: UUID = Field(..., description="Workspace reconciled")
+
+    events_replayed: int = Field(default=0, description="Events processed")
+    orders_rebuilt: int = Field(default=0, description="Orders reconstructed")
+    positions_rebuilt: int = Field(default=0, description="Positions with qty > 0")
+
+    cash_after: float = Field(default=0.0, description="Cash after reconciliation")
+    realized_pnl_after: float = Field(default=0.0, description="Realized P&L after")
+
+    last_event_at: Optional[datetime] = Field(None, description="Last event timestamp")
+    errors: list[str] = Field(default_factory=list, description="Errors encountered")

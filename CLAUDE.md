@@ -182,6 +182,86 @@ Research workflow for strategy optimization via parameter sweeps.
 - `GET /admin/kb/*` - KB inspection and curation endpoints
 - `GET /admin/backtests/*` - Backtest admin UI
 
+**Execution** (requires `X-Admin-Token` header):
+- `POST /execute/intents` - Execute trade intent (paper mode only)
+- `GET /execute/paper/state/{workspace_id}` - Get paper trading state
+- `GET /execute/paper/positions/{workspace_id}` - Get open positions
+- `POST /execute/paper/reconcile/{workspace_id}` - Rebuild state from journal
+- `POST /execute/paper/reset/{workspace_id}` - Reset state (dev only)
+
+## Paper Execution Adapter
+
+Provider-agnostic broker adapter that simulates trade execution for end-to-end automation testing without exchange randomness.
+
+**Architecture** (`app/services/execution/`):
+```
+TradeIntent (approved by PolicyEngine)
+       │
+       ▼
+  ┌─────────────┐
+  │ PaperBroker │ ─────► trade_events journal (ORDER_FILLED)
+  └──────┬──────┘
+         │
+         ▼
+    PaperState (in-memory, reconcilable from journal)
+```
+
+**Key Design Decisions**:
+- **State persistence**: In-memory + journal rebuild (event sourcing pattern)
+- **Fill simulation**: Immediate fill, caller provides `fill_price` (required)
+- **Order types**: MARKET only (limit orders planned for later)
+- **Position support**: Long-only, single position per symbol
+- **Reconciliation**: Manual endpoint only (no auto on startup)
+- **Idempotency**: Key = `(workspace_id, intent_id, mode)`, returns 409 on duplicate
+- **Supported actions**: `OPEN_LONG`, `CLOSE_LONG` only (400 for others)
+- **Full close only**: SELL qty must == position.qty (no partial closes)
+- **Policy re-check**: Execution re-evaluates policy internally (doesn't trust caller)
+
+**Event Flow**:
+```
+INTENT_EMITTED → POLICY_EVALUATED → INTENT_APPROVED
+                                          │
+                                          ▼
+                                    ORDER_FILLED (source of truth)
+                                          │
+                          ┌───────────────┼───────────────┐
+                          ▼               ▼               ▼
+                  POSITION_OPENED  POSITION_SCALED  POSITION_CLOSED
+                        (observability breadcrumbs only)
+```
+
+**Cash Ledger** (`PaperState`):
+- `starting_equity` - Initial capital (default 10000.0)
+- `cash` - Current available cash
+- `realized_pnl` - Cumulative realized profit/loss
+- `positions` - Dict of symbol → `PaperPosition`
+
+**Position Scaling Formula**:
+```python
+# BUY more of existing position
+new_qty = old_qty + add_qty
+new_avg = (old_avg * old_qty + fill_price * add_qty) / new_qty
+```
+
+**Reconciliation**:
+1. Clear in-memory state (cash = starting_equity, positions = {})
+2. Query `trade_events` for `ORDER_FILLED` events only
+3. Dedupe by `order_id` (skip duplicates)
+4. Replay fills to rebuild cash/positions
+5. `POSITION_*` events are NOT replayed (observability only)
+
+**Execute Request**:
+```python
+POST /execute/intents
+{
+    "intent": TradeIntent,   # From policy engine
+    "fill_price": 50000.0,   # REQUIRED - caller provides
+    "mode": "paper"          # Only paper supported
+}
+```
+
+Returns 409 Conflict if intent already executed.
+
 ## Trading KB Recommend Pipeline
 
 The `/kb/trials/recommend` endpoint provides strategy parameter recommendations based on historical backtest results.
