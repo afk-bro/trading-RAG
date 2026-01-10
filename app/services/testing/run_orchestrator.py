@@ -115,104 +115,142 @@ class RunOrchestrator:
             },
         )
 
-        # Execute each variant
+        # Execute variants with try/finally to ensure plan reaches terminal state
         results: list[RunResult] = []
         variant_run_ids: dict[str, Optional[UUID]] = {}  # variant_id -> db run_id
+        plan_failed_unexpectedly = False
+        unexpected_error: Optional[str] = None
 
-        for idx, variant in enumerate(run_plan.variants):
-            # Create pending row for this variant
-            run_id = None
-            if self._backtest_repo and db_plan_id:
-                run_id = await self._backtest_repo.create_variant_run(
-                    run_plan_id=db_plan_id,
-                    workspace_id=run_plan.workspace_id,
-                    strategy_entity_id=UUID("00000000-0000-0000-0000-000000000000"),
-                    variant_index=idx,
-                    variant_fingerprint=variant.variant_id,
-                    params=variant.spec_overrides,
-                    dataset_meta={"ref": run_plan.dataset_ref, "bar_count": len(bars)},
-                    run_kind="test_variant",
+        try:
+            for idx, variant in enumerate(run_plan.variants):
+                # Create pending row for this variant
+                run_id = None
+                if self._backtest_repo and db_plan_id:
+                    run_id = await self._backtest_repo.create_variant_run(
+                        run_plan_id=db_plan_id,
+                        workspace_id=run_plan.workspace_id,
+                        strategy_entity_id=UUID("00000000-0000-0000-0000-000000000000"),
+                        variant_index=idx,
+                        variant_fingerprint=variant.variant_id,
+                        params=variant.spec_overrides,
+                        dataset_meta={
+                            "ref": run_plan.dataset_ref,
+                            "bar_count": len(bars),
+                        },
+                        run_kind="test_variant",
+                    )
+                    variant_run_ids[variant.variant_id] = run_id
+
+                try:
+                    result = await self._execute_variant(run_plan, variant, bars)
+                    results.append(result)
+
+                    # Persist variant result
+                    if self._backtest_repo and run_id:
+                        await self._persist_variant_result(run_id, result)
+
+                    log.info(
+                        "variant_completed",
+                        variant_id=variant.variant_id,
+                        status=result.status,
+                        objective_score=result.objective_score,
+                    )
+                except Exception as e:
+                    # Catch variant-level errors
+                    log.error(
+                        "variant_failed",
+                        variant_id=variant.variant_id,
+                        error=str(e),
+                    )
+                    failed_result = RunResult(
+                        run_plan_id=run_plan.run_plan_id,
+                        variant_id=variant.variant_id,
+                        status=RunResultStatus.failed,
+                        error=str(e),
+                        started_at=datetime.now(timezone.utc),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    results.append(failed_result)
+
+                    # Persist failed result
+                    if self._backtest_repo and run_id:
+                        await self._backtest_repo.update_variant_failed(run_id, str(e))
+
+        except Exception as e:
+            # Unexpected error during execution loop (not variant-level)
+            log.error("run_plan_failed_unexpectedly", error=str(e))
+            plan_failed_unexpectedly = True
+            unexpected_error = str(e)
+
+        finally:
+            # ALWAYS finalize the plan - never leave stuck in "running"
+            n_success = sum(1 for r in results if r.status == RunResultStatus.success)
+            n_skipped = sum(1 for r in results if r.status == RunResultStatus.skipped)
+            n_failed = sum(1 for r in results if r.status == RunResultStatus.failed)
+            best_id, best_score = select_best_variant(results)
+
+            # Find best variant's DB run ID
+            best_run_id = variant_run_ids.get(best_id) if best_id else None
+
+            # Determine final status
+            if plan_failed_unexpectedly:
+                final_status = "failed"
+            else:
+                final_status = "completed"
+
+            # Complete run_plan with aggregates
+            if self._run_plans_repo and db_plan_id:
+                await self._run_plans_repo.complete_run_plan(
+                    plan_id=db_plan_id,
+                    status=final_status,
+                    n_completed=n_success,
+                    n_failed=n_failed,
+                    n_skipped=n_skipped,
+                    best_backtest_run_id=best_run_id,
+                    best_objective_score=best_score,
+                    error_summary=unexpected_error,
                 )
-                variant_run_ids[variant.variant_id] = run_id
 
-            try:
-                result = await self._execute_variant(run_plan, variant, bars)
-                results.append(result)
-
-                # Persist variant result
-                if self._backtest_repo and run_id:
-                    await self._persist_variant_result(run_id, result)
-
-                log.info(
-                    "variant_completed",
-                    variant_id=variant.variant_id,
-                    status=result.status,
-                    objective_score=result.objective_score,
+            # Journal appropriate event
+            if plan_failed_unexpectedly:
+                await self._journal_run_event(
+                    run_plan,
+                    "RUN_FAILED",
+                    {
+                        "n_variants": run_plan.n_variants,
+                        "n_success": n_success,
+                        "n_skipped": n_skipped,
+                        "n_failed": n_failed,
+                        "error": unexpected_error,
+                    },
                 )
-            except Exception as e:
-                # Catch variant-level errors
-                log.error(
-                    "variant_failed",
-                    variant_id=variant.variant_id,
-                    error=str(e),
+            else:
+                await self._journal_run_event(
+                    run_plan,
+                    "RUN_COMPLETED",
+                    {
+                        "n_variants": run_plan.n_variants,
+                        "n_success": n_success,
+                        "n_skipped": n_skipped,
+                        "n_failed": n_failed,
+                        "best_variant_id": best_id,
+                        "best_objective_score": best_score,
+                    },
                 )
-                failed_result = RunResult(
-                    run_plan_id=run_plan.run_plan_id,
-                    variant_id=variant.variant_id,
-                    status=RunResultStatus.failed,
-                    error=str(e),
-                    started_at=datetime.now(timezone.utc),
-                    completed_at=datetime.now(timezone.utc),
-                )
-                results.append(failed_result)
 
-                # Persist failed result
-                if self._backtest_repo and run_id:
-                    await self._backtest_repo.update_variant_failed(run_id, str(e))
-
-        # Calculate aggregates
-        n_success = sum(1 for r in results if r.status == RunResultStatus.success)
-        n_skipped = sum(1 for r in results if r.status == RunResultStatus.skipped)
-        n_failed = sum(1 for r in results if r.status == RunResultStatus.failed)
-        best_id, best_score = select_best_variant(results)
-
-        # Find best variant's DB run ID
-        best_run_id = variant_run_ids.get(best_id) if best_id else None
-
-        # Complete run_plan with aggregates
-        if self._run_plans_repo and db_plan_id:
-            await self._run_plans_repo.complete_run_plan(
-                plan_id=db_plan_id,
-                status="completed",
-                n_completed=n_success,
-                n_failed=n_failed,
+            log.info(
+                "run_finalized",
+                status=final_status,
+                n_success=n_success,
                 n_skipped=n_skipped,
-                best_backtest_run_id=best_run_id,
-                best_objective_score=best_score,
+                n_failed=n_failed,
+                best_variant_id=best_id,
+                best_score=best_score,
             )
 
-        # Journal RUN_COMPLETED
-        await self._journal_run_event(
-            run_plan,
-            "RUN_COMPLETED",
-            {
-                "n_variants": run_plan.n_variants,
-                "n_success": n_success,
-                "n_skipped": n_skipped,
-                "n_failed": n_failed,
-                "best_variant_id": best_id,
-                "best_objective_score": best_score,
-            },
-        )
-
-        log.info(
-            "run_completed",
-            n_success=n_success,
-            n_skipped=n_skipped,
-            n_failed=n_failed,
-            best_variant_id=best_id,
-            best_score=best_score,
-        )
+        # Re-raise if we had an unexpected failure
+        if plan_failed_unexpectedly:
+            raise RuntimeError(f"Run plan failed unexpectedly: {unexpected_error}")
 
         return results
 

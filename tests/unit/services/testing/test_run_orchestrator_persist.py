@@ -1,16 +1,11 @@
 """Unit tests for RunOrchestrator persistence."""
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from app.services.testing.models import (
-    RunPlan,
-    RunVariant,
-    RunResultStatus,
-)
+from app.services.testing.models import RunPlan, RunVariant
 from app.services.testing.run_orchestrator import RunOrchestrator
 
 
@@ -65,7 +60,11 @@ def orchestrator(
 @pytest.fixture
 def simple_csv_content():
     """Minimal valid OHLCV CSV."""
-    return b"ts,open,high,low,close,volume\n2024-01-01T00:00:00Z,100,101,99,100.5,1000\n2024-01-02T00:00:00Z,100.5,102,100,101,1100"
+    return (
+        b"ts,open,high,low,close,volume\n"
+        b"2024-01-01T00:00:00Z,100,101,99,100.5,1000\n"
+        b"2024-01-02T00:00:00Z,100.5,102,100,101,1100"
+    )
 
 
 class TestOrchestratorInit:
@@ -276,3 +275,100 @@ class TestCompleteRunPlanAggregates:
         assert call_kwargs["n_completed"] == 2
         assert call_kwargs["n_failed"] == 0
         assert call_kwargs["n_skipped"] == 0
+
+
+class TestFinalizeInFinally:
+    """Tests that plan is finalized even on unexpected exceptions."""
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_still_finalizes_plan(
+        self, mock_events_repo, mock_run_plans_repo, mock_backtest_repo, mock_runner
+    ):
+        """Plan is marked failed (not stuck in running) on unexpected exception."""
+        # Make create_variant_run raise an unexpected error
+        mock_backtest_repo.create_variant_run = AsyncMock(
+            side_effect=RuntimeError("Database connection lost")
+        )
+
+        orchestrator = RunOrchestrator(
+            events_repo=mock_events_repo,
+            runner=mock_runner,
+            run_plans_repo=mock_run_plans_repo,
+            backtest_repo=mock_backtest_repo,
+        )
+
+        workspace_id = uuid4()
+        run_plan = RunPlan(
+            workspace_id=workspace_id,
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
+            variants=[
+                RunVariant(variant_id="v1", label="v1", spec_overrides={}),
+            ],
+            dataset_ref="test.csv",
+        )
+
+        # Execute should raise (error is re-raised after cleanup)
+        csv_data = (
+            b"ts,open,high,low,close,volume\n"
+            b"2024-01-01T00:00:00Z,100,101,99,100.5,1000\n"
+            b"2024-01-02T00:00:00Z,100.5,102,100,101,1100"
+        )
+        with pytest.raises(RuntimeError, match="Run plan failed unexpectedly"):
+            await orchestrator.execute(run_plan, csv_data)
+
+        # CRITICAL: complete_run_plan should still have been called with failed status
+        mock_run_plans_repo.complete_run_plan.assert_called_once()
+        call_kwargs = mock_run_plans_repo.complete_run_plan.call_args[1]
+        assert call_kwargs["status"] == "failed"
+        assert "Database connection lost" in call_kwargs["error_summary"]
+
+    @pytest.mark.asyncio
+    async def test_run_failed_event_journaled_on_unexpected_error(
+        self, mock_events_repo, mock_run_plans_repo, mock_backtest_repo, mock_runner
+    ):
+        """RUN_FAILED event is journaled on unexpected exception."""
+        from app.schemas import TradeEventType
+
+        mock_backtest_repo.create_variant_run = AsyncMock(
+            side_effect=RuntimeError("Unexpected error")
+        )
+
+        orchestrator = RunOrchestrator(
+            events_repo=mock_events_repo,
+            runner=mock_runner,
+            run_plans_repo=mock_run_plans_repo,
+            backtest_repo=mock_backtest_repo,
+        )
+
+        workspace_id = uuid4()
+        run_plan = RunPlan(
+            workspace_id=workspace_id,
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
+            variants=[
+                RunVariant(variant_id="v1", label="v1", spec_overrides={}),
+            ],
+            dataset_ref="test.csv",
+        )
+
+        csv_data = (
+            b"ts,open,high,low,close,volume\n"
+            b"2024-01-01T00:00:00Z,100,101,99,100.5,1000\n"
+            b"2024-01-02T00:00:00Z,100.5,102,100,101,1100"
+        )
+        with pytest.raises(RuntimeError):
+            await orchestrator.execute(run_plan, csv_data)
+
+        # Check that RUN_FAILED event was journaled
+        insert_calls = mock_events_repo.insert.call_args_list
+        assert len(insert_calls) >= 2  # RUN_STARTED and RUN_FAILED
+
+        # Last event should be RUN_FAILED
+        last_event = insert_calls[-1][0][0]
+        assert last_event.event_type == TradeEventType.RUN_FAILED
+        assert "Unexpected error" in last_event.payload.get("error", "")
