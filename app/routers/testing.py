@@ -8,6 +8,8 @@ import structlog
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
+from app.repositories.backtests import BacktestRepository
+from app.repositories.run_plans import RunPlansRepository
 from app.repositories.trade_events import TradeEventsRepository
 from app.services.strategy.models import ExecutionSpec
 from app.services.strategy.runner import StrategyRunner
@@ -41,6 +43,26 @@ def _get_events_repo() -> TradeEventsRepository:
             detail="Database connection not available",
         )
     return TradeEventsRepository(_db_pool)
+
+
+def _get_run_plans_repo() -> RunPlansRepository:
+    """Get run plans repository."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return RunPlansRepository(_db_pool)
+
+
+def _get_backtest_repo() -> BacktestRepository:
+    """Get backtest repository."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return BacktestRepository(_db_pool)
 
 
 # =============================================================================
@@ -328,10 +350,18 @@ async def generate_and_execute_run_plan(
         n_variants=run_plan.n_variants,
     )
 
-    # Execute run plan
+    # Execute run plan with persistence
     events_repo = _get_events_repo()
+    run_plans_repo = _get_run_plans_repo()
+    backtest_repo = _get_backtest_repo()
     runner = StrategyRunner()
-    orchestrator = RunOrchestrator(events_repo=events_repo, runner=runner)
+
+    orchestrator = RunOrchestrator(
+        events_repo=events_repo,
+        runner=runner,
+        run_plans_repo=run_plans_repo,
+        backtest_repo=backtest_repo,
+    )
 
     try:
         results = await orchestrator.execute(run_plan, file_content)
