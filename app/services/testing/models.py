@@ -7,7 +7,8 @@ import json
 from copy import deepcopy
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -89,26 +90,29 @@ class RunVariant(BaseModel):
     """Individual variant with parameter overrides.
 
     Represents a single configuration to be tested, consisting of
-    a variant_id (deterministic hash) and the specific overrides
-    to apply to the base specification.
+    a variant_id (deterministic hash), a human-readable label,
+    and the specific overrides to apply to the base specification.
     """
 
     variant_id: str = Field(description="16-char hex ID derived from base+overrides hash")
-    overrides: dict[str, Any] = Field(default_factory=dict)
+    label: str = Field(description="Human-readable label for the variant")
+    spec_overrides: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
 
     @classmethod
     def create(
         cls,
         base_spec: dict,
-        overrides: dict[str, Any],
+        spec_overrides: dict[str, Any],
+        label: str = "",
         tags: list[str] | None = None,
     ) -> RunVariant:
         """Factory method that validates overrides and generates variant ID.
 
         Args:
             base_spec: The base specification dictionary.
-            overrides: Dict mapping dotted paths to scalar values.
+            spec_overrides: Dict mapping dotted paths to scalar values.
+            label: Human-readable label for the variant.
             tags: Optional list of tags for the variant.
 
         Returns:
@@ -119,7 +123,7 @@ class RunVariant(BaseModel):
                        if paths have empty segments, or if values are dicts.
         """
         # Validate override keys and values
-        for key, value in overrides.items():
+        for key, value in spec_overrides.items():
             # Key must contain a dot
             if "." not in key:
                 raise ValueError(
@@ -139,11 +143,12 @@ class RunVariant(BaseModel):
                     f"Override value for '{key}' must be a scalar, not a dict"
                 )
 
-        variant_id = hash_variant(base_spec, overrides)
+        variant_id = hash_variant(base_spec, spec_overrides)
 
         return cls(
             variant_id=variant_id,
-            overrides=overrides,
+            label=label,
+            spec_overrides=spec_overrides,
             tags=tags or [],
         )
 
@@ -152,13 +157,15 @@ class RunPlan(BaseModel):
     """Plan for executing a batch of backtest variants.
 
     Contains the base specification, list of variants to test,
-    and constraints that govern the generation.
+    objective function, and dataset reference.
     """
 
-    plan_id: str = Field(description="Unique identifier for the run plan")
+    run_plan_id: UUID = Field(default_factory=uuid4, description="Unique identifier for the run plan")
+    workspace_id: UUID = Field(description="Workspace this plan belongs to")
     base_spec: dict = Field(description="Base strategy specification")
     variants: list[RunVariant] = Field(default_factory=list)
-    constraints: GeneratorConstraints = Field(default_factory=GeneratorConstraints)
+    objective: str = Field(default="sharpe_dd_penalty", description="Objective function for optimization")
+    dataset_ref: str = Field(description="Reference to the dataset used for backtesting")
     status: RunPlanStatus = RunPlanStatus.pending
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -176,13 +183,15 @@ class VariantMetrics(BaseModel):
     from a backtest execution.
     """
 
-    sharpe: float
+    sharpe: Optional[float] = Field(default=None, description="Sharpe ratio (None if <2 trades)")
     return_pct: float
     max_drawdown_pct: float
-    n_trades: int
-    calmar: float | None = None
-    win_rate: float | None = None
-    profit_factor: float | None = None
+    trade_count: int
+    win_rate: float = Field(default=0.0, description="Win rate (0.0 if no trades)")
+    ending_equity: float = Field(description="Final equity value")
+    gross_profit: float = Field(description="Total profit from winning trades")
+    gross_loss: float = Field(description="Total loss from losing trades (should be <= 0)")
+    profit_factor: Optional[float] = None
 
 
 class RunResult(BaseModel):
@@ -193,9 +202,13 @@ class RunResult(BaseModel):
     error information (if failed).
     """
 
+    run_plan_id: UUID = Field(description="ID of the run plan this result belongs to")
     variant_id: str = Field(description="ID of the variant that was run")
     status: str = Field(description="'success' or 'failed'")
-    metrics: VariantMetrics | None = None
-    error_message: str | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    metrics: Optional[VariantMetrics] = None
+    objective_score: Optional[float] = Field(default=None, description="Computed objective score")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+    started_at: datetime = Field(description="When the run started")
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[int] = Field(default=None, description="Duration in milliseconds")
+    events_recorded: int = Field(default=0, description="Number of events recorded during run")
