@@ -7,6 +7,7 @@ This module provides:
 - RunVariant: Individual variant with parameter overrides
 - RunResult: Results from executing a variant
 - GeneratorConstraints: Constraints for test generation
+- TestGenerator: Generates RunPlan variants from a base ExecutionSpec
 """
 
 from app.services.testing.models import (
@@ -20,6 +21,7 @@ from app.services.testing.models import (
     VariantMetrics,
     RunResult,
 )
+from app.services.testing.test_generator import TestGenerator
 
 __all__ = [
     "canonical_json",
@@ -31,4 +33,5 @@ __all__ = [
     "RunPlan",
     "VariantMetrics",
     "RunResult",
+    "TestGenerator",
 ]
