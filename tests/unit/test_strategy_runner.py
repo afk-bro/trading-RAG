@@ -538,7 +538,6 @@ class TestStrategyRunner:
         self, runner, make_spec, make_snapshot, make_paper_state
     ):
         """At max_positions + has position + is_eod, exit is allowed."""
-        spec = make_spec(max_positions=2)
         # EOD flag set
         snapshot = make_snapshot(
             symbol="MSFT", highs=[100.0, 102.0, 101.0], is_eod=True
