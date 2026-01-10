@@ -216,9 +216,7 @@ class RunOrchestrator:
 
         return results
 
-    async def _persist_variant_result(
-        self, run_id: UUID, result: RunResult
-    ) -> None:
+    async def _persist_variant_result(self, run_id: UUID, result: RunResult) -> None:
         """Persist variant result to backtest_runs.
 
         Args:
@@ -258,9 +256,7 @@ class RunOrchestrator:
                 trade_count=result.metrics.trade_count,
             )
 
-    def _build_plan_jsonb(
-        self, run_plan: RunPlan, dataset_content: bytes
-    ) -> dict:
+    def _build_plan_jsonb(self, run_plan: RunPlan, dataset_content: bytes) -> dict:
         """Build the plan JSONB structure for persistence.
 
         Args:

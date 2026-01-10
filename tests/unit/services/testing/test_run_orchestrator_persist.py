@@ -50,7 +50,9 @@ def mock_runner():
 
 
 @pytest.fixture
-def orchestrator(mock_events_repo, mock_run_plans_repo, mock_backtest_repo, mock_runner):
+def orchestrator(
+    mock_events_repo, mock_run_plans_repo, mock_backtest_repo, mock_runner
+):
     """Create orchestrator with all mocked repos."""
     return RunOrchestrator(
         events_repo=mock_events_repo,
@@ -103,7 +105,10 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[],
             dataset_ref="test.csv",
         )
@@ -123,7 +128,10 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[],
             dataset_ref="test.csv",
         )
@@ -142,7 +150,10 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[
                 RunVariant(
                     variant_id="abc123def456",
@@ -167,7 +178,10 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[
                 RunVariant(variant_id="variant1", label="v1", spec_overrides={}),
                 RunVariant(variant_id="variant2", label="v2", spec_overrides={}),
@@ -188,7 +202,10 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[
                 RunVariant(variant_id="abc123", label="baseline", spec_overrides={}),
             ],
@@ -217,7 +234,10 @@ class TestExecuteWithoutPersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[],
             dataset_ref="test.csv",
         )
@@ -238,7 +258,10 @@ class TestCompleteRunPlanAggregates:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={"strategy_name": "test", "risk": {"dollars_per_trade": 100, "max_positions": 1}},
+            base_spec={
+                "strategy_name": "test",
+                "risk": {"dollars_per_trade": 100, "max_positions": 1},
+            },
             variants=[
                 RunVariant(variant_id="v1", label="v1", spec_overrides={}),
                 RunVariant(variant_id="v2", label="v2", spec_overrides={}),

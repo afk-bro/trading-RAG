@@ -261,8 +261,5 @@ class RunPlansRepository:
             total = await conn.fetchval(count_query, plan_id)
             rows = await conn.fetch(list_query, plan_id, limit, offset)
 
-        runs = [
-            parse_jsonb_fields(dict(row), ["params", "summary"])
-            for row in rows
-        ]
+        runs = [parse_jsonb_fields(dict(row), ["params", "summary"]) for row in rows]
         return runs, total

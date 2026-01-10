@@ -72,11 +72,13 @@ class PlanBuilder:
         Returns:
             self for chaining
         """
-        self._variants.append({
-            "variant_index": variant_index,
-            "params": params,
-            "param_source": param_source,
-        })
+        self._variants.append(
+            {
+                "variant_index": variant_index,
+                "params": params,
+                "param_source": param_source,
+            }
+        )
         return self
 
     def build(self) -> dict[str, Any]:
@@ -105,10 +107,12 @@ class PlanBuilder:
         }
 
         # Compute fingerprints (deterministic, excluding timestamp)
-        plan_content = canonical_json({
-            "inputs": inputs,
-            "resolved": resolved,
-        })
+        plan_content = canonical_json(
+            {
+                "inputs": inputs,
+                "resolved": resolved,
+            }
+        )
         plan_fingerprint = hashlib.sha256(plan_content.encode()).hexdigest()[:16]
 
         provenance = {

@@ -197,10 +197,12 @@ class TestListRunPlans:
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=2)
-        mock_conn.fetch = AsyncMock(return_value=[
-            {"id": uuid4(), "status": "completed", "n_variants": 5},
-            {"id": uuid4(), "status": "running", "n_variants": 3},
-        ])
+        mock_conn.fetch = AsyncMock(
+            return_value=[
+                {"id": uuid4(), "status": "completed", "n_variants": 5},
+                {"id": uuid4(), "status": "running", "n_variants": 3},
+            ]
+        )
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         plans, total = await repo.list_run_plans(workspace_id)
@@ -236,11 +238,13 @@ class TestListRunsForPlan:
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=3)
-        mock_conn.fetch = AsyncMock(return_value=[
-            {"id": uuid4(), "variant_index": 0, "status": "completed"},
-            {"id": uuid4(), "variant_index": 1, "status": "completed"},
-            {"id": uuid4(), "variant_index": 2, "status": "skipped"},
-        ])
+        mock_conn.fetch = AsyncMock(
+            return_value=[
+                {"id": uuid4(), "variant_index": 0, "status": "completed"},
+                {"id": uuid4(), "variant_index": 1, "status": "completed"},
+                {"id": uuid4(), "variant_index": 2, "status": "skipped"},
+            ]
+        )
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         runs, total = await repo.list_runs_for_plan(plan_id)
@@ -264,4 +268,8 @@ class TestListRunsForPlan:
         fetch_call = mock_conn.fetch.call_args[0][0]
         assert "SELECT *" not in fetch_call
         # Verify explicit column list is used (good practice for blob exclusion)
-        assert "SELECT id," in fetch_call or "SELECT id\n" in fetch_call or "id," in fetch_call
+        assert (
+            "SELECT id," in fetch_call
+            or "SELECT id\n" in fetch_call
+            or "id," in fetch_call
+        )

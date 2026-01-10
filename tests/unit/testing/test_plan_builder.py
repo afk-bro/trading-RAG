@@ -48,6 +48,7 @@ class TestPlanBuilder:
 
     def test_build_fingerprint_is_stable(self):
         """Same inputs produce same fingerprint."""
+
         def make_builder():
             builder = PlanBuilder(
                 base_spec={"strategy_name": "breakout", "param": 123},

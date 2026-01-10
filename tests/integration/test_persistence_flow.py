@@ -131,7 +131,9 @@ class TestPersistenceFlow:
 
         # Check for INSERT INTO run_plans call
         run_plan_inserts = [
-            c for c in calls if "run_plans" in str(c).lower() and "insert" in str(c).lower()
+            c
+            for c in calls
+            if "run_plans" in str(c).lower() and "insert" in str(c).lower()
         ]
         assert len(run_plan_inserts) > 0, "Expected run_plan INSERT"
 
@@ -165,7 +167,9 @@ class TestPersistenceFlow:
 
         # Each variant creates a backtest_run
         backtest_run_inserts = [
-            c for c in calls if "backtest_runs" in str(c).lower() and "insert" in str(c).lower()
+            c
+            for c in calls
+            if "backtest_runs" in str(c).lower() and "insert" in str(c).lower()
         ]
         # Should have at least n_variants inserts (one per variant)
         assert len(backtest_run_inserts) >= n_variants
@@ -195,7 +199,8 @@ class TestPersistenceFlow:
 
         # Check for UPDATE run_plans ... status = 'completed'
         completion_updates = [
-            c for c in calls
+            c
+            for c in calls
             if "run_plans" in str(c).lower()
             and "update" in str(c).lower()
             and "completed" in str(c).lower()
@@ -260,7 +265,9 @@ class TestPersistenceFlow:
 class TestPersistenceWithoutPool:
     """Tests behavior when pool is not available."""
 
-    def test_execute_without_pool_returns_503(self, valid_csv_content, base_spec, constraints):
+    def test_execute_without_pool_returns_503(
+        self, valid_csv_content, base_spec, constraints
+    ):
         """Execute returns 503 when database pool is not set."""
         from app.main import app
         from app.routers.testing import set_db_pool

@@ -75,9 +75,7 @@ class TestGetRunPlan:
 class TestGetRunPlanRuns:
     """Tests for GET /admin/run-plans/{id}/runs."""
 
-    def test_get_run_plan_runs_not_found_returns_404(
-        self, client, mock_run_plans_repo
-    ):
+    def test_get_run_plan_runs_not_found_returns_404(self, client, mock_run_plans_repo):
         """GET /admin/run-plans/{id}/runs returns 404 if plan not found."""
         plan_id = uuid4()
         mock_run_plans_repo.get_run_plan.return_value = None
