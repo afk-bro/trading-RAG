@@ -1,0 +1,235 @@
+{% extends "layout.html" %}
+
+{% block title %}Run Plans - Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Run Plans</h2>
+        <div class="header-right">
+            <span class="pagination-info">{{ total }} total</span>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        <select name="status" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            <option value="running" {% if status_filter == 'running' %}selected{% endif %}>Running</option>
+            <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
+        </select>
+        <select name="hours" onchange="this.form.submit()">
+            <option value="24" {% if hours == 24 %}selected{% endif %}>Last 24h</option>
+            <option value="72" {% if hours == 72 %}selected{% endif %}>Last 3 days</option>
+            <option value="168" {% if hours == 168 %}selected{% endif %}>Last 7 days</option>
+        </select>
+    </form>
+
+    {% if error %}
+    <div class="empty-state">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+    {% elif run_plans %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Run Plan ID</th>
+                    <th>Status</th>
+                    <th>Variants</th>
+                    <th>Objective</th>
+                    <th>Started At</th>
+                    <th>Duration</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for plan in run_plans %}
+                <tr class="clickable-row" data-href="/admin/testing/run-plans/{{ plan.run_plan_id }}">
+                    <td>
+                        <code class="run-plan-id">{{ plan.run_plan_id[:12] }}...</code>
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ plan.status }}">{{ plan.status }}</span>
+                    </td>
+                    <td>
+                        {% if plan.n_completed is not none %}
+                        <span class="variants-breakdown">
+                            <span class="variant-stat completed" title="Completed">{{ plan.n_completed }}</span>
+                            {% if plan.n_failed > 0 %}
+                            <span class="variant-stat failed" title="Failed">{{ plan.n_failed }}</span>
+                            {% endif %}
+                            <span class="variant-total">/ {{ plan.n_variants }}</span>
+                        </span>
+                        {% else %}
+                        <span class="text-muted">{{ plan.n_variants }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if plan.objective %}
+                        <span class="objective-badge">{{ plan.objective }}</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="relative-time" data-timestamp="{{ plan.started_at.isoformat() }}" title="{{ plan.started_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                            {{ plan.started_at.strftime('%Y-%m-%d %H:%M') }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if plan.duration_ms is not none %}
+                        <span class="duration" title="{{ plan.duration_ms }}ms">
+                            {% if plan.duration_ms < 1000 %}
+                            {{ plan.duration_ms }}ms
+                            {% elif plan.duration_ms < 60000 %}
+                            {{ "%.1f"|format(plan.duration_ms / 1000) }}s
+                            {% else %}
+                            {{ "%.1f"|format(plan.duration_ms / 60000) }}m
+                            {% endif %}
+                        </span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="row-actions">
+                            <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('{{ plan.run_plan_id }}')" title="Copy run plan ID">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            </button>
+                            <a href="/admin/testing/run-plans/{{ plan.run_plan_id }}" class="btn btn-secondary" onclick="event.stopPropagation()">View</a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&hours={{ hours }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&hours={{ hours }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No run plans found</h3>
+        <p>{% if status_filter %}No run plans with status "{{ status_filter }}" in the last {{ hours }} hours.{% else %}No test runs have been executed in the last {{ hours }} hours.{% endif %}</p>
+        <div class="empty-hint">
+            <code>POST /testing/generate-and-execute</code>
+            <p class="text-muted" style="margin-top: 8px; font-size: 13px;">Execute a test run plan to see results here.</p>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .header-right { display: flex; align-items: center; gap: 16px; }
+
+    .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { position: sticky; top: 0; background: var(--bg-secondary); z-index: 10; }
+    thead th { border-bottom: 2px solid var(--border); white-space: nowrap; }
+
+    .clickable-row { cursor: pointer; transition: background 0.15s; }
+    .clickable-row:hover { background: rgba(56, 139, 253, 0.15); }
+
+    .run-plan-id { font-size: 12px; }
+
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-pending { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .text-muted { color: var(--text-muted); }
+
+    .objective-badge {
+        background: rgba(255, 166, 87, 0.2);
+        color: #f7a141;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .variants-breakdown { display: flex; gap: 4px; align-items: center; }
+    .variant-stat { padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .variant-stat.completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .variant-stat.failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .variant-total { color: var(--text-muted); font-size: 12px; margin-left: 2px; }
+
+    .duration { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--text-muted); }
+
+    .row-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+    .copy-btn { background: none; border: none; cursor: pointer; padding: 4px; color: var(--text-muted); border-radius: 4px; opacity: 0; transition: opacity 0.15s, background 0.15s; }
+    .clickable-row:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { background: var(--bg); color: var(--text); }
+
+    .empty-hint { margin-top: 16px; text-align: center; }
+    .empty-hint code { background: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+</style>
+
+<script>
+// Clickable rows with Ctrl/Cmd+click for new tab
+document.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const href = row.dataset.href;
+        if (e.ctrlKey || e.metaKey) {
+            window.open(href, '_blank');
+        } else {
+            window.location.href = href;
+        }
+    });
+});
+
+// Copy to clipboard
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback could be added here
+    });
+}
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000); // Update every minute
+</script>
+{% endblock %}

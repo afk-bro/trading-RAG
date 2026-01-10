@@ -1,0 +1,321 @@
+{% extends "layout.html" %}
+
+{% block title %}Run Plan {{ run_plan_id[:8] }}... - Admin{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/admin/testing/run-plans?workspace_id={{ workspace_id }}">Run Plans</a> /
+    <span>{{ run_plan_id[:8] }}...</span>
+</div>
+
+<!-- Header -->
+<div class="detail-header">
+    <h1>
+        <span class="badge badge-{{ status }}">{{ status }}</span>
+        Run Plan
+    </h1>
+    <div class="detail-meta">
+        <span title="{{ run_plan_id }}">
+            ID: {{ run_plan_id[:12] }}...
+            <button onclick="copyToClipboard('{{ run_plan_id }}')" class="copy-btn" title="Copy run plan ID">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+        </span>
+        {% if started_at %}
+        <span class="relative-time" data-timestamp="{{ started_at.isoformat() }}" title="{{ started_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+            Started: {{ started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+        </span>
+        {% endif %}
+        {% if duration_ms is not none %}
+        <span class="duration-display">
+            Duration:
+            {% if duration_ms < 1000 %}
+            {{ duration_ms }}ms
+            {% elif duration_ms < 60000 %}
+            {{ "%.1f"|format(duration_ms / 1000) }}s
+            {% else %}
+            {{ "%.1f"|format(duration_ms / 60000) }}m
+            {% endif %}
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Status Counts -->
+{% if n_variants is not none %}
+<div class="stats">
+    <div class="stat">
+        <div class="stat-value">{{ n_variants }}</div>
+        <div class="stat-label">Total Variants</div>
+    </div>
+    {% if n_completed is not none %}
+    <div class="stat">
+        <div class="stat-value" style="color: var(--success)">{{ n_completed }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    {% endif %}
+    {% if n_failed is not none and n_failed > 0 %}
+    <div class="stat">
+        <div class="stat-value" style="color: var(--danger)">{{ n_failed }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- RUN_STARTED Event -->
+{% if started_event %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">RUN_STARTED Event</h3>
+        <span class="event-time">{{ started_event.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+    </div>
+    <table>
+        <tr>
+            <th style="width: 150px;">Variants</th>
+            <td>{{ started_event.payload.n_variants or '-' }}</td>
+        </tr>
+        <tr>
+            <th>Objective</th>
+            <td>
+                {% if started_event.payload.objective %}
+                <span class="objective-badge">{{ started_event.payload.objective }}</span>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <th>Dataset</th>
+            <td>
+                {% if started_event.payload.dataset_ref %}
+                <code style="font-size: 12px;">{{ started_event.payload.dataset_ref }}</code>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <th>Bar Count</th>
+            <td>{{ started_event.payload.bar_count or '-' }}</td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<!-- RUN_COMPLETED Event -->
+{% if completed_event %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">RUN_COMPLETED Event</h3>
+        <span class="event-time">{{ completed_event.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+    </div>
+    <table>
+        <tr>
+            <th style="width: 150px;">Completed</th>
+            <td>
+                <span class="variant-stat completed">{{ completed_event.payload.n_completed or 0 }}</span>
+            </td>
+        </tr>
+        <tr>
+            <th>Failed</th>
+            <td>
+                {% if completed_event.payload.n_failed and completed_event.payload.n_failed > 0 %}
+                <span class="variant-stat failed">{{ completed_event.payload.n_failed }}</span>
+                {% else %}
+                <span class="text-muted">0</span>
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <th>Duration</th>
+            <td>
+                {% if completed_event.payload.duration_ms is not none %}
+                {% set dur = completed_event.payload.duration_ms %}
+                {% if dur < 1000 %}
+                {{ dur }}ms
+                {% elif dur < 60000 %}
+                {{ "%.1f"|format(dur / 1000) }}s
+                {% else %}
+                {{ "%.1f"|format(dur / 60000) }}m
+                {% endif %}
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<!-- Raw Events -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">All Events</h3>
+        <span class="pagination-info">{{ events|length }} events</span>
+    </div>
+    {% if events %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Event Type</th>
+                    <th>Created At</th>
+                    <th>Payload Preview</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in events %}
+                <tr class="clickable-row" data-href="/admin/trade/events/{{ event.id }}">
+                    <td>
+                        <span class="badge badge-run">{{ event.payload.run_event_type or event.event_type }}</span>
+                    </td>
+                    <td>
+                        <span class="event-time">{{ event.created_at.strftime('%H:%M:%S.%f')[:12] }}</span>
+                    </td>
+                    <td>
+                        <span class="payload-preview truncate">{{ event.payload | tojson }}</span>
+                    </td>
+                    <td>
+                        <a href="/admin/trade/events/{{ event.id }}" class="btn btn-secondary" onclick="event.stopPropagation()">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No events found for this run plan.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Debug: Raw Payload JSON -->
+{% if started_event or completed_event %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Payload JSON</h3>
+        <button onclick="copyJson()" class="btn btn-secondary" style="font-size: 12px; padding: 4px 12px;">Copy JSON</button>
+    </div>
+    <div class="code-block" id="payload-json">{
+{% if started_event %}  "run_started": {{ started_event.payload | tojson(indent=4) }}{% if completed_event %},{% endif %}
+
+{% endif %}
+{% if completed_event %}  "run_completed": {{ completed_event.payload | tojson(indent=4) }}
+{% endif %}}</div>
+</div>
+{% endif %}
+
+<style>
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-pending { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .badge-run { background: rgba(136, 87, 229, 0.2); color: #a371f7; }
+    .text-muted { color: var(--text-muted); }
+
+    .objective-badge {
+        background: rgba(255, 166, 87, 0.2);
+        color: #f7a141;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+
+    .variant-stat { padding: 2px 8px; border-radius: 4px; font-size: 13px; font-weight: 500; }
+    .variant-stat.completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .variant-stat.failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+
+    .duration-display { font-family: 'SF Mono', Consolas, monospace; font-size: 13px; }
+
+    .event-time { font-size: 12px; color: var(--text-muted); font-family: 'SF Mono', Consolas, monospace; }
+
+    .payload-preview { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--text-muted); max-width: 400px; }
+
+    .copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        color: var(--text-muted);
+        border-radius: 4px;
+        transition: background 0.15s;
+        vertical-align: middle;
+    }
+    .copy-btn:hover { background: var(--bg); color: var(--text); }
+
+    .table-container { overflow-x: auto; }
+    thead { position: sticky; top: 0; background: var(--bg-secondary); z-index: 10; }
+    thead th { border-bottom: 2px solid var(--border); }
+
+    .clickable-row { cursor: pointer; transition: background 0.15s; }
+    .clickable-row:hover { background: rgba(56, 139, 253, 0.15); }
+
+    .truncate {
+        display: block;
+        max-width: 400px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+</style>
+
+<script>
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text);
+}
+
+function copyJson() {
+    const text = document.getElementById('payload-json').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard');
+    });
+}
+
+// Clickable rows
+document.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const href = row.dataset.href;
+        if (e.ctrlKey || e.metaKey) {
+            window.open(href, '_blank');
+        } else {
+            window.location.href = href;
+        }
+    });
+});
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = 'Started: ' + formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000);
+</script>
+{% endblock %}

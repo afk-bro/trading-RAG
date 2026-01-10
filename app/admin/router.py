@@ -2385,3 +2385,308 @@ async def admin_trade_event_detail(
             "related_events": related_data,
         },
     )
+
+
+# ==============================================================================
+# Run Plans Admin UI (Test Generator / Orchestrator)
+# ==============================================================================
+
+
+@router.get("/testing/run-plans", response_class=HTMLResponse)
+async def admin_run_plans_list(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    hours: int = Query(24, ge=1, le=168, description="Time window in hours"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(require_admin_token),
+):
+    """List run plans with event-driven summaries.
+
+    Run plans are reconstructed from RUN_STARTED and RUN_COMPLETED events
+    in the trade_events journal (v0 has no dedicated RunPlan table).
+    """
+    from datetime import timedelta
+
+    # If no workspace specified, get first available
+    if not workspace_id:
+        try:
+            async with _db_pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
+                if row:
+                    workspace_id = row["id"]
+        except Exception as e:
+            logger.warning("Could not fetch default workspace", error=str(e))
+
+    if not workspace_id:
+        return templates.TemplateResponse(
+            "run_plans_list.html",
+            {
+                "request": request,
+                "run_plans": [],
+                "total": 0,
+                "workspace_id": None,
+                "status_filter": status_filter,
+                "hours": hours,
+                "limit": limit,
+                "offset": offset,
+                "has_prev": False,
+                "has_next": False,
+                "prev_offset": 0,
+                "next_offset": 0,
+                "error": "No workspace found. Create a workspace first.",
+            },
+        )
+
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    # Query trade_events for run plan events
+    # Group by correlation_id (which is run_plan_id)
+    # Join RUN_STARTED and RUN_COMPLETED events
+    query = """
+        WITH run_events AS (
+            SELECT
+                correlation_id as run_plan_id,
+                payload->>'run_event_type' as run_event_type,
+                payload,
+                created_at
+            FROM trade_events
+            WHERE workspace_id = $1
+              AND created_at >= $2
+              AND payload->>'run_event_type' IN ('RUN_STARTED', 'RUN_COMPLETED')
+        ),
+        started AS (
+            SELECT
+                run_plan_id,
+                payload,
+                created_at as started_at
+            FROM run_events
+            WHERE run_event_type = 'RUN_STARTED'
+        ),
+        completed AS (
+            SELECT
+                run_plan_id,
+                payload,
+                created_at as completed_at
+            FROM run_events
+            WHERE run_event_type = 'RUN_COMPLETED'
+        ),
+        run_plans AS (
+            SELECT
+                s.run_plan_id,
+                s.started_at,
+                c.completed_at,
+                CASE
+                    WHEN c.run_plan_id IS NOT NULL THEN 'completed'
+                    ELSE 'running'
+                END as status,
+                (s.payload->>'n_variants')::int as n_variants,
+                s.payload->>'objective' as objective,
+                s.payload->>'dataset_ref' as dataset_ref,
+                (s.payload->>'bar_count')::int as bar_count,
+                (c.payload->>'n_completed')::int as n_completed,
+                (c.payload->>'n_failed')::int as n_failed,
+                (c.payload->>'duration_ms')::int as duration_ms
+            FROM started s
+            LEFT JOIN completed c ON s.run_plan_id = c.run_plan_id
+        )
+        SELECT * FROM run_plans
+        WHERE 1=1
+    """
+
+    params = [workspace_id, since]
+    param_idx = 3
+
+    # Apply status filter
+    if status_filter:
+        query += f" AND status = ${param_idx}"
+        params.append(status_filter)
+        param_idx += 1
+
+    # Count query
+    count_query = f"""
+        WITH run_events AS (
+            SELECT
+                correlation_id as run_plan_id,
+                payload->>'run_event_type' as run_event_type,
+                payload,
+                created_at
+            FROM trade_events
+            WHERE workspace_id = $1
+              AND created_at >= $2
+              AND payload->>'run_event_type' IN ('RUN_STARTED', 'RUN_COMPLETED')
+        ),
+        started AS (
+            SELECT run_plan_id FROM run_events WHERE run_event_type = 'RUN_STARTED'
+        ),
+        completed AS (
+            SELECT run_plan_id FROM run_events WHERE run_event_type = 'RUN_COMPLETED'
+        ),
+        run_plans AS (
+            SELECT
+                s.run_plan_id,
+                CASE WHEN c.run_plan_id IS NOT NULL THEN 'completed' ELSE 'running' END as status
+            FROM started s
+            LEFT JOIN completed c ON s.run_plan_id = c.run_plan_id
+        )
+        SELECT COUNT(*) as total FROM run_plans
+        WHERE 1=1 {'AND status = $3' if status_filter else ''}
+    """
+
+    count_params = [workspace_id, since]
+    if status_filter:
+        count_params.append(status_filter)
+
+    # Add ordering and pagination
+    query += f" ORDER BY started_at DESC LIMIT ${param_idx} OFFSET ${param_idx + 1}"
+    params.extend([limit, offset])
+
+    async with _db_pool.acquire() as conn:
+        count_row = await conn.fetchrow(count_query, *count_params)
+        total = count_row["total"] if count_row else 0
+
+        rows = await conn.fetch(query, *params)
+
+    run_plans = []
+    for row in rows:
+        run_plans.append({
+            "run_plan_id": row["run_plan_id"],
+            "status": row["status"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "n_variants": row["n_variants"],
+            "objective": row["objective"],
+            "dataset_ref": row["dataset_ref"],
+            "bar_count": row["bar_count"],
+            "n_completed": row["n_completed"],
+            "n_failed": row["n_failed"],
+            "duration_ms": row["duration_ms"],
+        })
+
+    return templates.TemplateResponse(
+        "run_plans_list.html",
+        {
+            "request": request,
+            "run_plans": run_plans,
+            "total": total,
+            "workspace_id": str(workspace_id),
+            "status_filter": status_filter or "",
+            "hours": hours,
+            "limit": limit,
+            "offset": offset,
+            "has_prev": offset > 0,
+            "has_next": offset + limit < total,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
+        },
+    )
+
+
+@router.get("/testing/run-plans/{run_plan_id}", response_class=HTMLResponse)
+async def admin_run_plan_detail(
+    request: Request,
+    run_plan_id: str,
+    _: bool = Depends(require_admin_token),
+):
+    """View run plan details from trade_events journal.
+
+    Shows RUN_STARTED and RUN_COMPLETED event payloads.
+    """
+    # Query all events for this run_plan_id (correlation_id)
+    query = """
+        SELECT
+            id,
+            correlation_id,
+            workspace_id,
+            event_type,
+            created_at,
+            payload
+        FROM trade_events
+        WHERE correlation_id = $1
+        ORDER BY created_at ASC
+    """
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, run_plan_id)
+
+    if not rows:
+        # Graceful error - no 500
+        return templates.TemplateResponse(
+            "run_plan_detail.html",
+            {
+                "request": request,
+                "run_plan_id": run_plan_id,
+                "workspace_id": None,
+                "status": "not_found",
+                "started_at": None,
+                "duration_ms": None,
+                "n_variants": None,
+                "n_completed": None,
+                "n_failed": None,
+                "started_event": None,
+                "completed_event": None,
+                "events": [],
+                "error": f"Run plan {run_plan_id[:12]}... not found in trade events journal.",
+            },
+        )
+
+    # Parse events
+    events = []
+    started_event = None
+    completed_event = None
+    workspace_id = None
+
+    for row in rows:
+        payload = row["payload"]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        event_data = {
+            "id": str(row["id"]),
+            "event_type": row["event_type"],
+            "created_at": row["created_at"],
+            "payload": payload,
+        }
+        events.append(event_data)
+
+        if not workspace_id:
+            workspace_id = str(row["workspace_id"])
+
+        run_event_type = payload.get("run_event_type")
+        if run_event_type == "RUN_STARTED":
+            started_event = event_data
+        elif run_event_type == "RUN_COMPLETED":
+            completed_event = event_data
+
+    # Compute status and metrics
+    if completed_event:
+        status = "completed"
+    elif started_event:
+        status = "running"
+    else:
+        status = "unknown"
+
+    started_at = started_event["created_at"] if started_event else None
+    n_variants = started_event["payload"].get("n_variants") if started_event else None
+    n_completed = completed_event["payload"].get("n_completed") if completed_event else None
+    n_failed = completed_event["payload"].get("n_failed") if completed_event else None
+    duration_ms = completed_event["payload"].get("duration_ms") if completed_event else None
+
+    return templates.TemplateResponse(
+        "run_plan_detail.html",
+        {
+            "request": request,
+            "run_plan_id": run_plan_id,
+            "workspace_id": workspace_id,
+            "status": status,
+            "started_at": started_at,
+            "duration_ms": duration_ms,
+            "n_variants": n_variants,
+            "n_completed": n_completed,
+            "n_failed": n_failed,
+            "started_event": started_event,
+            "completed_event": completed_event,
+            "events": events,
+        },
+    )
