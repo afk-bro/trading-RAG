@@ -224,6 +224,162 @@ class BacktestRepository:
 
         return deleted is not None
 
+    # =========================================================================
+    # Variant Run Methods (for RunOrchestrator persistence)
+    # =========================================================================
+
+    async def create_variant_run(
+        self,
+        run_plan_id: UUID,
+        workspace_id: UUID,
+        strategy_entity_id: UUID,
+        variant_index: int,
+        variant_fingerprint: str,
+        params: dict[str, Any],
+        dataset_meta: dict[str, Any],
+        run_kind: str = "test_variant",
+    ) -> UUID:
+        """
+        Create a new backtest run for a plan variant.
+
+        Args:
+            run_plan_id: Parent run plan ID
+            workspace_id: Workspace ID
+            strategy_entity_id: Strategy entity ID
+            variant_index: 0-based index within run plan
+            variant_fingerprint: Hash of canonical params
+            params: Variant parameters
+            dataset_meta: Dataset metadata
+            run_kind: Type of run (default: test_variant)
+
+        Returns:
+            The new run ID
+        """
+        query = """
+            INSERT INTO backtest_runs (
+                run_plan_id, workspace_id, strategy_entity_id,
+                variant_index, variant_fingerprint, run_kind,
+                params, dataset_meta, status, started_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', NOW())
+            RETURNING id
+        """
+
+        async with self.pool.acquire() as conn:
+            run_id = await conn.fetchval(
+                query,
+                run_plan_id,
+                workspace_id,
+                strategy_entity_id,
+                variant_index,
+                variant_fingerprint,
+                run_kind,
+                json.dumps(params),
+                json.dumps(dataset_meta),
+            )
+
+        logger.info(
+            "Created variant run",
+            run_id=str(run_id),
+            run_plan_id=str(run_plan_id),
+            variant_index=variant_index,
+        )
+
+        return run_id
+
+    async def update_variant_completed(
+        self,
+        run_id: UUID,
+        summary: dict[str, Any],
+        equity_curve: list[dict[str, Any]],
+        trades: list[dict[str, Any]],
+        objective_score: Optional[float],
+        has_equity_curve: bool,
+        has_trades: bool,
+        equity_points: Optional[int],
+        trade_count: Optional[int],
+        warnings: Optional[list[str]] = None,
+    ) -> None:
+        """Update variant run with completed results."""
+        query = """
+            UPDATE backtest_runs
+            SET status = 'completed',
+                summary = $2,
+                equity_curve = $3,
+                trades = $4,
+                objective_score = $5,
+                has_equity_curve = $6,
+                has_trades = $7,
+                equity_points = $8,
+                trade_count = $9,
+                warnings = $10,
+                completed_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query,
+                run_id,
+                json.dumps(summary),
+                json.dumps(equity_curve),
+                json.dumps(trades),
+                objective_score,
+                has_equity_curve,
+                has_trades,
+                equity_points,
+                trade_count,
+                json.dumps(warnings or []),
+            )
+
+        logger.info("Updated variant run as completed", run_id=str(run_id))
+
+    async def update_variant_skipped(
+        self,
+        run_id: UUID,
+        skip_reason: str,
+    ) -> None:
+        """Update variant run as skipped."""
+        query = """
+            UPDATE backtest_runs
+            SET status = 'skipped',
+                skip_reason = $2,
+                completed_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, run_id, skip_reason)
+
+        logger.info(
+            "Updated variant run as skipped",
+            run_id=str(run_id),
+            skip_reason=skip_reason,
+        )
+
+    async def update_variant_failed(
+        self,
+        run_id: UUID,
+        error: str,
+    ) -> None:
+        """Update variant run as failed."""
+        query = """
+            UPDATE backtest_runs
+            SET status = 'failed',
+                error = $2,
+                completed_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, run_id, error)
+
+        logger.info(
+            "Updated variant run as failed",
+            run_id=str(run_id),
+            error=error,
+        )
+
 
 class TuneRepository:
     """Repository for backtest_tunes and backtest_tune_runs table operations."""
