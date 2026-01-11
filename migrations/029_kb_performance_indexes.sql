@@ -30,9 +30,9 @@ CREATE INDEX IF NOT EXISTS idx_backtest_runs_kb_created
 -- ============================================================================
 
 -- Covers: WHERE status = 'completed' AND kb_status IN (...)
--- Note: tune_runs don't have run_kind, they're always tune trials
+-- Note: tune_runs join through tune_id to get workspace_id
 CREATE INDEX IF NOT EXISTS idx_tune_runs_kb_composite
-    ON backtest_tune_runs(workspace_id, kb_status, status, created_at DESC)
+    ON backtest_tune_runs(tune_id, kb_status, status, created_at DESC)
     WHERE status = 'completed'
       AND kb_status IN ('candidate', 'promoted');
 
