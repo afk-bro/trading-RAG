@@ -23,6 +23,9 @@ from app.services.kb.regime import (
     compute_tags,
     compute_tags_with_evidence,
     DEFAULT_RULESET,
+    compute_regime_key,
+    compute_regime_fingerprint,
+    extract_regime_tags_for_attribution,
 )
 from app.services.kb.types import TagEvidence
 
@@ -817,14 +820,6 @@ class TestTagEvidence:
 # =============================================================================
 # Regime Key Computation Tests (Step 3)
 # =============================================================================
-
-
-from app.services.kb.regime import (
-    compute_regime_key,
-    compute_regime_fingerprint,
-    extract_regime_tags_for_attribution,
-    DEFAULT_RULESET_ID,
-)
 
 
 class TestRegimeKeyComputation:
