@@ -323,6 +323,102 @@ def _format_timestamp(ts: Any) -> str:
     return str(ts)
 
 
+def build_trial_doc_from_eligible_row(row: dict) -> Optional[TrialDoc]:
+    """
+    Build a TrialDoc from a kb_eligible_trials view row.
+
+    This factory handles both tune_run and test_variant sources,
+    normalizing the data into a consistent TrialDoc format.
+
+    Args:
+        row: Dict from kb_eligible_trials view
+
+    Returns:
+        TrialDoc or None if data is insufficient
+    """
+    source_type = row.get("source_type")
+    if source_type not in ("tune_run", "test_variant"):
+        return None
+
+    # Extract regime snapshots
+    regime_is_data = row.get("regime_is")
+    regime_oos_data = row.get("regime_oos")
+
+    regime_is = RegimeSnapshot.from_dict(regime_is_data) if regime_is_data else None
+    regime_oos = RegimeSnapshot.from_dict(regime_oos_data) if regime_oos_data else None
+
+    # Performance metrics
+    sharpe_is = row.get("sharpe_is")
+    sharpe_oos = row.get("sharpe_oos")
+    return_frac_oos = row.get("return_frac_oos")
+    max_dd_frac_oos = row.get("max_dd_frac_oos")
+    n_trades_oos = row.get("n_trades_oos")
+
+    # Has OOS if we have OOS metrics
+    has_oos = sharpe_oos is not None
+
+    # Compute overfit gap
+    overfit_gap = compute_overfit_gap(sharpe_is, sharpe_oos)
+
+    # Quality flags - assume valid if in eligible view
+    is_valid = True
+
+    # Compute warnings
+    warnings = compute_trial_warnings(
+        sharpe_is=sharpe_is,
+        sharpe_oos=sharpe_oos,
+        overfit_gap=overfit_gap,
+        n_trades_oos=n_trades_oos,
+        max_dd_frac_oos=max_dd_frac_oos,
+        is_valid=is_valid,
+        regime_is=regime_is,
+        regime_oos=regime_oos,
+        has_oos=has_oos,
+    )
+
+    # Identity - tune_run_id and tune_id vary by source
+    source_id = row.get("source_id")
+    group_id = row.get("group_id")
+
+    if source_type == "tune_run":
+        tune_run_id = source_id
+        tune_id = group_id
+    else:
+        # test_variant: source_id is backtest_run.id, group_id is run_plan_id
+        tune_run_id = source_id
+        tune_id = group_id  # Use run_plan_id as group
+
+    return TrialDoc(
+        schema_version=TRIAL_DOC_SCHEMA_VERSION,
+        doc_type=KB_TRIALS_DOC_TYPE,
+        tune_run_id=tune_run_id,
+        tune_id=tune_id,
+        workspace_id=row.get("workspace_id"),
+        dataset_id=None,  # Not in view, could be added
+        instrument=None,  # Not in view, could be added
+        timeframe=None,  # Not in view, could be added
+        strategy_name=row.get("strategy_name", ""),
+        params=row.get("params") or {},
+        sharpe_is=sharpe_is,
+        sharpe_oos=sharpe_oos,
+        return_frac_is=None,  # Not tracked for tune_runs in view
+        return_frac_oos=return_frac_oos,
+        max_dd_frac_is=None,  # Not tracked
+        max_dd_frac_oos=max_dd_frac_oos,
+        n_trades_is=None,  # Not tracked
+        n_trades_oos=n_trades_oos,
+        overfit_gap=overfit_gap,
+        regime_is=regime_is,
+        regime_oos=regime_oos,
+        has_oos=has_oos,
+        is_valid=is_valid,
+        warnings=warnings,
+        objective_type=row.get("objective_type", "sharpe"),
+        objective_score=row.get("objective_score"),
+        created_at=_format_timestamp(row.get("created_at")),
+    )
+
+
 # =============================================================================
 # Trial Summary (for responses)
 # =============================================================================

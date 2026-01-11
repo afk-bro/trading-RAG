@@ -21,6 +21,16 @@ from app.services.testing.models import (
     get_variant_namespace,
     TESTING_VARIANT_NAMESPACE,
 )
+from app.services.kb.candidacy import (
+    CandidacyConfig,
+    CandidacyDecision,
+    VariantMetricsForCandidacy,
+    is_candidate,
+)
+from app.services.kb.circuit_breaker import (
+    CandidacyCircuitBreaker,
+    BacktestBreakerAdapter,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -49,6 +59,7 @@ class RunOrchestrator:
         runner,
         run_plans_repo=None,
         backtest_repo=None,
+        candidacy_config: Optional[CandidacyConfig] = None,
     ):
         """Initialize orchestrator.
 
@@ -57,11 +68,21 @@ class RunOrchestrator:
             runner: StrategyRunner for evaluating strategies
             run_plans_repo: RunPlansRepository for plan persistence (optional)
             backtest_repo: BacktestRepository for variant persistence (optional)
+            candidacy_config: Configuration for KB candidacy gates (optional)
         """
         self._events_repo = events_repo
         self._runner = runner
         self._run_plans_repo = run_plans_repo
         self._backtest_repo = backtest_repo
+        self._candidacy_config = candidacy_config or CandidacyConfig(
+            # Disable regime requirement for test variants (not computed yet)
+            require_regime=False,
+        )
+        # Circuit breaker is initialized lazily when backtest_repo is available
+        self._circuit_breaker: Optional[CandidacyCircuitBreaker] = None
+        if backtest_repo:
+            adapter = BacktestBreakerAdapter(backtest_repo)
+            self._circuit_breaker = CandidacyCircuitBreaker(adapter)
 
     async def execute(
         self, run_plan: RunPlan, dataset_content: bytes
@@ -148,6 +169,13 @@ class RunOrchestrator:
                     # Persist variant result
                     if self._backtest_repo and run_id:
                         await self._persist_variant_result(run_id, result)
+                        # Evaluate and persist KB status for successful runs
+                        await self._evaluate_and_persist_kb_status(
+                            run_id=run_id,
+                            workspace_id=run_plan.workspace_id,
+                            result=result,
+                            variant=variant,
+                        )
 
                     log.info(
                         "variant_completed",
@@ -293,6 +321,92 @@ class RunOrchestrator:
                 equity_points=0,
                 trade_count=result.metrics.trade_count,
             )
+
+    async def _evaluate_and_persist_kb_status(
+        self,
+        run_id: UUID,
+        workspace_id: UUID,
+        result: RunResult,
+        variant: RunVariant,
+    ) -> None:
+        """Evaluate candidacy gates and persist KB status.
+
+        Called after variant completion for successful runs.
+        Determines if the variant should be auto-promoted to 'candidate' status.
+
+        Args:
+            run_id: The backtest_runs row ID
+            workspace_id: Workspace ID for circuit breaker
+            result: The completed RunResult
+            variant: The variant definition (for experiment type)
+        """
+        if not self._backtest_repo:
+            return
+
+        # Only evaluate successful runs with metrics
+        if result.status != RunResultStatus.success or not result.metrics:
+            return
+
+        # Determine experiment type from variant tags
+        experiment_type = "sweep"  # Default for test variants
+        if "ablation" in variant.tags:
+            experiment_type = "ablation"
+        elif "baseline" in variant.tags:
+            experiment_type = "sweep"  # baseline is still part of sweep
+        elif "manual" in variant.tags:
+            experiment_type = "manual"
+
+        # Build metrics for candidacy check
+        # Note: Test variants don't have IS/OOS split, so we use full metrics
+        # max_drawdown_pct is a percentage (e.g., 10.5), convert to fraction
+        candidacy_metrics = VariantMetricsForCandidacy(
+            n_trades_oos=result.metrics.trade_count,
+            max_dd_frac_oos=result.metrics.max_drawdown_pct / 100.0,
+            overfit_gap=None,  # No IS/OOS split in test variants
+            sharpe_oos=result.metrics.sharpe,
+        )
+
+        # Evaluate candidacy gates
+        decision = is_candidate(
+            metrics=candidacy_metrics,
+            regime_oos=None,  # Regime not computed for test variants yet
+            experiment_type=experiment_type,
+            config=self._candidacy_config,
+        )
+
+        kb_status = "excluded"
+        auto_candidate_gate = decision.reason
+        auto_candidate_breaker = None
+
+        if decision.eligible:
+            # Gates passed - check circuit breaker
+            if self._circuit_breaker:
+                allowed, trip_reason = await self._circuit_breaker.check(workspace_id)
+                if allowed:
+                    kb_status = "candidate"
+                else:
+                    kb_status = "excluded"
+                    auto_candidate_breaker = trip_reason
+            else:
+                # No circuit breaker configured - allow candidacy
+                kb_status = "candidate"
+
+        # Persist KB status
+        await self._backtest_repo.update_variant_kb_status(
+            run_id=run_id,
+            kb_status=kb_status,
+            auto_candidate_gate=auto_candidate_gate,
+            auto_candidate_breaker=auto_candidate_breaker,
+        )
+
+        logger.info(
+            "kb_status_evaluated",
+            run_id=str(run_id),
+            kb_status=kb_status,
+            gate=auto_candidate_gate,
+            breaker=auto_candidate_breaker,
+            experiment_type=experiment_type,
+        )
 
     def _build_plan_jsonb(self, run_plan: RunPlan, dataset_content: bytes) -> dict:
         """Build the plan JSONB structure for persistence.

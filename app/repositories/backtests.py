@@ -380,6 +380,171 @@ class BacktestRepository:
             error=error,
         )
 
+    async def update_variant_kb_status(
+        self,
+        run_id: UUID,
+        kb_status: str,
+        auto_candidate_gate: Optional[str] = None,
+        auto_candidate_breaker: Optional[str] = None,
+        regime_is: Optional[dict] = None,
+        regime_oos: Optional[dict] = None,
+        regime_schema_version: Optional[str] = None,
+    ) -> None:
+        """Update KB status columns for a variant run.
+
+        Called after candidacy evaluation to persist the gate/breaker decision.
+
+        Args:
+            run_id: The backtest_runs row ID
+            kb_status: Status value (excluded, candidate, promoted, rejected)
+            auto_candidate_gate: Gate decision reason from is_candidate()
+            auto_candidate_breaker: Circuit breaker decision if gate passed
+            regime_is: Regime snapshot from in-sample segment (JSONB)
+            regime_oos: Regime snapshot from out-of-sample segment (JSONB)
+            regime_schema_version: Version of regime schema used
+        """
+        query = """
+            UPDATE backtest_runs
+            SET kb_status = $2,
+                kb_status_changed_at = NOW(),
+                auto_candidate_gate = $3,
+                auto_candidate_breaker = $4,
+                regime_is = $5,
+                regime_oos = $6,
+                regime_schema_version = $7
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query,
+                run_id,
+                kb_status,
+                auto_candidate_gate,
+                auto_candidate_breaker,
+                json.dumps(regime_is) if regime_is else None,
+                json.dumps(regime_oos) if regime_oos else None,
+                regime_schema_version,
+            )
+
+        logger.info(
+            "Updated variant KB status",
+            run_id=str(run_id),
+            kb_status=kb_status,
+            gate=auto_candidate_gate,
+            breaker=auto_candidate_breaker,
+        )
+
+    async def get_recent_candidacy_decisions(
+        self,
+        workspace_id: UUID,
+        limit: int,
+    ) -> list[str]:
+        """Get recent kb_status values for successful test variant runs.
+
+        Used by circuit breaker to calculate candidacy rate.
+
+        Args:
+            workspace_id: Workspace ID
+            limit: Number of recent decisions to fetch
+
+        Returns:
+            List of kb_status values (most recent first)
+        """
+        query = """
+            SELECT kb_status
+            FROM backtest_runs
+            WHERE workspace_id = $1
+              AND run_kind = 'test_variant'
+              AND status = 'completed'
+              AND kb_status IS NOT NULL
+            ORDER BY completed_at DESC
+            LIMIT $2
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, workspace_id, limit)
+
+        return [row["kb_status"] for row in rows]
+
+    async def get_candidate_count_rolling_24h(self, workspace_id: UUID) -> int:
+        """Count test variants marked as candidate in the last 24 hours.
+
+        Used by circuit breaker to enforce daily cap.
+        """
+        query = """
+            SELECT COUNT(*)
+            FROM backtest_runs
+            WHERE workspace_id = $1
+              AND run_kind = 'test_variant'
+              AND kb_status = 'candidate'
+              AND kb_status_changed_at >= NOW() - INTERVAL '24 hours'
+        """
+
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(query, workspace_id)
+
+    async def get_breaker_state(self, workspace_id: UUID) -> dict:
+        """Get circuit breaker state for a workspace.
+
+        Returns dict with kb_auto_candidacy_* columns.
+        """
+        query = """
+            SELECT kb_auto_candidacy_state,
+                   kb_auto_candidacy_disabled_until,
+                   kb_auto_candidacy_trip_reason,
+                   kb_auto_candidacy_tripped_at
+            FROM workspaces
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, workspace_id)
+
+        if not row:
+            # Default state if workspace not found
+            return {
+                "kb_auto_candidacy_state": "enabled",
+                "kb_auto_candidacy_disabled_until": None,
+                "kb_auto_candidacy_trip_reason": None,
+                "kb_auto_candidacy_tripped_at": None,
+            }
+
+        return dict(row)
+
+    async def update_breaker_state(
+        self,
+        workspace_id: UUID,
+        state: str,
+        disabled_until: Optional[datetime],
+        trip_reason: Optional[str],
+    ) -> None:
+        """Update circuit breaker state for a workspace."""
+        query = """
+            UPDATE workspaces
+            SET kb_auto_candidacy_state = $2,
+                kb_auto_candidacy_disabled_until = $3,
+                kb_auto_candidacy_trip_reason = $4,
+                kb_auto_candidacy_tripped_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query,
+                workspace_id,
+                state,
+                disabled_until,
+                trip_reason,
+            )
+
+        logger.info(
+            "Updated breaker state",
+            workspace_id=str(workspace_id),
+            state=state,
+            trip_reason=trip_reason,
+        )
+
 
 class TuneRepository:
     """Repository for backtest_tunes and backtest_tune_runs table operations."""

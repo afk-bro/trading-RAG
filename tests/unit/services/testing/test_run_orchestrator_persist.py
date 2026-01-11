@@ -35,6 +35,11 @@ def mock_backtest_repo():
     repo.update_variant_completed = AsyncMock()
     repo.update_variant_skipped = AsyncMock()
     repo.update_variant_failed = AsyncMock()
+    # KB status methods for candidacy evaluation
+    repo.update_variant_kb_status = AsyncMock()
+    repo.get_breaker_state = AsyncMock(return_value={"kb_auto_candidacy_state": "enabled"})
+    repo.get_recent_candidacy_decisions = AsyncMock(return_value=[])
+    repo.get_candidate_count_rolling_24h = AsyncMock(return_value=0)
     return repo
 
 
