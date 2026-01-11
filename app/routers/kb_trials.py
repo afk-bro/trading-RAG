@@ -631,6 +631,14 @@ class TieredRecommendResponse(BaseModel):
     # Query context
     query_regime_key: Optional[str] = Field(None, description="Query regime key used")
 
+    # Confidence score (trust meter for UI)
+    confidence: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Trust score: 1.0 (exact), 0.7 (partial), 0.5 (distance), 0.3 (global)",
+    )
+
     # Timing
     duration_ms: float = Field(0.0, description="Total duration in ms")
 
@@ -1407,12 +1415,50 @@ async def recommend_tiered(
 
     duration_ms = (time_module.perf_counter() - start_time) * 1000
 
+    # Compute confidence score based on tier_used
+    confidence = _compute_tier_confidence(result.sample_context.tier_used.value)
+
+    # Get top candidate score for uplift analysis
+    top_candidate_score = candidates[0].best_oos_score if candidates else None
+
+    # Log event for analytics (fire-and-forget, don't block response)
+    try:
+        await _log_recommend_event(
+            pool=_db_pool,
+            workspace_id=request.workspace_id,
+            strategy_entity_id=request.strategy_entity_id,
+            query_regime_key=request.regime_key,
+            query_trend_tag=request.trend_tag,
+            query_vol_tag=request.vol_tag,
+            tier_used=result.sample_context.tier_used.value,
+            tiers_attempted=result.sample_context.tiers_attempted,
+            exact_count=result.sample_context.exact_count,
+            partial_trend_count=result.sample_context.partial_trend_count,
+            partial_vol_count=result.sample_context.partial_vol_count,
+            distance_count=result.sample_context.distance_count,
+            global_count=result.sample_context.global_count,
+            k=request.k,
+            min_samples=request.min_samples,
+            candidate_count=len(candidates),
+            top_candidate_score=top_candidate_score,
+            confidence=confidence,
+            duration_ms=duration_ms,
+        )
+    except Exception as e:
+        # Log but don't fail the request
+        logger.warning(
+            "recommend_event_log_failed",
+            request_id=request_id,
+            error=str(e),
+        )
+
     logger.info(
         "kb_recommend_tiered_complete",
         request_id=request_id,
         candidate_count=len(candidates),
         tier_used=result.sample_context.tier_used.value,
         tiers_attempted=result.sample_context.tiers_attempted,
+        confidence=confidence,
         duration_ms=round(duration_ms, 1),
     )
 
@@ -1421,6 +1467,7 @@ async def recommend_tiered(
         candidates=candidates,
         sample_context=sample_context,
         query_regime_key=result.query_regime_key,
+        confidence=confidence,
         duration_ms=round(duration_ms, 1),
     )
 
@@ -1700,3 +1747,95 @@ def _parse_ohlcv_file(content: bytes, filename: str) -> list[dict]:
 
     else:
         raise ValueError(f"Unsupported file format: {filename}. Use .json or .csv")
+
+
+# =============================================================================
+# Analytics Helpers
+# =============================================================================
+
+# Confidence scores by tier (trust meter for UI)
+TIER_CONFIDENCE = {
+    "exact": 1.0,
+    "partial_trend": 0.7,
+    "partial_vol": 0.7,
+    "distance": 0.5,
+    "global_best": 0.3,
+}
+
+
+def _compute_tier_confidence(tier_used: str) -> float:
+    """Compute confidence score from tier_used.
+
+    Returns:
+        1.0 for exact match (high trust)
+        0.7 for partial match (good trust)
+        0.5 for distance match (moderate trust)
+        0.3 for global fallback (low trust)
+    """
+    return TIER_CONFIDENCE.get(tier_used, 0.3)
+
+
+async def _log_recommend_event(
+    pool,
+    workspace_id: UUID,
+    strategy_entity_id: Optional[UUID],
+    query_regime_key: Optional[str],
+    query_trend_tag: Optional[str],
+    query_vol_tag: Optional[str],
+    tier_used: str,
+    tiers_attempted: list[str],
+    exact_count: int,
+    partial_trend_count: int,
+    partial_vol_count: int,
+    distance_count: int,
+    global_count: int,
+    k: int,
+    min_samples: int,
+    candidate_count: int,
+    top_candidate_score: Optional[float],
+    confidence: float,
+    duration_ms: float,
+) -> None:
+    """Log recommend event to analytics table.
+
+    Fire-and-forget: caller should catch exceptions.
+    """
+    import json
+
+    query = """
+        INSERT INTO recommend_events (
+            workspace_id, strategy_entity_id,
+            query_regime_key, query_trend_tag, query_vol_tag,
+            tier_used, tiers_attempted,
+            exact_count, partial_trend_count, partial_vol_count,
+            distance_count, global_count,
+            k, min_samples,
+            candidate_count, top_candidate_score, confidence,
+            duration_ms
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+        )
+    """
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            query,
+            workspace_id,
+            strategy_entity_id,
+            query_regime_key,
+            query_trend_tag,
+            query_vol_tag,
+            tier_used,
+            json.dumps(tiers_attempted),
+            exact_count,
+            partial_trend_count,
+            partial_vol_count,
+            distance_count,
+            global_count,
+            k,
+            min_samples,
+            candidate_count,
+            top_candidate_score,
+            confidence,
+            duration_ms,
+        )

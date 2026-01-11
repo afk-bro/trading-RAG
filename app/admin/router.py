@@ -45,9 +45,13 @@ from pydantic import BaseModel  # noqa: E402
 from app.config import Settings, get_settings  # noqa: E402
 from app.deps.security import require_admin_token  # noqa: E402
 from app.schemas import KBEntityType, KBClaimType  # noqa: E402
+from app.admin import analytics as analytics_router  # noqa: E402
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
+
+# Include analytics sub-router
+router.include_router(analytics_router.router)
 
 # Setup Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
@@ -61,6 +65,8 @@ def set_db_pool(pool):
     """Set the database pool for admin routes."""
     global _db_pool
     _db_pool = pool
+    # Also set pool for analytics router
+    analytics_router.set_db_pool(pool)
 
 
 def _get_kb_repo():
