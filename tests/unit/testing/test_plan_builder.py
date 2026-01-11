@@ -1,6 +1,5 @@
 """Unit tests for PlanBuilder."""
 
-
 from app.services.testing.plan_builder import PlanBuilder
 
 

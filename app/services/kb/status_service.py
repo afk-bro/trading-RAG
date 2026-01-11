@@ -93,7 +93,6 @@ class TrialNotFoundError(Exception):
     """Raised when a trial is not found."""
 
 
-
 class KBStatusRepository(Protocol):
     """Protocol for KB status persistence operations.
 
