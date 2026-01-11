@@ -256,7 +256,7 @@ jobs:
 
       - name: Run smoke tests
         run: |
-          SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -v --tb=short -s
+          SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -v --tb=short -s -m smoke
         env:
           SMOKE_TEST_TIMEOUT: "30"
           SMOKE_OUTPUT_DIR: "/tmp/smoke-results"

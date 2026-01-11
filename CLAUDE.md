@@ -431,21 +431,30 @@ BUILD_TIME=2025-01-09T12:00:00Z # Set by CI/CD
 | Category | Location | Runs in CI | Requirements |
 |----------|----------|------------|--------------|
 | Unit | `tests/unit/` | Always | None (all mocked) |
+| Contract | `tests/contract/` | Always | None (all mocked) |
+| Golden | `tests/golden/` | Always | None (deterministic snapshots) |
 | Integration (mocked) | `tests/integration/` | Always | Qdrant container |
 | Integration (full) | `tests/integration/` | Nightly/manual | Qdrant + real services |
 | Smoke | `tests/smoke/` | Nightly/manual | Full running service |
+| E2E | `tests/e2e/` | Nightly/manual | Server + Playwright browser |
 
 ### Test Markers
 
 ```python
 @pytest.mark.requires_db      # Needs real DB/services - skipped in normal CI
 @pytest.mark.integration      # Integration test (informational)
+@pytest.mark.e2e              # E2E browser test - auto-skipped unless explicit
+@pytest.mark.smoke            # Smoke test - auto-skipped unless explicit
+@pytest.mark.slow             # Slow test - can deselect with -m "not slow"
 ```
 
 ### Running Tests Locally
 
 ```bash
-# Unit tests (fast, no dependencies)
+# All tests (e2e/smoke auto-skipped)
+pytest tests/
+
+# Unit tests only (fast, no dependencies)
 pytest tests/unit/ -v
 
 # Integration tests without DB (needs Qdrant running)
@@ -457,6 +466,13 @@ pytest tests/integration/ -v
 
 # Single test file
 pytest tests/unit/test_chunker.py -v
+
+# E2E tests (requires running server + browser)
+# Start server: uvicorn app.main:app --port 8000
+pytest tests/e2e/ -m e2e -v
+
+# Smoke tests (requires running server)
+SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -m smoke -v
 ```
 
 ### Required Environment Variables for Tests
