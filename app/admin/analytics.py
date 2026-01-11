@@ -191,6 +191,14 @@ class RegimeBacklogRequest(BaseModel):
     strategy_entity_id: Optional[UUID] = None
     min_samples: int = Field(5, ge=1, le=100, description="Target sample threshold")
     max_items: int = Field(10, ge=1, le=50, description="Max regimes to return")
+    # Optional filters for focused backlog generation
+    only_regimes: Optional[list[str]] = Field(
+        None, description="Filter to specific regime_keys (e.g., from drift drivers)"
+    )
+    focus: Optional[str] = Field(
+        None,
+        description="Focus mode: 'drift_drivers' to auto-select top drift-driving regimes",
+    )
 
 
 class RegimeBacklogResponse(BaseModel):
@@ -242,6 +250,48 @@ class RegimeDriftResponse(BaseModel):
     series: list[DriftBucketItem] = Field(default_factory=list)
 
 
+class TierDistribution(BaseModel):
+    """Distribution of tier usage for a regime."""
+
+    exact: int = Field(0, description="Count using exact tier")
+    partial_trend: int = Field(0, description="Count using partial_trend tier")
+    partial_vol: int = Field(0, description="Count using partial_vol tier")
+    distance: int = Field(0, description="Count using distance tier")
+    global_best: int = Field(0, description="Count using global_best tier")
+
+
+class DriftDriverItem(BaseModel):
+    """A regime driving non-exact fallback."""
+
+    regime_key: str
+    trend_tag: Optional[str] = None
+    vol_tag: Optional[str] = None
+    # Drift metrics
+    total_requests: int = Field(..., description="Total recommendations for this regime")
+    non_exact_count: int = Field(..., description="Recommendations not using exact tier")
+    non_exact_pct: float = Field(..., description="% not using exact tier")
+    # Week-over-week change
+    wow_change: Optional[float] = Field(
+        None, description="Week-over-week change in non_exact_pct (pp)"
+    )
+    # Tier distribution
+    tier_distribution: TierDistribution
+    # Coverage gap (joined from backtest_tunes)
+    current_tunes: int = Field(0, description="Current tune count for this regime")
+    coverage_gap: int = Field(0, description="Tunes needed to reach min_samples")
+
+
+class DriftDriversResponse(BaseModel):
+    """Response from drift-drivers endpoint."""
+
+    workspace_id: str
+    strategy_entity_id: Optional[str] = None
+    period_days: int = Field(7, description="Analysis period in days")
+    min_samples: int = Field(5, description="Target sample threshold for coverage gap")
+    total_non_exact: int = Field(0, description="Total non-exact recommendations")
+    drivers: list[DriftDriverItem] = Field(default_factory=list)
+
+
 # =============================================================================
 # HTML Page
 # =============================================================================
@@ -271,6 +321,53 @@ async def analytics_regimes_page(
             "admin_token": admin_token,
         },
     )
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+async def _get_drift_driver_regimes(
+    workspace_id: UUID,
+    strategy_entity_id: Optional[UUID] = None,
+    limit: int = 5,
+    period_days: int = 7,
+) -> list[str]:
+    """Get top drift-driving regime keys for backlog focus mode."""
+    if _db_pool is None:
+        return []
+
+    since = datetime.utcnow() - timedelta(days=period_days)
+
+    conditions = ["workspace_id = $1", "created_at >= $2", "query_regime_key IS NOT NULL"]
+    params: list = [workspace_id, since]
+    param_idx = 3
+
+    if strategy_entity_id:
+        conditions.append(f"strategy_entity_id = ${param_idx}")
+        params.append(strategy_entity_id)
+        param_idx += 1
+
+    where_clause = " AND ".join(conditions)
+
+    query = f"""
+        SELECT
+            query_regime_key,
+            SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact_count
+        FROM recommend_events
+        WHERE {where_clause}
+        GROUP BY query_regime_key
+        HAVING SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) > 0
+        ORDER BY non_exact_count DESC
+        LIMIT ${param_idx}
+    """
+    params.append(limit)
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    return [row["query_regime_key"] for row in rows]
 
 
 # =============================================================================
@@ -755,6 +852,17 @@ async def generate_regime_backlog(
             detail="Database connection not available",
         )
 
+    # Handle focus mode: auto-select drift-driving regimes
+    only_regimes = request.only_regimes
+    if request.focus == "drift_drivers" and not only_regimes:
+        # Fetch top drift drivers and use their regime keys
+        drift_drivers = await _get_drift_driver_regimes(
+            workspace_id=request.workspace_id,
+            strategy_entity_id=request.strategy_entity_id,
+            limit=request.max_items,
+        )
+        only_regimes = drift_drivers
+
     # Build query conditions
     conditions = ["t.workspace_id = $1", "t.regime_key IS NOT NULL"]
     params: list = [request.workspace_id]
@@ -764,6 +872,13 @@ async def generate_regime_backlog(
         conditions.append(f"t.strategy_entity_id = ${param_idx}")
         params.append(request.strategy_entity_id)
         param_idx += 1
+
+    # Add only_regimes filter if specified
+    if only_regimes:
+        placeholders = ", ".join(f"${param_idx + i}" for i in range(len(only_regimes)))
+        conditions.append(f"t.regime_key IN ({placeholders})")
+        params.extend(only_regimes)
+        param_idx += len(only_regimes)
 
     where_clause = " AND ".join(conditions)
 
@@ -778,9 +893,9 @@ async def generate_regime_backlog(
         WHERE {where_clause}
           AND t.status = 'completed'
         GROUP BY t.regime_key, t.trend_tag, t.vol_tag
-        HAVING COUNT(DISTINCT t.id) < ${ param_idx }
+        HAVING COUNT(DISTINCT t.id) < ${param_idx}
         ORDER BY COUNT(DISTINCT t.id) ASC
-        LIMIT ${ param_idx + 1 }
+        LIMIT ${param_idx + 1}
     """
     params.extend([request.min_samples, request.max_items])
 
@@ -1013,4 +1128,190 @@ async def get_regime_drift(
         drift_trend=drift_trend,
         avg_daily_churn=round(avg_daily_churn, 2),
         series=series,
+    )
+
+
+@router.get(
+    "/drift-drivers",
+    response_model=DriftDriversResponse,
+    summary="Get top regimes driving non-exact fallback",
+    description="""
+Identify which regimes are driving drift (non-exact tier usage).
+
+Returns top regimes ranked by:
+- non_exact_count: absolute count of fallbacks
+- non_exact_pct: percentage of requests falling back
+- wow_change: week-over-week change in fallback rate
+
+For each regime, includes:
+- tier_distribution: breakdown of which tiers were used
+- coverage_gap: how many more tunes needed (from backtest_tunes)
+
+Use this to prioritize tuning efforts on the highest-impact regimes.
+""",
+)
+async def get_drift_drivers(
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
+    period_days: int = Query(7, ge=1, le=90, description="Analysis period (default 7)"),
+    min_samples: int = Query(5, ge=1, le=100, description="Target threshold for gap"),
+    limit: int = Query(5, ge=1, le=20, description="Max regimes to return"),
+    _: bool = Depends(require_admin_token),
+) -> DriftDriversResponse:
+    """Get top regimes driving non-exact fallback."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    since = datetime.utcnow() - timedelta(days=period_days)
+    # For WoW comparison, we need prior week data
+    prior_week_start = since - timedelta(days=7)
+
+    # Build query conditions
+    conditions = ["workspace_id = $1", "created_at >= $2"]
+    params: list = [workspace_id, since]
+    param_idx = 3
+
+    if strategy_entity_id:
+        conditions.append(f"strategy_entity_id = ${param_idx}")
+        params.append(strategy_entity_id)
+        param_idx += 1
+
+    where_clause = " AND ".join(conditions)
+
+    # Build prior week conditions (for WoW)
+    prior_conditions = ["workspace_id = $1", "created_at >= $2", "created_at < $3"]
+    prior_params: list = [workspace_id, prior_week_start, since]
+    prior_param_idx = 4
+
+    if strategy_entity_id:
+        prior_conditions.append(f"strategy_entity_id = ${prior_param_idx}")
+        prior_params.append(strategy_entity_id)
+        prior_param_idx += 1
+
+    prior_where_clause = " AND ".join(prior_conditions)
+
+    # Query per-regime drift stats with tier distribution
+    query = f"""
+        WITH regime_stats AS (
+            SELECT
+                query_regime_key,
+                query_trend_tag,
+                query_vol_tag,
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact_count,
+                SUM(CASE WHEN tier_used = 'exact' THEN 1 ELSE 0 END) as exact_count,
+                SUM(CASE WHEN tier_used = 'partial_trend' THEN 1 ELSE 0 END) as partial_trend_count,
+                SUM(CASE WHEN tier_used = 'partial_vol' THEN 1 ELSE 0 END) as partial_vol_count,
+                SUM(CASE WHEN tier_used = 'distance' THEN 1 ELSE 0 END) as distance_count,
+                SUM(CASE WHEN tier_used = 'global_best' THEN 1 ELSE 0 END) as global_count
+            FROM recommend_events
+            WHERE {where_clause}
+              AND query_regime_key IS NOT NULL
+            GROUP BY query_regime_key, query_trend_tag, query_vol_tag
+        ),
+        coverage AS (
+            SELECT
+                regime_key,
+                COUNT(DISTINCT id) as n_tunes
+            FROM backtest_tunes
+            WHERE workspace_id = $1
+              AND regime_key IS NOT NULL
+              AND status = 'completed'
+            GROUP BY regime_key
+        )
+        SELECT
+            rs.query_regime_key as regime_key,
+            rs.query_trend_tag as trend_tag,
+            rs.query_vol_tag as vol_tag,
+            rs.total_requests,
+            rs.non_exact_count,
+            rs.exact_count,
+            rs.partial_trend_count,
+            rs.partial_vol_count,
+            rs.distance_count,
+            rs.global_count,
+            COALESCE(c.n_tunes, 0) as current_tunes
+        FROM regime_stats rs
+        LEFT JOIN coverage c ON c.regime_key = rs.query_regime_key
+        WHERE rs.non_exact_count > 0
+        ORDER BY rs.non_exact_count DESC
+        LIMIT ${param_idx}
+    """
+    params.append(limit)
+
+    # Query prior week stats for WoW comparison
+    prior_query = f"""
+        SELECT
+            query_regime_key,
+            COUNT(*) as total,
+            SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact
+        FROM recommend_events
+        WHERE {prior_where_clause}
+          AND query_regime_key IS NOT NULL
+        GROUP BY query_regime_key
+    """
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+        prior_rows = await conn.fetch(prior_query, *prior_params)
+
+    # Build prior week lookup for WoW calculation
+    prior_lookup = {}
+    for row in prior_rows:
+        total = row["total"]
+        non_exact = row["non_exact"]
+        pct = (non_exact / total * 100) if total > 0 else 0.0
+        prior_lookup[row["query_regime_key"]] = pct
+
+    # Build response
+    drivers = []
+    total_non_exact = 0
+
+    for row in rows:
+        total = row["total_requests"]
+        non_exact = row["non_exact_count"]
+        non_exact_pct = (non_exact / total * 100) if total > 0 else 0.0
+        total_non_exact += non_exact
+
+        # Calculate WoW change
+        wow_change = None
+        prior_pct = prior_lookup.get(row["regime_key"])
+        if prior_pct is not None:
+            wow_change = round(non_exact_pct - prior_pct, 1)
+
+        # Calculate coverage gap
+        current_tunes = row["current_tunes"]
+        coverage_gap = max(0, min_samples - current_tunes)
+
+        drivers.append(
+            DriftDriverItem(
+                regime_key=row["regime_key"],
+                trend_tag=row["trend_tag"],
+                vol_tag=row["vol_tag"],
+                total_requests=total,
+                non_exact_count=non_exact,
+                non_exact_pct=round(non_exact_pct, 1),
+                wow_change=wow_change,
+                tier_distribution=TierDistribution(
+                    exact=row["exact_count"],
+                    partial_trend=row["partial_trend_count"],
+                    partial_vol=row["partial_vol_count"],
+                    distance=row["distance_count"],
+                    global_best=row["global_count"],
+                ),
+                current_tunes=current_tunes,
+                coverage_gap=coverage_gap,
+            )
+        )
+
+    return DriftDriversResponse(
+        workspace_id=str(workspace_id),
+        strategy_entity_id=str(strategy_entity_id) if strategy_entity_id else None,
+        period_days=period_days,
+        min_samples=min_samples,
+        total_non_exact=total_non_exact,
+        drivers=drivers,
     )

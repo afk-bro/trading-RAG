@@ -691,6 +691,170 @@
         font-size: 11px;
         color: var(--text-muted);
     }
+
+    /* Drift Drivers Table */
+    .drift-drivers-section {
+        margin-top: 16px;
+        border-top: 1px solid var(--border);
+        padding-top: 16px;
+    }
+
+    .drift-drivers-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .drift-drivers-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .btn-sm {
+        padding: 4px 12px;
+        font-size: 12px;
+    }
+
+    .drift-drivers-table {
+        width: 100%;
+        font-size: 12px;
+        border-collapse: collapse;
+    }
+
+    .drift-drivers-table th {
+        text-align: left;
+        padding: 6px 8px;
+        color: var(--text-muted);
+        font-weight: 500;
+        font-size: 11px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .drift-drivers-table td {
+        padding: 8px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .drift-drivers-table tr:hover {
+        background: rgba(56, 139, 253, 0.05);
+    }
+
+    .loading-cell {
+        text-align: center;
+        color: var(--text-muted);
+        padding: 16px !important;
+    }
+
+    .regime-key-cell {
+        font-family: monospace;
+        font-size: 11px;
+    }
+
+    .wow-positive {
+        color: var(--danger);
+    }
+
+    .wow-negative {
+        color: var(--success);
+    }
+
+    .wow-neutral {
+        color: var(--text-muted);
+    }
+
+    .tier-dist {
+        display: flex;
+        gap: 2px;
+        height: 12px;
+    }
+
+    .tier-dist-bar {
+        height: 100%;
+        border-radius: 2px;
+    }
+
+    .tier-dist-bar.exact { background: var(--success); }
+    .tier-dist-bar.partial { background: var(--info); }
+    .tier-dist-bar.distance { background: var(--warning); }
+    .tier-dist-bar.global { background: var(--danger); }
+
+    .gap-badge {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .gap-high {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+
+    .gap-medium {
+        background: rgba(210, 153, 34, 0.2);
+        color: var(--warning);
+    }
+
+    .gap-low {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+
+    .gap-none {
+        background: rgba(139, 148, 158, 0.2);
+        color: var(--text-muted);
+    }
+
+    /* Focused Backlog Section */
+    .drift-backlog-section {
+        margin-top: 16px;
+        border-top: 1px solid var(--border);
+        padding-top: 16px;
+    }
+
+    .drift-backlog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .drift-backlog-item {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 8px;
+    }
+
+    .drift-backlog-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .drift-backlog-regime {
+        font-family: monospace;
+        font-weight: 600;
+    }
+
+    .drift-backlog-actions {
+        display: flex;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .no-drivers {
+        text-align: center;
+        padding: 16px;
+        color: var(--text-muted);
+    }
 </style>
 
 <div class="page-header">
@@ -884,6 +1048,42 @@
         <span><span style="display:inline-block;width:10px;height:10px;background:var(--warning);border-radius:2px;"></span> 20-50% fallback</span>
         <span><span style="display:inline-block;width:10px;height:10px;background:var(--danger);border-radius:2px;"></span> &gt;50% fallback</span>
     </div>
+
+    <!-- Drift Drivers Table -->
+    <div class="drift-drivers-section">
+        <div class="drift-drivers-header">
+            <span class="drift-drivers-title">Top Drift Drivers (7d)</span>
+            <button class="btn btn-sm" id="generateDriftPlanBtn" disabled>
+                Generate Tuning Plan
+            </button>
+        </div>
+        <table class="drift-drivers-table" id="driftDriversTable">
+            <thead>
+                <tr>
+                    <th>Regime</th>
+                    <th>Requests</th>
+                    <th>Non-Exact</th>
+                    <th>WoW</th>
+                    <th>Gap</th>
+                    <th>Tier Distribution</th>
+                </tr>
+            </thead>
+            <tbody id="driftDriversBody">
+                <tr>
+                    <td colspan="6" class="loading-cell">Loading drift drivers...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Focused Backlog (shown after generating plan for drift drivers) -->
+    <div class="drift-backlog-section" id="driftBacklogSection" style="display: none;">
+        <div class="drift-backlog-header">
+            <span class="drift-drivers-title">Focused Tuning Plan</span>
+            <button class="btn btn-secondary btn-sm" id="closeDriftBacklogBtn">Close</button>
+        </div>
+        <div id="driftBacklogItems"></div>
+    </div>
 </div>
 
 <!-- Coverage Table -->
@@ -927,6 +1127,7 @@
     let coverageData = null;
     let upliftData = null;
     let driftData = null;
+    let driftDriversData = null;
     let currentTierView = 'pct';
     let currentTimeMode = 'totals';  // 'totals' or 'timeseries'
     let currentSort = { column: 'coverage_gap', direction: 'desc' };
@@ -966,12 +1167,13 @@
         const params = getFilterParams();
 
         try {
-            // Fetch all endpoints in parallel (always get totals + drift + optionally time-series)
+            // Fetch all endpoints in parallel (always get totals + drift + drift drivers + optionally time-series)
             const fetches = [
                 fetchWithAuth(`/admin/analytics/tier-usage?${params}`),
                 fetchWithAuth(`/admin/analytics/regime-coverage?${params}`),
                 fetchWithAuth(`/admin/analytics/uplift?${params}`),
-                fetchWithAuth(`/admin/analytics/regime-drift?${params}`)
+                fetchWithAuth(`/admin/analytics/regime-drift?${params}`),
+                fetchWithAuth(`/admin/analytics/drift-drivers?${params}&period_days=7&limit=5`)
             ];
 
             // Also fetch time-series if in that mode
@@ -985,7 +1187,8 @@
             coverageData = results[1];
             upliftData = results[2];
             driftData = results[3];
-            tierTimeSeriesData = results[4] || null;
+            driftDriversData = results[4];
+            tierTimeSeriesData = results[5] || null;
 
             renderAll();
             updateLastUpdated();
@@ -1026,6 +1229,7 @@
         renderConfidenceChart();
         renderInsightCards();
         renderDriftPanel();
+        renderDriftDrivers();
         renderCoverageTable();
     }
 
@@ -1515,6 +1719,151 @@
         chartLabels.innerHTML = labelsHtml;
     }
 
+    // Drift Drivers table
+    function renderDriftDrivers() {
+        const tbody = document.getElementById('driftDriversBody');
+        const generateBtn = document.getElementById('generateDriftPlanBtn');
+
+        if (!driftDriversData?.drivers?.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="no-drivers">No drift drivers detected (all requests using exact tier)</td></tr>';
+            generateBtn.disabled = true;
+            return;
+        }
+
+        generateBtn.disabled = false;
+        const drivers = driftDriversData.drivers;
+
+        tbody.innerHTML = drivers.map(driver => {
+            // WoW change styling
+            let wowClass = 'wow-neutral';
+            let wowText = '-';
+            if (driver.wow_change !== null) {
+                if (driver.wow_change > 0) {
+                    wowClass = 'wow-positive';
+                    wowText = `+${driver.wow_change.toFixed(1)}pp`;
+                } else if (driver.wow_change < 0) {
+                    wowClass = 'wow-negative';
+                    wowText = `${driver.wow_change.toFixed(1)}pp`;
+                } else {
+                    wowText = '0pp';
+                }
+            }
+
+            // Gap badge
+            let gapClass = 'gap-none';
+            let gapText = '-';
+            if (driver.coverage_gap > 0) {
+                if (driver.coverage_gap >= 3) {
+                    gapClass = 'gap-high';
+                } else if (driver.coverage_gap >= 2) {
+                    gapClass = 'gap-medium';
+                } else {
+                    gapClass = 'gap-low';
+                }
+                gapText = `-${driver.coverage_gap}`;
+            }
+
+            // Tier distribution bar
+            const td = driver.tier_distribution;
+            const total = td.exact + td.partial_trend + td.partial_vol + td.distance + td.global_best;
+            const tierDist = total > 0 ? `
+                <div class="tier-dist" style="width: 100px;">
+                    ${td.exact > 0 ? `<div class="tier-dist-bar exact" style="width: ${td.exact/total*100}%" title="Exact: ${td.exact}"></div>` : ''}
+                    ${td.partial_trend + td.partial_vol > 0 ? `<div class="tier-dist-bar partial" style="width: ${(td.partial_trend + td.partial_vol)/total*100}%" title="Partial: ${td.partial_trend + td.partial_vol}"></div>` : ''}
+                    ${td.distance > 0 ? `<div class="tier-dist-bar distance" style="width: ${td.distance/total*100}%" title="Distance: ${td.distance}"></div>` : ''}
+                    ${td.global_best > 0 ? `<div class="tier-dist-bar global" style="width: ${td.global_best/total*100}%" title="Global: ${td.global_best}"></div>` : ''}
+                </div>
+            ` : '-';
+
+            return `
+                <tr>
+                    <td class="regime-key-cell" title="${driver.regime_key}">${truncate(driver.regime_key, 25)}</td>
+                    <td>${driver.total_requests}</td>
+                    <td>${driver.non_exact_count} (${driver.non_exact_pct.toFixed(0)}%)</td>
+                    <td class="${wowClass}">${wowText}</td>
+                    <td><span class="gap-badge ${gapClass}">${gapText}</span></td>
+                    <td>${tierDist}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // Generate focused backlog for drift drivers
+    async function generateDriftPlan() {
+        const btn = document.getElementById('generateDriftPlanBtn');
+        const backlogSection = document.getElementById('driftBacklogSection');
+        const backlogItems = document.getElementById('driftBacklogItems');
+
+        if (!driftDriversData?.drivers?.length) return;
+
+        btn.disabled = true;
+        btn.textContent = 'Generating...';
+
+        try {
+            const regimeKeys = driftDriversData.drivers.map(d => d.regime_key);
+            const workspaceId = document.getElementById('workspaceSelect').value || '{{ workspace_id }}';
+            const minSamples = parseInt(document.getElementById('minSamplesInput').value) || 5;
+
+            const response = await fetch('/admin/analytics/regime-backlog', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-Token': adminToken
+                },
+                body: JSON.stringify({
+                    workspace_id: workspaceId,
+                    min_samples: minSamples,
+                    max_items: 10,
+                    only_regimes: regimeKeys
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const backlog = await response.json();
+
+            if (!backlog.regimes?.length) {
+                backlogItems.innerHTML = '<div class="no-drivers">All drift-driving regimes have sufficient coverage!</div>';
+            } else {
+                backlogItems.innerHTML = backlog.regimes.map(regime => `
+                    <div class="drift-backlog-item">
+                        <div class="drift-backlog-item-header">
+                            <span class="drift-backlog-regime">${regime.regime_key}</span>
+                            <span class="badge badge-${regime.suggested_actions.priority === 'high' ? 'rejected' : regime.suggested_actions.priority === 'medium' ? 'weak' : 'pending'}">
+                                ${regime.suggested_actions.priority}
+                            </span>
+                        </div>
+                        <div class="drift-backlog-actions">
+                            <span>Need: ${regime.missing_samples} more tunes</span>
+                            <span>|</span>
+                            <span>Current: ${regime.current_tunes}</span>
+                            <span>|</span>
+                            <span>Trend: ${regime.trend_tag || '-'}</span>
+                            <span>|</span>
+                            <span>Vol: ${regime.vol_tag || '-'}</span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            backlogSection.style.display = 'block';
+
+        } catch (error) {
+            console.error('Failed to generate drift plan:', error);
+            backlogItems.innerHTML = `<div class="no-drivers" style="color: var(--danger);">Error: ${error.message}</div>`;
+            backlogSection.style.display = 'block';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Generate Tuning Plan';
+        }
+    }
+
+    function closeDriftBacklog() {
+        document.getElementById('driftBacklogSection').style.display = 'none';
+    }
+
     // Coverage table
     function renderCoverageTable() {
         const tbody = document.getElementById('coverageTableBody');
@@ -1735,6 +2084,10 @@
         // Set workspace in dropdown
         const wsSelect = document.getElementById('workspaceSelect');
         wsSelect.innerHTML = `<option value="${workspaceId}" selected>${workspaceId}</option>`;
+
+        // Wire up drift drivers buttons
+        document.getElementById('generateDriftPlanBtn').addEventListener('click', generateDriftPlan);
+        document.getElementById('closeDriftBacklogBtn').addEventListener('click', closeDriftBacklog);
 
         // Load data
         loadAllData();
