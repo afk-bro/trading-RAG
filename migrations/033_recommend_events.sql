@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS recommend_events (
 
     -- Request context
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    strategy_entity_id UUID REFERENCES strategy_entities(id) ON DELETE SET NULL,
+    strategy_entity_id UUID REFERENCES kb_entities(id) ON DELETE SET NULL,
 
     -- Query regime context
     query_regime_key TEXT,
