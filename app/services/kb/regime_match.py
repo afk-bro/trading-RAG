@@ -39,6 +39,16 @@ class RegimeMatchTier(str, Enum):
 
 
 @dataclass
+class DistanceFeatureDelta:
+    """A feature's contribution to distance score."""
+
+    name: str  # Feature name (e.g., "bb_width_pct")
+    query_value: float  # Value in query snapshot
+    candidate_value: float  # Value in candidate snapshot
+    delta: float  # Absolute difference
+
+
+@dataclass
 class MatchDetail:
     """Details about how a candidate matched.
 
@@ -54,9 +64,33 @@ class MatchDetail:
     # For distance matches: distance metrics
     distance_score: Optional[float] = None  # Euclidean distance
     distance_rank: Optional[int] = None  # Rank among distance candidates
+    distance_method: Optional[str] = None  # "euclidean" | "cosine" | "weighted"
+    distance_features_version: Optional[str] = None  # e.g., "regime_v1"
+    distance_top_features: Optional[list[DistanceFeatureDelta]] = (
+        None  # Top contributing features
+    )
 
     # For all: contributing features (optional, for explainability)
     contributing_features: Optional[list[str]] = None
+
+
+@dataclass
+class TierCaps:
+    """Per-tier caps to avoid any single tier flooding the results.
+
+    Keeps recommendations diverse and stable.
+    """
+
+    max_partial_trend: int = 10
+    max_partial_vol: int = 10
+    max_distance: int = 20
+
+
+# Default tier caps
+DEFAULT_TIER_CAPS = TierCaps()
+
+# Distance feature version for reproducibility
+DISTANCE_FEATURES_VERSION = "regime_v1"
 
 
 @dataclass
@@ -78,6 +112,9 @@ class SampleContext:
     # Thresholds used
     min_samples: int = 5
     k: int = 20
+
+    # Per-tier caps applied
+    tier_caps: Optional[TierCaps] = None
 
     # Why we fell back (if applicable)
     fallback_reason: Optional[str] = None
@@ -176,6 +213,51 @@ def compute_regime_distance(
     return math.sqrt(sum_sq)
 
 
+def compute_regime_distance_with_features(
+    query_features: dict[str, float],
+    candidate_features: dict[str, float],
+    top_n: int = 3,
+) -> tuple[float, list[DistanceFeatureDelta]]:
+    """Compute distance and return top contributing features.
+
+    Args:
+        query_features: Query regime features
+        candidate_features: Candidate regime features
+        top_n: Number of top contributing features to return
+
+    Returns:
+        Tuple of (distance, list of top feature deltas sorted by |delta| desc)
+    """
+    common_features = set(query_features.keys()) & set(candidate_features.keys())
+    if not common_features:
+        return float("inf"), []
+
+    feature_deltas: list[DistanceFeatureDelta] = []
+    sum_sq = 0.0
+
+    for feat in common_features:
+        q_val = query_features[feat]
+        c_val = candidate_features[feat]
+        diff = q_val - c_val
+        sum_sq += diff * diff
+        feature_deltas.append(
+            DistanceFeatureDelta(
+                name=feat,
+                query_value=q_val,
+                candidate_value=c_val,
+                delta=abs(diff),
+            )
+        )
+
+    distance = math.sqrt(sum_sq)
+
+    # Sort by delta descending, take top N
+    feature_deltas.sort(key=lambda x: x.delta, reverse=True)
+    top_features = feature_deltas[:top_n]
+
+    return distance, top_features
+
+
 # =============================================================================
 # Tiered Matching Implementation
 # =============================================================================
@@ -209,6 +291,7 @@ class TieredRegimeMatcher:
         query_snapshot: Optional[RegimeSnapshot] = None,
         min_samples: int = 5,
         k: int = 20,
+        tier_caps: Optional[TierCaps] = None,
     ) -> TieredMatchResult:
         """
         Find candidates using tiered matching.
@@ -222,11 +305,13 @@ class TieredRegimeMatcher:
             query_snapshot: Current regime snapshot for distance match
             min_samples: Minimum candidates before falling back
             k: Maximum candidates to return
+            tier_caps: Per-tier caps to avoid flooding (uses defaults if None)
 
         Returns:
             TieredMatchResult with candidates and context
         """
-        context = SampleContext(min_samples=min_samples, k=k)
+        caps = tier_caps or DEFAULT_TIER_CAPS
+        context = SampleContext(min_samples=min_samples, k=k, tier_caps=caps)
         all_candidates: list[RegimeMatchCandidate] = []
         seen_tune_ids: set[UUID] = set()
 
@@ -265,18 +350,19 @@ class TieredRegimeMatcher:
             f"exact_count={context.exact_count} < min_samples={min_samples}"
         )
 
-        # 1A: Same trend, any vol
+        # 1A: Same trend, any vol (capped)
         partial_trend = await self._query_partial_trend(
             workspace_id=workspace_id,
             strategy_entity_id=strategy_entity_id,
             trend_tag=trend_tag,
             exclude_ids=seen_tune_ids,
-            limit=k,
+            limit=caps.max_partial_trend,  # Apply tier cap
         )
         context.partial_trend_count = len(partial_trend)
 
+        added_trend = 0
         for c in partial_trend:
-            if c.tune_id not in seen_tune_ids:
+            if c.tune_id not in seen_tune_ids and added_trend < caps.max_partial_trend:
                 c.match_detail = MatchDetail(
                     tier=RegimeMatchTier.PARTIAL_TREND,
                     matched_field="trend_tag",
@@ -284,19 +370,21 @@ class TieredRegimeMatcher:
                 )
                 all_candidates.append(c)
                 seen_tune_ids.add(c.tune_id)
+                added_trend += 1
 
-        # 1B: Same vol, any trend
+        # 1B: Same vol, any trend (capped)
         partial_vol = await self._query_partial_vol(
             workspace_id=workspace_id,
             strategy_entity_id=strategy_entity_id,
             vol_tag=vol_tag,
             exclude_ids=seen_tune_ids,
-            limit=k,
+            limit=caps.max_partial_vol,  # Apply tier cap
         )
         context.partial_vol_count = len(partial_vol)
 
+        added_vol = 0
         for c in partial_vol:
-            if c.tune_id not in seen_tune_ids:
+            if c.tune_id not in seen_tune_ids and added_vol < caps.max_partial_vol:
                 c.match_detail = MatchDetail(
                     tier=RegimeMatchTier.PARTIAL_VOL,
                     matched_field="vol_tag",
@@ -304,6 +392,7 @@ class TieredRegimeMatcher:
                 )
                 all_candidates.append(c)
                 seen_tune_ids.add(c.tune_id)
+                added_vol += 1
 
         if len(all_candidates) >= min_samples:
             context.tier_used = RegimeMatchTier.PARTIAL_TREND
@@ -319,7 +408,7 @@ class TieredRegimeMatcher:
                 query_regime_key=regime_key,
             )
 
-        # Tier 2: Distance match
+        # Tier 2: Distance match (capped)
         if query_snapshot:
             context.tiers_attempted.append("distance")
             context.fallback_reason = (
@@ -331,17 +420,22 @@ class TieredRegimeMatcher:
                 strategy_entity_id=strategy_entity_id,
                 query_snapshot=query_snapshot,
                 exclude_ids=seen_tune_ids,
-                limit=k * 2,  # Fetch more for distance ranking
+                limit=caps.max_distance * 2,  # Fetch extra for ranking
             )
             context.distance_count = len(distance_candidates)
 
+            added_distance = 0
             for i, c in enumerate(distance_candidates):
-                if c.tune_id not in seen_tune_ids:
-                    # match_detail already set by _query_distance
+                if (
+                    c.tune_id not in seen_tune_ids
+                    and added_distance < caps.max_distance
+                ):
+                    # match_detail already set by _query_distance with full metadata
                     if c.match_detail:
                         c.match_detail.distance_rank = i + 1
                     all_candidates.append(c)
                     seen_tune_ids.add(c.tune_id)
+                    added_distance += 1
 
             if len(all_candidates) >= min_samples:
                 context.tier_used = RegimeMatchTier.DISTANCE
@@ -618,7 +712,9 @@ class TieredRegimeMatcher:
             try:
                 candidate_snapshot = RegimeSnapshot.from_dict(regime_data)
                 candidate_features = extract_regime_features(candidate_snapshot)
-                distance = compute_regime_distance(query_features, candidate_features)
+                distance, top_features = compute_regime_distance_with_features(
+                    query_features, candidate_features
+                )
 
                 if distance != float("inf"):
                     candidate = RegimeMatchCandidate(
@@ -634,6 +730,9 @@ class TieredRegimeMatcher:
                         match_detail=MatchDetail(
                             tier=RegimeMatchTier.DISTANCE,
                             distance_score=distance,
+                            distance_method="euclidean",
+                            distance_features_version=DISTANCE_FEATURES_VERSION,
+                            distance_top_features=top_features,
                         ),
                     )
                     candidates_with_distance.append((distance, candidate))

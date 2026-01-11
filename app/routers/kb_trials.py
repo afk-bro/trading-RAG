@@ -491,6 +491,15 @@ class IngestResponse(BaseModel):
 # =============================================================================
 
 
+class DistanceFeatureDeltaInfo(BaseModel):
+    """A feature's contribution to distance score."""
+
+    name: str = Field(..., description="Feature name (e.g., 'bb_width_pct')")
+    query_value: float = Field(..., description="Value in query snapshot")
+    candidate_value: float = Field(..., description="Value in candidate snapshot")
+    delta: float = Field(..., description="Absolute difference")
+
+
 class MatchDetailInfo(BaseModel):
     """Details about how a candidate matched."""
 
@@ -506,6 +515,16 @@ class MatchDetailInfo(BaseModel):
     )
     distance_rank: Optional[int] = Field(
         None, description="For distance: rank among candidates"
+    )
+    # v1.1 distance explainability fields
+    distance_method: Optional[str] = Field(
+        None, description="Distance method: 'euclidean' | 'cosine' | 'weighted'"
+    )
+    distance_features_version: Optional[str] = Field(
+        None, description="Feature version for reproducibility (e.g., 'regime_v1')"
+    )
+    distance_top_features: Optional[list[DistanceFeatureDeltaInfo]] = Field(
+        None, description="Top contributing features sorted by delta desc"
     )
 
 
@@ -1327,6 +1346,19 @@ async def recommend_tiered(
     # Convert to response format
     candidates = []
     for c in result.candidates:
+        # Convert distance top features if present
+        top_features_info = None
+        if c.match_detail and c.match_detail.distance_top_features:
+            top_features_info = [
+                DistanceFeatureDeltaInfo(
+                    name=f.name,
+                    query_value=f.query_value,
+                    candidate_value=f.candidate_value,
+                    delta=f.delta,
+                )
+                for f in c.match_detail.distance_top_features
+            ]
+
         match_detail = MatchDetailInfo(
             tier=(
                 RegimeMatchTier(c.match_detail.tier.value)
@@ -1337,6 +1369,11 @@ async def recommend_tiered(
             matched_value=c.match_detail.matched_value if c.match_detail else None,
             distance_score=c.match_detail.distance_score if c.match_detail else None,
             distance_rank=c.match_detail.distance_rank if c.match_detail else None,
+            distance_method=c.match_detail.distance_method if c.match_detail else None,
+            distance_features_version=(
+                c.match_detail.distance_features_version if c.match_detail else None
+            ),
+            distance_top_features=top_features_info,
         )
         candidates.append(
             TieredCandidateInfo(
