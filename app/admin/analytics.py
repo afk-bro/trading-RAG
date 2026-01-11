@@ -107,7 +107,9 @@ class BucketConfidence(BaseModel):
     """Overall confidence stats for a time bucket."""
 
     bucket_start: str = Field(..., description="Bucket start timestamp (ISO format)")
-    avg_confidence: float = Field(..., description="Average confidence across all tiers")
+    avg_confidence: float = Field(
+        ..., description="Average confidence across all tiers"
+    )
     n: int = Field(..., description="Number of recommendations in this bucket")
 
 
@@ -217,11 +219,16 @@ class DriftBucketItem(BaseModel):
 
     bucket_start: str = Field(..., description="Bucket start timestamp (ISO format)")
     total: int = Field(..., description="Total recommendations in bucket")
-    non_exact_count: int = Field(..., description="Recommendations not using exact tier")
+    non_exact_count: int = Field(
+        ..., description="Recommendations not using exact tier"
+    )
     non_exact_pct: float = Field(..., description="Percentage not using exact tier")
     unique_regimes: int = Field(..., description="Distinct query_regime_key values")
     top_regime_pct: float = Field(
         ..., description="Percentage of recommendations in most common regime"
+    )
+    avg_confidence: float = Field(
+        0.0, description="Average confidence score for this bucket"
     )
 
 
@@ -238,10 +245,17 @@ class RegimeDriftResponse(BaseModel):
         0.0, description="Overall % not using exact tier"
     )
     overall_unique_regimes: int = Field(0, description="Total distinct regimes seen")
+    overall_avg_confidence: float = Field(
+        0.0, description="Overall average confidence score"
+    )
     # Trend indicators
     drift_trend: str = Field(
         "stable",
         description="Trend: 'increasing', 'decreasing', 'stable', 'insufficient_data'",
+    )
+    confidence_trend: str = Field(
+        "stable",
+        description="Confidence trend: 'improving', 'degrading', 'stable', 'insufficient_data'",
     )
     avg_daily_churn: float = Field(
         0.0, description="Average daily regime churn (new regimes per day)"
@@ -267,8 +281,12 @@ class DriftDriverItem(BaseModel):
     trend_tag: Optional[str] = None
     vol_tag: Optional[str] = None
     # Drift metrics
-    total_requests: int = Field(..., description="Total recommendations for this regime")
-    non_exact_count: int = Field(..., description="Recommendations not using exact tier")
+    total_requests: int = Field(
+        ..., description="Total recommendations for this regime"
+    )
+    non_exact_count: int = Field(
+        ..., description="Recommendations not using exact tier"
+    )
     non_exact_pct: float = Field(..., description="% not using exact tier")
     # Week-over-week change
     wow_change: Optional[float] = Field(
@@ -340,7 +358,11 @@ async def _get_drift_driver_regimes(
 
     since = datetime.utcnow() - timedelta(days=period_days)
 
-    conditions = ["workspace_id = $1", "created_at >= $2", "query_regime_key IS NOT NULL"]
+    conditions = [
+        "workspace_id = $1",
+        "created_at >= $2",
+        "query_regime_key IS NOT NULL",
+    ]
     params: list = [workspace_id, since]
     param_idx = 3
 
@@ -610,6 +632,12 @@ async def _get_tier_usage_time_series(
         GROUP BY bucket_start, tier_used
         ORDER BY bucket_start ASC, tier_used
     """
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database pool not initialized",
+        )
 
     async with _db_pool.acquire() as conn:
         rows = await conn.fetch(query, *params)
@@ -1000,14 +1028,15 @@ async def get_regime_drift(
 
     where_clause = " AND ".join(conditions)
 
-    # Query per-bucket metrics
+    # Query per-bucket metrics (including confidence)
     query = f"""
         WITH bucket_stats AS (
             SELECT
                 date_trunc('{trunc_unit}', created_at) as bucket_start,
                 COUNT(*) as total,
                 SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact_count,
-                COUNT(DISTINCT query_regime_key) as unique_regimes
+                COUNT(DISTINCT query_regime_key) as unique_regimes,
+                AVG(COALESCE(confidence, 0.5)) as avg_confidence
             FROM recommend_events
             WHERE {where_clause}
             GROUP BY bucket_start
@@ -1031,6 +1060,7 @@ async def get_regime_drift(
             bs.total,
             bs.non_exact_count,
             bs.unique_regimes,
+            bs.avg_confidence,
             COALESCE(tr.regime_count, 0) as top_regime_count
         FROM bucket_stats bs
         LEFT JOIN top_regime_per_bucket tr
@@ -1059,6 +1089,12 @@ async def get_regime_drift(
             period_days=period_days,
             bucket=bucket,
             drift_trend="insufficient_data",
+            total_recommendations=0,
+            overall_non_exact_pct=0.0,
+            overall_unique_regimes=0,
+            overall_avg_confidence=0.0,
+            confidence_trend="insufficient_data",
+            avg_daily_churn=0.0,
         )
 
     # Build series
@@ -1066,18 +1102,21 @@ async def get_regime_drift(
     total_recs = 0
     total_non_exact = 0
     non_exact_pcts = []
+    confidence_scores = []
+    weighted_confidence_sum = 0.0
 
     for row in rows:
         total = row["total"]
         non_exact = row["non_exact_count"]
         non_exact_pct = (non_exact / total * 100) if total > 0 else 0.0
-        top_regime_pct = (
-            (row["top_regime_count"] / total * 100) if total > 0 else 0.0
-        )
+        top_regime_pct = (row["top_regime_count"] / total * 100) if total > 0 else 0.0
+        avg_conf = float(row["avg_confidence"]) if row["avg_confidence"] else 0.5
 
         total_recs += total
         total_non_exact += non_exact
         non_exact_pcts.append(non_exact_pct)
+        confidence_scores.append(avg_conf)
+        weighted_confidence_sum += avg_conf * total
 
         series.append(
             DriftBucketItem(
@@ -1087,6 +1126,7 @@ async def get_regime_drift(
                 non_exact_pct=round(non_exact_pct, 1),
                 unique_regimes=row["unique_regimes"],
                 top_regime_pct=round(top_regime_pct, 1),
+                avg_confidence=round(avg_conf, 3),
             )
         )
 
@@ -1095,6 +1135,7 @@ async def get_regime_drift(
         (total_non_exact / total_recs * 100) if total_recs > 0 else 0.0
     )
     overall_unique = overall_row["unique_regimes"] if overall_row else 0
+    overall_avg_conf = weighted_confidence_sum / total_recs if total_recs > 0 else 0.0
 
     # Calculate drift trend (compare first half vs second half of period)
     drift_trend = "stable"
@@ -1113,6 +1154,23 @@ async def get_regime_drift(
     elif len(non_exact_pcts) < 2:
         drift_trend = "insufficient_data"
 
+    # Calculate confidence trend (compare first half vs second half)
+    confidence_trend = "stable"
+    if len(confidence_scores) >= 4:
+        mid = len(confidence_scores) // 2
+        first_half_conf = sum(confidence_scores[:mid]) / mid
+        second_half_conf = sum(confidence_scores[mid:]) / (len(confidence_scores) - mid)
+        conf_diff = second_half_conf - first_half_conf
+
+        if conf_diff > 0.05:  # More than 5% improvement
+            confidence_trend = "improving"
+        elif conf_diff < -0.05:  # More than 5% degradation
+            confidence_trend = "degrading"
+        else:
+            confidence_trend = "stable"
+    elif len(confidence_scores) < 2:
+        confidence_trend = "insufficient_data"
+
     # Calculate avg daily churn (new unique regimes appearing)
     # Simple heuristic: unique_regimes / days with data
     avg_daily_churn = overall_unique / len(series) if series else 0.0
@@ -1125,7 +1183,9 @@ async def get_regime_drift(
         total_recommendations=total_recs,
         overall_non_exact_pct=round(overall_non_exact_pct, 1),
         overall_unique_regimes=overall_unique,
+        overall_avg_confidence=round(overall_avg_conf, 3),
         drift_trend=drift_trend,
+        confidence_trend=confidence_trend,
         avg_daily_churn=round(avg_daily_churn, 2),
         series=series,
     )

@@ -855,6 +855,70 @@
         padding: 16px;
         color: var(--text-muted);
     }
+
+    /* Drift badges row */
+    .drift-badges {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .confidence-trend-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-weight: 500;
+    }
+
+    .confidence-trend-stable {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+
+    .confidence-trend-improving {
+        background: rgba(88, 166, 255, 0.2);
+        color: var(--info);
+    }
+
+    .confidence-trend-degrading {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+
+    .confidence-trend-insufficient_data {
+        background: rgba(139, 148, 158, 0.2);
+        color: var(--text-muted);
+    }
+
+    /* Drift chart with confidence overlay */
+    .drift-chart-container {
+        position: relative;
+        margin-bottom: 8px;
+    }
+
+    .drift-confidence-overlay {
+        position: absolute;
+        top: 0;
+        left: 4px;
+        right: 4px;
+        height: 80px;
+        pointer-events: none;
+    }
+
+    .drift-confidence-line {
+        fill: none;
+        stroke: var(--link);
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .drift-confidence-dot {
+        fill: var(--link);
+        stroke: var(--bg-secondary);
+        stroke-width: 2;
+    }
 </style>
 
 <div class="page-header">
@@ -1019,12 +1083,19 @@
 <div class="drift-panel card">
     <div class="card-header">
         <span class="card-title">Regime Drift Indicator</span>
-        <span class="drift-trend-badge drift-trend-stable" id="driftTrendBadge">Loading...</span>
+        <div class="drift-badges">
+            <span class="drift-trend-badge drift-trend-stable" id="driftTrendBadge">Loading...</span>
+            <span class="confidence-trend-badge confidence-trend-stable" id="confidenceTrendBadge">Confidence: -</span>
+        </div>
     </div>
     <div class="drift-summary" id="driftSummary">
         <div class="drift-metric">
             <div class="drift-metric-value" id="driftNonExactPct">-</div>
             <div class="drift-metric-label">Non-Exact %</div>
+        </div>
+        <div class="drift-metric">
+            <div class="drift-metric-value" id="driftAvgConfidence">-</div>
+            <div class="drift-metric-label">Avg Confidence</div>
         </div>
         <div class="drift-metric">
             <div class="drift-metric-value" id="driftUniqueRegimes">-</div>
@@ -1035,10 +1106,11 @@
             <div class="drift-metric-label">Avg Daily Churn</div>
         </div>
     </div>
-    <div class="drift-chart" id="driftChart">
+    <div class="drift-chart-container" id="driftChart">
         <div class="drift-chart-area" id="driftChartArea">
             <!-- Bars will be rendered here -->
         </div>
+        <svg class="drift-confidence-overlay" id="driftConfidenceOverlay"></svg>
         <div class="drift-chart-labels" id="driftChartLabels">
             <!-- Labels will be rendered here -->
         </div>
@@ -1047,6 +1119,7 @@
         <span><span style="display:inline-block;width:10px;height:10px;background:var(--success);border-radius:2px;"></span> &lt;20% fallback</span>
         <span><span style="display:inline-block;width:10px;height:10px;background:var(--warning);border-radius:2px;"></span> 20-50% fallback</span>
         <span><span style="display:inline-block;width:10px;height:10px;background:var(--danger);border-radius:2px;"></span> &gt;50% fallback</span>
+        <span><span style="display:inline-block;width:10px;height:2px;background:var(--link);border-radius:1px;"></span> Confidence</span>
     </div>
 
     <!-- Drift Drivers Table -->
@@ -1639,11 +1712,14 @@
 
     // Drift panel
     function renderDriftPanel() {
-        const badge = document.getElementById('driftTrendBadge');
+        const driftBadge = document.getElementById('driftTrendBadge');
+        const confidenceBadge = document.getElementById('confidenceTrendBadge');
 
         if (!driftData) {
-            badge.textContent = 'No data';
-            badge.className = 'drift-trend-badge drift-trend-insufficient_data';
+            driftBadge.textContent = 'No data';
+            driftBadge.className = 'drift-trend-badge drift-trend-insufficient_data';
+            confidenceBadge.textContent = 'Confidence: -';
+            confidenceBadge.className = 'confidence-trend-badge confidence-trend-insufficient_data';
             return;
         }
 
@@ -1655,15 +1731,30 @@
         document.getElementById('driftDailyChurn').textContent =
             driftData.avg_daily_churn.toFixed(1);
 
-        // Update trend badge
-        const trendLabels = {
+        // Update avg confidence metric
+        const avgConf = driftData.overall_avg_confidence || 0;
+        document.getElementById('driftAvgConfidence').textContent = avgConf.toFixed(2);
+
+        // Update drift trend badge
+        const driftTrendLabels = {
             'stable': 'Stable',
             'increasing': 'Increasing Drift',
             'decreasing': 'Decreasing Drift',
             'insufficient_data': 'Insufficient Data'
         };
-        badge.textContent = trendLabels[driftData.drift_trend] || driftData.drift_trend;
-        badge.className = `drift-trend-badge drift-trend-${driftData.drift_trend}`;
+        driftBadge.textContent = driftTrendLabels[driftData.drift_trend] || driftData.drift_trend;
+        driftBadge.className = `drift-trend-badge drift-trend-${driftData.drift_trend}`;
+
+        // Update confidence trend badge
+        const confTrendLabels = {
+            'stable': 'Confidence: Stable',
+            'improving': 'Confidence: Improving',
+            'degrading': 'Confidence: Degrading',
+            'insufficient_data': 'Confidence: -'
+        };
+        const confTrend = driftData.confidence_trend || 'insufficient_data';
+        confidenceBadge.textContent = confTrendLabels[confTrend] || `Confidence: ${confTrend}`;
+        confidenceBadge.className = `confidence-trend-badge confidence-trend-${confTrend}`;
 
         // Render drift chart
         renderDriftChart();
@@ -1672,10 +1763,12 @@
     function renderDriftChart() {
         const chartArea = document.getElementById('driftChartArea');
         const chartLabels = document.getElementById('driftChartLabels');
+        const confidenceOverlay = document.getElementById('driftConfidenceOverlay');
 
         if (!driftData?.series?.length) {
             chartArea.innerHTML = '<div class="empty-state" style="width:100%;text-align:center;font-size:12px;">No time-series data</div>';
             chartLabels.innerHTML = '';
+            confidenceOverlay.innerHTML = '';
             return;
         }
 
@@ -1695,14 +1788,51 @@
             }
 
             const date = new Date(item.bucket_start);
+            const avgConf = item.avg_confidence || 0;
             const tooltip = `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}\n` +
                 `Non-exact: ${item.non_exact_pct.toFixed(1)}%\n` +
+                `Confidence: ${avgConf.toFixed(2)}\n` +
                 `Total: ${item.total}\n` +
                 `Unique regimes: ${item.unique_regimes}`;
 
             barsHtml += `<div class="drift-bar ${colorClass}" style="height: ${height}px" title="${tooltip}"></div>`;
         }
         chartArea.innerHTML = barsHtml;
+
+        // Build confidence line overlay
+        let linePath = '';
+        let dots = '';
+        if (series.length > 0) {
+            const points = [];
+            for (let i = 0; i < series.length; i++) {
+                const avgConf = series[i].avg_confidence || 0;
+                // x: position as percentage (0 to 100)
+                const x = series.length === 1 ? 50 : (i / (series.length - 1)) * 100;
+                // y: confidence 1.0 = top (0), confidence 0 = bottom (chartHeight)
+                const y = (1 - avgConf) * chartHeight;
+                points.push({ x, y, conf: avgConf });
+            }
+
+            if (points.length === 1) {
+                // Single point - just a dot
+                dots = `<circle class="drift-confidence-dot" cx="${points[0].x}%" cy="${points[0].y}" r="4"/>`;
+            } else {
+                // Build line path
+                linePath = `M ${points[0].x}% ${points[0].y}`;
+                for (let i = 1; i < points.length; i++) {
+                    linePath += ` L ${points[i].x}% ${points[i].y}`;
+                }
+                // Add dots at each point
+                dots = points.map(p =>
+                    `<circle class="drift-confidence-dot" cx="${p.x}%" cy="${p.y}" r="3"/>`
+                ).join('');
+            }
+        }
+
+        confidenceOverlay.innerHTML = `
+            <path class="drift-confidence-line" d="${linePath}"/>
+            ${dots}
+        `;
 
         // Build labels (show subset if too many)
         const maxLabels = 8;
