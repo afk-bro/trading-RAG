@@ -256,11 +256,12 @@ class RegimeDriftResponse(BaseModel):
 async def analytics_regimes_page(
     request: Request,
     workspace_id: UUID = Query(..., description="Workspace ID"),
+    token: Optional[str] = Query(None, description="Admin token (dev convenience)"),
     _: bool = Depends(require_admin_token),
 ) -> HTMLResponse:
     """Render the regime analytics dashboard page."""
-    # Get admin token from header for JS API calls
-    admin_token = request.headers.get("X-Admin-Token", "")
+    # Get admin token from header or query param (query param for dev convenience)
+    admin_token = request.headers.get("X-Admin-Token", "") or token or ""
 
     return templates.TemplateResponse(
         "analytics_regimes.html",
