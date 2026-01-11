@@ -143,5 +143,16 @@ KB_TRIALS_DOC_TYPE: Final[str] = "trial"
 # Schema Versioning
 # =============================================================================
 
-REGIME_SCHEMA_VERSION: Final[str] = "regime_v1"
+REGIME_SCHEMA_VERSION: Final[str] = "regime_v1_1"
 TRIAL_DOC_SCHEMA_VERSION: Final[str] = "trial_v1"
+
+# =============================================================================
+# Tag Exclusive Families (v1.1)
+# =============================================================================
+
+# Tags that are mutually exclusive (at most one can be assigned)
+# Evaluator applies priority order within families; first passing tag wins.
+# Order: uptrend > downtrend > trending > flat
+EXCLUSIVE_FAMILIES: Final[dict[str, list[str]]] = {
+    "trend": ["uptrend", "downtrend", "trending", "flat"],
+}

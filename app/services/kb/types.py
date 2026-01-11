@@ -22,6 +22,61 @@ from app.services.kb.constants import (
 
 
 # =============================================================================
+# Tag Evidence Types (v1.1)
+# =============================================================================
+
+Op = Literal[">=", "<=", ">", "<", "=="]
+Transform = Literal["abs"]
+
+
+@dataclass
+class TagRule:
+    """
+    Declarative rule for computing a single tag.
+
+    Evaluator semantics:
+    - Rules are grouped by (tag, group)
+    - AND within group: all rules in a group must pass
+    - OR across groups: any group passing assigns the tag
+    """
+
+    tag: str  # e.g., "uptrend", "oversold"
+    rule_id: str  # e.g., "uptrend_strong", "oversold_zscore"
+    metric: str  # e.g., "trend_strength", "zscore"
+    op: Op  # Comparison operator
+    threshold: float  # Threshold value
+    group: str = "default"  # Grouping key for OR-over-groups logic
+    transform: Transform | None = None  # Optional transform (e.g., "abs")
+    units: str | None = None  # Display hint: "%", "σ", etc.
+    is_headline: bool = False  # Surface in near-misses if failed
+
+
+@dataclass
+class TagEvidence:
+    """
+    Evidence of a single rule evaluation.
+
+    Used for:
+    - UI tooltips ("tagged uptrend because trend_strength=0.72 >= 0.6")
+    - Near-miss surfacing ("almost overbought, RSI 68 < 70")
+    - LLM reasoning context
+    """
+
+    tag: str  # Tag this rule contributes to
+    rule_id: str  # Which rule was evaluated
+    passed: bool  # Did this rule pass?
+    metric: str  # Which metric was evaluated
+    value: float  # Raw value from snapshot
+    op: Op  # Operator used
+    threshold: float  # Threshold compared against
+    units: str | None = None  # Display hint
+    margin: float | None = None  # Normalized: positive = passed by X
+    transform: Transform | None = None  # Transform applied (for UI: "|zscore|")
+    computed_value: float | None = None  # Value after transform (if different)
+    confidence: float | None = None  # Reserved for v2
+
+
+# =============================================================================
 # RegimeSnapshot
 # =============================================================================
 
@@ -80,6 +135,9 @@ class RegimeSnapshot:
     # Derived
     regime_tags: list[str] = field(default_factory=list)
 
+    # Explainability (v1.1)
+    tag_evidence: list[TagEvidence] = field(default_factory=list)
+
     # Warnings from computation
     warnings: list[str] = field(default_factory=list)
 
@@ -97,6 +155,13 @@ class RegimeSnapshot:
         if version != REGIME_SCHEMA_VERSION:
             # Future: handle migrations between versions
             pass
+        # Handle nested TagEvidence objects (v1.1+)
+        if "tag_evidence" in data and data["tag_evidence"]:
+            data = data.copy()  # Don't mutate original
+            data["tag_evidence"] = [
+                TagEvidence(**ev) if isinstance(ev, dict) else ev
+                for ev in data["tag_evidence"]
+            ]
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 

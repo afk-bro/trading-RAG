@@ -12,11 +12,13 @@ Implements market regime feature extraction from OHLCV data:
 All indicators implemented in numpy/pandas for determinism and minimal dependencies.
 """
 
-import numpy as np
-import pandas as pd
+from collections import defaultdict
 from typing import Optional
 
-from app.services.kb.types import RegimeSnapshot, utc_now_iso
+import numpy as np
+import pandas as pd
+
+from app.services.kb.types import RegimeSnapshot, TagRule, TagEvidence, Op, utc_now_iso
 from app.services.kb.constants import (
     REGIME_SCHEMA_VERSION,
     DEFAULT_FEATURE_PARAMS,
@@ -35,6 +37,7 @@ from app.services.kb.constants import (
     RSI_OVERSOLD,
     RSI_OVERBOUGHT,
     OUTLIER_PCT_CHANGE_THRESHOLD,
+    EXCLUSIVE_FAMILIES,
 )
 
 
@@ -304,7 +307,338 @@ def compute_trend_direction(close: pd.Series, lookback: int = 50) -> int:
 
 
 # =============================================================================
-# Tagging Rules
+# Declarative Tagging Rules (v1.1)
+# =============================================================================
+
+# DEFAULT_RULESET: Declarative rules for all regime tags
+# - Rules grouped by (tag, group): AND within group, OR across groups
+# - is_headline=True: surface in near-miss extraction
+# - transform="abs": apply abs() before comparison
+DEFAULT_RULESET: list[TagRule] = [
+    # Uptrend: strong trend + positive direction (AND within default group)
+    TagRule(
+        "uptrend",
+        "uptrend_strength",
+        "trend_strength",
+        ">=",
+        TREND_STRONG_THRESHOLD,
+        is_headline=True,
+    ),
+    TagRule("uptrend", "uptrend_dir", "trend_dir", ">", 0),
+    # Downtrend: strong trend + negative direction (AND within default group)
+    TagRule(
+        "downtrend",
+        "downtrend_strength",
+        "trend_strength",
+        ">=",
+        TREND_STRONG_THRESHOLD,
+        is_headline=True,
+    ),
+    TagRule("downtrend", "downtrend_dir", "trend_dir", "<", 0),
+    # Trending: strong trend but neutral direction (AND within default group)
+    # This is a fallback when trend is strong but direction is 0
+    TagRule(
+        "trending",
+        "trending_strength",
+        "trend_strength",
+        ">=",
+        TREND_STRONG_THRESHOLD,
+        is_headline=True,
+    ),
+    TagRule("trending", "trending_dir", "trend_dir", "==", 0),
+    # Flat: weak trend (single rule)
+    TagRule(
+        "flat",
+        "flat_weak_trend",
+        "trend_strength",
+        "<",
+        TREND_WEAK_THRESHOLD,
+        is_headline=True,
+    ),
+    # Volatility (mutually exclusive by threshold, no middle tag)
+    TagRule(
+        "low_vol",
+        "low_vol_atr",
+        "atr_pct",
+        "<",
+        VOL_LOW_THRESHOLD,
+        units="%",
+        is_headline=True,
+    ),
+    TagRule(
+        "high_vol",
+        "high_vol_atr",
+        "atr_pct",
+        ">",
+        VOL_HIGH_THRESHOLD,
+        units="%",
+        is_headline=True,
+    ),
+    # Mean-reverting: requires flat + extreme zscore (abs transform)
+    TagRule("mean_reverting", "mr_flat", "trend_strength", "<", TREND_WEAK_THRESHOLD),
+    TagRule(
+        "mean_reverting",
+        "mr_zscore",
+        "zscore",
+        ">",
+        ZSCORE_MEAN_REVERT_THRESHOLD,
+        transform="abs",
+        units="σ",
+        is_headline=True,
+    ),
+    # Choppy: requires flat + narrow bands
+    TagRule("choppy", "choppy_flat", "trend_strength", "<", TREND_WEAK_THRESHOLD),
+    TagRule(
+        "choppy",
+        "choppy_bb",
+        "bb_width_pct",
+        "<",
+        BB_WIDTH_CHOPPY_THRESHOLD,
+        units="%",
+        is_headline=True,
+    ),
+    # Efficiency (mutually exclusive by threshold, no middle tag)
+    TagRule(
+        "noisy",
+        "noisy_er",
+        "efficiency_ratio",
+        "<",
+        ER_NOISY_THRESHOLD,
+        is_headline=True,
+    ),
+    TagRule(
+        "efficient",
+        "efficient_er",
+        "efficiency_ratio",
+        ">",
+        ER_EFFICIENT_THRESHOLD,
+        is_headline=True,
+    ),
+    # Oversold: zscore OR rsi (separate groups for OR semantics)
+    TagRule(
+        "oversold",
+        "oversold_zscore",
+        "zscore",
+        "<",
+        ZSCORE_OVERSOLD,
+        units="σ",
+        is_headline=True,
+        group="zscore",
+    ),
+    TagRule(
+        "oversold",
+        "oversold_rsi",
+        "rsi",
+        "<",
+        RSI_OVERSOLD,
+        units="RSI",
+        is_headline=True,
+        group="rsi",
+    ),
+    # Overbought: zscore OR rsi (separate groups for OR semantics)
+    TagRule(
+        "overbought",
+        "overbought_zscore",
+        "zscore",
+        ">",
+        ZSCORE_OVERBOUGHT,
+        units="σ",
+        is_headline=True,
+        group="zscore",
+    ),
+    TagRule(
+        "overbought",
+        "overbought_rsi",
+        "rsi",
+        ">",
+        RSI_OVERBOUGHT,
+        units="RSI",
+        is_headline=True,
+        group="rsi",
+    ),
+]
+
+# Exclusive families: at most one tag per family can be assigned
+# Order determines priority (first passing wins)
+
+
+def _evaluate_op(value: float, op: Op, threshold: float) -> bool:
+    """Evaluate comparison operation."""
+    if op == ">=":
+        return value >= threshold
+    elif op == ">":
+        return value > threshold
+    elif op == "<=":
+        return value <= threshold
+    elif op == "<":
+        return value < threshold
+    elif op == "==":
+        return value == threshold
+    return False
+
+
+def _compute_margin(value: float, op: Op, threshold: float) -> float:
+    """
+    Compute normalized margin (positive = passed).
+
+    For >= and >: margin = value - threshold (positive if passed)
+    For <= and <: margin = threshold - value (positive if passed)
+    For ==: margin = -abs(value - threshold) (0 if exact match)
+    """
+    if op in (">=", ">"):
+        return value - threshold
+    elif op in ("<=", "<"):
+        return threshold - value
+    elif op == "==":
+        return -abs(value - threshold)
+    return 0.0
+
+
+def evaluate_rules(
+    features: dict[str, float],
+    ruleset: list[TagRule] | None = None,
+) -> tuple[list[str], list[TagEvidence]]:
+    """
+    Evaluate ruleset against features.
+
+    Evaluator semantics:
+    - Group rules by (tag, group)
+    - AND within group: all rules in a group must pass
+    - OR across groups: any group passing assigns the tag
+    - Exclusive families: at most one tag per family
+
+    Args:
+        features: Dict mapping metric names to values
+        ruleset: List of TagRule (defaults to DEFAULT_RULESET)
+
+    Returns:
+        Tuple of (assigned_tags, all_evidence)
+    """
+    if ruleset is None:
+        ruleset = DEFAULT_RULESET
+
+    evidence: list[TagEvidence] = []
+
+    # Group rules by (tag, group)
+    grouped: dict[str, dict[str, list[TagRule]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for rule in ruleset:
+        grouped[rule.tag][rule.group].append(rule)
+
+    # Track which tags pass (before exclusive family filtering)
+    passing_tags: set[str] = set()
+
+    for tag, groups in grouped.items():
+        tag_assigned = False
+
+        for group_name, rules in groups.items():
+            # AND within group: all rules must pass
+            group_passed = True
+            group_evidence = []
+
+            for rule in rules:
+                # Get raw value and apply transform
+                raw_value = features.get(rule.metric, 0.0)
+                if rule.transform == "abs":
+                    computed = abs(raw_value)
+                else:
+                    computed = raw_value
+
+                # Evaluate using computed value
+                passed = _evaluate_op(computed, rule.op, rule.threshold)
+                margin = _compute_margin(computed, rule.op, rule.threshold)
+
+                ev = TagEvidence(
+                    tag=rule.tag,
+                    rule_id=rule.rule_id,
+                    passed=passed,
+                    metric=rule.metric,
+                    value=raw_value,  # Always store raw
+                    op=rule.op,
+                    threshold=rule.threshold,
+                    units=rule.units,
+                    margin=margin,
+                    transform=rule.transform,
+                    computed_value=computed if rule.transform else None,
+                )
+                group_evidence.append(ev)
+
+                if not passed:
+                    group_passed = False
+
+            evidence.extend(group_evidence)
+
+            # OR across groups: any group passing assigns tag
+            if group_passed:
+                tag_assigned = True
+
+        if tag_assigned:
+            passing_tags.add(tag)
+
+    # Apply exclusive family filtering
+    assigned_tags: list[str] = []
+    claimed_families: set[str] = set()
+
+    for family_name, family_members in EXCLUSIVE_FAMILIES.items():
+        # Find first passing tag in priority order
+        for tag in family_members:
+            if tag in passing_tags:
+                assigned_tags.append(tag)
+                claimed_families.add(family_name)
+                break
+
+    # Add all passing tags not in any exclusive family
+    all_family_tags = {
+        tag for members in EXCLUSIVE_FAMILIES.values() for tag in members
+    }
+    for tag in passing_tags:
+        if tag not in all_family_tags:
+            assigned_tags.append(tag)
+
+    return sorted(assigned_tags), evidence
+
+
+def snapshot_to_features(s: "RegimeSnapshot") -> dict[str, float]:
+    """
+    Extract feature dict from RegimeSnapshot for rule evaluation.
+
+    Maps snapshot fields to feature names used in DEFAULT_RULESET.
+    """
+    return {
+        "trend_strength": s.trend_strength,
+        "trend_dir": float(s.trend_dir),  # int to float for consistent comparison
+        "atr_pct": s.atr_pct,
+        "zscore": s.zscore,
+        "rsi": s.rsi,
+        "efficiency_ratio": s.efficiency_ratio,
+        "bb_width_pct": s.bb_width_pct,
+    }
+
+
+def compute_tags_with_evidence(
+    s: "RegimeSnapshot",
+    ruleset: list[TagRule] | None = None,
+) -> tuple[list[str], list[TagEvidence]]:
+    """
+    Compute regime tags with full evidence trail.
+
+    This is the v1.1 replacement for compute_tags().
+    Returns both tags and evidence for explainability.
+
+    Args:
+        s: RegimeSnapshot with computed features
+        ruleset: Optional custom ruleset (defaults to DEFAULT_RULESET)
+
+    Returns:
+        Tuple of (sorted tags, all evidence)
+    """
+    features = snapshot_to_features(s)
+    return evaluate_rules(features, ruleset)
+
+
+# =============================================================================
+# Legacy Tagging (preserved for compatibility verification)
 # =============================================================================
 
 
@@ -546,8 +880,10 @@ def compute_regime_snapshot(
         warnings=warnings,
     )
 
-    # Compute tags
-    snapshot.regime_tags = compute_tags(snapshot)
+    # Compute tags with evidence (v1.1)
+    tags, evidence = compute_tags_with_evidence(snapshot)
+    snapshot.regime_tags = tags
+    snapshot.tag_evidence = evidence
 
     return snapshot
 

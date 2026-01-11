@@ -18,6 +18,13 @@ from app.services.kb import (
     compute_trend_direction,
     REGIME_SCHEMA_VERSION,
 )
+from app.services.kb.regime import (
+    evaluate_rules,
+    compute_tags,
+    compute_tags_with_evidence,
+    DEFAULT_RULESET,
+)
+from app.services.kb.types import TagEvidence
 
 
 # =============================================================================
@@ -536,3 +543,272 @@ class TestNaNCleaning:
         assert data["atr_pct"] is None
         assert data["rsi"] == 50.0
         assert data["zscore"] is None
+
+
+# =============================================================================
+# Rule Evaluation Tests (v1.1)
+# =============================================================================
+
+
+class TestRuleEvaluation:
+    """Tests for declarative rule evaluation."""
+
+    def test_and_within_group_uptrend_requires_both(self):
+        """Uptrend requires both strength AND direction rules to pass."""
+        # Strength passes, direction fails → no uptrend
+        features = {"trend_strength": 0.7, "trend_dir": 0}
+        tags, _ = evaluate_rules(features)
+        assert "uptrend" not in tags
+
+    def test_and_within_group_uptrend_both_pass(self):
+        """Uptrend is assigned when both rules pass."""
+        features = {"trend_strength": 0.7, "trend_dir": 1}
+        tags, _ = evaluate_rules(features)
+        assert "uptrend" in tags
+
+    def test_or_across_groups_oversold_zscore_only(self):
+        """Oversold fires on zscore alone (OR across groups)."""
+        features = {"zscore": -1.6, "rsi": 55, "trend_strength": 0.5}
+        tags, _ = evaluate_rules(features)
+        assert "oversold" in tags
+
+    def test_or_across_groups_oversold_rsi_only(self):
+        """Oversold fires on RSI alone (OR across groups)."""
+        features = {"zscore": 0, "rsi": 25, "trend_strength": 0.5}
+        tags, _ = evaluate_rules(features)
+        assert "oversold" in tags
+
+    def test_or_across_groups_overbought_zscore_only(self):
+        """Overbought fires on zscore alone."""
+        features = {"zscore": 1.6, "rsi": 55, "trend_strength": 0.5}
+        tags, _ = evaluate_rules(features)
+        assert "overbought" in tags
+
+    def test_or_across_groups_overbought_rsi_only(self):
+        """Overbought fires on RSI alone."""
+        features = {"zscore": 0, "rsi": 75, "trend_strength": 0.5}
+        tags, _ = evaluate_rules(features)
+        assert "overbought" in tags
+
+    def test_abs_transform_mean_reverting_negative_zscore(self):
+        """Mean-reverting uses abs(zscore) for comparison."""
+        # zscore = -1.2, abs(-1.2) = 1.2 > 1.0 threshold
+        features = {"trend_strength": 0.2, "zscore": -1.2}
+        tags, evidence = evaluate_rules(features)
+        assert "mean_reverting" in tags
+
+        # Verify transform is recorded in evidence
+        mr_evidence = [e for e in evidence if e.rule_id == "mr_zscore"][0]
+        assert mr_evidence.value == -1.2  # Raw value
+        assert mr_evidence.computed_value == 1.2  # After abs()
+        assert mr_evidence.transform == "abs"
+
+    def test_abs_transform_mean_reverting_positive_zscore(self):
+        """Mean-reverting works with positive zscore too."""
+        features = {"trend_strength": 0.2, "zscore": 1.2}
+        tags, _ = evaluate_rules(features)
+        assert "mean_reverting" in tags
+
+    def test_margin_positive_when_passed_ge(self):
+        """Margin is positive when >= rule passes."""
+        # trend_strength=0.7 >= 0.6, margin = 0.7 - 0.6 = 0.1
+        features = {"trend_strength": 0.7, "trend_dir": 1}
+        _, evidence = evaluate_rules(features)
+        uptrend_strength = [e for e in evidence if e.rule_id == "uptrend_strength"][0]
+        assert uptrend_strength.passed is True
+        assert uptrend_strength.margin == pytest.approx(0.1)
+
+    def test_margin_negative_when_failed_ge(self):
+        """Margin is negative when >= rule fails."""
+        # trend_strength=0.5 >= 0.6, margin = 0.5 - 0.6 = -0.1
+        features = {"trend_strength": 0.5, "trend_dir": 1}
+        _, evidence = evaluate_rules(features)
+        uptrend_strength = [e for e in evidence if e.rule_id == "uptrend_strength"][0]
+        assert uptrend_strength.passed is False
+        assert uptrend_strength.margin == pytest.approx(-0.1)
+
+    def test_margin_positive_when_passed_lt(self):
+        """Margin is positive when < rule passes."""
+        # zscore=-1.6 < -1.5, margin = -1.5 - (-1.6) = 0.1
+        features = {"zscore": -1.6, "rsi": 55, "trend_strength": 0.5}
+        _, evidence = evaluate_rules(features)
+        oversold_zscore = [e for e in evidence if e.rule_id == "oversold_zscore"][0]
+        assert oversold_zscore.passed is True
+        assert oversold_zscore.margin == pytest.approx(0.1)
+
+    def test_margin_negative_when_failed_lt(self):
+        """Margin is negative when < rule fails."""
+        # zscore=-1.4 < -1.5, margin = -1.5 - (-1.4) = -0.1
+        features = {"zscore": -1.4, "rsi": 55, "trend_strength": 0.5}
+        _, evidence = evaluate_rules(features)
+        oversold_zscore = [e for e in evidence if e.rule_id == "oversold_zscore"][0]
+        assert oversold_zscore.passed is False
+        assert oversold_zscore.margin == pytest.approx(-0.1)
+
+
+class TestExclusiveFamilies:
+    """Tests for exclusive family logic."""
+
+    def test_trend_family_uptrend_wins_over_flat(self):
+        """Uptrend and flat can't both be assigned (uptrend has priority)."""
+        # This shouldn't happen in practice (mutually exclusive thresholds),
+        # but tests the priority logic
+        features = {"trend_strength": 0.7, "trend_dir": 1}
+        tags, _ = evaluate_rules(features)
+        assert "uptrend" in tags
+        assert "flat" not in tags
+
+    def test_trend_family_downtrend_wins_over_flat(self):
+        """Downtrend blocks flat."""
+        features = {"trend_strength": 0.7, "trend_dir": -1}
+        tags, _ = evaluate_rules(features)
+        assert "downtrend" in tags
+        assert "flat" not in tags
+
+    def test_trend_family_only_one_assigned(self):
+        """At most one trend tag is assigned."""
+        # Uptrend case
+        features = {"trend_strength": 0.7, "trend_dir": 1}
+        tags, _ = evaluate_rules(features)
+        trend_tags = [
+            t for t in tags if t in ["uptrend", "downtrend", "trending", "flat"]
+        ]
+        assert len(trend_tags) == 1
+
+    def test_middle_band_no_trend_tag(self):
+        """Middle band (0.3-0.6) yields no trend tag."""
+        features = {"trend_strength": 0.45, "trend_dir": 1}
+        tags, _ = evaluate_rules(features)
+        trend_tags = [
+            t for t in tags if t in ["uptrend", "downtrend", "trending", "flat"]
+        ]
+        assert len(trend_tags) == 0
+
+    def test_trending_neutral_direction(self):
+        """Trending assigned when strength high but direction neutral."""
+        features = {"trend_strength": 0.7, "trend_dir": 0}
+        tags, _ = evaluate_rules(features)
+        assert "trending" in tags
+        assert "uptrend" not in tags
+        assert "downtrend" not in tags
+
+
+class TestLegacyBehaviorMatch:
+    """Tests verifying new evaluate_rules matches legacy compute_tags."""
+
+    @pytest.mark.parametrize(
+        "kwargs,expected_tags",
+        [
+            # Basic trend cases
+            ({"trend_strength": 0.7, "trend_dir": 1}, ["uptrend"]),
+            ({"trend_strength": 0.7, "trend_dir": -1}, ["downtrend"]),
+            ({"trend_strength": 0.7, "trend_dir": 0}, ["trending"]),
+            ({"trend_strength": 0.2, "trend_dir": 0}, ["flat"]),
+            # Volatility
+            ({"trend_strength": 0.5, "atr_pct": 0.003}, ["low_vol"]),
+            ({"trend_strength": 0.5, "atr_pct": 0.02}, ["high_vol"]),
+            # Efficiency
+            ({"trend_strength": 0.5, "efficiency_ratio": 0.2}, ["noisy"]),
+            ({"trend_strength": 0.5, "efficiency_ratio": 0.8}, ["efficient"]),
+            # Oscillator extremes
+            ({"trend_strength": 0.5, "zscore": -1.6, "rsi": 50}, ["oversold"]),
+            ({"trend_strength": 0.5, "zscore": 0, "rsi": 25}, ["oversold"]),
+            ({"trend_strength": 0.5, "zscore": 1.6, "rsi": 50}, ["overbought"]),
+            ({"trend_strength": 0.5, "zscore": 0, "rsi": 75}, ["overbought"]),
+        ],
+    )
+    def test_matches_legacy(self, kwargs, expected_tags):
+        """New evaluate_rules matches legacy compute_tags."""
+        # Create snapshot with neutral defaults + test kwargs
+        defaults = {
+            "trend_strength": 0.5,
+            "trend_dir": 0,
+            "atr_pct": 0.01,
+            "zscore": 0,
+            "rsi": 50,
+            "efficiency_ratio": 0.5,
+            "bb_width_pct": 0.03,
+        }
+        defaults.update(kwargs)
+        snapshot = RegimeSnapshot(**defaults)
+
+        legacy_tags = compute_tags(snapshot)
+        new_tags, _ = compute_tags_with_evidence(snapshot)
+
+        # Both should contain the expected tags
+        for tag in expected_tags:
+            assert tag in legacy_tags, f"Legacy missing {tag}"
+            assert tag in new_tags, f"New missing {tag}"
+
+        # Tags should match exactly
+        assert legacy_tags == new_tags
+
+
+class TestTagEvidence:
+    """Tests for tag evidence structure."""
+
+    def test_evidence_includes_all_rules(self):
+        """Evidence should include all evaluated rules."""
+        features = {"trend_strength": 0.5, "trend_dir": 0}
+        _, evidence = evaluate_rules(features)
+
+        # Should have evidence for all rules in DEFAULT_RULESET
+        rule_ids = {e.rule_id for e in evidence}
+        expected_ids = {r.rule_id for r in DEFAULT_RULESET}
+        assert rule_ids == expected_ids
+
+    def test_evidence_structure_complete(self):
+        """Each evidence should have complete structure."""
+        features = {"trend_strength": 0.7, "trend_dir": 1}
+        _, evidence = evaluate_rules(features)
+
+        for ev in evidence:
+            assert ev.tag is not None
+            assert ev.rule_id is not None
+            assert isinstance(ev.passed, bool)
+            assert ev.metric is not None
+            assert isinstance(ev.value, (int, float))  # trend_dir is int
+            assert ev.op in (">=", "<=", ">", "<", "==")
+            assert isinstance(ev.threshold, (int, float))
+            assert ev.margin is not None
+
+    def test_snapshot_has_tag_evidence(self, uptrend_series):
+        """RegimeSnapshot should include tag_evidence after computation."""
+        snapshot = compute_regime_snapshot(uptrend_series, source="test")
+
+        assert hasattr(snapshot, "tag_evidence")
+        assert len(snapshot.tag_evidence) > 0
+        assert all(isinstance(e, TagEvidence) for e in snapshot.tag_evidence)
+
+    def test_tag_evidence_serializes_correctly(self, uptrend_series):
+        """tag_evidence should serialize and deserialize correctly."""
+        original = compute_regime_snapshot(uptrend_series, source="test")
+        data = original.to_dict()
+
+        # tag_evidence should be in the dict
+        assert "tag_evidence" in data
+        assert isinstance(data["tag_evidence"], list)
+
+        # Restore and verify
+        restored = RegimeSnapshot.from_dict(data)
+        assert len(restored.tag_evidence) == len(original.tag_evidence)
+
+        # Compare first evidence item
+        orig_ev = original.tag_evidence[0]
+        rest_ev = restored.tag_evidence[0]
+        assert orig_ev.tag == rest_ev.tag
+        assert orig_ev.rule_id == rest_ev.rule_id
+        assert orig_ev.passed == rest_ev.passed
+
+    def test_old_snapshot_without_evidence_defaults_empty(self):
+        """Old snapshots without tag_evidence should default to empty list."""
+        # Simulate old v1 snapshot (no tag_evidence field)
+        old_data = {
+            "schema_version": "regime_v1",
+            "trend_strength": 0.5,
+            "trend_dir": 0,
+            "regime_tags": ["flat"],
+        }
+        snapshot = RegimeSnapshot.from_dict(old_data)
+
+        assert snapshot.tag_evidence == []
