@@ -9,7 +9,6 @@ Skip tests requiring DB: pytest tests/integration/ -v -m "not requires_db"
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 import uuid
 
 
@@ -20,15 +19,7 @@ pytestmark = pytest.mark.integration
 class TestHealthEndpoint:
     """Tests for the /health endpoint."""
 
-    @pytest.fixture
-    def client(self):
-        """Create test client with mocked dependencies."""
-        # Mock the database and Qdrant connections for health endpoint tests
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
+    # Uses shared `client` fixture from conftest.py
 
     def test_health_returns_200(self, client):
         """Test that health endpoint returns 200 even with degraded status."""
@@ -67,15 +58,6 @@ class TestHealthEndpoint:
 class TestRootEndpoint:
     """Tests for the root / endpoint."""
 
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
-
     def test_root_returns_200(self, client):
         """Test that root endpoint returns 200."""
         response = client.get("/")
@@ -93,15 +75,6 @@ class TestRootEndpoint:
 
 class TestIngestEndpoint:
     """Tests for the /ingest endpoint."""
-
-    @pytest.fixture
-    def client(self):
-        """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
 
     def test_ingest_validates_required_fields(self, client):
         """Test that ingest validates required fields."""
@@ -168,15 +141,6 @@ class TestIngestEndpoint:
 class TestYouTubeEndpoint:
     """Tests for the /sources/youtube/ingest endpoint."""
 
-    @pytest.fixture
-    def client(self):
-        """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
-
     def test_youtube_validates_required_fields(self, client):
         """Test that YouTube ingest validates required fields."""
         # Missing url
@@ -210,15 +174,6 @@ class TestYouTubeEndpoint:
 class TestQueryEndpoint:
     """Tests for the /query endpoint."""
 
-    @pytest.fixture
-    def client(self):
-        """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
-
     def test_query_validates_required_fields(self, client):
         """Test that query validates required fields."""
         # Missing workspace_id
@@ -239,30 +194,33 @@ class TestQueryEndpoint:
         )
         assert response.status_code == 422
 
-    def test_query_returns_503_without_db(self, client):
+    def test_query_returns_503_without_db(self):
         """Test that query returns 503 when DB is not available."""
-        response = client.post(
-            "/query",
-            json={
-                "workspace_id": str(uuid.uuid4()),
-                "question": "What is the market outlook?",
-                "mode": "retrieve",
-            },
-        )
-        assert response.status_code == 503
+        import app.routers.query as query_module
+        from unittest.mock import patch
+
+        from app.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
+            original_pool = query_module._db_pool
+            query_module._db_pool = None
+            try:
+                response = client.post(
+                    "/query",
+                    json={
+                        "workspace_id": str(uuid.uuid4()),
+                        "question": "What is the market outlook?",
+                        "mode": "retrieve",
+                    },
+                )
+                assert response.status_code == 503
+            finally:
+                query_module._db_pool = original_pool
 
 
 class TestJobsEndpoint:
     """Tests for the /jobs endpoint."""
-
-    @pytest.fixture
-    def client(self):
-        """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
 
     def test_jobs_unknown_id_returns_404(self, client):
         """Test that unknown job ID returns 404."""
@@ -272,15 +230,6 @@ class TestJobsEndpoint:
 
 class TestReembedEndpoint:
     """Tests for the /reembed endpoint."""
-
-    @pytest.fixture
-    def client(self):
-        """Create test client with mocked dependencies."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
 
     def test_reembed_validates_required_fields(self, client):
         """Test that reembed validates required fields."""
@@ -318,15 +267,6 @@ class TestReembedEndpoint:
 class TestCORSHeaders:
     """Tests for CORS headers."""
 
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
-
     def test_cors_headers_on_options(self, client):
         """Test that OPTIONS request returns CORS headers."""
         response = client.options(
@@ -346,15 +286,6 @@ class TestCORSHeaders:
 
 class TestErrorHandling:
     """Tests for error handling."""
-
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        with patch("app.main._db_pool", None), patch("app.main._qdrant_client", None):
-            from app.main import app
-
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
 
     def test_malformed_json_returns_422(self, client):
         """Test that malformed JSON returns 422."""
@@ -387,7 +318,7 @@ class TestIngestFlow:
     """
 
     @pytest.fixture
-    def client(self):
+    def full_client(self):
         """Create test client with real connections."""
         # These tests require actual services running
         from app.main import app
@@ -396,9 +327,9 @@ class TestIngestFlow:
             yield client
 
     @pytest.mark.skip(reason="Requires Supabase connection")
-    def test_ingest_creates_document(self, client):
+    def test_ingest_creates_document(self, full_client):
         """Test that ingest creates a document with chunks and vectors."""
-        response = client.post(
+        response = full_client.post(
             "/ingest",
             json={
                 "workspace_id": str(uuid.uuid4()),

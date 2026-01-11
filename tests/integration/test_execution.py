@@ -16,38 +16,25 @@ from unittest.mock import patch, AsyncMock, MagicMock
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
 
-# Test admin token - used in both headers and environment
-TEST_ADMIN_TOKEN = "test-admin-token"
-
-
-@pytest.fixture
-def admin_headers():
-    """Headers with admin token for protected endpoints."""
-    return {"X-Admin-Token": TEST_ADMIN_TOKEN}
-
-
-@pytest.fixture
-def mock_settings():
-    """Create mock settings for paper trading config."""
-    mock = MagicMock()
-    mock.config_profile = "development"
-    mock.paper_starting_equity = 10000.0
-    mock.paper_max_position_size_pct = 0.20
-    return mock
+# Uses shared fixtures from conftest.py:
+# - admin_headers
+# - mock_settings
+# - client_with_admin (as 'client' for this module)
 
 
 @pytest.fixture
 def client(mock_settings):
-    """Create test client with mocked dependencies."""
-    # Reset the broker singleton to ensure clean state
+    """Create test client with mocked dependencies for execution tests."""
     from app.services.execution import factory
 
     factory.reset_paper_broker()
 
     # Set admin token in environment and patch settings
-    with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), patch(
-        "app.routers.execution.get_settings", return_value=mock_settings
-    ), patch("app.main._db_pool", MagicMock()), patch("app.main._qdrant_client", None):
+    # Patch the stable seam in app.core.lifespan, not app.main
+    with patch.dict(os.environ, {"ADMIN_TOKEN": "test-admin-token"}), \
+         patch("app.routers.execution.get_settings", return_value=mock_settings), \
+         patch("app.core.lifespan._db_pool", MagicMock()), \
+         patch("app.core.lifespan._qdrant_client", None):
         # Also need to patch the execution router's _db_pool
         import app.routers.execution as execution_module
 
@@ -173,11 +160,10 @@ class TestPaperResetEndpoint:
         prod_settings = MagicMock()
         prod_settings.config_profile = "production"
 
-        with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), patch(
-            "app.routers.execution.get_settings", return_value=prod_settings
-        ), patch("app.main._db_pool", MagicMock()), patch(
-            "app.main._qdrant_client", None
-        ):
+        with patch.dict(os.environ, {"ADMIN_TOKEN": "test-admin-token"}), \
+             patch("app.routers.execution.get_settings", return_value=prod_settings), \
+             patch("app.core.lifespan._db_pool", MagicMock()), \
+             patch("app.core.lifespan._qdrant_client", None):
             import app.routers.execution as execution_module
 
             execution_module._db_pool = MagicMock()
