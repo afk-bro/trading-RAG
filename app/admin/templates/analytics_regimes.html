@@ -148,60 +148,112 @@
         color: white;
     }
 
-    /* Time-series stacked bars */
+    /* Time-series vertical stacked bars with confidence overlay */
     .timeseries-chart {
+        position: relative;
+        height: 180px;
+        margin-bottom: 8px;
+    }
+
+    .timeseries-bars-container {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        height: 150px;
+        padding: 0 4px;
+        border-bottom: 1px solid var(--border);
+        position: relative;
+    }
+
+    .timeseries-bar-wrapper {
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        overflow-x: auto;
-        padding-bottom: 8px;
-    }
-
-    .timeseries-row {
-        display: flex;
         align-items: center;
-        gap: 8px;
-        min-height: 24px;
-    }
-
-    .timeseries-label {
-        width: 80px;
-        font-size: 11px;
-        color: var(--text-muted);
-        text-align: right;
-        flex-shrink: 0;
-    }
-
-    .timeseries-bar-container {
         flex: 1;
+        max-width: 40px;
+        position: relative;
+    }
+
+    .timeseries-bar {
+        width: 24px;
         display: flex;
-        height: 20px;
-        background: var(--bg);
-        border-radius: 3px;
+        flex-direction: column-reverse;
+        border-radius: 3px 3px 0 0;
         overflow: hidden;
+        cursor: pointer;
+        position: relative;
     }
 
     .timeseries-segment {
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-        color: white;
-        text-shadow: 0 1px 1px rgba(0,0,0,0.3);
-        min-width: 0;
-        overflow: hidden;
+        width: 100%;
+        min-height: 2px;
+        transition: opacity 0.2s;
     }
 
-    .timeseries-segment span {
-        padding: 0 2px;
+    .timeseries-bar:hover .timeseries-segment {
+        opacity: 0.8;
+    }
+
+    .timeseries-labels {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 4px 0;
+    }
+
+    .timeseries-label {
+        flex: 1;
+        max-width: 40px;
+        font-size: 10px;
+        color: var(--text-muted);
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Confidence line overlay */
+    .confidence-line-container {
+        position: absolute;
+        top: 0;
+        left: 4px;
+        right: 4px;
+        height: 150px;
+        pointer-events: none;
+    }
+
+    .confidence-line {
+        fill: none;
+        stroke: var(--link);
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .confidence-dot {
+        fill: var(--link);
+        stroke: var(--bg-secondary);
+        stroke-width: 2;
+    }
+
+    /* Y-axis for confidence */
+    .confidence-axis {
+        position: absolute;
+        right: -30px;
+        top: 0;
+        height: 150px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--text-muted);
     }
 
     .timeseries-legend {
         display: flex;
-        gap: 12px;
-        margin-top: 12px;
+        gap: 16px;
+        margin-top: 8px;
         flex-wrap: wrap;
+        align-items: center;
     }
 
     .legend-item {
@@ -216,6 +268,53 @@
         width: 10px;
         height: 10px;
         border-radius: 2px;
+    }
+
+    .legend-line {
+        width: 16px;
+        height: 2px;
+        background: var(--link);
+        border-radius: 1px;
+    }
+
+    /* Tooltip */
+    .chart-tooltip {
+        position: fixed;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 12px;
+        z-index: 1000;
+        pointer-events: none;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        max-width: 200px;
+    }
+
+    .chart-tooltip-title {
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: var(--text);
+    }
+
+    .chart-tooltip-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 2px 0;
+    }
+
+    .chart-tooltip-label {
+        color: var(--text-muted);
+    }
+
+    .chart-tooltip-value {
+        font-weight: 500;
+    }
+
+    .chart-tooltip-divider {
+        border-top: 1px solid var(--border);
+        margin: 6px 0;
     }
 
     /* Insight cards */
@@ -856,7 +955,7 @@
         document.getElementById('btnPct').classList.toggle('active', currentTierView === 'pct');
     }
 
-    // Render time-series stacked bar chart
+    // Render time-series vertical stacked bar chart with confidence line overlay
     function renderTierTimeSeriesChart(container) {
         if (!tierTimeSeriesData?.buckets?.length) {
             container.innerHTML = '<div class="empty-state">No time-series data available</div>';
@@ -872,11 +971,11 @@
             'global_best': 'Global'
         };
         const tierColors = {
-            'exact': 'var(--success)',
+            'exact': '#3fb950',
             'partial_trend': '#3b82f6',
             'partial_vol': '#8b5cf6',
-            'distance': 'var(--warning)',
-            'global_best': 'var(--danger)'
+            'distance': '#d29922',
+            'global_best': '#f85149'
         };
 
         // Group series data by bucket
@@ -895,60 +994,193 @@
             }
         }
 
-        // Find max total for scaling
+        // Build confidence lookup
+        const confidenceByBucket = {};
+        for (const conf of (tierTimeSeriesData.confidence_series || [])) {
+            confidenceByBucket[conf.bucket_start] = conf.avg_confidence;
+        }
+
+        // Find max total for scaling bars
         const maxTotal = Math.max(...Object.values(bucketData).map(d => d.total), 1);
+        const chartHeight = 150;
+        const buckets = tierTimeSeriesData.buckets;
+        const barCount = buckets.length;
 
-        let html = '<div class="timeseries-chart">';
-
-        for (const bucket of tierTimeSeriesData.buckets) {
+        // Build bars HTML
+        let barsHtml = '';
+        for (let i = 0; i < buckets.length; i++) {
+            const bucket = buckets[i];
             const data = bucketData[bucket];
-            const date = new Date(bucket);
-            const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const barHeight = (data.total / maxTotal) * chartHeight;
+            const confidence = confidenceByBucket[bucket] || 0;
 
-            html += `
-                <div class="timeseries-row">
-                    <div class="timeseries-label">${label}</div>
-                    <div class="timeseries-bar-container" style="width: ${(data.total / maxTotal * 100)}%">
-            `;
+            // Build tooltip data attribute
+            const tooltipData = JSON.stringify({
+                bucket: bucket,
+                total: data.total,
+                confidence: confidence,
+                tiers: tierOrder.map(t => ({ tier: t, count: data[t] }))
+            });
 
-            // Render stacked segments
+            barsHtml += `<div class="timeseries-bar-wrapper">
+                <div class="timeseries-bar"
+                     style="height: ${barHeight}px"
+                     data-tooltip='${tooltipData}'
+                     onmouseenter="showChartTooltip(event, this)"
+                     onmouseleave="hideChartTooltip()">`;
+
+            // Stacked segments (bottom to top)
             for (const tier of tierOrder) {
                 const count = data[tier];
                 if (count > 0) {
-                    const pct = (count / data.total * 100);
-                    html += `
-                        <div class="timeseries-segment tier-${tier}"
-                             style="width: ${pct}%"
-                             title="${tierLabels[tier]}: ${count}">
-                            ${pct >= 15 ? `<span>${count}</span>` : ''}
-                        </div>
-                    `;
+                    const segmentHeight = (count / data.total) * barHeight;
+                    barsHtml += `<div class="timeseries-segment tier-${tier}" style="height: ${segmentHeight}px"></div>`;
                 }
             }
 
-            html += `
-                    </div>
-                    <span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">${data.total}</span>
-                </div>
-            `;
+            barsHtml += `</div></div>`;
+        }
+
+        // Build confidence line SVG path
+        let linePath = '';
+        let dots = '';
+        if (buckets.length > 0) {
+            const points = [];
+            for (let i = 0; i < buckets.length; i++) {
+                const bucket = buckets[i];
+                const confidence = confidenceByBucket[bucket] || 0;
+                // Calculate x position (center of each bar area)
+                const x = (i / (buckets.length - 1 || 1)) * 100;
+                // y: 0 = top (conf=1.0), chartHeight = bottom (conf=0)
+                const y = (1 - confidence) * chartHeight;
+                points.push({ x, y, confidence });
+            }
+
+            if (points.length === 1) {
+                // Single point - just a dot
+                dots = `<circle class="confidence-dot" cx="${points[0].x}%" cy="${points[0].y}" r="4"/>`;
+            } else {
+                // Build line path
+                linePath = `M ${points[0].x}% ${points[0].y}`;
+                for (let i = 1; i < points.length; i++) {
+                    linePath += ` L ${points[i].x}% ${points[i].y}`;
+                }
+                // Add dots at each point
+                dots = points.map(p =>
+                    `<circle class="confidence-dot" cx="${p.x}%" cy="${p.y}" r="3"/>`
+                ).join('');
+            }
+        }
+
+        // Build labels (show subset if too many)
+        let labelsHtml = '';
+        const maxLabels = 10;
+        const step = buckets.length <= maxLabels ? 1 : Math.ceil(buckets.length / maxLabels);
+        for (let i = 0; i < buckets.length; i++) {
+            const bucket = buckets[i];
+            const date = new Date(bucket);
+            const label = (i % step === 0)
+                ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : '';
+            labelsHtml += `<div class="timeseries-label">${label}</div>`;
         }
 
         // Legend
-        html += `
-            </div>
-            <div class="timeseries-legend">
-        `;
+        let legendHtml = '';
         for (const tier of tierOrder) {
-            html += `
+            legendHtml += `
                 <div class="legend-item">
                     <div class="legend-dot" style="background: ${tierColors[tier]}"></div>
                     ${tierLabels[tier]}
-                </div>
-            `;
+                </div>`;
         }
-        html += '</div>';
+        legendHtml += `
+            <div class="legend-item">
+                <div class="legend-line"></div>
+                Avg Confidence
+            </div>`;
 
-        container.innerHTML = html;
+        // Combine all parts
+        container.innerHTML = `
+            <div class="timeseries-chart">
+                <div class="timeseries-bars-container">
+                    ${barsHtml}
+                    <svg class="confidence-line-container" preserveAspectRatio="none">
+                        <path class="confidence-line" d="${linePath}"/>
+                        ${dots}
+                    </svg>
+                    <div class="confidence-axis">
+                        <span>1.0</span>
+                        <span>0.5</span>
+                        <span>0.0</span>
+                    </div>
+                </div>
+                <div class="timeseries-labels">${labelsHtml}</div>
+            </div>
+            <div class="timeseries-legend">${legendHtml}</div>
+        `;
+    }
+
+    // Chart tooltip handlers
+    let tooltipEl = null;
+
+    function showChartTooltip(event, element) {
+        const data = JSON.parse(element.dataset.tooltip);
+        const date = new Date(data.bucket);
+        const dateStr = date.toLocaleDateString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric'
+        });
+
+        const tierLabels = {
+            'exact': 'Exact',
+            'partial_trend': 'Partial (T)',
+            'partial_vol': 'Partial (V)',
+            'distance': 'Distance',
+            'global_best': 'Global'
+        };
+
+        let tierRows = data.tiers
+            .filter(t => t.count > 0)
+            .map(t => `
+                <div class="chart-tooltip-row">
+                    <span class="chart-tooltip-label">${tierLabels[t.tier]}</span>
+                    <span class="chart-tooltip-value">${t.count}</span>
+                </div>
+            `).join('');
+
+        if (!tooltipEl) {
+            tooltipEl = document.createElement('div');
+            tooltipEl.className = 'chart-tooltip';
+            document.body.appendChild(tooltipEl);
+        }
+
+        tooltipEl.innerHTML = `
+            <div class="chart-tooltip-title">${dateStr}</div>
+            <div class="chart-tooltip-row">
+                <span class="chart-tooltip-label">Total</span>
+                <span class="chart-tooltip-value">${data.total}</span>
+            </div>
+            <div class="chart-tooltip-row">
+                <span class="chart-tooltip-label">Confidence</span>
+                <span class="chart-tooltip-value" style="color: var(--link)">${data.confidence.toFixed(2)}</span>
+            </div>
+            <div class="chart-tooltip-divider"></div>
+            ${tierRows}
+        `;
+
+        tooltipEl.style.display = 'block';
+
+        // Position tooltip near cursor
+        const rect = element.getBoundingClientRect();
+        tooltipEl.style.left = (rect.left + rect.width / 2) + 'px';
+        tooltipEl.style.top = (rect.top - 10) + 'px';
+        tooltipEl.style.transform = 'translate(-50%, -100%)';
+    }
+
+    function hideChartTooltip() {
+        if (tooltipEl) {
+            tooltipEl.style.display = 'none';
+        }
     }
 
     function toggleTierView(view) {

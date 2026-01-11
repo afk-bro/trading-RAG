@@ -103,6 +103,14 @@ class TierUsageBucketItem(BaseModel):
     avg_confidence: float = Field(..., description="Average confidence in this bucket")
 
 
+class BucketConfidence(BaseModel):
+    """Overall confidence stats for a time bucket."""
+
+    bucket_start: str = Field(..., description="Bucket start timestamp (ISO format)")
+    avg_confidence: float = Field(..., description="Average confidence across all tiers")
+    n: int = Field(..., description="Number of recommendations in this bucket")
+
+
 class TierUsageTimeSeriesResponse(BaseModel):
     """Time-series response from tier usage endpoint."""
 
@@ -116,6 +124,9 @@ class TierUsageTimeSeriesResponse(BaseModel):
     )
     series: list[TierUsageBucketItem] = Field(
         default_factory=list, description="Time-series data points"
+    )
+    confidence_series: list[BucketConfidence] = Field(
+        default_factory=list, description="Per-bucket confidence for trend overlay"
     )
 
 
@@ -470,12 +481,19 @@ async def _get_tier_usage_time_series(
     # Collect unique buckets and build series
     bucket_set: set[str] = set()
     bucket_totals: dict[str, int] = {}  # For computing percentages within each bucket
+    # Track weighted confidence for overall bucket avg
+    bucket_conf_sum: dict[str, float] = {}  # sum(count * avg_conf)
     series = []
 
     for row in rows:
         bucket_start = row["bucket_start"].isoformat()
         bucket_set.add(bucket_start)
-        bucket_totals[bucket_start] = bucket_totals.get(bucket_start, 0) + row["count"]
+        count = row["count"]
+        avg_conf = float(row["avg_confidence"])
+        bucket_totals[bucket_start] = bucket_totals.get(bucket_start, 0) + count
+        bucket_conf_sum[bucket_start] = (
+            bucket_conf_sum.get(bucket_start, 0.0) + count * avg_conf
+        )
 
     # Build series with percentages
     for row in rows:
@@ -498,6 +516,19 @@ async def _get_tier_usage_time_series(
     buckets = sorted(bucket_set)
     total = sum(bucket_totals.values())
 
+    # Build confidence series (overall avg per bucket)
+    confidence_series = []
+    for b in buckets:
+        n = bucket_totals[b]
+        avg_conf = bucket_conf_sum[b] / n if n > 0 else 0.0
+        confidence_series.append(
+            BucketConfidence(
+                bucket_start=b,
+                avg_confidence=round(avg_conf, 3),
+                n=n,
+            )
+        )
+
     return TierUsageTimeSeriesResponse(
         workspace_id=str(workspace_id),
         strategy_entity_id=str(strategy_entity_id) if strategy_entity_id else None,
@@ -506,6 +537,7 @@ async def _get_tier_usage_time_series(
         total_recommendations=total,
         buckets=buckets,
         series=series,
+        confidence_series=confidence_series,
     )
 
 
