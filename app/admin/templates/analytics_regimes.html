@@ -1,0 +1,802 @@
+{% extends "layout.html" %}
+
+{% block title %}Regime Analytics - KB Admin{% endblock %}
+
+{% block content %}
+<style>
+    /* Analytics-specific styles */
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+    }
+
+    .page-header h1 {
+        font-size: 24px;
+        font-weight: 600;
+    }
+
+    .last-updated {
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    /* Filters */
+    .filter-row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 24px;
+        padding: 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .filter-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* Grid layout */
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    @media (max-width: 1200px) {
+        .analytics-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* Chart container */
+    .chart-container {
+        min-height: 200px;
+    }
+
+    .tier-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .tier-bar-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .tier-label {
+        width: 100px;
+        font-size: 13px;
+        text-align: right;
+    }
+
+    .tier-bar-container {
+        flex: 1;
+        height: 28px;
+        background: var(--bg);
+        border-radius: 4px;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .tier-bar {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 8px;
+    }
+
+    .tier-bar-value {
+        font-size: 12px;
+        font-weight: 500;
+        color: white;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+
+    .tier-exact { background: var(--success); }
+    .tier-partial_trend { background: #3b82f6; }
+    .tier-partial_vol { background: #8b5cf6; }
+    .tier-distance { background: var(--warning); }
+    .tier-global_best { background: var(--danger); }
+
+    /* Insight cards */
+    .insight-cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    @media (max-width: 900px) {
+        .insight-cards {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .insight-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 16px;
+    }
+
+    .insight-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .insight-icon {
+        font-size: 16px;
+    }
+
+    .insight-list {
+        list-style: none;
+    }
+
+    .insight-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+    }
+
+    .insight-item:last-child {
+        border-bottom: none;
+    }
+
+    .insight-regime {
+        font-family: 'SF Mono', Consolas, monospace;
+        color: var(--link);
+        cursor: pointer;
+    }
+
+    .insight-value {
+        font-weight: 500;
+    }
+
+    .insight-value.negative {
+        color: var(--danger);
+    }
+
+    .insight-value.positive {
+        color: var(--success);
+    }
+
+    /* Coverage table */
+    .coverage-table-container {
+        overflow-x: auto;
+    }
+
+    th.sortable {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    th.sortable:hover {
+        color: var(--text);
+    }
+
+    th.sortable::after {
+        content: ' ';
+        display: inline-block;
+        width: 16px;
+    }
+
+    th.sortable.asc::after {
+        content: ' \2191';
+    }
+
+    th.sortable.desc::after {
+        content: ' \2193';
+    }
+
+    .coverage-gap {
+        color: var(--warning);
+    }
+
+    .coverage-gap.zero {
+        color: var(--text-muted);
+    }
+
+    /* Summary stats */
+    .summary-stats {
+        display: flex;
+        gap: 32px;
+        margin-bottom: 16px;
+    }
+
+    .summary-stat {
+        text-align: center;
+    }
+
+    .summary-value {
+        font-size: 28px;
+        font-weight: 600;
+    }
+
+    .summary-label {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    /* Loading / Error states */
+    .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 150px;
+        color: var(--text-muted);
+    }
+
+    .loading-spinner {
+        width: 24px;
+        height: 24px;
+        border: 2px solid var(--border);
+        border-top-color: var(--link);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 12px;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .error-state {
+        text-align: center;
+        padding: 24px;
+        color: var(--danger);
+    }
+</style>
+
+<div class="page-header">
+    <h1>Regime Analytics</h1>
+    <div>
+        <span class="last-updated" id="lastUpdated">Loading...</span>
+        <button onclick="refreshData()" class="btn-secondary" style="margin-left: 12px;">Refresh</button>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filter-row">
+    <div class="filter-group">
+        <span class="filter-label">Workspace</span>
+        <select id="workspaceSelect" onchange="onFilterChange()">
+            <option value="">Loading...</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Strategy</span>
+        <select id="strategySelect" onchange="onFilterChange()">
+            <option value="">All Strategies</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Period</span>
+        <select id="periodSelect" onchange="onFilterChange()">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="365">All time</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Min Samples</span>
+        <input type="number" id="minSamplesInput" value="5" min="1" max="100" style="width: 80px;" onchange="onFilterChange()">
+    </div>
+</div>
+
+<!-- Summary Stats -->
+<div class="card">
+    <div class="summary-stats" id="summaryStats">
+        <div class="summary-stat">
+            <div class="summary-value" id="totalRecommends">-</div>
+            <div class="summary-label">Total Recommends</div>
+        </div>
+        <div class="summary-stat">
+            <div class="summary-value" id="totalRegimes">-</div>
+            <div class="summary-label">Unique Regimes</div>
+        </div>
+        <div class="summary-stat">
+            <div class="summary-value" id="coveragePct">-</div>
+            <div class="summary-label">Coverage %</div>
+        </div>
+        <div class="summary-stat">
+            <div class="summary-value" id="overallUplift">-</div>
+            <div class="summary-label">Avg Uplift</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Grid -->
+<div class="analytics-grid">
+    <!-- Tier Usage -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Tier Usage Distribution</span>
+            <div>
+                <button class="btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="toggleTierView('count')" id="btnCount">Count</button>
+                <button class="btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="toggleTierView('pct')" id="btnPct">%</button>
+            </div>
+        </div>
+        <div class="chart-container" id="tierChartContainer">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                Loading tier data...
+            </div>
+        </div>
+    </div>
+
+    <!-- Confidence by Tier -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Avg Confidence by Tier</span>
+        </div>
+        <div class="chart-container" id="confidenceChartContainer">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                Loading...
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Insight Cards -->
+<div class="insight-cards">
+    <div class="insight-card">
+        <div class="insight-title">
+            <span class="insight-icon">&#9888;</span>
+            Worst Coverage (Top 5)
+        </div>
+        <ul class="insight-list" id="worstCoverageList">
+            <li class="loading">
+                <div class="loading-spinner"></div>
+                Loading...
+            </li>
+        </ul>
+    </div>
+
+    <div class="insight-card">
+        <div class="insight-title">
+            <span class="insight-icon">&#10003;</span>
+            Best Uplift Regimes (Top 5)
+        </div>
+        <ul class="insight-list" id="bestUpliftList">
+            <li class="loading">
+                <div class="loading-spinner"></div>
+                Loading...
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Coverage Table -->
+<div class="card" style="margin-top: 24px;">
+    <div class="card-header">
+        <span class="card-title">Regime Coverage Details</span>
+        <span class="badge badge-type" id="regimeCount">0 regimes</span>
+    </div>
+    <div class="coverage-table-container">
+        <table id="coverageTable">
+            <thead>
+                <tr>
+                    <th class="sortable" data-sort="regime_key">Regime Key</th>
+                    <th class="sortable" data-sort="trend_tag">Trend</th>
+                    <th class="sortable" data-sort="vol_tag">Vol</th>
+                    <th class="sortable" data-sort="n_tunes">Tunes</th>
+                    <th class="sortable" data-sort="n_runs">Runs</th>
+                    <th class="sortable" data-sort="avg_best_oos">Avg Score</th>
+                    <th class="sortable" data-sort="p50_best_oos">P50</th>
+                    <th class="sortable" data-sort="p90_best_oos">P90</th>
+                    <th>Status</th>
+                    <th class="sortable desc" data-sort="coverage_gap">Gap</th>
+                </tr>
+            </thead>
+            <tbody id="coverageTableBody">
+                <tr>
+                    <td colspan="10" class="loading">
+                        <div class="loading-spinner"></div>
+                        Loading coverage data...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // State
+    let tierData = null;
+    let coverageData = null;
+    let upliftData = null;
+    let currentTierView = 'pct';
+    let currentSort = { column: 'coverage_gap', direction: 'desc' };
+
+    // Config from server
+    const workspaceId = '{{ workspace_id }}';
+    const adminToken = '{{ admin_token }}';
+
+    // API helpers
+    async function fetchWithAuth(url) {
+        const response = await fetch(url, {
+            headers: {
+                'X-Admin-Token': adminToken
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    }
+
+    function getFilterParams() {
+        const workspace = document.getElementById('workspaceSelect').value || workspaceId;
+        const strategy = document.getElementById('strategySelect').value;
+        const period = document.getElementById('periodSelect').value;
+        const minSamples = document.getElementById('minSamplesInput').value || 5;
+
+        let params = `workspace_id=${workspace}&period_days=${period}&min_samples=${minSamples}`;
+        if (strategy) {
+            params += `&strategy_entity_id=${strategy}`;
+        }
+        return params;
+    }
+
+    // Data loading
+    async function loadAllData() {
+        const params = getFilterParams();
+
+        try {
+            // Fetch all three endpoints in parallel
+            const [tier, coverage, uplift] = await Promise.all([
+                fetchWithAuth(`/admin/analytics/tier-usage?${params}`),
+                fetchWithAuth(`/admin/analytics/regime-coverage?${params}`),
+                fetchWithAuth(`/admin/analytics/uplift?${params}`)
+            ]);
+
+            tierData = tier;
+            coverageData = coverage;
+            upliftData = uplift;
+
+            renderAll();
+            updateLastUpdated();
+        } catch (error) {
+            console.error('Failed to load data:', error);
+            showError(error.message);
+        }
+    }
+
+    function renderAll() {
+        renderSummaryStats();
+        renderTierChart();
+        renderConfidenceChart();
+        renderInsightCards();
+        renderCoverageTable();
+    }
+
+    // Summary stats
+    function renderSummaryStats() {
+        document.getElementById('totalRecommends').textContent =
+            tierData?.total_recommendations?.toLocaleString() || '0';
+        document.getElementById('totalRegimes').textContent =
+            coverageData?.total_regimes?.toLocaleString() || '0';
+        document.getElementById('coveragePct').textContent =
+            (coverageData?.coverage_pct?.toFixed(1) || '0') + '%';
+
+        const uplift = upliftData?.overall_uplift || 0;
+        const upliftEl = document.getElementById('overallUplift');
+        upliftEl.textContent = (uplift >= 0 ? '+' : '') + uplift.toFixed(4);
+        upliftEl.style.color = uplift >= 0 ? 'var(--success)' : 'var(--danger)';
+    }
+
+    // Tier chart
+    function renderTierChart() {
+        const container = document.getElementById('tierChartContainer');
+
+        if (!tierData?.items?.length) {
+            container.innerHTML = '<div class="empty-state">No recommendation events in this period</div>';
+            return;
+        }
+
+        const tierOrder = ['exact', 'partial_trend', 'partial_vol', 'distance', 'global_best'];
+        const tierLabels = {
+            'exact': 'Exact',
+            'partial_trend': 'Partial (Trend)',
+            'partial_vol': 'Partial (Vol)',
+            'distance': 'Distance',
+            'global_best': 'Global Best'
+        };
+
+        // Sort items by tier order
+        const sortedItems = tierOrder.map(tier =>
+            tierData.items.find(i => i.tier === tier) || { tier, count: 0, pct: 0 }
+        );
+
+        const maxValue = currentTierView === 'count'
+            ? Math.max(...sortedItems.map(i => i.count))
+            : 100;
+
+        let html = '<div class="tier-bars">';
+        for (const item of sortedItems) {
+            const value = currentTierView === 'count' ? item.count : item.pct;
+            const width = maxValue > 0 ? (value / maxValue * 100) : 0;
+            const display = currentTierView === 'count'
+                ? item.count.toLocaleString()
+                : item.pct.toFixed(1) + '%';
+
+            html += `
+                <div class="tier-bar-row">
+                    <div class="tier-label">${tierLabels[item.tier]}</div>
+                    <div class="tier-bar-container">
+                        <div class="tier-bar tier-${item.tier}" style="width: ${width}%">
+                            <span class="tier-bar-value">${display}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
+
+        // Update button states
+        document.getElementById('btnCount').classList.toggle('active', currentTierView === 'count');
+        document.getElementById('btnPct').classList.toggle('active', currentTierView === 'pct');
+    }
+
+    function toggleTierView(view) {
+        currentTierView = view;
+        renderTierChart();
+    }
+
+    // Confidence chart
+    function renderConfidenceChart() {
+        const container = document.getElementById('confidenceChartContainer');
+
+        if (!tierData?.items?.length) {
+            container.innerHTML = '<div class="empty-state">No data</div>';
+            return;
+        }
+
+        const tierOrder = ['exact', 'partial_trend', 'partial_vol', 'distance', 'global_best'];
+        const tierLabels = {
+            'exact': 'Exact',
+            'partial_trend': 'Partial (T)',
+            'partial_vol': 'Partial (V)',
+            'distance': 'Distance',
+            'global_best': 'Global'
+        };
+
+        let html = '<div class="tier-bars">';
+        for (const tier of tierOrder) {
+            const item = tierData.items.find(i => i.tier === tier);
+            const confidence = item?.avg_confidence || 0;
+            const width = confidence * 100;
+
+            html += `
+                <div class="tier-bar-row">
+                    <div class="tier-label">${tierLabels[tier]}</div>
+                    <div class="tier-bar-container">
+                        <div class="tier-bar tier-${tier}" style="width: ${width}%">
+                            <span class="tier-bar-value">${confidence.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
+    }
+
+    // Insight cards
+    function renderInsightCards() {
+        // Worst coverage
+        const worstList = document.getElementById('worstCoverageList');
+        if (!coverageData?.items?.length) {
+            worstList.innerHTML = '<li class="empty-state">No regime data</li>';
+        } else {
+            const minSamples = parseInt(document.getElementById('minSamplesInput').value) || 5;
+            const withGap = coverageData.items
+                .map(item => ({
+                    ...item,
+                    gap: Math.max(0, minSamples - item.n_tunes)
+                }))
+                .filter(item => item.gap > 0)
+                .sort((a, b) => b.gap - a.gap)
+                .slice(0, 5);
+
+            if (withGap.length === 0) {
+                worstList.innerHTML = '<li class="insight-item"><span style="color: var(--success);">All regimes meet min_samples!</span></li>';
+            } else {
+                worstList.innerHTML = withGap.map(item => `
+                    <li class="insight-item">
+                        <span class="insight-regime" onclick="filterByRegime('${item.regime_key}')">${truncate(item.regime_key, 30)}</span>
+                        <span class="insight-value negative">-${item.gap} needed</span>
+                    </li>
+                `).join('');
+            }
+        }
+
+        // Best uplift
+        const bestList = document.getElementById('bestUpliftList');
+        if (!upliftData?.by_regime?.length) {
+            bestList.innerHTML = '<li class="empty-state">No uplift data (need recommend events)</li>';
+        } else {
+            const top5 = upliftData.by_regime
+                .filter(item => item.n_recommendations >= 3)  // Minimum sample size
+                .sort((a, b) => b.uplift - a.uplift)
+                .slice(0, 5);
+
+            if (top5.length === 0) {
+                bestList.innerHTML = '<li class="insight-item"><span>Need more recommendations per regime</span></li>';
+            } else {
+                bestList.innerHTML = top5.map(item => `
+                    <li class="insight-item">
+                        <span class="insight-regime" onclick="filterByRegime('${item.group_key}')">${truncate(item.group_key, 30)}</span>
+                        <span class="insight-value ${item.uplift >= 0 ? 'positive' : 'negative'}">
+                            ${item.uplift >= 0 ? '+' : ''}${item.uplift.toFixed(4)} (n=${item.n_recommendations})
+                        </span>
+                    </li>
+                `).join('');
+            }
+        }
+    }
+
+    // Coverage table
+    function renderCoverageTable() {
+        const tbody = document.getElementById('coverageTableBody');
+        const countBadge = document.getElementById('regimeCount');
+
+        if (!coverageData?.items?.length) {
+            tbody.innerHTML = '<tr><td colspan="10" class="empty-state">No tunes/runs with OOS scores yet</td></tr>';
+            countBadge.textContent = '0 regimes';
+            return;
+        }
+
+        const minSamples = parseInt(document.getElementById('minSamplesInput').value) || 5;
+
+        // Add coverage gap and sort
+        let items = coverageData.items.map(item => ({
+            ...item,
+            coverage_gap: Math.max(0, minSamples - item.n_tunes)
+        }));
+
+        // Sort
+        items.sort((a, b) => {
+            let aVal = a[currentSort.column];
+            let bVal = b[currentSort.column];
+
+            // Handle nulls
+            if (aVal === null) aVal = -Infinity;
+            if (bVal === null) bVal = -Infinity;
+
+            // String comparison
+            if (typeof aVal === 'string') {
+                return currentSort.direction === 'asc'
+                    ? aVal.localeCompare(bVal)
+                    : bVal.localeCompare(aVal);
+            }
+
+            // Numeric
+            return currentSort.direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+
+        tbody.innerHTML = items.map(item => `
+            <tr>
+                <td>
+                    <code style="font-size: 12px; color: var(--link); cursor: pointer;"
+                          onclick="filterByRegime('${item.regime_key}')">
+                        ${truncate(item.regime_key, 40)}
+                    </code>
+                </td>
+                <td>${item.trend_tag || '-'}</td>
+                <td>${item.vol_tag || '-'}</td>
+                <td>${item.n_tunes}</td>
+                <td>${item.n_runs}</td>
+                <td>${item.avg_best_oos?.toFixed(3) || '-'}</td>
+                <td>${item.p50_best_oos?.toFixed(3) || '-'}</td>
+                <td>${item.p90_best_oos?.toFixed(3) || '-'}</td>
+                <td>
+                    ${item.min_samples_met
+                        ? '<span class="badge badge-verified">OK</span>'
+                        : '<span class="badge badge-weak">Low</span>'}
+                </td>
+                <td class="coverage-gap ${item.coverage_gap === 0 ? 'zero' : ''}">
+                    ${item.coverage_gap > 0 ? '-' + item.coverage_gap : '-'}
+                </td>
+            </tr>
+        `).join('');
+
+        countBadge.textContent = `${items.length} regimes`;
+
+        // Update sort indicators
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.classList.remove('asc', 'desc');
+            if (th.dataset.sort === currentSort.column) {
+                th.classList.add(currentSort.direction);
+            }
+        });
+    }
+
+    // Sorting
+    document.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const column = th.dataset.sort;
+            if (currentSort.column === column) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.column = column;
+                currentSort.direction = 'desc';
+            }
+            renderCoverageTable();
+        });
+    });
+
+    // Helpers
+    function truncate(str, maxLen) {
+        if (!str) return '-';
+        return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
+    }
+
+    function filterByRegime(regimeKey) {
+        // Future: Add regime filter to filters row
+        console.log('Filter by regime:', regimeKey);
+        alert('Regime filter: ' + regimeKey + '\n\nFilter functionality coming soon.');
+    }
+
+    function updateLastUpdated() {
+        const now = new Date();
+        document.getElementById('lastUpdated').textContent =
+            'Last updated: ' + now.toLocaleTimeString();
+    }
+
+    function showError(message) {
+        document.getElementById('tierChartContainer').innerHTML =
+            `<div class="error-state">Error: ${message}</div>`;
+        document.getElementById('coverageTableBody').innerHTML =
+            `<tr><td colspan="10" class="error-state">Error: ${message}</td></tr>`;
+    }
+
+    function onFilterChange() {
+        loadAllData();
+    }
+
+    function refreshData() {
+        loadAllData();
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+        // Set workspace in dropdown
+        const wsSelect = document.getElementById('workspaceSelect');
+        wsSelect.innerHTML = `<option value="${workspaceId}" selected>${workspaceId}</option>`;
+
+        // Load data
+        loadAllData();
+    });
+</script>
+{% endblock %}

@@ -7,17 +7,24 @@ Provides analytics endpoints for:
 """
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 
 router = APIRouter(prefix="/analytics", tags=["admin-analytics"])
 logger = structlog.get_logger(__name__)
+
+# Setup Jinja2 templates (same dir as main admin templates)
+templates_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
 
 # Global connection pool (set during app startup via set_db_pool)
 _db_pool = None
@@ -119,7 +126,37 @@ class UpliftResponse(BaseModel):
 
 
 # =============================================================================
-# Endpoints
+# HTML Page
+# =============================================================================
+
+
+@router.get(
+    "/regimes",
+    response_class=HTMLResponse,
+    summary="Regime Analytics Dashboard",
+    description="Interactive dashboard for regime coverage, tier usage, and uplift analysis.",
+)
+async def analytics_regimes_page(
+    request: Request,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> HTMLResponse:
+    """Render the regime analytics dashboard page."""
+    # Get admin token from header for JS API calls
+    admin_token = request.headers.get("X-Admin-Token", "")
+
+    return templates.TemplateResponse(
+        "analytics_regimes.html",
+        {
+            "request": request,
+            "workspace_id": str(workspace_id),
+            "admin_token": admin_token,
+        },
+    )
+
+
+# =============================================================================
+# API Endpoints
 # =============================================================================
 
 
