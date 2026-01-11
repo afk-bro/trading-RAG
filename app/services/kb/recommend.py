@@ -900,6 +900,23 @@ class KBRecommender:
         # Rank using epsilon-aware comparator
         ranked = rank_candidates(scored)
 
+        # Detect tiebreak applications: compare score-only ranking vs final
+        # If a promoted candidate outranks a higher-score candidate, tie-break applied
+        tiebreak_count = 0
+        for i, sc in enumerate(ranked[:-1]):
+            next_sc = ranked[i + 1]
+            # Tie-break applied if: next has higher score but ranks lower
+            if next_sc.score > sc.score and sc.kb_status == "promoted":
+                tiebreak_count += 1
+
+        if tiebreak_count > 0:
+            logger.info(
+                "kb_tiebreak_applied_total",
+                count=tiebreak_count,
+                total_candidates=len(candidates),
+                top_k=top_k,
+            )
+
         # Reconstruct RerankedCandidates in ranked order
         result = []
         for sc in ranked[:top_k]:
