@@ -106,6 +106,16 @@ class RecommendMode(str, Enum):
     DEBUG = "debug"  # Return candidates without aggregation
 
 
+class RegimeMatchTier(str, Enum):
+    """Regime match tier for tiered matching."""
+
+    EXACT = "exact"
+    PARTIAL_TREND = "partial_trend"
+    PARTIAL_VOL = "partial_vol"
+    DISTANCE = "distance"
+    GLOBAL_BEST = "global_best"
+
+
 class RecommendStatus(str, Enum):
     """Recommendation result status."""
 
@@ -474,6 +484,136 @@ class IngestResponse(BaseModel):
     embedding_model: str
     errors: list[str] = Field(default_factory=list, max_length=50)
     duration_ms: int
+
+
+# =============================================================================
+# Tiered Matching Response Models
+# =============================================================================
+
+
+class MatchDetailInfo(BaseModel):
+    """Details about how a candidate matched."""
+
+    tier: RegimeMatchTier = Field(..., description="Match tier used")
+    matched_field: Optional[str] = Field(
+        None, description="For partial: 'trend_tag' or 'vol_tag'"
+    )
+    matched_value: Optional[str] = Field(
+        None, description="For partial: the matched value"
+    )
+    distance_score: Optional[float] = Field(
+        None, description="For distance: Euclidean distance"
+    )
+    distance_rank: Optional[int] = Field(
+        None, description="For distance: rank among candidates"
+    )
+
+
+class SampleContextInfo(BaseModel):
+    """Context about the tiered matching process."""
+
+    exact_count: int = Field(0, description="Candidates from exact tier")
+    partial_trend_count: int = Field(
+        0, description="Candidates from partial_trend tier"
+    )
+    partial_vol_count: int = Field(0, description="Candidates from partial_vol tier")
+    distance_count: int = Field(0, description="Candidates from distance tier")
+    global_count: int = Field(0, description="Candidates from global_best tier")
+
+    tier_used: RegimeMatchTier = Field(
+        ..., description="Primary tier that satisfied min_samples"
+    )
+    tiers_attempted: list[str] = Field(
+        default_factory=list, description="Tiers attempted in order"
+    )
+
+    min_samples: int = Field(5, description="Minimum samples threshold")
+    k: int = Field(20, description="Maximum candidates requested")
+
+    fallback_reason: Optional[str] = Field(
+        None, description="Why fallback to lower tier"
+    )
+
+
+class TieredCandidateInfo(BaseModel):
+    """A candidate from tiered regime matching with full metadata."""
+
+    # Identity
+    tune_id: str = Field(..., description="Tune ID")
+    run_id: Optional[str] = Field(None, description="Best OOS run ID")
+    strategy_entity_id: Optional[str] = Field(None, description="Strategy entity ID")
+
+    # Parameters
+    best_params: Optional[dict] = Field(None, description="Best OOS parameters")
+
+    # Performance
+    best_oos_score: Optional[float] = Field(None, description="Best OOS score")
+
+    # Regime info
+    regime_key: Optional[str] = Field(None, description="Regime key")
+    trend_tag: Optional[str] = Field(None, description="Trend tag")
+    vol_tag: Optional[str] = Field(None, description="Volatility tag")
+    efficiency_tag: Optional[str] = Field(None, description="Efficiency tag")
+
+    # Match metadata
+    match_detail: MatchDetailInfo = Field(..., description="How this candidate matched")
+
+
+class TieredRecommendRequest(BaseModel):
+    """Request for tiered regime matching."""
+
+    # Required
+    workspace_id: UUID = Field(..., description="Workspace ID")
+    strategy_entity_id: Optional[UUID] = Field(
+        None, description="Strategy entity ID (recommended for scoped matching)"
+    )
+
+    # Regime context (at least one recommended)
+    regime_key: Optional[str] = Field(
+        None, description="Current regime key for exact matching"
+    )
+    trend_tag: Optional[str] = Field(
+        None, description="Current trend tag for partial matching"
+    )
+    vol_tag: Optional[str] = Field(
+        None, description="Current volatility tag for partial matching"
+    )
+
+    # Optional: OHLCV for distance matching
+    ohlcv_data: Optional[list[dict]] = Field(
+        None, description="OHLCV bars for regime snapshot computation"
+    )
+    timeframe: Optional[str] = Field(
+        None, max_length=10, description="Timeframe for regime computation"
+    )
+
+    # Matching parameters
+    min_samples: int = Field(
+        5, ge=1, le=100, description="Minimum candidates before fallback"
+    )
+    k: int = Field(20, ge=1, le=100, description="Maximum candidates to return")
+
+    model_config = {"extra": "forbid"}
+
+
+class TieredRecommendResponse(BaseModel):
+    """Response from tiered regime matching."""
+
+    request_id: str = Field(..., description="Unique request ID")
+
+    # Results
+    candidates: list[TieredCandidateInfo] = Field(
+        default_factory=list, description="Matched candidates with metadata"
+    )
+    sample_context: SampleContextInfo = Field(
+        ..., description="Matching context and tier stats"
+    )
+
+    # Query context
+    query_regime_key: Optional[str] = Field(None, description="Query regime key used")
+
+    # Timing
+    duration_ms: float = Field(0.0, description="Total duration in ms")
 
 
 class StrategyListItem(BaseModel):
@@ -1070,6 +1210,182 @@ async def recommend(
         )
 
     return response
+
+
+@router.post(
+    "/recommend-tiered",
+    response_model=TieredRecommendResponse,
+    responses={
+        200: {"description": "Tiered matching completed"},
+        400: {"description": "Invalid request"},
+        403: {"description": "Access denied to workspace"},
+        503: {"description": "Service unavailable"},
+    },
+    summary="Get candidates via tiered regime matching",
+    description="""
+Find candidate tunes using tiered regime matching with graceful fallback:
+
+**Matching Ladder:**
+- **Tier 0 (exact)**: Exact regime_key match
+- **Tier 1A (partial_trend)**: Same trend_tag, any vol_tag
+- **Tier 1B (partial_vol)**: Same vol_tag, any trend_tag
+- **Tier 2 (distance)**: Nearest by regime feature distance
+- **Tier 3 (global_best)**: Top OOS scores regardless of regime
+
+**Fallback Logic:**
+If a tier has fewer than `min_samples` candidates, falls back to next tier.
+Combines candidates from multiple tiers if needed.
+
+**Response includes:**
+- Full candidate list with match metadata (tier, matched fields, distance)
+- Sample context (counts per tier, which tier satisfied min_samples)
+- Query regime key used
+
+**Best practice:** Include `strategy_entity_id` to scope matching to a specific strategy.
+""",
+)
+async def recommend_tiered(
+    http_request: Request,
+    request: TieredRecommendRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> TieredRecommendResponse:
+    """Get candidates via tiered regime matching."""
+    import time as time_module
+
+    request_id = str(uuid.uuid4())
+    start_time = time_module.perf_counter()
+
+    # Workspace access check
+    require_workspace_access(request.workspace_id, user)
+
+    logger.info(
+        "kb_recommend_tiered_start",
+        request_id=request_id,
+        workspace_id=str(request.workspace_id),
+        strategy_entity_id=(
+            str(request.strategy_entity_id) if request.strategy_entity_id else None
+        ),
+        regime_key=request.regime_key,
+        trend_tag=request.trend_tag,
+        vol_tag=request.vol_tag,
+        min_samples=request.min_samples,
+        k=request.k,
+        has_ohlcv=bool(request.ohlcv_data),
+    )
+
+    # Ensure DB pool is available
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    # Compute regime snapshot from OHLCV if provided
+    query_snapshot = None
+    if request.ohlcv_data:
+        try:
+            from app.services.kb.regime import compute_regime_from_ohlcv
+
+            query_snapshot = compute_regime_from_ohlcv(
+                ohlcv=request.ohlcv_data,
+                timeframe=request.timeframe,
+                source="query",
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to compute regime from OHLCV",
+                request_id=request_id,
+                error=str(e),
+            )
+
+    # Run tiered matching
+    try:
+        from app.services.kb.regime_match import TieredRegimeMatcher
+
+        matcher = TieredRegimeMatcher(_db_pool)
+        result = await matcher.match(
+            workspace_id=request.workspace_id,
+            strategy_entity_id=request.strategy_entity_id,
+            regime_key=request.regime_key,
+            trend_tag=request.trend_tag,
+            vol_tag=request.vol_tag,
+            query_snapshot=query_snapshot,
+            min_samples=request.min_samples,
+            k=request.k,
+        )
+    except Exception as e:
+        logger.error(
+            "kb_recommend_tiered_error",
+            request_id=request_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Tiered matching failed: {str(e)}",
+        )
+
+    # Convert to response format
+    candidates = []
+    for c in result.candidates:
+        match_detail = MatchDetailInfo(
+            tier=(
+                RegimeMatchTier(c.match_detail.tier.value)
+                if c.match_detail
+                else RegimeMatchTier.GLOBAL_BEST
+            ),
+            matched_field=c.match_detail.matched_field if c.match_detail else None,
+            matched_value=c.match_detail.matched_value if c.match_detail else None,
+            distance_score=c.match_detail.distance_score if c.match_detail else None,
+            distance_rank=c.match_detail.distance_rank if c.match_detail else None,
+        )
+        candidates.append(
+            TieredCandidateInfo(
+                tune_id=str(c.tune_id),
+                run_id=str(c.run_id) if c.run_id else None,
+                strategy_entity_id=(
+                    str(c.strategy_entity_id) if c.strategy_entity_id else None
+                ),
+                best_params=c.best_params,
+                best_oos_score=c.best_oos_score,
+                regime_key=c.regime_key,
+                trend_tag=c.trend_tag,
+                vol_tag=c.vol_tag,
+                efficiency_tag=c.efficiency_tag,
+                match_detail=match_detail,
+            )
+        )
+
+    sample_context = SampleContextInfo(
+        exact_count=result.sample_context.exact_count,
+        partial_trend_count=result.sample_context.partial_trend_count,
+        partial_vol_count=result.sample_context.partial_vol_count,
+        distance_count=result.sample_context.distance_count,
+        global_count=result.sample_context.global_count,
+        tier_used=RegimeMatchTier(result.sample_context.tier_used.value),
+        tiers_attempted=result.sample_context.tiers_attempted,
+        min_samples=result.sample_context.min_samples,
+        k=result.sample_context.k,
+        fallback_reason=result.sample_context.fallback_reason,
+    )
+
+    duration_ms = (time_module.perf_counter() - start_time) * 1000
+
+    logger.info(
+        "kb_recommend_tiered_complete",
+        request_id=request_id,
+        candidate_count=len(candidates),
+        tier_used=result.sample_context.tier_used.value,
+        tiers_attempted=result.sample_context.tiers_attempted,
+        duration_ms=round(duration_ms, 1),
+    )
+
+    return TieredRecommendResponse(
+        request_id=request_id,
+        candidates=candidates,
+        sample_context=sample_context,
+        query_regime_key=result.query_regime_key,
+        duration_ms=round(duration_ms, 1),
+    )
 
 
 @router.post(
