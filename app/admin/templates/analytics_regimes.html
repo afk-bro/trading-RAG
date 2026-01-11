@@ -742,6 +742,19 @@
         background: rgba(56, 139, 253, 0.05);
     }
 
+    .drift-drivers-table tr.driver-row {
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .drift-drivers-table tr.driver-row:hover {
+        background: rgba(56, 139, 253, 0.12);
+    }
+
+    .drift-drivers-table tr.driver-row:active {
+        background: rgba(56, 139, 253, 0.2);
+    }
+
     .loading-cell {
         text-align: center;
         color: var(--text-muted);
@@ -919,6 +932,132 @@
         stroke: var(--bg-secondary);
         stroke-width: 2;
     }
+
+    /* Filter Pills */
+    .filter-pills-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+        min-height: 28px;
+    }
+
+    .filter-pills-empty {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-style: italic;
+    }
+
+    .filter-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        font-size: 12px;
+        color: var(--text);
+        cursor: default;
+    }
+
+    .filter-pill-primary {
+        background: rgba(56, 139, 253, 0.15);
+        border-color: var(--link);
+        color: var(--link);
+    }
+
+    .filter-pill-clear {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: 50%;
+        color: var(--text-muted);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .filter-pill-clear:hover {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+
+    .filter-pill-primary .filter-pill-clear:hover {
+        background: rgba(56, 139, 253, 0.3);
+        color: var(--link);
+    }
+
+    .filter-reset-btn {
+        padding: 4px 10px;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .filter-reset-btn:hover {
+        background: rgba(248, 81, 73, 0.1);
+        border-color: var(--danger);
+        color: var(--danger);
+    }
+
+    /* Scope Banner */
+    .scope-banner {
+        display: none;
+        padding: 10px 16px;
+        background: rgba(56, 139, 253, 0.1);
+        border: 1px solid rgba(56, 139, 253, 0.3);
+        border-radius: 6px;
+        margin-bottom: 16px;
+        font-size: 13px;
+    }
+
+    .scope-banner.visible {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .scope-banner-text {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .scope-banner-label {
+        color: var(--text-muted);
+    }
+
+    .scope-banner-value {
+        font-family: monospace;
+        color: var(--link);
+        font-weight: 500;
+    }
+
+    .scope-banner-clear {
+        padding: 4px 10px;
+        background: transparent;
+        border: 1px solid var(--link);
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--link);
+        cursor: pointer;
+    }
+
+    .scope-banner-clear:hover {
+        background: rgba(56, 139, 253, 0.2);
+    }
 </style>
 
 <div class="page-header">
@@ -956,6 +1095,20 @@
         <span class="filter-label">Min Samples</span>
         <input type="number" id="minSamplesInput" value="5" min="1" max="100" style="width: 80px;" onchange="onFilterChange()">
     </div>
+</div>
+
+<!-- Active Filter Pills -->
+<div class="filter-pills-row" id="filterPills">
+    <span class="filter-pills-empty">No active filters</span>
+</div>
+
+<!-- Scope Banner (shown when filtered to specific regime) -->
+<div class="scope-banner" id="scopeBanner">
+    <div class="scope-banner-text">
+        <span class="scope-banner-label">Filtered to regime:</span>
+        <span class="scope-banner-value" id="scopeBannerValue"></span>
+    </div>
+    <button class="scope-banner-clear" onclick="clearRegimeFilter()">Clear filter</button>
 </div>
 
 <!-- Summary Stats -->
@@ -1194,7 +1347,9 @@
 </div>
 
 <script>
+    // =============================================================================
     // State
+    // =============================================================================
     let tierData = null;
     let tierTimeSeriesData = null;
     let coverageData = null;
@@ -1209,7 +1364,96 @@
     const workspaceId = '{{ workspace_id }}';
     const adminToken = '{{ admin_token }}';
 
+    // =============================================================================
+    // URL State Management (Source of Truth)
+    // =============================================================================
+
+    // Get current filters from URL
+    function getFiltersFromURL() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+            workspace_id: params.get('workspace_id') || workspaceId,
+            strategy_entity_id: params.get('strategy') || '',
+            period_days: params.get('period') || '30',
+            min_samples: params.get('min_samples') || '5',
+            regime_key: params.get('regime') || '',
+        };
+    }
+
+    // Update URL with current filters (no page reload)
+    function updateURL(filters) {
+        const params = new URLSearchParams();
+
+        // Always include workspace
+        params.set('workspace_id', filters.workspace_id || workspaceId);
+
+        // Only include non-default/non-empty values
+        if (filters.strategy_entity_id) params.set('strategy', filters.strategy_entity_id);
+        if (filters.period_days && filters.period_days !== '30') params.set('period', filters.period_days);
+        if (filters.min_samples && filters.min_samples !== '5') params.set('min_samples', filters.min_samples);
+        if (filters.regime_key) params.set('regime', filters.regime_key);
+
+        const newURL = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState({}, '', newURL);
+
+        // Update filter pills
+        renderFilterPills();
+    }
+
+    // Sync form controls from URL state
+    function syncControlsFromURL() {
+        const filters = getFiltersFromURL();
+
+        document.getElementById('workspaceSelect').value = filters.workspace_id;
+        document.getElementById('strategySelect').value = filters.strategy_entity_id;
+        document.getElementById('periodSelect').value = filters.period_days;
+        document.getElementById('minSamplesInput').value = filters.min_samples;
+
+        // Render filter pills
+        renderFilterPills();
+    }
+
+    // Get current regime filter
+    function getCurrentRegimeFilter() {
+        return getFiltersFromURL().regime_key;
+    }
+
+    // Set regime filter (updates URL and reloads data)
+    function setRegimeFilter(regimeKey) {
+        const filters = getFiltersFromURL();
+        filters.regime_key = regimeKey;
+        updateURL(filters);
+
+        // Clear cached time-series data
+        tierTimeSeriesData = null;
+
+        loadAllData();
+    }
+
+    // Clear regime filter
+    function clearRegimeFilter() {
+        setRegimeFilter('');
+    }
+
+    // Clear all filters (reset to defaults)
+    function clearAllFilters() {
+        const filters = {
+            workspace_id: workspaceId,
+            strategy_entity_id: '',
+            period_days: '30',
+            min_samples: '5',
+            regime_key: '',
+        };
+        updateURL(filters);
+        syncControlsFromURL();
+        tierTimeSeriesData = null;
+        loadAllData();
+    }
+
+    // =============================================================================
     // API helpers
+    // =============================================================================
+
     async function fetchWithAuth(url) {
         const response = await fetch(url, {
             headers: {
@@ -1223,14 +1467,14 @@
     }
 
     function getFilterParams() {
-        const workspace = document.getElementById('workspaceSelect').value || workspaceId;
-        const strategy = document.getElementById('strategySelect').value;
-        const period = document.getElementById('periodSelect').value;
-        const minSamples = document.getElementById('minSamplesInput').value || 5;
+        const filters = getFiltersFromURL();
 
-        let params = `workspace_id=${workspace}&period_days=${period}&min_samples=${minSamples}`;
-        if (strategy) {
-            params += `&strategy_entity_id=${strategy}`;
+        let params = `workspace_id=${filters.workspace_id}&period_days=${filters.period_days}&min_samples=${filters.min_samples}`;
+        if (filters.strategy_entity_id) {
+            params += `&strategy_entity_id=${filters.strategy_entity_id}`;
+        }
+        if (filters.regime_key) {
+            params += `&regime_key=${encodeURIComponent(filters.regime_key)}`;
         }
         return params;
     }
@@ -1304,6 +1548,7 @@
         renderDriftPanel();
         renderDriftDrivers();
         renderCoverageTable();
+        renderScopeBanner();
     }
 
     // Summary stats
@@ -1905,9 +2150,12 @@
                 </div>
             ` : '-';
 
+            // Escape regime key for onclick (handle quotes and special chars)
+            const escapedKey = driver.regime_key.replace(/'/g, "\\'").replace(/"/g, '\\"');
+
             return `
-                <tr>
-                    <td class="regime-key-cell" title="${driver.regime_key}">${truncate(driver.regime_key, 25)}</td>
+                <tr class="driver-row" onclick="filterByRegime('${escapedKey}')" title="Click to filter by this regime">
+                    <td class="regime-key-cell">${truncate(driver.regime_key, 25)}</td>
                     <td>${driver.total_requests}</td>
                     <td>${driver.non_exact_count} (${driver.non_exact_pct.toFixed(0)}%)</td>
                     <td class="${wowClass}">${wowText}</td>
@@ -2091,9 +2339,8 @@
     }
 
     function filterByRegime(regimeKey) {
-        // Future: Add regime filter to filters row
-        console.log('Filter by regime:', regimeKey);
-        alert('Regime filter: ' + regimeKey + '\n\nFilter functionality coming soon.');
+        // Set regime filter via URL state
+        setRegimeFilter(regimeKey);
     }
 
     function updateLastUpdated() {
@@ -2110,9 +2357,98 @@
     }
 
     function onFilterChange() {
+        // Update URL with current form values
+        const filters = {
+            workspace_id: document.getElementById('workspaceSelect').value || workspaceId,
+            strategy_entity_id: document.getElementById('strategySelect').value,
+            period_days: document.getElementById('periodSelect').value,
+            min_samples: document.getElementById('minSamplesInput').value || '5',
+            regime_key: getCurrentRegimeFilter(),  // Preserve regime filter
+        };
+        updateURL(filters);
+
         // Clear time-series cache on filter change
         tierTimeSeriesData = null;
         loadAllData();
+    }
+
+    // =============================================================================
+    // Filter Pills
+    // =============================================================================
+
+    function renderFilterPills() {
+        const container = document.getElementById('filterPills');
+        if (!container) return;
+
+        const filters = getFiltersFromURL();
+        const pills = [];
+
+        // Period pill (only if non-default)
+        if (filters.period_days && filters.period_days !== '30') {
+            pills.push({
+                label: `Period: ${filters.period_days}d`,
+                onClear: () => {
+                    const f = getFiltersFromURL();
+                    f.period_days = '30';
+                    updateURL(f);
+                    syncControlsFromURL();
+                    tierTimeSeriesData = null;
+                    loadAllData();
+                }
+            });
+        }
+
+        // Min samples pill (only if non-default)
+        if (filters.min_samples && filters.min_samples !== '5') {
+            pills.push({
+                label: `Min Samples: ${filters.min_samples}`,
+                onClear: () => {
+                    const f = getFiltersFromURL();
+                    f.min_samples = '5';
+                    updateURL(f);
+                    syncControlsFromURL();
+                    loadAllData();
+                }
+            });
+        }
+
+        // Regime filter pill (primary)
+        if (filters.regime_key) {
+            pills.push({
+                label: `Regime: ${truncate(filters.regime_key, 30)}`,
+                primary: true,
+                onClear: clearRegimeFilter
+            });
+        }
+
+        // Render pills
+        if (pills.length === 0) {
+            container.innerHTML = '<span class="filter-pills-empty">No active filters</span>';
+            return;
+        }
+
+        let html = pills.map(pill => `
+            <span class="filter-pill ${pill.primary ? 'filter-pill-primary' : ''}"
+                  title="${pill.label}">
+                ${pill.label}
+                <button class="filter-pill-clear" onclick="event.stopPropagation();">×</button>
+            </span>
+        `).join('');
+
+        if (pills.length > 0) {
+            html += `<button class="filter-reset-btn" onclick="clearAllFilters()">Reset all</button>`;
+        }
+
+        container.innerHTML = html;
+
+        // Wire up clear buttons
+        const clearBtns = container.querySelectorAll('.filter-pill-clear');
+        clearBtns.forEach((btn, i) => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                pills[i].onClear();
+            };
+        });
     }
 
     function refreshData() {
@@ -2126,17 +2462,18 @@
         btn.textContent = 'Generating...';
         btn.disabled = true;
 
-        const workspace = document.getElementById('workspaceSelect').value || workspaceId;
-        const strategy = document.getElementById('strategySelect').value;
-        const minSamples = parseInt(document.getElementById('minSamplesInput').value) || 5;
-
+        const filters = getFiltersFromURL();
         const requestBody = {
-            workspace_id: workspace,
-            min_samples: minSamples,
+            workspace_id: filters.workspace_id,
+            min_samples: parseInt(filters.min_samples) || 5,
             max_items: 10
         };
-        if (strategy) {
-            requestBody.strategy_entity_id = strategy;
+        if (filters.strategy_entity_id) {
+            requestBody.strategy_entity_id = filters.strategy_entity_id;
+        }
+        // If regime filter is active, scope backlog to that regime
+        if (filters.regime_key) {
+            requestBody.only_regimes = [filters.regime_key];
         }
 
         try {
@@ -2209,7 +2546,28 @@
         document.getElementById('backlogPanel').classList.remove('visible');
     }
 
+    // =============================================================================
+    // Scope Banner
+    // =============================================================================
+
+    function renderScopeBanner() {
+        const banner = document.getElementById('scopeBanner');
+        if (!banner) return;
+
+        const filters = getFiltersFromURL();
+
+        if (filters.regime_key) {
+            document.getElementById('scopeBannerValue').textContent = filters.regime_key;
+            banner.classList.add('visible');
+        } else {
+            banner.classList.remove('visible');
+        }
+    }
+
+    // =============================================================================
     // Initialize
+    // =============================================================================
+
     document.addEventListener('DOMContentLoaded', () => {
         // Set workspace in dropdown
         const wsSelect = document.getElementById('workspaceSelect');
@@ -2219,7 +2577,23 @@
         document.getElementById('generateDriftPlanBtn').addEventListener('click', generateDriftPlan);
         document.getElementById('closeDriftBacklogBtn').addEventListener('click', closeDriftBacklog);
 
+        // Sync form controls from URL (restore filters from query string)
+        syncControlsFromURL();
+
+        // Render initial filter pills and scope banner
+        renderFilterPills();
+        renderScopeBanner();
+
         // Load data
+        loadAllData();
+    });
+
+    // Handle browser back/forward navigation
+    window.addEventListener('popstate', () => {
+        syncControlsFromURL();
+        renderFilterPills();
+        renderScopeBanner();
+        tierTimeSeriesData = null;
         loadAllData();
     });
 </script>
