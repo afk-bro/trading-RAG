@@ -120,10 +120,38 @@ def minimal_constraints() -> dict:
 # =============================================================================
 
 
+class AsyncContextManagerMock:
+    """Mock that supports async context manager protocol."""
+
+    def __init__(self, return_value):
+        self.return_value = return_value
+
+    async def __aenter__(self):
+        return self.return_value
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+class MockDBPool:
+    """Mock database pool that properly supports async with pool.acquire()."""
+
+    def __init__(self):
+        self.conn = AsyncMock()
+        # Set up common return values
+        self.conn.fetchval.return_value = uuid4()  # For INSERT ... RETURNING id
+        self.conn.fetch.return_value = []  # For SELECT queries
+        self.conn.execute.return_value = None
+
+    def acquire(self):
+        """Return an async context manager for the connection."""
+        return AsyncContextManagerMock(self.conn)
+
+
 @pytest.fixture
 def mock_db_pool():
-    """Create a mock database pool."""
-    return AsyncMock()
+    """Create a mock database pool that supports async with pool.acquire()."""
+    return MockDBPool()
 
 
 @pytest.fixture
@@ -249,16 +277,18 @@ class TestGenerateAndExecuteIntegration:
             len(recorded_events) >= 2
         ), "Should have at least RUN_STARTED and RUN_COMPLETED"
 
-        # Find RUN_STARTED and RUN_COMPLETED events
+        # Find RUN_STARTED and RUN_COMPLETED events by checking event_type field
+        from app.schemas import TradeEventType
+
         run_started_count = sum(
             1
             for e in recorded_events
-            if e.payload.get("run_event_type") == "RUN_STARTED"
+            if e.event_type == TradeEventType.RUN_STARTED
         )
         run_completed_count = sum(
             1
             for e in recorded_events
-            if e.payload.get("run_event_type") == "RUN_COMPLETED"
+            if e.event_type == TradeEventType.RUN_COMPLETED
         )
 
         assert run_started_count == 1, "Should have exactly one RUN_STARTED event"
