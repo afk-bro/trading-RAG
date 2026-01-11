@@ -1,7 +1,7 @@
 """Unit tests for BackfillRunRepository and resume semantics."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -492,7 +492,6 @@ class TestNewestWinsResumeSemantics:
         """When multiple failed runs match config, newest (by started_at) wins."""
         workspace_id = uuid4()
         config = {"limit": 1000}
-        config_hash = _compute_config_hash(config)
 
         # Simulate finding the newest run
         # The query should ORDER BY started_at DESC LIMIT 1
