@@ -1,18 +1,13 @@
 """Unit tests for KB trial ingestion service."""
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 
 from app.services.kb.idempotency import (
-    BatchIngestResult,
     IndexEntry,
-    IngestAction,
-    IngestResult,
     compute_point_id,
 )
 from app.services.kb.ingest import (

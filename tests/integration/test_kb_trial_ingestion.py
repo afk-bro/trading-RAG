@@ -10,16 +10,14 @@ Tests the glue between modules:
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4, UUID
 
 import pytest
 
 from app.services.kb.idempotency import (
-    KB_NAMESPACE,
     compute_point_id,
     compute_content_hash_from_trial,
-    IngestAction,
     IndexEntry,
 )
 from app.services.kb.ingest import (
@@ -28,17 +26,14 @@ from app.services.kb.ingest import (
 )
 from app.services.kb.trial_doc import build_trial_doc_from_eligible_row, trial_to_text
 from app.services.kb.comparator import (
-    EPSILON,
     ScoredCandidate,
     rank_candidates,
 )
 from app.services.kb.constants import KB_TRIALS_COLLECTION_NAME, REGIME_SCHEMA_VERSION
 from app.services.kb.status_service import (
     KBStatusService,
-    KBStatusResult,
     CurrentStatus,
 )
-from app.services.kb.transitions import KBStatusTransition
 
 
 @dataclass
@@ -365,8 +360,6 @@ class TestAdminPromoteTriggerIngest:
     @pytest.mark.asyncio
     async def test_promote_updates_status_and_timestamps(self, workspace_id, source_id):
         """Promote sets kb_status, promoted_at, and inserts history."""
-        now = datetime.now(timezone.utc)
-
         mock_status_repo = MagicMock()
         mock_status_repo.get_current_status = AsyncMock(
             return_value=CurrentStatus(

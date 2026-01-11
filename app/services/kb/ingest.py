@@ -15,12 +15,10 @@ import structlog
 
 from app.services.kb.constants import (
     KB_TRIALS_COLLECTION_NAME,
-    REGIME_SCHEMA_VERSION,
 )
 from app.services.kb.embed import KBEmbeddingAdapter
 from app.services.kb.idempotency import (
     BatchIngestResult,
-    IndexEntry,
     IngestAction,
     IngestResult,
     KBTrialIndexRepository,
@@ -28,12 +26,10 @@ from app.services.kb.idempotency import (
     compute_point_id,
 )
 from app.services.kb.trial_doc import (
-    TrialDoc,
     build_trial_doc_from_eligible_row,
     trial_to_metadata,
     trial_to_text,
 )
-from app.services.kb.types import RegimeSnapshot
 
 logger = structlog.get_logger(__name__)
 

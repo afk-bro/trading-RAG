@@ -197,7 +197,6 @@ class TestQueryEndpoint:
     def test_query_returns_503_without_db(self):
         """Test that query returns 503 when DB is not available."""
         import app.routers.query as query_module
-        from unittest.mock import patch
 
         from app.main import app
 

@@ -6,13 +6,13 @@ This is Phase 3 of the trial ingestion design.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal, Optional, Protocol
 from uuid import UUID
 
 import structlog
 
-from app.services.kb.transitions import KBStatusTransition, TransitionResult
+from app.services.kb.transitions import KBStatusTransition
 
 logger = structlog.get_logger(__name__)
 
@@ -92,7 +92,6 @@ class InvalidTransitionError(Exception):
 class TrialNotFoundError(Exception):
     """Raised when a trial is not found."""
 
-    pass
 
 
 class KBStatusRepository(Protocol):

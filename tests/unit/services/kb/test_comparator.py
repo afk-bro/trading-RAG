@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from app.services.kb.comparator import (
     CURRENT_REGIME_SCHEMA,

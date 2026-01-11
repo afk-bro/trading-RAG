@@ -1,6 +1,6 @@
 """Unit tests for KB status service."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -13,7 +13,6 @@ from app.services.kb.status_service import (
     KBStatusService,
     TrialNotFoundError,
 )
-from app.services.kb.transitions import KBStatusTransition
 
 
 class MockStatusRepository:

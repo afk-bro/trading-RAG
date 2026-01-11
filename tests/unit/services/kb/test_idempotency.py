@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
-import pytest
 
 from app.services.kb.idempotency import (
     KB_NAMESPACE,

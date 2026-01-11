@@ -1,7 +1,6 @@
 """Unit tests for RunPlansRepository."""
 
 import json
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 

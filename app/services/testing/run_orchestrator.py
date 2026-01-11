@@ -23,7 +23,6 @@ from app.services.testing.models import (
 )
 from app.services.kb.candidacy import (
     CandidacyConfig,
-    CandidacyDecision,
     VariantMetricsForCandidacy,
     is_candidate,
 )
