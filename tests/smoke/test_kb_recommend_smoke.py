@@ -20,6 +20,10 @@ import uuid
 
 import pytest
 
+
+# Mark all tests in this module as smoke tests (require running server)
+pytestmark = pytest.mark.smoke
+
 # Skip entire module if httpx not installed (lightweight marker)
 httpx = pytest.importorskip("httpx")
 
