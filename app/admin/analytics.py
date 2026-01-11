@@ -151,6 +151,48 @@ class UpliftResponse(BaseModel):
     by_tier: list[UpliftItem] = Field(default_factory=list)
 
 
+class SuggestedActions(BaseModel):
+    """Suggested tuning actions for a regime gap."""
+
+    n_tunes: int = Field(..., description="Number of tunes to run")
+    timeframes: list[str] = Field(
+        default_factory=list, description="Suggested timeframes"
+    )
+    symbols: list[str] = Field(default_factory=list, description="Suggested symbols")
+    priority: str = Field(..., description="Priority: 'high', 'medium', 'low'")
+
+
+class RegimeBacklogItem(BaseModel):
+    """A regime with coverage gap and suggested actions."""
+
+    regime_key: str
+    trend_tag: Optional[str] = None
+    vol_tag: Optional[str] = None
+    current_tunes: int = Field(..., description="Current tune count")
+    missing_samples: int = Field(..., description="Tunes needed to reach min_samples")
+    suggested_actions: SuggestedActions
+
+
+class RegimeBacklogRequest(BaseModel):
+    """Request body for generating regime backlog."""
+
+    workspace_id: UUID
+    strategy_entity_id: Optional[UUID] = None
+    min_samples: int = Field(5, ge=1, le=100, description="Target sample threshold")
+    max_items: int = Field(10, ge=1, le=50, description="Max regimes to return")
+
+
+class RegimeBacklogResponse(BaseModel):
+    """Response from regime backlog generator."""
+
+    workspace_id: str
+    strategy_entity_id: Optional[str] = None
+    min_samples: int = Field(5, description="Target threshold")
+    total_gaps: int = Field(0, description="Total regimes below threshold")
+    total_missing: int = Field(0, description="Sum of all missing samples")
+    regimes: list[RegimeBacklogItem] = Field(default_factory=list)
+
+
 # =============================================================================
 # HTML Page
 # =============================================================================
@@ -609,4 +651,114 @@ async def get_uplift(
         overall_uplift=round(overall_uplift, 4),
         by_regime=by_regime,
         by_tier=by_tier,
+    )
+
+
+@router.post(
+    "/regime-backlog",
+    response_model=RegimeBacklogResponse,
+    summary="Generate tuning backlog from coverage gaps",
+    description="""
+Generate actionable tuning tasks from regime coverage gaps.
+
+For each regime below min_samples threshold, returns:
+- missing_samples: how many more tunes are needed
+- suggested_actions: n_tunes, timeframes, symbols, priority
+
+Priority levels:
+- high: missing >= 3 samples
+- medium: missing == 2 samples
+- low: missing == 1 sample
+
+This closes the analytics → execution loop by turning insights into tasks.
+""",
+)
+async def generate_regime_backlog(
+    request: RegimeBacklogRequest,
+    _: bool = Depends(require_admin_token),
+) -> RegimeBacklogResponse:
+    """Generate tuning backlog from regime coverage gaps."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    # Build query conditions
+    conditions = ["t.workspace_id = $1", "t.regime_key IS NOT NULL"]
+    params: list = [request.workspace_id]
+    param_idx = 2
+
+    if request.strategy_entity_id:
+        conditions.append(f"t.strategy_entity_id = ${param_idx}")
+        params.append(request.strategy_entity_id)
+        param_idx += 1
+
+    where_clause = " AND ".join(conditions)
+
+    # Query regimes with tune counts
+    query = f"""
+        SELECT
+            t.regime_key,
+            t.trend_tag,
+            t.vol_tag,
+            COUNT(DISTINCT t.id) as n_tunes
+        FROM backtest_tunes t
+        WHERE {where_clause}
+          AND t.status = 'completed'
+        GROUP BY t.regime_key, t.trend_tag, t.vol_tag
+        HAVING COUNT(DISTINCT t.id) < ${ param_idx }
+        ORDER BY COUNT(DISTINCT t.id) ASC
+        LIMIT ${ param_idx + 1 }
+    """
+    params.extend([request.min_samples, request.max_items])
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    # Default suggestions (can be made smarter later)
+    default_timeframes = ["5m", "15m"]
+    default_symbols = ["BTC-USDT", "ETH-USDT"]
+
+    regimes = []
+    total_missing = 0
+
+    for row in rows:
+        current = row["n_tunes"]
+        missing = request.min_samples - current
+        total_missing += missing
+
+        # Determine priority based on gap size
+        if missing >= 3:
+            priority = "high"
+        elif missing >= 2:
+            priority = "medium"
+        else:
+            priority = "low"
+
+        regimes.append(
+            RegimeBacklogItem(
+                regime_key=row["regime_key"],
+                trend_tag=row["trend_tag"],
+                vol_tag=row["vol_tag"],
+                current_tunes=current,
+                missing_samples=missing,
+                suggested_actions=SuggestedActions(
+                    n_tunes=missing,
+                    timeframes=default_timeframes,
+                    symbols=default_symbols,
+                    priority=priority,
+                ),
+            )
+        )
+
+    return RegimeBacklogResponse(
+        workspace_id=str(request.workspace_id),
+        strategy_entity_id=(
+            str(request.strategy_entity_id) if request.strategy_entity_id else None
+        ),
+        min_samples=request.min_samples,
+        total_gaps=len(regimes),
+        total_missing=total_missing,
+        regimes=regimes,
     )
