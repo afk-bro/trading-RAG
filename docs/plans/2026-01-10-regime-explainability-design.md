@@ -48,11 +48,13 @@ class TagEvidence:
     rule_id: str                       # Which rule was evaluated
     passed: bool                       # Did this rule pass?
     metric: str                        # Which metric was evaluated
-    value: float                       # Actual value (after transform)
+    value: float                       # Raw value from snapshot
     op: Op                             # Operator used
     threshold: float                   # Threshold compared against
     units: str | None = None           # Display hint
     margin: float | None = None        # Normalized: positive = passed by X
+    transform: Transform | None = None # Transform applied (for UI: "|zscore|")
+    computed_value: float | None = None # Value after transform (if different)
     confidence: float | None = None    # Reserved for v2
 ```
 
@@ -79,6 +81,33 @@ Margin is always normalized so **positive = rule satisfied**:
 This handles both:
 - Compound requirements: `uptrend` needs `trend_strength >= 0.6 AND trend_dir > 0`
 - Alternative triggers: `oversold` from `zscore < -1.5 OR rsi < 30`
+
+### Exclusive Families
+
+Some tags are mutually exclusive (at most one can be assigned):
+
+```python
+EXCLUSIVE_FAMILIES: dict[str, list[str]] = {
+    "trend": ["uptrend", "downtrend", "flat"],
+    # Note: "trending" (dir=0) is a fallback, handled by priority
+}
+```
+
+**Legacy behavior to preserve:**
+- If `trend_strength > 0.6`: assign uptrend/downtrend based on direction, or skip if dir=0
+- If `trend_strength < 0.3`: assign flat
+- Middle band (0.3-0.6): no trend tag
+
+The evaluator applies priority order within families. The first passing tag in the family wins.
+
+### Near-Miss Policy for OR Groups
+
+When OR-over-groups is in play, near-misses can be noisy. Policy:
+
+1. **If tag passes**: Skip near-miss emission entirely for that tag (no "almost" for something that happened)
+2. **If tag fails**: Emit near-miss only for the **closest group** (highest group margin)
+
+This prevents tooltips like "oversold: RSI almost triggered AND zscore almost triggered"
 
 ### Default Ruleset
 
@@ -166,27 +195,29 @@ def evaluate_rules(
             group_evidence = []
 
             for rule in rules:
-                # Apply transform
+                # Get raw value and apply transform
                 raw_value = features.get(rule.metric, 0.0)
                 if rule.transform == "abs":
-                    value = abs(raw_value)
+                    computed = abs(raw_value)
                 else:
-                    value = raw_value
+                    computed = raw_value
 
-                # Evaluate
-                passed = _evaluate_op(value, rule.op, rule.threshold)
-                margin = _compute_margin(value, rule.op, rule.threshold)
+                # Evaluate using computed value
+                passed = _evaluate_op(computed, rule.op, rule.threshold)
+                margin = _compute_margin(computed, rule.op, rule.threshold)
 
                 ev = TagEvidence(
                     tag=rule.tag,
                     rule_id=rule.rule_id,
                     passed=passed,
                     metric=rule.metric,
-                    value=value,
+                    value=raw_value,  # Always store raw
                     op=rule.op,
                     threshold=rule.threshold,
                     units=rule.units,
                     margin=margin,
+                    transform=rule.transform,
+                    computed_value=computed if rule.transform else None,
                 )
                 group_evidence.append(ev)
 
@@ -300,31 +331,39 @@ REGIME_SCHEMA_VERSION: Final[str] = "regime_v1_1"
 
 ## Implementation Steps
 
-### Task 1: Add Type Definitions
+### Task 1: Types + Constants
 - Add `Op`, `Transform`, `TagRule`, `TagEvidence` to `types.py`
 - Add `tag_evidence` field to `RegimeSnapshot`
+- Add `EXCLUSIVE_FAMILIES` to `constants.py`
+- Update `REGIME_SCHEMA_VERSION` to `"regime_v1_1"`
 
-### Task 2: Add Ruleset and Evaluator
+### Task 2: Evaluator (Pure Function)
 - Add `DEFAULT_RULESET` to `constants.py`
-- Add `evaluate_rules()` to `regime.py`
+- Add `evaluate_rules(features, ruleset)` to `regime.py`
 - Add helper functions `_evaluate_op()`, `_compute_margin()`
+- Keep it deterministic, no I/O
 
-### Task 3: Integrate into compute_tags
-- Refactor `compute_tags()` to call `evaluate_rules()`
-- Populate `tag_evidence` on `RegimeSnapshot`
-- Bump schema version
+### Task 3: Wire into compute_tags()
+- Replace existing tagging logic with `evaluate_rules()` call
+- Set `snapshot.tag_evidence = evidence`
+- Apply exclusive family logic
+- **Critical**: Output tags must match legacy `compute_tags()` behavior
 
-### Task 4: Add Tests
-- Test each tag rule evaluates correctly
-- Test AND-within-group semantics
-- Test OR-across-groups semantics (oversold/overbought)
-- Test transform="abs" for mean_reverting
-- Test margin normalization
-- Test near-miss extraction
+### Task 4: Tests (~12-18 tests)
+Minimum test matrix:
+- AND within group: uptrend requires both rules
+- OR across groups: oversold fires on RSI alone
+- `abs` transform: mean_reverting when zscore=-1.2 but abs>=1.0
+- Margin sign correctness for each op family
+- Near-miss emission only for headline rules
+- Near-miss OR policy (closest group only)
+- Exclusive family: at most one of uptrend/downtrend/flat
+- Legacy behavior: middle band (0.3-0.6) yields no trend tag
 
-### Task 5: Backward Compatibility
-- Verify old snapshots (v1) still load correctly
-- Verify filtering by `regime_tags` unchanged
+### Task 5: Serialization / Persistence
+- Ensure `tag_evidence` included in JSON serialization
+- Verify old snapshots without `tag_evidence` default to `[]`
+- KB ingestion/backfill runs without migrations (additive JSONB change)
 
 ## Test Cases
 
@@ -372,10 +411,21 @@ def test_margin_negative_when_failed():
     ...
 ```
 
+## Definition of Done
+
+Implementation is complete when:
+
+1. **Tags match legacy**: For a fixed fixture snapshot set, tags match legacy `compute_tags()` output
+2. **Evidence is stable**: Includes threshold/op/metric/value/margin for each evaluated rule
+3. **UI-ready**: Dashboards can render tooltips without calling the LLM
+4. **KB compatible**: Ingestion/backfill can run on existing DB without migrations (additive JSONB)
+5. **Tests pass**: All ~12-18 tests covering the test matrix above
+
 ## Open Questions
 
-None - design is complete based on prior discussion.
+None - design is complete based on feedback discussion.
 
 ## Revision History
 
 - 2026-01-10: Initial design based on brainstorming session
+- 2026-01-10: Added computed_value field, near-miss OR policy, exclusive families per feedback
