@@ -25,6 +25,9 @@ Examples:
     # Backfill candidacy status for test_variant runs
     python -m app.services.kb.cli backfill-candidacy --workspace abc123 --since 2025-01-01 --dry-run
 
+    # Resume a failed backfill run
+    python -m app.services.kb.cli backfill-candidacy --workspace abc123 --resume
+
     # Backfill regime snapshots from OHLCV file
     python -m app.services.kb.cli backfill-regime --workspace abc123 --ohlcv-file data.csv --dry-run
 """
@@ -308,6 +311,8 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
 
     Evaluates historical runs against the candidacy gate policy and marks
     eligible ones as 'candidate' for KB ingestion.
+
+    Supports resume semantics via kb_backfill_runs table.
     """
     from app.db import get_db_pool
     from app.services.kb.candidacy import (
@@ -316,6 +321,7 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
         CandidacyConfig,
     )
     from app.services.kb.types import RegimeSnapshot
+    from app.repositories.kb_backfill import BackfillRunRepository
 
     # Parse workspace ID
     try:
@@ -337,6 +343,15 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
     dry_run = args.dry_run
     experiment_type = args.experiment_type or "sweep"
     require_regime = not args.no_regime_check
+    resume = args.resume
+
+    # Build config dict for run tracking
+    run_config = {
+        "since": str(since) if since else None,
+        "limit": limit,
+        "experiment_type": experiment_type,
+        "require_regime": require_regime,
+    }
 
     logger.info(
         "Starting candidacy backfill",
@@ -346,6 +361,7 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
         dry_run=dry_run,
         experiment_type=experiment_type,
         require_regime=require_regime,
+        resume=resume,
     )
 
     # Connect to database
@@ -355,7 +371,40 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
         logger.error("Failed to connect to database", error=str(e))
         return 1
 
-    # Query eligible runs
+    # Initialize run tracking
+    backfill_repo = BackfillRunRepository(pool)
+    backfill_run = None
+    resume_cursor: Optional[str] = None
+
+    # Check for resumable run if --resume flag is set
+    if resume:
+        backfill_run = await backfill_repo.find_resumable(
+            workspace_id=workspace_id,
+            backfill_type="candidacy",
+            config=run_config,
+        )
+        if backfill_run:
+            resume_cursor = backfill_run.last_processed_cursor
+            logger.info(
+                "Resuming from previous run",
+                run_id=str(backfill_run.id),
+                processed_count=backfill_run.processed_count,
+                resume_cursor=resume_cursor,
+            )
+        else:
+            logger.info("No resumable run found, starting fresh")
+
+    # Create new run if not resuming
+    if backfill_run is None:
+        backfill_run = await backfill_repo.create(
+            workspace_id=workspace_id,
+            backfill_type="candidacy",
+            config=run_config,
+            dry_run=dry_run,
+        )
+        logger.info("Created backfill run", run_id=str(backfill_run.id))
+
+    # Query eligible runs (with cursor support for resume)
     query = """
         SELECT id, workspace_id, summary, regime_oos, trade_count, run_kind, status
         FROM backtest_runs
@@ -364,123 +413,176 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
           AND kb_status = 'excluded'
           AND workspace_id = $1
           AND ($2::timestamp IS NULL OR created_at >= $2)
-        ORDER BY created_at
+          AND ($4::text IS NULL OR id::text > $4)
+        ORDER BY id
         LIMIT $3
     """
 
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(query, workspace_id, since, limit)
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, workspace_id, since, limit, resume_cursor)
 
-    logger.info("Fetched runs", count=len(rows))
+        logger.info("Fetched runs", count=len(rows))
 
-    # Candidacy config
-    config = CandidacyConfig(require_regime=require_regime)
+        # Candidacy config
+        config = CandidacyConfig(require_regime=require_regime)
 
-    # Track results
-    eligible_ids: list[UUID] = []
-    rejection_reasons: Counter = Counter()
-    total_scanned = len(rows)
+        # Track results (start from resume counts if resuming)
+        eligible_ids: list[UUID] = []
+        rejection_reasons: Counter = Counter()
+        processed_count = backfill_run.processed_count
+        skipped_count = backfill_run.skipped_count
+        error_count = backfill_run.error_count
+        last_cursor: Optional[str] = resume_cursor
 
-    for row in rows:
-        run_id = row["id"]
-        summary = row["summary"]
+        # Progress update interval
+        progress_interval = 100
 
-        # Parse summary if it's a string
-        if isinstance(summary, str):
-            try:
-                summary = json.loads(summary)
-            except json.JSONDecodeError:
+        for i, row in enumerate(rows):
+            run_id = row["id"]
+            summary = row["summary"]
+            last_cursor = str(run_id)
+
+            # Parse summary if it's a string
+            if isinstance(summary, str):
+                try:
+                    summary = json.loads(summary)
+                except json.JSONDecodeError:
+                    summary = {}
+
+            if summary is None:
                 summary = {}
 
-        if summary is None:
-            summary = {}
+            # Extract metrics from summary
+            n_trades = row["trade_count"] or summary.get("trades", 0) or 0
+            max_dd_pct = abs(summary.get("max_drawdown_pct", 0) or 0)
+            sharpe = summary.get("sharpe")
 
-        # Extract metrics from summary
-        n_trades = row["trade_count"] or summary.get("trades", 0) or 0
-        max_dd_pct = abs(summary.get("max_drawdown_pct", 0) or 0)
-        sharpe = summary.get("sharpe")
+            # Parse regime snapshot if present
+            regime_oos = None
+            if row["regime_oos"]:
+                regime_data = row["regime_oos"]
+                if isinstance(regime_data, str):
+                    try:
+                        regime_data = json.loads(regime_data)
+                    except json.JSONDecodeError:
+                        regime_data = None
+                if regime_data:
+                    regime_oos = RegimeSnapshot.from_dict(regime_data)
 
-        # Parse regime snapshot if present
-        regime_oos = None
-        if row["regime_oos"]:
-            regime_data = row["regime_oos"]
-            if isinstance(regime_data, str):
-                try:
-                    regime_data = json.loads(regime_data)
-                except json.JSONDecodeError:
-                    regime_data = None
-            if regime_data:
-                regime_oos = RegimeSnapshot.from_dict(regime_data)
+            # Build metrics for candidacy check
+            metrics = VariantMetricsForCandidacy(
+                n_trades_oos=n_trades,
+                max_dd_frac_oos=max_dd_pct / 100.0,  # Convert percentage to fraction
+                sharpe_oos=sharpe,
+                overfit_gap=None,  # Not available for test_variants
+            )
 
-        # Build metrics for candidacy check
-        metrics = VariantMetricsForCandidacy(
-            n_trades_oos=n_trades,
-            max_dd_frac_oos=max_dd_pct / 100.0,  # Convert percentage to fraction
-            sharpe_oos=sharpe,
-            overfit_gap=None,  # Not available for test_variants
+            # Evaluate candidacy
+            decision = is_candidate(
+                metrics=metrics,
+                regime_oos=regime_oos,
+                experiment_type=experiment_type,
+                config=config,
+            )
+
+            if decision.eligible:
+                eligible_ids.append(run_id)
+                processed_count += 1
+            else:
+                rejection_reasons[decision.reason] += 1
+                skipped_count += 1
+
+            # Update progress periodically
+            if (i + 1) % progress_interval == 0:
+                await backfill_repo.update_progress(
+                    run_id=backfill_run.id,
+                    processed_count=processed_count,
+                    skipped_count=skipped_count,
+                    error_count=error_count,
+                    last_processed_cursor=last_cursor,
+                )
+                logger.info(
+                    "Progress update",
+                    processed=processed_count,
+                    skipped=skipped_count,
+                    cursor=last_cursor[:8] if last_cursor else None,
+                )
+
+        # Update eligible runs (unless dry-run)
+        updated_count = 0
+        if eligible_ids and not dry_run:
+            update_query = """
+                UPDATE backtest_runs SET
+                    kb_status = 'candidate',
+                    kb_status_changed_at = NOW(),
+                    kb_status_changed_by = 'backfill',
+                    auto_candidate_gate = 'passed_all_gates'
+                WHERE id = ANY($1)
+            """
+            async with pool.acquire() as conn:
+                result = await conn.execute(update_query, eligible_ids)
+                updated_count = int(result.split()[-1])
+
+            logger.info("Updated runs", count=updated_count)
+
+        # Mark run as completed
+        await backfill_repo.complete(
+            run_id=backfill_run.id,
+            processed_count=processed_count,
+            skipped_count=skipped_count,
+            error_count=error_count,
         )
 
-        # Evaluate candidacy
-        decision = is_candidate(
-            metrics=metrics,
-            regime_oos=regime_oos,
-            experiment_type=experiment_type,
-            config=config,
+        # Print report
+        print("\n" + "=" * 60)
+        print("BACKFILL CANDIDACY REPORT")
+        print("=" * 60)
+        print(f"Run ID:          {backfill_run.id}")
+        print(f"Workspace:       {workspace_id}")
+        print(f"Since:           {since or 'all time'}")
+        print(f"Limit:           {limit}")
+        print(f"Experiment Type: {experiment_type}")
+        print(f"Require Regime:  {require_regime}")
+        print(f"Dry Run:         {dry_run}")
+        print(f"Resumed:         {resume and resume_cursor is not None}")
+        print("-" * 60)
+        print(f"Total Scanned:   {len(rows)}")
+        print(f"Eligible:        {len(eligible_ids)}")
+        print(f"Ineligible:      {sum(rejection_reasons.values())}")
+        print(f"Updated:         {updated_count}" + (" (dry run)" if dry_run else ""))
+        print("-" * 60)
+
+        if rejection_reasons:
+            print("Rejection Reasons:")
+            for reason, count in rejection_reasons.most_common():
+                print(f"  {reason}: {count}")
+
+        print("=" * 60)
+
+        return 0
+
+    except Exception as e:
+        # Mark run as failed
+        error_msg = str(e)
+        await backfill_repo.fail(
+            run_id=backfill_run.id,
+            error=error_msg,
+            processed_count=processed_count if "processed_count" in dir() else 0,
+            skipped_count=skipped_count if "skipped_count" in dir() else 0,
+            error_count=error_count if "error_count" in dir() else 0,
+            last_processed_cursor=last_cursor if "last_cursor" in dir() else None,
         )
-
-        if decision.eligible:
-            eligible_ids.append(run_id)
-        else:
-            rejection_reasons[decision.reason] += 1
-
-    # Update eligible runs (unless dry-run)
-    updated_count = 0
-    if eligible_ids and not dry_run:
-        update_query = """
-            UPDATE backtest_runs SET
-                kb_status = 'candidate',
-                kb_status_changed_at = NOW(),
-                kb_status_changed_by = 'backfill',
-                auto_candidate_gate = 'passed_all_gates'
-            WHERE id = ANY($1)
-        """
-        async with pool.acquire() as conn:
-            result = await conn.execute(update_query, eligible_ids)
-            updated_count = int(result.split()[-1])
-
-        logger.info("Updated runs", count=updated_count)
-
-    # Print report
-    print("\n" + "=" * 60)
-    print("BACKFILL CANDIDACY REPORT")
-    print("=" * 60)
-    print(f"Workspace:       {workspace_id}")
-    print(f"Since:           {since or 'all time'}")
-    print(f"Limit:           {limit}")
-    print(f"Experiment Type: {experiment_type}")
-    print(f"Require Regime:  {require_regime}")
-    print(f"Dry Run:         {dry_run}")
-    print("-" * 60)
-    print(f"Total Scanned:   {total_scanned}")
-    print(f"Eligible:        {len(eligible_ids)}")
-    print(f"Ineligible:      {sum(rejection_reasons.values())}")
-    print(f"Updated:         {updated_count}" + (" (dry run)" if dry_run else ""))
-    print("-" * 60)
-
-    if rejection_reasons:
-        print("Rejection Reasons:")
-        for reason, count in rejection_reasons.most_common():
-            print(f"  {reason}: {count}")
-
-    print("=" * 60)
-
-    return 0
+        logger.error("Backfill failed", error=error_msg, run_id=str(backfill_run.id))
+        raise
 
 
 async def cmd_backfill_regime(args: argparse.Namespace) -> int:
     """Backfill regime snapshots from OHLCV file.
 
     Computes regime_oos for runs that are missing it, using provided OHLCV data.
+
+    Supports resume semantics via kb_backfill_runs table.
     """
     import pandas as pd
     from pathlib import Path
@@ -488,6 +590,7 @@ async def cmd_backfill_regime(args: argparse.Namespace) -> int:
     from app.db import get_db_pool
     from app.services.kb.regime import compute_regime_snapshot
     from app.services.kb.constants import REGIME_SCHEMA_VERSION
+    from app.repositories.kb_backfill import BackfillRunRepository
 
     # Parse workspace ID
     try:
@@ -515,6 +618,16 @@ async def cmd_backfill_regime(args: argparse.Namespace) -> int:
     dry_run = args.dry_run
     timeframe = args.timeframe or "1d"
     symbol_filter = args.symbol
+    resume = args.resume
+
+    # Build config dict for run tracking
+    run_config = {
+        "ohlcv_file": str(ohlcv_path),
+        "symbol": symbol_filter,
+        "timeframe": timeframe,
+        "since": str(since) if since else None,
+        "limit": limit,
+    }
 
     logger.info(
         "Starting regime backfill",
@@ -525,6 +638,7 @@ async def cmd_backfill_regime(args: argparse.Namespace) -> int:
         since=str(since) if since else None,
         limit=limit,
         dry_run=dry_run,
+        resume=resume,
     )
 
     # Load OHLCV data
@@ -545,7 +659,40 @@ async def cmd_backfill_regime(args: argparse.Namespace) -> int:
         logger.error("Failed to connect to database", error=str(e))
         return 1
 
-    # Query runs needing regime backfill
+    # Initialize run tracking
+    backfill_repo = BackfillRunRepository(pool)
+    backfill_run = None
+    resume_cursor: Optional[str] = None
+
+    # Check for resumable run if --resume flag is set
+    if resume:
+        backfill_run = await backfill_repo.find_resumable(
+            workspace_id=workspace_id,
+            backfill_type="regime",
+            config=run_config,
+        )
+        if backfill_run:
+            resume_cursor = backfill_run.last_processed_cursor
+            logger.info(
+                "Resuming from previous run",
+                run_id=str(backfill_run.id),
+                processed_count=backfill_run.processed_count,
+                resume_cursor=resume_cursor,
+            )
+        else:
+            logger.info("No resumable run found, starting fresh")
+
+    # Create new run if not resuming
+    if backfill_run is None:
+        backfill_run = await backfill_repo.create(
+            workspace_id=workspace_id,
+            backfill_type="regime",
+            config=run_config,
+            dry_run=dry_run,
+        )
+        logger.info("Created backfill run", run_id=str(backfill_run.id))
+
+    # Query runs needing regime backfill (with cursor support for resume)
     query = """
         SELECT id, workspace_id, dataset_meta, params, started_at, completed_at
         FROM backtest_runs
@@ -555,80 +702,134 @@ async def cmd_backfill_regime(args: argparse.Namespace) -> int:
           AND workspace_id = $1
           AND ($2::text IS NULL OR dataset_meta->>'symbol' = $2)
           AND ($3::timestamp IS NULL OR created_at >= $3)
-        ORDER BY created_at
+          AND ($5::text IS NULL OR id::text > $5)
+        ORDER BY id
         LIMIT $4
     """
 
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(query, workspace_id, symbol_filter, since, limit)
-
-    logger.info("Fetched runs needing regime", count=len(rows))
-
-    # Compute regime for each run
-    computed_count = 0
-    skipped_reasons: Counter = Counter()
-
-    for row in rows:
-        run_id = row["id"]
-
-        # For now, compute regime from the full OHLCV window
-        # Future: extract OOS date range and slice the data
-        try:
-            regime = compute_regime_snapshot(
-                df,
-                source="backfill",
-                timeframe=timeframe,
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                query, workspace_id, symbol_filter, since, limit, resume_cursor
             )
 
-            if not dry_run:
-                update_query = """
-                    UPDATE backtest_runs SET
-                        regime_oos = $2,
-                        regime_schema_version = $3
-                    WHERE id = $1
-                """
-                async with pool.acquire() as conn:
-                    await conn.execute(
-                        update_query,
-                        run_id,
-                        json.dumps(regime.to_dict()),
-                        REGIME_SCHEMA_VERSION,
-                    )
+        logger.info("Fetched runs needing regime", count=len(rows))
 
-            computed_count += 1
+        # Track results (start from resume counts if resuming)
+        processed_count = backfill_run.processed_count
+        skipped_count = backfill_run.skipped_count
+        error_count = backfill_run.error_count
+        skipped_reasons: Counter = Counter()
+        last_cursor: Optional[str] = resume_cursor
 
-        except Exception as e:
-            logger.warning("Failed to compute regime", run_id=str(run_id), error=str(e))
-            skipped_reasons["computation_error"] += 1
+        # Progress update interval
+        progress_interval = 50
 
-    # Print report
-    print("\n" + "=" * 60)
-    print("BACKFILL REGIME REPORT")
-    print("=" * 60)
-    print(f"Workspace:       {workspace_id}")
-    print(f"OHLCV File:      {ohlcv_path}")
-    print(f"Symbol Filter:   {symbol_filter or 'all'}")
-    print(f"Timeframe:       {timeframe}")
-    print(f"OHLCV Rows:      {len(df)}")
-    print(f"Dry Run:         {dry_run}")
-    print("-" * 60)
-    print(f"Total Scanned:   {len(rows)}")
-    print(f"Computed:        {computed_count}")
-    print(f"Skipped:         {sum(skipped_reasons.values())}")
-    print(
-        f"Updated:         {computed_count if not dry_run else 0}"
-        + (" (dry run)" if dry_run else "")
-    )
+        for i, row in enumerate(rows):
+            run_id = row["id"]
+            last_cursor = str(run_id)
 
-    if skipped_reasons:
+            # For now, compute regime from the full OHLCV window
+            # Future: extract OOS date range and slice the data
+            try:
+                regime = compute_regime_snapshot(
+                    df,
+                    source="backfill",
+                    timeframe=timeframe,
+                )
+
+                if not dry_run:
+                    update_query = """
+                        UPDATE backtest_runs SET
+                            regime_oos = $2,
+                            regime_schema_version = $3
+                        WHERE id = $1
+                    """
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            update_query,
+                            run_id,
+                            json.dumps(regime.to_dict()),
+                            REGIME_SCHEMA_VERSION,
+                        )
+
+                processed_count += 1
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to compute regime", run_id=str(run_id), error=str(e)
+                )
+                skipped_reasons["computation_error"] += 1
+                error_count += 1
+
+            # Update progress periodically
+            if (i + 1) % progress_interval == 0:
+                await backfill_repo.update_progress(
+                    run_id=backfill_run.id,
+                    processed_count=processed_count,
+                    skipped_count=skipped_count,
+                    error_count=error_count,
+                    last_processed_cursor=last_cursor,
+                )
+                logger.info(
+                    "Progress update",
+                    processed=processed_count,
+                    errors=error_count,
+                    cursor=last_cursor[:8] if last_cursor else None,
+                )
+
+        # Mark run as completed
+        await backfill_repo.complete(
+            run_id=backfill_run.id,
+            processed_count=processed_count,
+            skipped_count=skipped_count,
+            error_count=error_count,
+        )
+
+        # Print report
+        print("\n" + "=" * 60)
+        print("BACKFILL REGIME REPORT")
+        print("=" * 60)
+        print(f"Run ID:          {backfill_run.id}")
+        print(f"Workspace:       {workspace_id}")
+        print(f"OHLCV File:      {ohlcv_path}")
+        print(f"Symbol Filter:   {symbol_filter or 'all'}")
+        print(f"Timeframe:       {timeframe}")
+        print(f"OHLCV Rows:      {len(df)}")
+        print(f"Dry Run:         {dry_run}")
+        print(f"Resumed:         {resume and resume_cursor is not None}")
         print("-" * 60)
-        print("Skip Reasons:")
-        for reason, count in skipped_reasons.most_common():
-            print(f"  {reason}: {count}")
+        print(f"Total Scanned:   {len(rows)}")
+        print(f"Computed:        {processed_count - backfill_run.processed_count}")
+        print(f"Errors:          {error_count - backfill_run.error_count}")
+        computed_this_run = processed_count - backfill_run.processed_count
+        updated_count = computed_this_run if not dry_run else 0
+        dry_run_suffix = " (dry run)" if dry_run else ""
+        print(f"Updated:         {updated_count}{dry_run_suffix}")
 
-    print("=" * 60)
+        if skipped_reasons:
+            print("-" * 60)
+            print("Skip Reasons:")
+            for reason, count in skipped_reasons.most_common():
+                print(f"  {reason}: {count}")
 
-    return 0
+        print("=" * 60)
+
+        return 0
+
+    except Exception as e:
+        # Mark run as failed
+        error_msg = str(e)
+        await backfill_repo.fail(
+            run_id=backfill_run.id,
+            error=error_msg,
+            processed_count=processed_count if "processed_count" in dir() else 0,
+            skipped_count=skipped_count if "skipped_count" in dir() else 0,
+            error_count=error_count if "error_count" in dir() else 0,
+            last_processed_cursor=last_cursor if "last_cursor" in dir() else None,
+        )
+        logger.error("Backfill failed", error=error_msg, run_id=str(backfill_run.id))
+        raise
 
 
 def main():
@@ -737,6 +938,12 @@ def main():
         action="store_true",
         help="Skip regime requirement in candidacy check",
     )
+    candidacy_parser.add_argument(
+        "--resume",
+        "-r",
+        action="store_true",
+        help="Resume from last failed/interrupted run with same config",
+    )
 
     # Backfill regime command
     regime_parser = subparsers.add_parser(
@@ -782,6 +989,12 @@ def main():
         "-n",
         action="store_true",
         help="Preview without writing changes",
+    )
+    regime_parser.add_argument(
+        "--resume",
+        "-r",
+        action="store_true",
+        help="Resume from last failed/interrupted run with same config",
     )
 
     args = parser.parse_args()
