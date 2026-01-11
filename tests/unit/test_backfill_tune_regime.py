@@ -11,18 +11,15 @@ TDD tests for backfilling regime columns on existing tunes:
 8. Returns correct stats (processed/skipped/errors)
 """
 
-import json
 import pytest
-from datetime import datetime, timezone
 from typing import Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 from app.services.kb.types import RegimeSnapshot
 from app.jobs.backfill_tune_regime import (
     run_tune_regime_backfill,
     BackfillResult,
-    BackfillTuneRegimeJob,
 )
 
 
@@ -611,8 +608,6 @@ class TestBackfillWithWorkspaceFilter:
         queries_executed = []
 
         conn = mock_db_pool._mock_conn
-
-        original_fetch = conn.fetch
 
         async def tracking_fetch(query, *args, **kwargs):
             queries_executed.append((query, args))
