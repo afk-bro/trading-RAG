@@ -204,6 +204,44 @@ class RegimeBacklogResponse(BaseModel):
     regimes: list[RegimeBacklogItem] = Field(default_factory=list)
 
 
+class DriftBucketItem(BaseModel):
+    """Drift metrics for a time bucket."""
+
+    bucket_start: str = Field(..., description="Bucket start timestamp (ISO format)")
+    total: int = Field(..., description="Total recommendations in bucket")
+    non_exact_count: int = Field(..., description="Recommendations not using exact tier")
+    non_exact_pct: float = Field(..., description="Percentage not using exact tier")
+    unique_regimes: int = Field(..., description="Distinct query_regime_key values")
+    top_regime_pct: float = Field(
+        ..., description="Percentage of recommendations in most common regime"
+    )
+
+
+class RegimeDriftResponse(BaseModel):
+    """Response from regime drift endpoint."""
+
+    workspace_id: str
+    strategy_entity_id: Optional[str] = None
+    period_days: int = Field(30, description="Analysis period in days")
+    bucket: str = Field("day", description="Bucket size: 'day' or 'week'")
+    # Overall metrics
+    total_recommendations: int = Field(0, description="Total recommend calls")
+    overall_non_exact_pct: float = Field(
+        0.0, description="Overall % not using exact tier"
+    )
+    overall_unique_regimes: int = Field(0, description="Total distinct regimes seen")
+    # Trend indicators
+    drift_trend: str = Field(
+        "stable",
+        description="Trend: 'increasing', 'decreasing', 'stable', 'insufficient_data'",
+    )
+    avg_daily_churn: float = Field(
+        0.0, description="Average daily regime churn (new regimes per day)"
+    )
+    # Time-series
+    series: list[DriftBucketItem] = Field(default_factory=list)
+
+
 # =============================================================================
 # HTML Page
 # =============================================================================
@@ -793,4 +831,185 @@ async def generate_regime_backlog(
         total_gaps=len(regimes),
         total_missing=total_missing,
         regimes=regimes,
+    )
+
+
+@router.get(
+    "/regime-drift",
+    response_model=RegimeDriftResponse,
+    summary="Get regime drift indicators",
+    description="""
+Analyze regime stability over time.
+
+Returns metrics for detecting regime drift:
+- non_exact_pct: % of recommendations falling back from exact tier
+- unique_regimes: Number of distinct regimes queried
+- top_regime_pct: Concentration in most common regime (lower = more diverse)
+- drift_trend: 'increasing', 'decreasing', 'stable', or 'insufficient_data'
+
+High non_exact_pct or decreasing top_regime_pct may indicate:
+- Market regime shifts
+- Need for more training data
+- Model staleness
+
+This is a precursor to automated drift alerts.
+""",
+)
+async def get_regime_drift(
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
+    period_days: int = Query(30, ge=7, le=365, description="Analysis period"),
+    bucket: str = Query("day", regex="^(day|week)$", description="Time bucket"),
+    _: bool = Depends(require_admin_token),
+) -> RegimeDriftResponse:
+    """Get regime drift indicators from recommend_events."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    since = datetime.utcnow() - timedelta(days=period_days)
+    trunc_unit = "day" if bucket == "day" else "week"
+
+    # Build query conditions
+    conditions = ["workspace_id = $1", "created_at >= $2"]
+    params: list = [workspace_id, since]
+    param_idx = 3
+
+    if strategy_entity_id:
+        conditions.append(f"strategy_entity_id = ${param_idx}")
+        params.append(strategy_entity_id)
+        param_idx += 1
+
+    where_clause = " AND ".join(conditions)
+
+    # Query per-bucket metrics
+    query = f"""
+        WITH bucket_stats AS (
+            SELECT
+                date_trunc('{trunc_unit}', created_at) as bucket_start,
+                COUNT(*) as total,
+                SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact_count,
+                COUNT(DISTINCT query_regime_key) as unique_regimes
+            FROM recommend_events
+            WHERE {where_clause}
+            GROUP BY bucket_start
+        ),
+        top_regime_per_bucket AS (
+            SELECT
+                date_trunc('{trunc_unit}', created_at) as bucket_start,
+                query_regime_key,
+                COUNT(*) as regime_count,
+                ROW_NUMBER() OVER (
+                    PARTITION BY date_trunc('{trunc_unit}', created_at)
+                    ORDER BY COUNT(*) DESC
+                ) as rn
+            FROM recommend_events
+            WHERE {where_clause}
+              AND query_regime_key IS NOT NULL
+            GROUP BY bucket_start, query_regime_key
+        )
+        SELECT
+            bs.bucket_start,
+            bs.total,
+            bs.non_exact_count,
+            bs.unique_regimes,
+            COALESCE(tr.regime_count, 0) as top_regime_count
+        FROM bucket_stats bs
+        LEFT JOIN top_regime_per_bucket tr
+            ON tr.bucket_start = bs.bucket_start AND tr.rn = 1
+        ORDER BY bs.bucket_start ASC
+    """
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+        # Get overall unique regimes
+        overall_query = f"""
+            SELECT COUNT(DISTINCT query_regime_key) as unique_regimes
+            FROM recommend_events
+            WHERE {where_clause}
+              AND query_regime_key IS NOT NULL
+        """
+        overall_row = await conn.fetchrow(overall_query, *params)
+
+    if not rows:
+        return RegimeDriftResponse(
+            workspace_id=str(workspace_id),
+            strategy_entity_id=(
+                str(strategy_entity_id) if strategy_entity_id else None
+            ),
+            period_days=period_days,
+            bucket=bucket,
+            drift_trend="insufficient_data",
+        )
+
+    # Build series
+    series = []
+    total_recs = 0
+    total_non_exact = 0
+    non_exact_pcts = []
+
+    for row in rows:
+        total = row["total"]
+        non_exact = row["non_exact_count"]
+        non_exact_pct = (non_exact / total * 100) if total > 0 else 0.0
+        top_regime_pct = (
+            (row["top_regime_count"] / total * 100) if total > 0 else 0.0
+        )
+
+        total_recs += total
+        total_non_exact += non_exact
+        non_exact_pcts.append(non_exact_pct)
+
+        series.append(
+            DriftBucketItem(
+                bucket_start=row["bucket_start"].isoformat(),
+                total=total,
+                non_exact_count=non_exact,
+                non_exact_pct=round(non_exact_pct, 1),
+                unique_regimes=row["unique_regimes"],
+                top_regime_pct=round(top_regime_pct, 1),
+            )
+        )
+
+    # Calculate overall metrics
+    overall_non_exact_pct = (
+        (total_non_exact / total_recs * 100) if total_recs > 0 else 0.0
+    )
+    overall_unique = overall_row["unique_regimes"] if overall_row else 0
+
+    # Calculate drift trend (compare first half vs second half of period)
+    drift_trend = "stable"
+    if len(non_exact_pcts) >= 4:
+        mid = len(non_exact_pcts) // 2
+        first_half_avg = sum(non_exact_pcts[:mid]) / mid
+        second_half_avg = sum(non_exact_pcts[mid:]) / (len(non_exact_pcts) - mid)
+        diff = second_half_avg - first_half_avg
+
+        if diff > 10:  # More than 10pp increase
+            drift_trend = "increasing"
+        elif diff < -10:  # More than 10pp decrease
+            drift_trend = "decreasing"
+        else:
+            drift_trend = "stable"
+    elif len(non_exact_pcts) < 2:
+        drift_trend = "insufficient_data"
+
+    # Calculate avg daily churn (new unique regimes appearing)
+    # Simple heuristic: unique_regimes / days with data
+    avg_daily_churn = overall_unique / len(series) if series else 0.0
+
+    return RegimeDriftResponse(
+        workspace_id=str(workspace_id),
+        strategy_entity_id=str(strategy_entity_id) if strategy_entity_id else None,
+        period_days=period_days,
+        bucket=bucket,
+        total_recommendations=total_recs,
+        overall_non_exact_pct=round(overall_non_exact_pct, 1),
+        overall_unique_regimes=overall_unique,
+        drift_trend=drift_trend,
+        avg_daily_churn=round(avg_daily_churn, 2),
+        series=series,
     )

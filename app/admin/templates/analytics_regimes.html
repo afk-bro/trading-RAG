@@ -579,6 +579,118 @@
         padding: 24px;
         color: var(--danger);
     }
+
+    /* Drift panel */
+    .drift-panel {
+        margin-top: 24px;
+    }
+
+    .drift-summary {
+        display: flex;
+        gap: 32px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .drift-metric {
+        text-align: center;
+        min-width: 100px;
+    }
+
+    .drift-metric-value {
+        font-size: 28px;
+        font-weight: 600;
+    }
+
+    .drift-metric-label {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .drift-trend-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-weight: 500;
+    }
+
+    .drift-trend-stable {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+
+    .drift-trend-increasing {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+
+    .drift-trend-decreasing {
+        background: rgba(88, 166, 255, 0.2);
+        color: var(--info);
+    }
+
+    .drift-trend-insufficient_data {
+        background: rgba(139, 148, 158, 0.2);
+        color: var(--text-muted);
+    }
+
+    /* Drift sparkline chart */
+    .drift-chart {
+        height: 100px;
+        position: relative;
+    }
+
+    .drift-chart-area {
+        height: 80px;
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        padding: 0 4px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .drift-bar {
+        flex: 1;
+        min-width: 8px;
+        max-width: 20px;
+        background: var(--warning);
+        border-radius: 2px 2px 0 0;
+        transition: opacity 0.2s;
+        cursor: pointer;
+    }
+
+    .drift-bar:hover {
+        opacity: 0.7;
+    }
+
+    .drift-bar.low {
+        background: var(--success);
+    }
+
+    .drift-bar.medium {
+        background: var(--warning);
+    }
+
+    .drift-bar.high {
+        background: var(--danger);
+    }
+
+    .drift-chart-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 4px 4px 0;
+    }
+
+    .drift-chart-legend {
+        display: flex;
+        gap: 16px;
+        margin-top: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+    }
 </style>
 
 <div class="page-header">
@@ -739,6 +851,41 @@
     </div>
 </div>
 
+<!-- Drift Indicator Panel -->
+<div class="drift-panel card">
+    <div class="card-header">
+        <span class="card-title">Regime Drift Indicator</span>
+        <span class="drift-trend-badge drift-trend-stable" id="driftTrendBadge">Loading...</span>
+    </div>
+    <div class="drift-summary" id="driftSummary">
+        <div class="drift-metric">
+            <div class="drift-metric-value" id="driftNonExactPct">-</div>
+            <div class="drift-metric-label">Non-Exact %</div>
+        </div>
+        <div class="drift-metric">
+            <div class="drift-metric-value" id="driftUniqueRegimes">-</div>
+            <div class="drift-metric-label">Unique Regimes</div>
+        </div>
+        <div class="drift-metric">
+            <div class="drift-metric-value" id="driftDailyChurn">-</div>
+            <div class="drift-metric-label">Avg Daily Churn</div>
+        </div>
+    </div>
+    <div class="drift-chart" id="driftChart">
+        <div class="drift-chart-area" id="driftChartArea">
+            <!-- Bars will be rendered here -->
+        </div>
+        <div class="drift-chart-labels" id="driftChartLabels">
+            <!-- Labels will be rendered here -->
+        </div>
+    </div>
+    <div class="drift-chart-legend">
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--success);border-radius:2px;"></span> &lt;20% fallback</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--warning);border-radius:2px;"></span> 20-50% fallback</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--danger);border-radius:2px;"></span> &gt;50% fallback</span>
+    </div>
+</div>
+
 <!-- Coverage Table -->
 <div class="card" style="margin-top: 24px;">
     <div class="card-header">
@@ -779,6 +926,7 @@
     let tierTimeSeriesData = null;
     let coverageData = null;
     let upliftData = null;
+    let driftData = null;
     let currentTierView = 'pct';
     let currentTimeMode = 'totals';  // 'totals' or 'timeseries'
     let currentSort = { column: 'coverage_gap', direction: 'desc' };
@@ -818,11 +966,12 @@
         const params = getFilterParams();
 
         try {
-            // Fetch all endpoints in parallel (always get totals + optionally time-series)
+            // Fetch all endpoints in parallel (always get totals + drift + optionally time-series)
             const fetches = [
                 fetchWithAuth(`/admin/analytics/tier-usage?${params}`),
                 fetchWithAuth(`/admin/analytics/regime-coverage?${params}`),
-                fetchWithAuth(`/admin/analytics/uplift?${params}`)
+                fetchWithAuth(`/admin/analytics/uplift?${params}`),
+                fetchWithAuth(`/admin/analytics/regime-drift?${params}`)
             ];
 
             // Also fetch time-series if in that mode
@@ -835,7 +984,8 @@
             tierData = results[0];
             coverageData = results[1];
             upliftData = results[2];
-            tierTimeSeriesData = results[3] || null;
+            driftData = results[3];
+            tierTimeSeriesData = results[4] || null;
 
             renderAll();
             updateLastUpdated();
@@ -875,6 +1025,7 @@
         renderTierChart();
         renderConfidenceChart();
         renderInsightCards();
+        renderDriftPanel();
         renderCoverageTable();
     }
 
@@ -1280,6 +1431,88 @@
                 `).join('');
             }
         }
+    }
+
+    // Drift panel
+    function renderDriftPanel() {
+        const badge = document.getElementById('driftTrendBadge');
+
+        if (!driftData) {
+            badge.textContent = 'No data';
+            badge.className = 'drift-trend-badge drift-trend-insufficient_data';
+            return;
+        }
+
+        // Update summary metrics
+        document.getElementById('driftNonExactPct').textContent =
+            driftData.overall_non_exact_pct.toFixed(1) + '%';
+        document.getElementById('driftUniqueRegimes').textContent =
+            driftData.overall_unique_regimes;
+        document.getElementById('driftDailyChurn').textContent =
+            driftData.avg_daily_churn.toFixed(1);
+
+        // Update trend badge
+        const trendLabels = {
+            'stable': 'Stable',
+            'increasing': 'Increasing Drift',
+            'decreasing': 'Decreasing Drift',
+            'insufficient_data': 'Insufficient Data'
+        };
+        badge.textContent = trendLabels[driftData.drift_trend] || driftData.drift_trend;
+        badge.className = `drift-trend-badge drift-trend-${driftData.drift_trend}`;
+
+        // Render drift chart
+        renderDriftChart();
+    }
+
+    function renderDriftChart() {
+        const chartArea = document.getElementById('driftChartArea');
+        const chartLabels = document.getElementById('driftChartLabels');
+
+        if (!driftData?.series?.length) {
+            chartArea.innerHTML = '<div class="empty-state" style="width:100%;text-align:center;font-size:12px;">No time-series data</div>';
+            chartLabels.innerHTML = '';
+            return;
+        }
+
+        const series = driftData.series;
+        const maxPct = Math.max(...series.map(s => s.non_exact_pct), 100);
+        const chartHeight = 80;
+
+        // Build bars
+        let barsHtml = '';
+        for (const item of series) {
+            const height = (item.non_exact_pct / maxPct) * chartHeight;
+            let colorClass = 'low';
+            if (item.non_exact_pct >= 50) {
+                colorClass = 'high';
+            } else if (item.non_exact_pct >= 20) {
+                colorClass = 'medium';
+            }
+
+            const date = new Date(item.bucket_start);
+            const tooltip = `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}\n` +
+                `Non-exact: ${item.non_exact_pct.toFixed(1)}%\n` +
+                `Total: ${item.total}\n` +
+                `Unique regimes: ${item.unique_regimes}`;
+
+            barsHtml += `<div class="drift-bar ${colorClass}" style="height: ${height}px" title="${tooltip}"></div>`;
+        }
+        chartArea.innerHTML = barsHtml;
+
+        // Build labels (show subset if too many)
+        const maxLabels = 8;
+        const step = series.length <= maxLabels ? 1 : Math.ceil(series.length / maxLabels);
+        let labelsHtml = '';
+        for (let i = 0; i < series.length; i++) {
+            if (i % step === 0 || i === series.length - 1) {
+                const date = new Date(series[i].bucket_start);
+                labelsHtml += `<span>${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`;
+            } else {
+                labelsHtml += '<span></span>';
+            }
+        }
+        chartLabels.innerHTML = labelsHtml;
     }
 
     // Coverage table
