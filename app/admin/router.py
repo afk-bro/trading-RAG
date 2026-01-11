@@ -40,6 +40,7 @@ from fastapi.responses import (  # noqa: E402
     StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 from app.config import Settings, get_settings  # noqa: E402
 from app.deps.security import require_admin_token  # noqa: E402
@@ -1234,6 +1235,101 @@ def _generate_compare_json(tunes: list[dict], rows: list[dict]) -> JSONResponse:
         content=_json_serializable(export_data),
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ===========================================
+# Backfill Regime Attribution
+# ===========================================
+
+
+class BackfillRegimeRequest(BaseModel):
+    """Request to trigger tune regime attribution backfill."""
+
+    workspace_id: UUID
+    dry_run: bool = True  # Default to dry run for safety
+    limit: Optional[int] = None
+
+
+class BackfillRegimeResponse(BaseModel):
+    """Response from tune regime attribution backfill."""
+
+    processed: int
+    skipped: int
+    errors: int
+    dry_run: bool
+
+
+@router.post(
+    "/backtests/tunes/backfill-regime",
+    response_model=BackfillRegimeResponse,
+    responses={
+        200: {"description": "Backfill completed successfully"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Invalid admin token"},
+        503: {"description": "Service unavailable"},
+    },
+    summary="Trigger tune regime attribution backfill",
+    description="""
+Backfill regime attribution for existing tune runs.
+
+Computes and stores regime tags for tune runs that don't have them.
+This is useful after adding new regime attribution logic.
+
+**Admin-only endpoint.** Requires X-Admin-Token header.
+
+Options:
+- `dry_run` (default: true): Preview without writing changes
+- `limit`: Maximum number of tunes to process (optional)
+""",
+)
+async def backfill_tune_regime(
+    request: BackfillRegimeRequest,
+    _: bool = Depends(require_admin_token),
+) -> BackfillRegimeResponse:
+    """Trigger tune regime attribution backfill."""
+    from app.jobs.backfill_tune_regime import BackfillTuneRegimeJob
+
+    logger.info(
+        "backfill_tune_regime_started",
+        workspace_id=str(request.workspace_id),
+        dry_run=request.dry_run,
+        limit=request.limit,
+    )
+
+    try:
+        job = BackfillTuneRegimeJob(db_pool=_db_pool)
+        result = await job.run(
+            workspace_id=request.workspace_id,
+            dry_run=request.dry_run,
+            limit=request.limit,
+        )
+
+        logger.info(
+            "backfill_tune_regime_complete",
+            workspace_id=str(request.workspace_id),
+            processed=result.processed,
+            skipped=result.skipped,
+            errors=result.errors,
+            dry_run=request.dry_run,
+        )
+
+        return BackfillRegimeResponse(
+            processed=result.processed,
+            skipped=result.skipped,
+            errors=result.errors,
+            dry_run=result.dry_run,
+        )
+
+    except Exception as e:
+        logger.error(
+            "backfill_tune_regime_failed",
+            workspace_id=str(request.workspace_id),
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Backfill failed: {str(e)}",
+        )
 
 
 @router.get("/backtests/tunes/{tune_id}", response_class=HTMLResponse)
