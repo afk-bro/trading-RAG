@@ -32,6 +32,16 @@ logger = structlog.get_logger(__name__)
 
 
 @dataclass
+class SkipRecord:
+    """Record of a skipped tune with structured reason."""
+
+    tune_id: str
+    reason: (
+        str  # "no_completed_runs" | "missing_metrics_oos" | "missing_regime_snapshot"
+    )
+
+
+@dataclass
 class BackfillResult:
     """Result of tune regime backfill job."""
 
@@ -42,6 +52,7 @@ class BackfillResult:
     would_update: int = 0  # For dry run
     dry_run: bool = False
     errors: list[str] = field(default_factory=list)
+    skipped: list[SkipRecord] = field(default_factory=list)  # Structured skip reasons
 
 
 # =============================================================================
@@ -52,6 +63,9 @@ class BackfillResult:
 class BackfillTuneRegimeJob:
     """
     Backfill regime attribution columns on existing backtest_tunes.
+
+    INVARIANT: Regime attribution MUST be derived from captured OOS regime snapshot.
+    If metrics_oos.regime is missing, attribution must be skipped - never fabricated.
 
     For each tune with regime_key IS NULL:
     1. Get the best OOS run (ordered by objective_score DESC)
@@ -113,6 +127,9 @@ class BackfillTuneRegimeJob:
 
                 if not best_run:
                     result.skipped_no_runs += 1
+                    result.skipped.append(
+                        SkipRecord(tune_id=str(tune_id), reason="no_completed_runs")
+                    )
                     logger.debug(
                         "tune_regime_backfill_no_runs",
                         tune_id=str(tune_id),
@@ -125,12 +142,22 @@ class BackfillTuneRegimeJob:
 
                 if not regime_data:
                     result.skipped_no_regime += 1
+                    # Determine specific reason: missing metrics_oos vs missing regime key
+                    reason = (
+                        "missing_metrics_oos"
+                        if not metrics_oos
+                        else "missing_regime_snapshot"
+                    )
+                    result.skipped.append(
+                        SkipRecord(tune_id=str(tune_id), reason=reason)
+                    )
                     logger.warning(
                         "tune_regime_backfill_no_regime_data",
                         tune_id=str(tune_id),
                         run_id=(
                             str(best_run["run_id"]) if best_run.get("run_id") else None
                         ),
+                        reason=reason,
                     )
                     continue
 

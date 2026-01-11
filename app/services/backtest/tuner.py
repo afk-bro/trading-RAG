@@ -918,6 +918,8 @@ class ParamTuner:
             )
 
             # Populate regime attribution if we have a best OOS result with regime
+            # INVARIANT: Regime attribution MUST be derived from captured OOS regime snapshot.
+            # If metrics_oos.regime is missing, attribution is skipped - never fabricated.
             if sorted_results:
                 best_trial = sorted_results[0]
                 metrics_oos = best_trial.get("metrics_oos")
