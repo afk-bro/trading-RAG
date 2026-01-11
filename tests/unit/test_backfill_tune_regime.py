@@ -414,9 +414,7 @@ class TestBackfillRespectsLimit:
     """Test limit parameter works correctly."""
 
     @pytest.mark.asyncio
-    async def test_backfill_respects_limit(
-        self, mock_db_pool, sample_regime_snapshot
-    ):
+    async def test_backfill_respects_limit(self, mock_db_pool, sample_regime_snapshot):
         """Limit parameter restricts number of tunes processed."""
         # Create multiple tunes
         tune_ids = [uuid4() for _ in range(5)]
@@ -435,10 +433,12 @@ class TestBackfillRespectsLimit:
 
         conn = mock_db_pool._mock_conn
         conn.fetch = AsyncMock(return_value=limited_tune_rows)
-        conn.fetchrow = AsyncMock(side_effect=[
-            make_best_run_for(tune_ids[0]),
-            make_best_run_for(tune_ids[1]),
-        ])
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                make_best_run_for(tune_ids[0]),
+                make_best_run_for(tune_ids[1]),
+            ]
+        )
 
         updates_called = []
 
@@ -462,9 +462,7 @@ class TestBackfillReturnsStats:
     """Test backfill returns correct statistics."""
 
     @pytest.mark.asyncio
-    async def test_backfill_returns_stats(
-        self, mock_db_pool, sample_regime_snapshot
-    ):
+    async def test_backfill_returns_stats(self, mock_db_pool, sample_regime_snapshot):
         """Returns processed/skipped/errors counts."""
         tune_ids = [uuid4() for _ in range(4)]
 
@@ -480,31 +478,33 @@ class TestBackfillReturnsStats:
         conn.fetch = AsyncMock(return_value=tune_rows)
 
         # Create side effects for each tune's best run query
-        conn.fetchrow = AsyncMock(side_effect=[
-            # Tune 1: has regime
-            make_tune_run_row(
-                tune_id=tune_ids[0],
-                score_oos=1.5,
-                metrics_oos={"regime": sample_regime_snapshot, "sharpe": 1.5},
-                params={"lookback": 20},
-            ),
-            # Tune 2: no runs
-            None,
-            # Tune 3: no regime in metrics
-            make_tune_run_row(
-                tune_id=tune_ids[2],
-                score_oos=1.0,
-                metrics_oos={"sharpe": 1.0},  # No regime
-                params={"lookback": 20},
-            ),
-            # Tune 4: has regime
-            make_tune_run_row(
-                tune_id=tune_ids[3],
-                score_oos=2.0,
-                metrics_oos={"regime": sample_regime_snapshot, "sharpe": 2.0},
-                params={"lookback": 30},
-            ),
-        ])
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                # Tune 1: has regime
+                make_tune_run_row(
+                    tune_id=tune_ids[0],
+                    score_oos=1.5,
+                    metrics_oos={"regime": sample_regime_snapshot, "sharpe": 1.5},
+                    params={"lookback": 20},
+                ),
+                # Tune 2: no runs
+                None,
+                # Tune 3: no regime in metrics
+                make_tune_run_row(
+                    tune_id=tune_ids[2],
+                    score_oos=1.0,
+                    metrics_oos={"sharpe": 1.0},  # No regime
+                    params={"lookback": 20},
+                ),
+                # Tune 4: has regime
+                make_tune_run_row(
+                    tune_id=tune_ids[3],
+                    score_oos=2.0,
+                    metrics_oos={"regime": sample_regime_snapshot, "sharpe": 2.0},
+                    params={"lookback": 30},
+                ),
+            ]
+        )
 
         updates_called = []
 
