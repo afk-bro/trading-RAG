@@ -728,6 +728,75 @@ class TuneRepository:
                 trials_completed=trials_completed,
             )
 
+    async def populate_regime_attribution(
+        self,
+        tune_id: UUID,
+        regime_schema_version: str,
+        tag_ruleset_id: str,
+        regime_key: str,
+        regime_fingerprint: str,
+        trend_tag: Optional[str],
+        vol_tag: Optional[str],
+        efficiency_tag: Optional[str],
+        best_oos_score: Optional[float],
+        best_oos_params: Optional[dict[str, Any]],
+        best_oos_run_id: Optional[UUID],
+    ) -> None:
+        """
+        Populate regime attribution columns after tune completes.
+
+        Called from tune completion handler to enable regime-based queries.
+
+        Args:
+            tune_id: Tune to update
+            regime_schema_version: Version of regime schema (e.g., "regime_v1_1")
+            tag_ruleset_id: Ruleset used for tagging (e.g., "default_v1")
+            regime_key: Human-readable key (e.g., "regime_v1_1|default_v1|uptrend|high_vol|noisy")
+            regime_fingerprint: SHA256 hash of regime_key
+            trend_tag: Denormalized trend tag (uptrend, downtrend, trending, flat, or None)
+            vol_tag: Denormalized volatility tag (high_vol, low_vol, or None)
+            efficiency_tag: Denormalized efficiency tag (efficient, noisy, or None)
+            best_oos_score: Best OOS score (e.g., sharpe)
+            best_oos_params: Best OOS params (JSON)
+            best_oos_run_id: Run ID of best OOS trial
+        """
+        query = """
+            UPDATE backtest_tunes SET
+                regime_schema_version = $2,
+                tag_ruleset_id = $3,
+                regime_key = $4,
+                regime_fingerprint = $5,
+                trend_tag = $6,
+                vol_tag = $7,
+                efficiency_tag = $8,
+                best_oos_score = $9,
+                best_oos_params = $10,
+                best_oos_run_id = $11
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query,
+                tune_id,
+                regime_schema_version,
+                tag_ruleset_id,
+                regime_key,
+                regime_fingerprint,
+                trend_tag,
+                vol_tag,
+                efficiency_tag,
+                best_oos_score,
+                json.dumps(best_oos_params) if best_oos_params else None,
+                best_oos_run_id,
+            )
+
+        logger.debug(
+            "Populated regime attribution",
+            tune_id=str(tune_id),
+            regime_key=regime_key,
+        )
+
     async def create_tune_run(
         self,
         tune_id: UUID,

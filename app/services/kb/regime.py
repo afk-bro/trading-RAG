@@ -12,6 +12,7 @@ Implements market regime feature extraction from OHLCV data:
 All indicators implemented in numpy/pandas for determinism and minimal dependencies.
 """
 
+import hashlib
 from collections import defaultdict
 from typing import Optional
 
@@ -962,3 +963,77 @@ def compute_regime_from_ohlcv(
     """
     df = pd.DataFrame(ohlcv)
     return compute_regime_snapshot(df, source=source, timeframe=timeframe)
+
+
+# =============================================================================
+# Regime Key Computation (Step 3: Tune Attribution)
+# =============================================================================
+
+# Default ruleset ID for regime key generation
+DEFAULT_RULESET_ID = "default_v1"
+
+# Tag dimension extraction order (priority order within each dimension)
+TREND_TAGS = ["uptrend", "downtrend", "trending", "flat"]
+VOL_TAGS = ["high_vol", "low_vol"]
+EFFICIENCY_TAGS = ["efficient", "noisy"]
+
+
+def compute_regime_key(
+    snapshot: RegimeSnapshot,
+    ruleset_id: str = DEFAULT_RULESET_ID,
+) -> str:
+    """
+    Compute human-readable regime key from snapshot.
+
+    Format: {schema}|{ruleset}|{trend}|{vol}|{efficiency}
+    Uses "_" for missing tags in each dimension.
+
+    Args:
+        snapshot: RegimeSnapshot with computed tags
+        ruleset_id: Ruleset identifier (defaults to "default_v1")
+
+    Returns:
+        Regime key string, e.g. "regime_v1_1|default_v1|uptrend|high_vol|noisy"
+    """
+    tags = set(snapshot.regime_tags)
+
+    # Extract one tag per dimension (or "_" if none)
+    trend = next((t for t in TREND_TAGS if t in tags), "_")
+    vol = next((t for t in VOL_TAGS if t in tags), "_")
+    eff = next((t for t in EFFICIENCY_TAGS if t in tags), "_")
+
+    return f"{snapshot.schema_version}|{ruleset_id}|{trend}|{vol}|{eff}"
+
+
+def compute_regime_fingerprint(regime_key: str) -> str:
+    """
+    Compute SHA256 hash of regime key for indexing.
+
+    Args:
+        regime_key: Human-readable regime key
+
+    Returns:
+        SHA256 hex digest (64 characters)
+    """
+    return hashlib.sha256(regime_key.encode()).hexdigest()
+
+
+def extract_regime_tags_for_attribution(
+    snapshot: RegimeSnapshot,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Extract denormalized tags for SQL filtering.
+
+    Args:
+        snapshot: RegimeSnapshot with computed tags
+
+    Returns:
+        Tuple of (trend_tag, vol_tag, efficiency_tag) - None for missing
+    """
+    tags = set(snapshot.regime_tags)
+
+    trend_tag = next((t for t in TREND_TAGS if t in tags), None)
+    vol_tag = next((t for t in VOL_TAGS if t in tags), None)
+    eff_tag = next((t for t in EFFICIENCY_TAGS if t in tags), None)
+
+    return trend_tag, vol_tag, eff_tag

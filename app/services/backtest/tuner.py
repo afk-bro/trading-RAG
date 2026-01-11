@@ -26,6 +26,13 @@ from app.services.backtest.regime_integration import (
     detect_timeframe_from_ohlcv,
     extract_instrument_from_filename,
 )
+from app.services.kb.types import RegimeSnapshot
+from app.services.kb.regime import (
+    compute_regime_key,
+    compute_regime_fingerprint,
+    extract_regime_tags_for_attribution,
+    DEFAULT_RULESET_ID,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -909,6 +916,55 @@ class ParamTuner:
                 leaderboard=leaderboard,
                 trials_completed=trials_completed,
             )
+
+            # Populate regime attribution if we have a best OOS result with regime
+            if sorted_results:
+                best_trial = sorted_results[0]
+                metrics_oos = best_trial.get("metrics_oos")
+                regime_data = metrics_oos.get("regime") if metrics_oos else None
+
+                if regime_data:
+                    try:
+                        regime_snapshot = RegimeSnapshot.from_dict(regime_data)
+                        regime_key = compute_regime_key(
+                            regime_snapshot, ruleset_id=DEFAULT_RULESET_ID
+                        )
+                        regime_fingerprint = compute_regime_fingerprint(regime_key)
+                        trend_tag, vol_tag, eff_tag = (
+                            extract_regime_tags_for_attribution(regime_snapshot)
+                        )
+
+                        # Get OOS score (sharpe from metrics_oos if available)
+                        best_oos_score = (
+                            metrics_oos.get("sharpe") if metrics_oos else None
+                        )
+
+                        await self.tune_repo.populate_regime_attribution(
+                            tune_id=tune_id,
+                            regime_schema_version=regime_snapshot.schema_version,
+                            tag_ruleset_id=DEFAULT_RULESET_ID,
+                            regime_key=regime_key,
+                            regime_fingerprint=regime_fingerprint,
+                            trend_tag=trend_tag,
+                            vol_tag=vol_tag,
+                            efficiency_tag=eff_tag,
+                            best_oos_score=best_oos_score,
+                            best_oos_params=best_params,
+                            best_oos_run_id=best_run_id,
+                        )
+
+                        logger.debug(
+                            "Populated regime attribution",
+                            tune_id=str(tune_id),
+                            regime_key=regime_key,
+                        )
+                    except Exception as e:
+                        # Non-fatal: log warning but don't fail tune
+                        logger.warning(
+                            "Failed to populate regime attribution",
+                            tune_id=str(tune_id),
+                            error=str(e),
+                        )
 
             logger.info(
                 "Parameter tuning completed",

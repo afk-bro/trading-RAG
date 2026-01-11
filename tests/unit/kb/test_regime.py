@@ -812,3 +812,175 @@ class TestTagEvidence:
         snapshot = RegimeSnapshot.from_dict(old_data)
 
         assert snapshot.tag_evidence == []
+
+
+# =============================================================================
+# Regime Key Computation Tests (Step 3)
+# =============================================================================
+
+
+from app.services.kb.regime import (
+    compute_regime_key,
+    compute_regime_fingerprint,
+    extract_regime_tags_for_attribution,
+    DEFAULT_RULESET_ID,
+)
+
+
+class TestRegimeKeyComputation:
+    """Tests for regime key and fingerprint computation."""
+
+    def test_regime_key_format_all_tags(self):
+        """Regime key has correct format with all tags."""
+        snapshot = RegimeSnapshot(
+            schema_version="regime_v1_1",
+            regime_tags=["uptrend", "high_vol", "efficient"],
+        )
+        key = compute_regime_key(snapshot)
+
+        assert key == "regime_v1_1|default_v1|uptrend|high_vol|efficient"
+
+    def test_regime_key_with_missing_tags(self):
+        """Regime key uses underscore for missing dimensions."""
+        # Only uptrend, no vol or efficiency
+        snapshot = RegimeSnapshot(
+            schema_version="regime_v1_1",
+            regime_tags=["uptrend"],
+        )
+        key = compute_regime_key(snapshot)
+
+        assert key == "regime_v1_1|default_v1|uptrend|_|_"
+
+    def test_regime_key_no_tags(self):
+        """Regime key with no tags uses underscores for all dimensions."""
+        snapshot = RegimeSnapshot(
+            schema_version="regime_v1_1",
+            regime_tags=[],
+        )
+        key = compute_regime_key(snapshot)
+
+        assert key == "regime_v1_1|default_v1|_|_|_"
+
+    def test_regime_key_custom_ruleset(self):
+        """Regime key respects custom ruleset_id."""
+        snapshot = RegimeSnapshot(
+            schema_version="regime_v1_1",
+            regime_tags=["flat", "low_vol"],
+        )
+        key = compute_regime_key(snapshot, ruleset_id="custom_v2")
+
+        assert key == "regime_v1_1|custom_v2|flat|low_vol|_"
+
+    def test_regime_key_trend_priority(self):
+        """Trend tag priority: uptrend > downtrend > trending > flat."""
+        # If multiple trend tags somehow present, priority order applies
+        snapshot = RegimeSnapshot(
+            schema_version="regime_v1_1",
+            regime_tags=["downtrend", "uptrend"],  # Both present
+        )
+        key = compute_regime_key(snapshot)
+
+        # uptrend wins due to priority order
+        assert "|uptrend|" in key
+
+
+class TestRegimeFingerprint:
+    """Tests for regime fingerprint computation."""
+
+    def test_fingerprint_stability(self):
+        """Same key produces same fingerprint."""
+        key = "regime_v1_1|default_v1|uptrend|high_vol|noisy"
+
+        fp1 = compute_regime_fingerprint(key)
+        fp2 = compute_regime_fingerprint(key)
+
+        assert fp1 == fp2
+
+    def test_fingerprint_is_sha256(self):
+        """Fingerprint is a valid SHA256 hash (64 hex chars)."""
+        key = "regime_v1_1|default_v1|flat|low_vol|efficient"
+        fingerprint = compute_regime_fingerprint(key)
+
+        assert len(fingerprint) == 64
+        assert all(c in "0123456789abcdef" for c in fingerprint)
+
+    def test_fingerprint_changes_with_schema(self):
+        """Different schema versions produce different fingerprints."""
+        key_v1 = "regime_v1|default_v1|uptrend|high_vol|noisy"
+        key_v2 = "regime_v1_1|default_v1|uptrend|high_vol|noisy"
+
+        fp1 = compute_regime_fingerprint(key_v1)
+        fp2 = compute_regime_fingerprint(key_v2)
+
+        assert fp1 != fp2
+
+    def test_fingerprint_changes_with_ruleset(self):
+        """Different rulesets produce different fingerprints."""
+        key_v1 = "regime_v1_1|default_v1|uptrend|_|_"
+        key_v2 = "regime_v1_1|custom_v2|uptrend|_|_"
+
+        fp1 = compute_regime_fingerprint(key_v1)
+        fp2 = compute_regime_fingerprint(key_v2)
+
+        assert fp1 != fp2
+
+
+class TestRegimeTagExtraction:
+    """Tests for denormalized tag extraction."""
+
+    def test_extract_all_tags(self):
+        """Extract all three tag dimensions."""
+        snapshot = RegimeSnapshot(
+            regime_tags=["downtrend", "low_vol", "noisy"],
+        )
+        trend, vol, eff = extract_regime_tags_for_attribution(snapshot)
+
+        assert trend == "downtrend"
+        assert vol == "low_vol"
+        assert eff == "noisy"
+
+    def test_extract_partial_tags(self):
+        """Extract with some dimensions missing."""
+        snapshot = RegimeSnapshot(
+            regime_tags=["flat"],  # Only trend
+        )
+        trend, vol, eff = extract_regime_tags_for_attribution(snapshot)
+
+        assert trend == "flat"
+        assert vol is None
+        assert eff is None
+
+    def test_extract_no_tags(self):
+        """Extract with no tags returns all None."""
+        snapshot = RegimeSnapshot(regime_tags=[])
+        trend, vol, eff = extract_regime_tags_for_attribution(snapshot)
+
+        assert trend is None
+        assert vol is None
+        assert eff is None
+
+    def test_extract_ignores_other_tags(self):
+        """Extraction ignores non-dimension tags like oversold."""
+        snapshot = RegimeSnapshot(
+            regime_tags=["uptrend", "oversold", "mean_reverting", "efficient"],
+        )
+        trend, vol, eff = extract_regime_tags_for_attribution(snapshot)
+
+        assert trend == "uptrend"
+        assert vol is None  # oversold is not a vol tag
+        assert eff == "efficient"
+
+    def test_denormalized_tags_match_regime_key(self):
+        """Denormalized tags should match what's in regime_key."""
+        snapshot = RegimeSnapshot(
+            schema_version="regime_v1_1",
+            regime_tags=["trending", "high_vol", "noisy"],
+        )
+        key = compute_regime_key(snapshot)
+        trend, vol, eff = extract_regime_tags_for_attribution(snapshot)
+
+        # Key format: {schema}|{ruleset}|{trend}|{vol}|{eff}
+        parts = key.split("|")
+        assert parts[2] == (trend or "_")
+        assert parts[3] == (vol or "_")
+        assert parts[4] == (eff or "_")
