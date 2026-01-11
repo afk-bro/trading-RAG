@@ -58,6 +58,7 @@ def compare_candidates(a: ScoredCandidate, b: ScoredCandidate) -> int:
     3. Current schema > other > null - prefer compatible
     4. Higher kb_promoted_at - recent curation
     5. Newer created_at - recency tiebreaker
+    6. source_id ascending - deterministic fallback for sort stability
 
     Args:
         a: First candidate
@@ -66,7 +67,7 @@ def compare_candidates(a: ScoredCandidate, b: ScoredCandidate) -> int:
     Returns:
         -1 if a should rank higher
         1 if b should rank higher
-        0 if equal
+        0 if equal (should never happen with rule 6)
     """
     # Rule 1: Primary score (higher is better)
     if abs(a.score - b.score) > EPSILON:
@@ -96,6 +97,11 @@ def compare_candidates(a: ScoredCandidate, b: ScoredCandidate) -> int:
     # Rule 5: Recency (newer = better)
     if a.created_at != b.created_at:
         return -1 if a.created_at > b.created_at else 1
+
+    # Rule 6: Deterministic fallback (source_id ascending)
+    # Guarantees stable sort across Python versions
+    if a.source_id != b.source_id:
+        return -1 if a.source_id < b.source_id else 1
 
     return 0
 

@@ -177,14 +177,47 @@ class TestCompareByCreatedAt:
         assert compare_candidates(a, b) == -1
         assert compare_candidates(b, a) == 1
 
-    def test_identical_candidates_compare_equal(self):
-        """Completely identical candidates compare as 0."""
+    def test_identical_candidates_use_source_id_fallback(self):
+        """Rule 6: When all else ties, use source_id for determinism."""
         now = datetime.now(timezone.utc)
 
-        a = make_candidate(score=1.0, created_at=now)
-        b = make_candidate(score=1.0, created_at=now)
+        a = make_candidate(score=1.0, created_at=now, source_id="aaa")
+        b = make_candidate(score=1.0, created_at=now, source_id="bbb")
+
+        # Lower source_id ranks first (ascending order)
+        assert compare_candidates(a, b) == -1
+        assert compare_candidates(b, a) == 1
+
+    def test_truly_identical_candidates_compare_equal(self):
+        """Candidates with same source_id compare as 0."""
+        now = datetime.now(timezone.utc)
+
+        a = make_candidate(score=1.0, created_at=now, source_id="same")
+        b = make_candidate(score=1.0, created_at=now, source_id="same")
 
         assert compare_candidates(a, b) == 0
+
+
+class TestCompareBySourceId:
+    """Tests for Rule 6: Deterministic fallback."""
+
+    def test_source_id_provides_stable_sort(self):
+        """Source ID ensures consistent ordering across runs."""
+        now = datetime.now(timezone.utc)
+
+        # All metadata identical except source_id
+        candidates = [
+            make_candidate(score=1.0, created_at=now, source_id="zebra"),
+            make_candidate(score=1.0, created_at=now, source_id="apple"),
+            make_candidate(score=1.0, created_at=now, source_id="mango"),
+        ]
+
+        ranked = rank_candidates(candidates)
+
+        # Should be sorted by source_id ascending
+        assert ranked[0].source_id == "apple"
+        assert ranked[1].source_id == "mango"
+        assert ranked[2].source_id == "zebra"
 
 
 class TestRankCandidates:

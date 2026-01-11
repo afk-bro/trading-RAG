@@ -9,7 +9,8 @@ Standard operating procedures for Trading RAG service.
 3. [Embedding Model Rotation](#embedding-model-rotation)
 4. [Handling KB Status: None](#handling-kb-status-none)
 5. [Handling KB Status: Degraded](#handling-kb-status-degraded)
-6. [Service Restart Procedure](#service-restart-procedure)
+6. [KB Trial Ingestion Operations](#kb-trial-ingestion-operations)
+7. [Service Restart Procedure](#service-restart-procedure)
 
 ---
 
@@ -314,6 +315,103 @@ Degraded means recommendations are available but with caveats:
 # Degraded breakdown
 tag:kb_status=degraded count() group by tag:strategy, has:strict_to_relaxed
 ```
+
+---
+
+## KB Trial Ingestion Operations
+
+Operations for the trial ingestion pipeline that bridges backtest results to the KB.
+
+### Dry-Run Ingestion
+
+Preview what would be ingested without modifying Qdrant or the index:
+
+```bash
+# Via Python (service-level)
+from app.services.kb.ingest import KBTrialIngester, IngestConfig
+
+config = IngestConfig(dry_run=True)
+ingester = KBTrialIngester(..., config=config)
+result = await ingester.ingest_workspace(workspace_id)
+# result.inserted/updated/skipped show what WOULD happen
+```
+
+### Safe Re-Ingestion
+
+Ingestion is idempotent via content hashing. Safe to re-run anytime:
+
+```bash
+# Re-ingest all eligible trials for workspace
+curl -X POST "http://localhost:8000/kb/trials/ingest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "YOUR_WORKSPACE_ID"}'
+```
+
+**What happens:**
+- Unchanged trials → `skipped` (content hash matches)
+- Modified trials → `updated` (new hash, re-embedded)
+- New trials → `inserted`
+- Previously archived → `unarchived` and re-embedded
+
+### Archive/Delete Failure Recovery
+
+When archive fails to delete from Qdrant:
+
+1. **Check logs for correlation ID:**
+   ```bash
+   docker compose logs trading-rag-svc | grep "kb_archive_qdrant_failed"
+   # Look for: correlation_id, point_id, error
+   ```
+
+2. **The index is still marked archived** (with error note in reason field):
+   ```sql
+   SELECT id, reason, archived_at FROM kb_trial_index
+   WHERE reason LIKE '%qdrant_delete_failed%';
+   ```
+
+3. **Self-healing:** Re-running ingest on the same trial will:
+   - Unarchive the entry
+   - Re-upsert to Qdrant (overwriting orphaned point)
+   - Clear the error state
+
+4. **Manual cleanup (if needed):**
+   ```bash
+   # Delete orphaned Qdrant point manually
+   curl -X POST "http://qdrant:6333/collections/kb_trials/points/delete" \
+     -H "Content-Type: application/json" \
+     -d '{"points": ["<point_id_from_log>"]}'
+   ```
+
+### Interpreting Observability Counters
+
+Three structured log counters for monitoring:
+
+| Counter | Fields | Meaning |
+|---------|--------|---------|
+| `kb_ingest_action_total` | `action`, `count`, `workspace_id` | Batch ingestion results |
+| `kb_admin_status_change_total` | `transition`, `actor`, `actor_type` | Admin status changes |
+| `kb_tiebreak_applied_total` | `rule`, `workspace_id`, `strategy` | Which comparator rules are used |
+
+**Ingest action breakdown:**
+- `inserted` - New trials added to KB
+- `updated` - Existing trials re-embedded (content changed)
+- `skipped` - Unchanged (normal for re-runs)
+- `unarchived` - Previously rejected trials restored
+- `error` - Failed to process (check logs)
+
+**Status change patterns:**
+- `candidate_to_promoted` - Admin approved trial
+- `candidate_to_rejected` - Admin rejected trial
+- `rejected_to_promoted` - Admin restored rejected trial
+
+**Tiebreak rules (in priority order):**
+- `score` - Primary score difference > epsilon
+- `status` - promoted beats candidate
+- `schema` - Current schema preferred
+- `promoted_at` - Recent promotion wins
+- `created_at` - Newer trial wins
+- `source_id` - Deterministic fallback
 
 ---
 

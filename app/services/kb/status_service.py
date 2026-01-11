@@ -17,6 +17,27 @@ from app.services.kb.transitions import KBStatusTransition, TransitionResult
 logger = structlog.get_logger(__name__)
 
 
+def format_actor_id(actor_type: str, actor_id: Optional[str]) -> str:
+    """Format actor identifier for audit logging.
+
+    Standardized format: <type>:<id>
+    - admin:<user_id> - Admin user action
+    - token:<token_name> - API token action
+    - service:<service_name> - Automated service action
+    - auto:<gate_name> - Auto-candidacy gate
+
+    Args:
+        actor_type: Type of actor (auto, admin, token, service)
+        actor_id: The actor's identifier
+
+    Returns:
+        Formatted actor string for audit logs
+    """
+    if actor_id is None:
+        return f"{actor_type}:unknown"
+    return f"{actor_type}:{actor_id}"
+
+
 SourceType = Literal["tune_run", "test_variant"]
 
 
@@ -353,6 +374,7 @@ class KBStatusService:
             transition=f"{from_status}_to_{to_status}",
             from_status=from_status,
             to_status=to_status,
+            actor=format_actor_id(actor_type, actor_id),
             actor_type=actor_type,
             source_type=source_type,
             workspace_id=str(current.workspace_id),

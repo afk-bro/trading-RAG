@@ -225,6 +225,14 @@ class KBTrialIngester:
     async def _ingest_row(self, workspace_id: UUID, row: dict) -> IngestResult:
         """Ingest a single eligible trial row.
 
+        Failure handling:
+        - Qdrant upsert runs first, then DB index update
+        - If Qdrant fails: exception raised, DB unchanged (safe)
+        - If DB fails after Qdrant success: orphaned Qdrant point exists
+          but idempotency allows safe re-run (content hash will match,
+          triggering update which re-syncs the index)
+        - Correlation: log messages include workspace_id, source_type, source_id
+
         Args:
             workspace_id: Workspace ID
             row: Row from kb_eligible_trials view
@@ -448,6 +456,13 @@ class KBTrialIngester:
 
         Called when a trial is rejected or explicitly archived.
 
+        Failure handling:
+        - If Qdrant delete fails, we still mark the index entry archived
+          with an error note. This prevents retry loops and allows manual
+          cleanup via the runbook.
+        - Re-running ingest on the same trial will unarchive and re-upsert,
+          providing self-healing if Qdrant comes back.
+
         Args:
             workspace_id: Workspace ID
             source_type: Source type
@@ -458,11 +473,15 @@ class KBTrialIngester:
         Returns:
             True if archived, False if not found
         """
+        from uuid import uuid4
+
+        correlation_id = str(uuid4())[:8]
         log = logger.bind(
             workspace_id=str(workspace_id),
             source_type=source_type,
             source_id=str(source_id),
             reason=reason,
+            correlation_id=correlation_id,
         )
 
         # Find existing index entry
@@ -480,18 +499,39 @@ class KBTrialIngester:
             log.debug("Trial already archived")
             return True
 
-        # Delete from Qdrant
-        await self._qdrant.delete_point(
-            collection_name=existing.collection_name,
-            point_id=existing.qdrant_point_id,
-        )
+        # Delete from Qdrant (best-effort, log failures)
+        qdrant_error = None
+        try:
+            await self._qdrant.delete_point(
+                collection_name=existing.collection_name,
+                point_id=existing.qdrant_point_id,
+            )
+        except Exception as e:
+            qdrant_error = str(e)
+            log.error(
+                "kb_archive_qdrant_failed",
+                error=qdrant_error,
+                point_id=str(existing.qdrant_point_id),
+                collection=existing.collection_name,
+            )
 
-        # Mark as archived in index
+        # Mark as archived in index (include error if Qdrant failed)
+        archive_reason = reason
+        if qdrant_error:
+            archive_reason = f"{reason} [qdrant_delete_failed: {qdrant_error[:100]}]"
+
         await self._index_repo.archive_entry(
             entry_id=existing.id,
-            reason=reason,
+            reason=archive_reason,
             actor=actor,
         )
 
-        log.info("Archived trial")
+        if qdrant_error:
+            log.warning(
+                "Archived trial with Qdrant error - manual cleanup may be needed",
+                qdrant_error=qdrant_error,
+            )
+        else:
+            log.info("Archived trial")
+
         return True
