@@ -413,7 +413,7 @@ async def cmd_backfill_candidacy(args: argparse.Namespace) -> int:
           AND kb_status = 'excluded'
           AND workspace_id = $1
           AND ($2::timestamp IS NULL OR created_at >= $2)
-          AND ($4::text IS NULL OR id::text > $4)
+          AND ($4::uuid IS NULL OR id > $4::uuid)
         ORDER BY id
         LIMIT $3
     """
@@ -702,7 +702,7 @@ async def cmd_backfill_regime(args: argparse.Namespace) -> int:
           AND workspace_id = $1
           AND ($2::text IS NULL OR dataset_meta->>'symbol' = $2)
           AND ($3::timestamp IS NULL OR created_at >= $3)
-          AND ($5::text IS NULL OR id::text > $5)
+          AND ($5::uuid IS NULL OR id > $5::uuid)
         ORDER BY id
         LIMIT $4
     """

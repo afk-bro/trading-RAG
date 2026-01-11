@@ -5,8 +5,18 @@ Provides CRUD operations for kb_backfill_runs table:
 - Start/complete/fail tracking
 - Resume from last cursor
 - Progress updates
+
+Progress Update Semantics:
+    Cursor is updated AFTER successful processing of each batch.
+    This means on resume, items up to and including the cursor have been
+    processed. The query uses `id > cursor::uuid` to skip already-processed items.
+
+    If a failure occurs mid-batch:
+    - Items before the last cursor update are complete
+    - Items after may need reprocessing (idempotent writes assumed)
 """
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,6 +26,24 @@ from uuid import UUID
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+def _compute_config_hash(config: dict) -> str:
+    """
+    Compute SHA256 hash of canonical JSON config.
+
+    Canonical form: sorted keys, no whitespace, consistent serialization.
+    This ensures stable matching regardless of dict key ordering or
+    formatting differences.
+
+    Args:
+        config: Configuration dict to hash
+
+    Returns:
+        Hex-encoded SHA256 hash (64 chars)
+    """
+    canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 BackfillType = Literal["candidacy", "regime"]
@@ -76,11 +104,17 @@ class BackfillRunRepository:
 
         Returns:
             Created BackfillRun with generated ID
+
+        Raises:
+            asyncpg.UniqueViolationError: If a run with same config is already running
+                (concurrency guard via partial unique index)
         """
+        config_hash = _compute_config_hash(config)
+
         query = """
             INSERT INTO kb_backfill_runs (
-                workspace_id, backfill_type, status, config, dry_run
-            ) VALUES ($1, $2, 'running', $3, $4)
+                workspace_id, backfill_type, status, config, config_hash, dry_run
+            ) VALUES ($1, $2, 'running', $3, $4, $5)
             RETURNING id, started_at
         """
 
@@ -90,6 +124,7 @@ class BackfillRunRepository:
                 workspace_id,
                 backfill_type,
                 json.dumps(config),
+                config_hash,
                 dry_run,
             )
 
@@ -253,9 +288,15 @@ class BackfillRunRepository:
         Find the most recent resumable run.
 
         A run is resumable if:
-        - Same workspace_id, backfill_type, and config
+        - Same workspace_id, backfill_type, and config_hash (or config for legacy)
         - Status is 'running' or 'failed'
         - Has a last_processed_cursor
+
+        Matching priority:
+        1. Try config_hash match first (fast, indexed)
+        2. Fall back to config JSONB equality (for legacy rows without hash)
+
+        The most recent (by started_at DESC) matching run wins.
 
         Args:
             workspace_id: Target workspace
@@ -265,6 +306,9 @@ class BackfillRunRepository:
         Returns:
             BackfillRun if resumable run found, None otherwise
         """
+        config_hash = _compute_config_hash(config)
+
+        # Query matches on config_hash OR config equality (fallback for legacy rows)
         query = """
             SELECT
                 id, workspace_id, backfill_type, status,
@@ -274,7 +318,7 @@ class BackfillRunRepository:
             FROM kb_backfill_runs
             WHERE workspace_id = $1
               AND backfill_type = $2
-              AND config = $3
+              AND (config_hash = $3 OR (config_hash IS NULL AND config = $4))
               AND status IN ('running', 'failed')
               AND last_processed_cursor IS NOT NULL
             ORDER BY started_at DESC
@@ -283,7 +327,11 @@ class BackfillRunRepository:
 
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                query, workspace_id, backfill_type, json.dumps(config)
+                query,
+                workspace_id,
+                backfill_type,
+                config_hash,
+                json.dumps(config),
             )
 
         if row is None:

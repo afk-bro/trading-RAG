@@ -1,13 +1,17 @@
 """Unit tests for BackfillRunRepository and resume semantics."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from app.repositories.kb_backfill import BackfillRunRepository, BackfillRun
+from app.repositories.kb_backfill import (
+    BackfillRunRepository,
+    BackfillRun,
+    _compute_config_hash,
+)
 
 
 @pytest.fixture
@@ -427,3 +431,157 @@ class TestRowToRunConversion:
         run = repo._row_to_run(row)
 
         assert run.config == config
+
+
+class TestConfigHash:
+    """Test config hash computation for stable matching."""
+
+    def test_hash_is_deterministic(self):
+        """Same config should always produce same hash."""
+        config = {"limit": 1000, "since": "2025-01-01"}
+        hash1 = _compute_config_hash(config)
+        hash2 = _compute_config_hash(config)
+        assert hash1 == hash2
+
+    def test_hash_ignores_key_ordering(self):
+        """Different key ordering should produce same hash."""
+        config1 = {"a": 1, "b": 2, "c": 3}
+        config2 = {"c": 3, "a": 1, "b": 2}
+        config3 = {"b": 2, "c": 3, "a": 1}
+
+        hash1 = _compute_config_hash(config1)
+        hash2 = _compute_config_hash(config2)
+        hash3 = _compute_config_hash(config3)
+
+        assert hash1 == hash2 == hash3
+
+    def test_hash_is_sha256_hex(self):
+        """Hash should be 64-character hex string (SHA256)."""
+        config = {"test": "value"}
+        config_hash = _compute_config_hash(config)
+
+        assert len(config_hash) == 64
+        assert all(c in "0123456789abcdef" for c in config_hash)
+
+    def test_different_configs_produce_different_hashes(self):
+        """Different configs should produce different hashes."""
+        config1 = {"limit": 1000}
+        config2 = {"limit": 2000}
+
+        hash1 = _compute_config_hash(config1)
+        hash2 = _compute_config_hash(config2)
+
+        assert hash1 != hash2
+
+    def test_empty_config_has_stable_hash(self):
+        """Empty config should have a stable, predictable hash."""
+        config = {}
+        config_hash = _compute_config_hash(config)
+        # sha256 of "{}" (empty JSON object with canonical formatting)
+        expected = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+        assert config_hash == expected
+
+
+class TestNewestWinsResumeSemantics:
+    """Test that the newest matching run wins when resuming."""
+
+    @pytest.mark.asyncio
+    async def test_find_resumable_returns_newest_when_multiple_match(
+        self, repo, mock_pool
+    ):
+        """When multiple failed runs match config, newest (by started_at) wins."""
+        workspace_id = uuid4()
+        config = {"limit": 1000}
+        config_hash = _compute_config_hash(config)
+
+        # Simulate finding the newest run
+        # The query should ORDER BY started_at DESC LIMIT 1
+        newer_run_id = uuid4()
+        newer_time = datetime.now()
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "id": newer_run_id,
+                "workspace_id": workspace_id,
+                "backfill_type": "candidacy",
+                "status": "failed",
+                "started_at": newer_time,
+                "completed_at": newer_time,
+                "processed_count": 500,  # More progress than older run
+                "skipped_count": 100,
+                "error_count": 1,
+                "last_processed_cursor": "newer_cursor",
+                "config": json.dumps(config),
+                "error": "Timeout",
+                "dry_run": False,
+            }
+        )
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        run = await repo.find_resumable(
+            workspace_id=workspace_id,
+            backfill_type="candidacy",
+            config=config,
+        )
+
+        # Verify the query uses ORDER BY started_at DESC
+        call_args = mock_conn.fetchrow.call_args[0]
+        assert "ORDER BY started_at DESC" in call_args[0]
+        assert "LIMIT 1" in call_args[0]
+
+        # Verify we got the newer run
+        assert run is not None
+        assert run.id == newer_run_id
+        assert run.last_processed_cursor == "newer_cursor"
+        assert run.processed_count == 500
+
+    @pytest.mark.asyncio
+    async def test_find_resumable_uses_config_hash(self, repo, mock_pool):
+        """Find resumable should match on config_hash for indexed lookup."""
+        workspace_id = uuid4()
+        config = {"limit": 1000, "since": "2025-01-01"}
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        await repo.find_resumable(
+            workspace_id=workspace_id,
+            backfill_type="candidacy",
+            config=config,
+        )
+
+        # Verify the query uses config_hash with fallback
+        call_args = mock_conn.fetchrow.call_args[0]
+        query = call_args[0]
+        assert "config_hash = $3" in query
+        assert "config_hash IS NULL AND config = $4" in query
+
+    @pytest.mark.asyncio
+    async def test_create_stores_config_hash(self, repo, mock_pool):
+        """Create should store config_hash for fast matching."""
+        workspace_id = uuid4()
+        run_id = uuid4()
+        now = datetime.now()
+        config = {"limit": 1000}
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={"id": run_id, "started_at": now})
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        await repo.create(
+            workspace_id=workspace_id,
+            backfill_type="candidacy",
+            config=config,
+            dry_run=False,
+        )
+
+        # Verify the INSERT includes config_hash
+        call_args = mock_conn.fetchrow.call_args[0]
+        query = call_args[0]
+        assert "config_hash" in query
+
+        # Verify config_hash is passed as argument (should be arg $4)
+        expected_hash = _compute_config_hash(config)
+        assert call_args[4] == expected_hash
