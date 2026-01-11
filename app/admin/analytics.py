@@ -93,6 +93,32 @@ class TierUsageResponse(BaseModel):
     items: list[TierUsageItem] = Field(default_factory=list)
 
 
+class TierUsageBucketItem(BaseModel):
+    """Time-series data point for tier usage."""
+
+    bucket_start: str = Field(..., description="Bucket start timestamp (ISO format)")
+    tier: str = Field(..., description="Tier name")
+    count: int = Field(..., description="Number of recommendations in this bucket")
+    pct: float = Field(..., description="Percentage within this bucket")
+    avg_confidence: float = Field(..., description="Average confidence in this bucket")
+
+
+class TierUsageTimeSeriesResponse(BaseModel):
+    """Time-series response from tier usage endpoint."""
+
+    workspace_id: str
+    strategy_entity_id: Optional[str] = None
+    period_days: int = Field(30, description="Analysis period in days")
+    bucket: str = Field(..., description="Bucket size: 'day' or 'week'")
+    total_recommendations: int = Field(0, description="Total recommend calls")
+    buckets: list[str] = Field(
+        default_factory=list, description="Ordered list of bucket timestamps"
+    )
+    series: list[TierUsageBucketItem] = Field(
+        default_factory=list, description="Time-series data points"
+    )
+
+
 class UpliftItem(BaseModel):
     """Uplift stats for a grouping (regime or tier)."""
 
@@ -273,7 +299,7 @@ async def get_regime_coverage(
 
 @router.get(
     "/tier-usage",
-    response_model=TierUsageResponse,
+    response_model=None,  # Union type, handled manually
     summary="Get tier usage distribution",
     description="""
 Analyze tier usage: "How often are we falling back?"
@@ -283,14 +309,21 @@ Shows distribution of recommendations across tiers:
 - partial_trend/partial_vol: Partial regime match
 - distance: Feature similarity fallback
 - global_best: No regime match, using global best
+
+**Time-series mode:** Add `bucket=day` or `bucket=week` to get trends over time.
 """,
 )
 async def get_tier_usage(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
     period_days: int = Query(30, ge=1, le=365, description="Analysis period"),
+    bucket: Optional[str] = Query(
+        None,
+        description="Time bucket: 'day' or 'week'. Omit for totals only.",
+        regex="^(day|week)$",
+    ),
     _: bool = Depends(require_admin_token),
-) -> TierUsageResponse:
+):
     """Get tier usage distribution from recommend_events."""
     if _db_pool is None:
         raise HTTPException(
@@ -312,6 +345,18 @@ async def get_tier_usage(
 
     where_clause = " AND ".join(conditions)
 
+    # Time-series mode
+    if bucket:
+        return await _get_tier_usage_time_series(
+            workspace_id=workspace_id,
+            strategy_entity_id=strategy_entity_id,
+            period_days=period_days,
+            bucket=bucket,
+            where_clause=where_clause,
+            params=params,
+        )
+
+    # Totals mode (default)
     query = f"""
         SELECT
             tier_used,
@@ -350,6 +395,75 @@ async def get_tier_usage(
         period_days=period_days,
         total_recommendations=total,
         items=items,
+    )
+
+
+async def _get_tier_usage_time_series(
+    workspace_id: UUID,
+    strategy_entity_id: Optional[UUID],
+    period_days: int,
+    bucket: str,
+    where_clause: str,
+    params: list,
+) -> TierUsageTimeSeriesResponse:
+    """Get tier usage as time-series data."""
+    # Determine bucket truncation
+    trunc_unit = "day" if bucket == "day" else "week"
+
+    query = f"""
+        SELECT
+            date_trunc('{trunc_unit}', created_at) as bucket_start,
+            tier_used,
+            COUNT(*) as count,
+            AVG(confidence) as avg_confidence
+        FROM recommend_events
+        WHERE {where_clause}
+        GROUP BY bucket_start, tier_used
+        ORDER BY bucket_start ASC, tier_used
+    """
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    # Collect unique buckets and build series
+    bucket_set: set[str] = set()
+    bucket_totals: dict[str, int] = {}  # For computing percentages within each bucket
+    series = []
+
+    for row in rows:
+        bucket_start = row["bucket_start"].isoformat()
+        bucket_set.add(bucket_start)
+        bucket_totals[bucket_start] = bucket_totals.get(bucket_start, 0) + row["count"]
+
+    # Build series with percentages
+    for row in rows:
+        bucket_start = row["bucket_start"].isoformat()
+        count = row["count"]
+        bucket_total = bucket_totals[bucket_start]
+        pct = (count / bucket_total * 100) if bucket_total > 0 else 0.0
+
+        series.append(
+            TierUsageBucketItem(
+                bucket_start=bucket_start,
+                tier=row["tier_used"],
+                count=count,
+                pct=round(pct, 1),
+                avg_confidence=round(float(row["avg_confidence"]), 2),
+            )
+        )
+
+    # Sort buckets chronologically
+    buckets = sorted(bucket_set)
+    total = sum(bucket_totals.values())
+
+    return TierUsageTimeSeriesResponse(
+        workspace_id=str(workspace_id),
+        strategy_entity_id=str(strategy_entity_id) if strategy_entity_id else None,
+        period_days=period_days,
+        bucket=bucket,
+        total_recommendations=total,
+        buckets=buckets,
+        series=series,
     )
 
 

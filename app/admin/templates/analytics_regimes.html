@@ -117,6 +117,107 @@
     .tier-distance { background: var(--warning); }
     .tier-global_best { background: var(--danger); }
 
+    /* Toggle button group */
+    .toggle-group {
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .toggle-btn {
+        background: var(--bg);
+        color: var(--text-muted);
+        border: none;
+        padding: 4px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        border-right: 1px solid var(--border);
+    }
+
+    .toggle-btn:last-child {
+        border-right: none;
+    }
+
+    .toggle-btn:hover {
+        color: var(--text);
+    }
+
+    .toggle-btn.active {
+        background: var(--link);
+        color: white;
+    }
+
+    /* Time-series stacked bars */
+    .timeseries-chart {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+    }
+
+    .timeseries-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 24px;
+    }
+
+    .timeseries-label {
+        width: 80px;
+        font-size: 11px;
+        color: var(--text-muted);
+        text-align: right;
+        flex-shrink: 0;
+    }
+
+    .timeseries-bar-container {
+        flex: 1;
+        display: flex;
+        height: 20px;
+        background: var(--bg);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .timeseries-segment {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: white;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .timeseries-segment span {
+        padding: 0 2px;
+    }
+
+    .timeseries-legend {
+        display: flex;
+        gap: 12px;
+        margin-top: 12px;
+        flex-wrap: wrap;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+    }
+
     /* Insight cards */
     .insight-cards {
         display: grid;
@@ -337,9 +438,15 @@
     <div class="card">
         <div class="card-header">
             <span class="card-title">Tier Usage Distribution</span>
-            <div>
-                <button class="btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="toggleTierView('count')" id="btnCount">Count</button>
-                <button class="btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="toggleTierView('pct')" id="btnPct">%</button>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <div class="toggle-group">
+                    <button class="toggle-btn active" id="btnTotals" onclick="toggleTimeMode('totals')">Totals</button>
+                    <button class="toggle-btn" id="btnOverTime" onclick="toggleTimeMode('timeseries')">Over time</button>
+                </div>
+                <div id="viewModeControls">
+                    <button class="btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="toggleTierView('count')" id="btnCount">Count</button>
+                    <button class="btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="toggleTierView('pct')" id="btnPct">%</button>
+                </div>
             </div>
         </div>
         <div class="chart-container" id="tierChartContainer">
@@ -430,9 +537,11 @@
 <script>
     // State
     let tierData = null;
+    let tierTimeSeriesData = null;
     let coverageData = null;
     let upliftData = null;
     let currentTierView = 'pct';
+    let currentTimeMode = 'totals';  // 'totals' or 'timeseries'
     let currentSort = { column: 'coverage_gap', direction: 'desc' };
 
     // Config from server
@@ -470,16 +579,24 @@
         const params = getFilterParams();
 
         try {
-            // Fetch all three endpoints in parallel
-            const [tier, coverage, uplift] = await Promise.all([
+            // Fetch all endpoints in parallel (always get totals + optionally time-series)
+            const fetches = [
                 fetchWithAuth(`/admin/analytics/tier-usage?${params}`),
                 fetchWithAuth(`/admin/analytics/regime-coverage?${params}`),
                 fetchWithAuth(`/admin/analytics/uplift?${params}`)
-            ]);
+            ];
 
-            tierData = tier;
-            coverageData = coverage;
-            upliftData = uplift;
+            // Also fetch time-series if in that mode
+            if (currentTimeMode === 'timeseries') {
+                fetches.push(fetchWithAuth(`/admin/analytics/tier-usage?${params}&bucket=day`));
+            }
+
+            const results = await Promise.all(fetches);
+
+            tierData = results[0];
+            coverageData = results[1];
+            upliftData = results[2];
+            tierTimeSeriesData = results[3] || null;
 
             renderAll();
             updateLastUpdated();
@@ -487,6 +604,31 @@
             console.error('Failed to load data:', error);
             showError(error.message);
         }
+    }
+
+    // Toggle between totals and time-series view
+    async function toggleTimeMode(mode) {
+        if (currentTimeMode === mode) return;
+        currentTimeMode = mode;
+
+        // Update toggle button states
+        document.getElementById('btnTotals').classList.toggle('active', mode === 'totals');
+        document.getElementById('btnOverTime').classList.toggle('active', mode === 'timeseries');
+
+        // Show/hide count/% controls (only relevant for totals)
+        document.getElementById('viewModeControls').style.display = mode === 'totals' ? 'block' : 'none';
+
+        // If switching to timeseries and no data yet, fetch it
+        if (mode === 'timeseries' && !tierTimeSeriesData) {
+            const params = getFilterParams();
+            try {
+                tierTimeSeriesData = await fetchWithAuth(`/admin/analytics/tier-usage?${params}&bucket=day`);
+            } catch (error) {
+                console.error('Failed to load time-series data:', error);
+            }
+        }
+
+        renderTierChart();
     }
 
     function renderAll() {
@@ -516,6 +658,13 @@
     function renderTierChart() {
         const container = document.getElementById('tierChartContainer');
 
+        // Time-series mode
+        if (currentTimeMode === 'timeseries') {
+            renderTierTimeSeriesChart(container);
+            return;
+        }
+
+        // Totals mode
         if (!tierData?.items?.length) {
             container.innerHTML = '<div class="empty-state">No recommendation events in this period</div>';
             return;
@@ -565,6 +714,101 @@
         // Update button states
         document.getElementById('btnCount').classList.toggle('active', currentTierView === 'count');
         document.getElementById('btnPct').classList.toggle('active', currentTierView === 'pct');
+    }
+
+    // Render time-series stacked bar chart
+    function renderTierTimeSeriesChart(container) {
+        if (!tierTimeSeriesData?.buckets?.length) {
+            container.innerHTML = '<div class="empty-state">No time-series data available</div>';
+            return;
+        }
+
+        const tierOrder = ['exact', 'partial_trend', 'partial_vol', 'distance', 'global_best'];
+        const tierLabels = {
+            'exact': 'Exact',
+            'partial_trend': 'Partial (T)',
+            'partial_vol': 'Partial (V)',
+            'distance': 'Distance',
+            'global_best': 'Global'
+        };
+        const tierColors = {
+            'exact': 'var(--success)',
+            'partial_trend': '#3b82f6',
+            'partial_vol': '#8b5cf6',
+            'distance': 'var(--warning)',
+            'global_best': 'var(--danger)'
+        };
+
+        // Group series data by bucket
+        const bucketData = {};
+        for (const bucket of tierTimeSeriesData.buckets) {
+            bucketData[bucket] = { total: 0 };
+            for (const tier of tierOrder) {
+                bucketData[bucket][tier] = 0;
+            }
+        }
+
+        for (const item of tierTimeSeriesData.series) {
+            if (bucketData[item.bucket_start]) {
+                bucketData[item.bucket_start][item.tier] = item.count;
+                bucketData[item.bucket_start].total += item.count;
+            }
+        }
+
+        // Find max total for scaling
+        const maxTotal = Math.max(...Object.values(bucketData).map(d => d.total), 1);
+
+        let html = '<div class="timeseries-chart">';
+
+        for (const bucket of tierTimeSeriesData.buckets) {
+            const data = bucketData[bucket];
+            const date = new Date(bucket);
+            const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+            html += `
+                <div class="timeseries-row">
+                    <div class="timeseries-label">${label}</div>
+                    <div class="timeseries-bar-container" style="width: ${(data.total / maxTotal * 100)}%">
+            `;
+
+            // Render stacked segments
+            for (const tier of tierOrder) {
+                const count = data[tier];
+                if (count > 0) {
+                    const pct = (count / data.total * 100);
+                    html += `
+                        <div class="timeseries-segment tier-${tier}"
+                             style="width: ${pct}%"
+                             title="${tierLabels[tier]}: ${count}">
+                            ${pct >= 15 ? `<span>${count}</span>` : ''}
+                        </div>
+                    `;
+                }
+            }
+
+            html += `
+                    </div>
+                    <span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">${data.total}</span>
+                </div>
+            `;
+        }
+
+        // Legend
+        html += `
+            </div>
+            <div class="timeseries-legend">
+        `;
+        for (const tier of tierOrder) {
+            html += `
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: ${tierColors[tier]}"></div>
+                    ${tierLabels[tier]}
+                </div>
+            `;
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
     }
 
     function toggleTierView(view) {
@@ -782,6 +1026,8 @@
     }
 
     function onFilterChange() {
+        // Clear time-series cache on filter change
+        tierTimeSeriesData = null;
         loadAllData();
     }
 
