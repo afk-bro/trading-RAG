@@ -112,9 +112,7 @@ class TestKBStatusTransitionValidator:
         def test_admin_can_transition_with_reason(self):
             """Admin can transition candidate → rejected with reason."""
             v = KBStatusTransition()
-            result = v.validate(
-                "candidate", "rejected", "admin", reason="low quality"
-            )
+            result = v.validate("candidate", "rejected", "admin", reason="low quality")
             assert result.valid is True
 
         def test_admin_cannot_transition_without_reason(self):
@@ -127,9 +125,7 @@ class TestKBStatusTransitionValidator:
         def test_auto_cannot_transition(self):
             """Auto cannot transition candidate → rejected."""
             v = KBStatusTransition()
-            result = v.validate(
-                "candidate", "rejected", "auto", reason="some reason"
-            )
+            result = v.validate("candidate", "rejected", "auto", reason="some reason")
             assert result.valid is False
 
     class TestPromotedToRejected:
@@ -138,9 +134,7 @@ class TestKBStatusTransitionValidator:
         def test_admin_can_transition_with_reason(self):
             """Admin can transition promoted → rejected with reason."""
             v = KBStatusTransition()
-            result = v.validate(
-                "promoted", "rejected", "admin", reason="bad data"
-            )
+            result = v.validate("promoted", "rejected", "admin", reason="bad data")
             assert result.valid is True
 
         def test_admin_cannot_transition_without_reason(self):
@@ -156,9 +150,7 @@ class TestKBStatusTransitionValidator:
         def test_admin_can_transition_with_reason(self):
             """Admin can transition rejected → promoted with reason."""
             v = KBStatusTransition()
-            result = v.validate(
-                "rejected", "promoted", "admin", reason="data verified"
-            )
+            result = v.validate("rejected", "promoted", "admin", reason="data verified")
             assert result.valid is True
 
         def test_admin_cannot_transition_without_reason(self):
@@ -171,9 +163,7 @@ class TestKBStatusTransitionValidator:
         def test_auto_cannot_transition(self):
             """Auto cannot transition rejected → promoted."""
             v = KBStatusTransition()
-            result = v.validate(
-                "rejected", "promoted", "auto", reason="verified"
-            )
+            result = v.validate("rejected", "promoted", "auto", reason="verified")
             assert result.valid is False
 
     # --- Disallowed transitions ---

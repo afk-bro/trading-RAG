@@ -220,11 +220,15 @@ class BacktestBreakerAdapter:
         """Get breaker state from workspace table."""
         state_dict = await self._repo.get_breaker_state(workspace_id)
         return BreakerState(
-            kb_auto_candidacy_state=state_dict.get("kb_auto_candidacy_state", "enabled"),
+            kb_auto_candidacy_state=state_dict.get(
+                "kb_auto_candidacy_state", "enabled"
+            ),
             kb_auto_candidacy_disabled_until=state_dict.get(
                 "kb_auto_candidacy_disabled_until"
             ),
-            kb_auto_candidacy_trip_reason=state_dict.get("kb_auto_candidacy_trip_reason"),
+            kb_auto_candidacy_trip_reason=state_dict.get(
+                "kb_auto_candidacy_trip_reason"
+            ),
             kb_auto_candidacy_tripped_at=state_dict.get("kb_auto_candidacy_tripped_at"),
         )
 

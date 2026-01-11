@@ -33,13 +33,18 @@ from app.services.kb.comparator import (
     rank_candidates,
 )
 from app.services.kb.constants import KB_TRIALS_COLLECTION_NAME, REGIME_SCHEMA_VERSION
-from app.services.kb.status_service import KBStatusService, KBStatusResult, CurrentStatus
+from app.services.kb.status_service import (
+    KBStatusService,
+    KBStatusResult,
+    CurrentStatus,
+)
 from app.services.kb.transitions import KBStatusTransition
 
 
 @dataclass
 class MockEmbedResult:
     """Mock embedding result with vectors attribute."""
+
     vectors: list[list[float]]
 
 
@@ -116,9 +121,7 @@ class TestEndToEndIngest:
         assert isinstance(point_id_1, UUID)
 
     @pytest.mark.asyncio
-    async def test_ingest_tune_run_inserts_correctly(
-        self, workspace_id, tune_run_row
-    ):
+    async def test_ingest_tune_run_inserts_correctly(self, workspace_id, tune_run_row):
         """Tune run ingestion creates index entry with correct fields."""
         # Setup mocks
         mock_index_repo = MagicMock()
@@ -129,7 +132,9 @@ class TestEndToEndIngest:
         mock_eligible_repo.get_eligible_trials = AsyncMock(return_value=[tune_run_row])
 
         mock_embedder = MagicMock()
-        mock_embedder.embed = AsyncMock(return_value=MockEmbedResult(vectors=[[0.1] * 768]))
+        mock_embedder.embed = AsyncMock(
+            return_value=MockEmbedResult(vectors=[[0.1] * 768])
+        )
 
         mock_qdrant = MagicMock()
         mock_qdrant.upsert_point = AsyncMock()
@@ -173,10 +178,14 @@ class TestEndToEndIngest:
         mock_index_repo.insert_index_entry = AsyncMock()
 
         mock_eligible_repo = MagicMock()
-        mock_eligible_repo.get_eligible_trials = AsyncMock(return_value=[test_variant_row])
+        mock_eligible_repo.get_eligible_trials = AsyncMock(
+            return_value=[test_variant_row]
+        )
 
         mock_embedder = MagicMock()
-        mock_embedder.embed = AsyncMock(return_value=MockEmbedResult(vectors=[[0.1] * 768]))
+        mock_embedder.embed = AsyncMock(
+            return_value=MockEmbedResult(vectors=[[0.1] * 768])
+        )
 
         mock_qdrant = MagicMock()
         mock_qdrant.upsert_point = AsyncMock()
@@ -270,7 +279,9 @@ class TestEndToEndIngest:
         mock_eligible_repo.get_eligible_trials = AsyncMock(return_value=[tune_run_row])
 
         mock_embedder = MagicMock()
-        mock_embedder.embed = AsyncMock(return_value=MockEmbedResult(vectors=[[0.1] * 768]))
+        mock_embedder.embed = AsyncMock(
+            return_value=MockEmbedResult(vectors=[[0.1] * 768])
+        )
 
         mock_qdrant = MagicMock()
         mock_qdrant.upsert_point = AsyncMock()
@@ -314,7 +325,9 @@ class TestEndToEndIngest:
         mock_eligible_repo.get_eligible_trials = AsyncMock(return_value=[tune_run_row])
 
         mock_embedder = MagicMock()
-        mock_embedder.embed = AsyncMock(return_value=MockEmbedResult(vectors=[[0.1] * 768]))
+        mock_embedder.embed = AsyncMock(
+            return_value=MockEmbedResult(vectors=[[0.1] * 768])
+        )
 
         mock_qdrant = MagicMock()
         mock_qdrant.upsert_point = AsyncMock()

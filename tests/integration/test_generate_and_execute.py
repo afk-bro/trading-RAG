@@ -281,14 +281,10 @@ class TestGenerateAndExecuteIntegration:
         from app.schemas import TradeEventType
 
         run_started_count = sum(
-            1
-            for e in recorded_events
-            if e.event_type == TradeEventType.RUN_STARTED
+            1 for e in recorded_events if e.event_type == TradeEventType.RUN_STARTED
         )
         run_completed_count = sum(
-            1
-            for e in recorded_events
-            if e.event_type == TradeEventType.RUN_COMPLETED
+            1 for e in recorded_events if e.event_type == TradeEventType.RUN_COMPLETED
         )
 
         assert run_started_count == 1, "Should have exactly one RUN_STARTED event"

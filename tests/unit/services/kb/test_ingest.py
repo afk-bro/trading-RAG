@@ -364,9 +364,7 @@ class TestKBTrialIngesterIngestWorkspace:
         assert result.inserted == 0
 
     @pytest.mark.asyncio
-    async def test_handles_embedding_error(
-        self, ingester, mock_embedder, workspace_id
-    ):
+    async def test_handles_embedding_error(self, ingester, mock_embedder, workspace_id):
         """Handles embedding failures gracefully."""
         embed_result = MagicMock()
         embed_result.vectors = []  # No vectors returned
@@ -381,7 +379,12 @@ class TestKBTrialIngesterIngestWorkspace:
 
     @pytest.mark.asyncio
     async def test_dry_run_does_not_persist(
-        self, mock_index_repo, mock_eligible_repo, mock_embedder, mock_qdrant, workspace_id
+        self,
+        mock_index_repo,
+        mock_eligible_repo,
+        mock_embedder,
+        mock_qdrant,
+        workspace_id,
     ):
         """Dry run mode doesn't call Qdrant or index."""
         config = IngestConfig(dry_run=True)

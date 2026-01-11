@@ -53,13 +53,15 @@ class MockStatusRepository:
         changed_by: Optional[str],
         reason: Optional[str],
     ) -> None:
-        self.update_calls.append({
-            "source_type": source_type,
-            "source_id": source_id,
-            "to_status": to_status,
-            "changed_by": changed_by,
-            "reason": reason,
-        })
+        self.update_calls.append(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "to_status": to_status,
+                "changed_by": changed_by,
+                "reason": reason,
+            }
+        )
         # Update the in-memory status
         key = (source_type, source_id)
         if key in self.statuses:
@@ -76,11 +78,13 @@ class MockStatusRepository:
         source_id: UUID,
         promoted_by: Optional[str],
     ) -> None:
-        self.promoted_at_calls.append({
-            "source_type": source_type,
-            "source_id": source_id,
-            "promoted_by": promoted_by,
-        })
+        self.promoted_at_calls.append(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "promoted_by": promoted_by,
+            }
+        )
 
     async def insert_history(
         self,
@@ -93,16 +97,18 @@ class MockStatusRepository:
         actor_id: Optional[str],
         reason: Optional[str],
     ) -> None:
-        self.history.append({
-            "workspace_id": workspace_id,
-            "source_type": source_type,
-            "source_id": source_id,
-            "from_status": from_status,
-            "to_status": to_status,
-            "actor_type": actor_type,
-            "actor_id": actor_id,
-            "reason": reason,
-        })
+        self.history.append(
+            {
+                "workspace_id": workspace_id,
+                "source_type": source_type,
+                "source_id": source_id,
+                "from_status": from_status,
+                "to_status": to_status,
+                "actor_type": actor_type,
+                "actor_id": actor_id,
+                "reason": reason,
+            }
+        )
 
 
 class MockIndexRepository:
@@ -126,13 +132,15 @@ class MockIndexRepository:
         reason: str,
         actor: Optional[str],
     ) -> bool:
-        self.archive_calls.append({
-            "workspace_id": workspace_id,
-            "source_type": source_type,
-            "source_id": source_id,
-            "reason": reason,
-            "actor": actor,
-        })
+        self.archive_calls.append(
+            {
+                "workspace_id": workspace_id,
+                "source_type": source_type,
+                "source_id": source_id,
+                "reason": reason,
+                "actor": actor,
+            }
+        )
         key = (source_type, source_id)
         if key in self.indexed_trials:
             self.indexed_trials.discard(key)
@@ -144,10 +152,12 @@ class MockIndexRepository:
         source_type: str,
         source_id: UUID,
     ) -> bool:
-        self.unarchive_calls.append({
-            "source_type": source_type,
-            "source_id": source_id,
-        })
+        self.unarchive_calls.append(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+            }
+        )
         # For testing, assume unarchive always succeeds if archived
         return True
 
@@ -196,9 +206,7 @@ class TestKBStatusService:
             """Auto can transition excluded → candidate."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "excluded"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "excluded")
 
             result = await service.transition(
                 source_type="test_variant",
@@ -216,9 +224,7 @@ class TestKBStatusService:
             """Admin can transition candidate → promoted."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "candidate"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "candidate")
 
             result = await service.transition(
                 source_type="test_variant",
@@ -236,9 +242,7 @@ class TestKBStatusService:
             """Promotion sets promoted_at timestamp."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "excluded"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "excluded")
 
             await service.transition(
                 source_type="test_variant",
@@ -254,15 +258,11 @@ class TestKBStatusService:
             assert call["promoted_by"] == "admin-123"
 
         @pytest.mark.asyncio
-        async def test_candidate_does_not_set_promoted_at(
-            self, service, status_repo
-        ):
+        async def test_candidate_does_not_set_promoted_at(self, service, status_repo):
             """Candidate transition does not set promoted_at."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "excluded"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "excluded")
 
             await service.transition(
                 source_type="test_variant",
@@ -291,9 +291,7 @@ class TestKBStatusService:
             """Transition logs to history."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "excluded"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "excluded")
 
             await service.transition(
                 source_type="test_variant",
@@ -316,9 +314,7 @@ class TestKBStatusService:
             """History includes actor_id and reason."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "candidate"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "candidate")
 
             await service.transition(
                 source_type="test_variant",
@@ -338,9 +334,7 @@ class TestKBStatusService:
             """No history logged when transition is skipped (same status)."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "candidate"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "candidate")
 
             result = await service.transition(
                 source_type="test_variant",
@@ -370,9 +364,7 @@ class TestKBStatusService:
             """Same status transition is skipped."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "candidate"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "candidate")
 
             result = await service.transition(
                 source_type="test_variant",
@@ -419,9 +411,7 @@ class TestKBStatusService:
             """Invalid transition raises InvalidTransitionError."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "rejected"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "rejected")
 
             with pytest.raises(InvalidTransitionError) as exc_info:
                 await service.transition(
@@ -431,16 +421,17 @@ class TestKBStatusService:
                     actor_type="admin",
                 )
 
-            assert exc_info.value.error_code == "transition_rejected_to_candidate_not_allowed"
+            assert (
+                exc_info.value.error_code
+                == "transition_rejected_to_candidate_not_allowed"
+            )
 
         @pytest.mark.asyncio
         async def test_auto_cannot_promote(self, service, status_repo):
             """Auto cannot promote."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "candidate"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "candidate")
 
             with pytest.raises(InvalidTransitionError) as exc_info:
                 await service.transition(
@@ -457,9 +448,7 @@ class TestKBStatusService:
             """Rejection requires reason."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "candidate"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "candidate")
 
             with pytest.raises(InvalidTransitionError) as exc_info:
                 await service.transition(
@@ -498,9 +487,7 @@ class TestKBStatusService:
             """Rejection archives trial if it's in the index."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "promoted"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "promoted")
             index_repo.mark_indexed("test_variant", source_id)
 
             await service.transition(
@@ -521,15 +508,11 @@ class TestKBStatusService:
             assert call["actor"] == "admin-789"
 
         @pytest.mark.asyncio
-        async def test_unrejection_unarchives(
-            self, service, status_repo, index_repo
-        ):
+        async def test_unrejection_unarchives(self, service, status_repo, index_repo):
             """Promotion from rejected unarchives."""
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "rejected"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "rejected")
 
             await service.transition(
                 source_type="test_variant",
@@ -551,9 +534,7 @@ class TestKBStatusService:
             service = KBStatusService(status_repo=status_repo)
             workspace_id = uuid4()
             source_id = uuid4()
-            status_repo.add_status(
-                "test_variant", source_id, workspace_id, "promoted"
-            )
+            status_repo.add_status("test_variant", source_id, workspace_id, "promoted")
 
             # Should not raise
             await service.transition(
@@ -605,9 +586,7 @@ class TestKBStatusService:
             workspace_id = uuid4()
             valid_id = uuid4()
             missing_id = uuid4()
-            status_repo.add_status(
-                "test_variant", valid_id, workspace_id, "excluded"
-            )
+            status_repo.add_status("test_variant", valid_id, workspace_id, "excluded")
 
             results = await service.bulk_transition(
                 source_type="test_variant",

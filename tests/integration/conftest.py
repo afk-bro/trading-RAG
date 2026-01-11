@@ -48,9 +48,11 @@ def test_app(mock_db_pool, mock_qdrant_client):
 
     Patches the stable seam in app.core.lifespan, not internal module globals.
     """
-    with patch("app.core.lifespan._db_pool", mock_db_pool), \
-         patch("app.core.lifespan._qdrant_client", mock_qdrant_client):
+    with patch("app.core.lifespan._db_pool", mock_db_pool), patch(
+        "app.core.lifespan._qdrant_client", mock_qdrant_client
+    ):
         from app.main import app
+
         yield app
 
 
@@ -66,13 +68,16 @@ def client_with_admin(mock_db_pool, mock_qdrant_client, mock_settings):
     """Create test client with admin token and mocked dependencies."""
     # Reset the broker singleton to ensure clean state
     from app.services.execution import factory
+
     factory.reset_paper_broker()
 
-    with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), \
-         patch("app.core.lifespan._db_pool", mock_db_pool), \
-         patch("app.core.lifespan._qdrant_client", mock_qdrant_client), \
-         patch("app.routers.execution.get_settings", return_value=mock_settings):
+    with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}), patch(
+        "app.core.lifespan._db_pool", mock_db_pool
+    ), patch("app.core.lifespan._qdrant_client", mock_qdrant_client), patch(
+        "app.routers.execution.get_settings", return_value=mock_settings
+    ):
         from app.main import app
+
         with TestClient(app, raise_server_exceptions=False) as test_client:
             yield test_client
 
@@ -85,5 +90,6 @@ def test_lifespan_exports_exist():
     making it clear what needs updating instead of 36 cryptic patch failures.
     """
     from app.core.lifespan import get_db_pool, get_qdrant_client
+
     assert callable(get_db_pool)
     assert callable(get_qdrant_client)

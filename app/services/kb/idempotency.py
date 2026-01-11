@@ -90,9 +90,7 @@ class IndexEntry:
     archived_by: Optional[str] = None
 
 
-def compute_point_id(
-    workspace_id: UUID, source_type: str, source_id: UUID
-) -> UUID:
+def compute_point_id(workspace_id: UUID, source_type: str, source_id: UUID) -> UUID:
     """Compute deterministic Qdrant point ID.
 
     Uses UUID5 with KB namespace for reproducibility. This ensures

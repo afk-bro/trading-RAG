@@ -3033,7 +3033,9 @@ def _get_status_service():
 async def kb_trials_promotion_preview(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     source_type: Optional[str] = Query(None, description="Filter by source type"),
-    group_id: Optional[UUID] = Query(None, description="Filter by group (tune_id or run_plan_id)"),
+    group_id: Optional[UUID] = Query(
+        None, description="Filter by group (tune_id or run_plan_id)"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     sort: str = Query("sharpe_oos", description="Sort field"),

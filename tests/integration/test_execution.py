@@ -31,10 +31,11 @@ def client(mock_settings):
 
     # Set admin token in environment and patch settings
     # Patch the stable seam in app.core.lifespan, not app.main
-    with patch.dict(os.environ, {"ADMIN_TOKEN": "test-admin-token"}), \
-         patch("app.routers.execution.get_settings", return_value=mock_settings), \
-         patch("app.core.lifespan._db_pool", MagicMock()), \
-         patch("app.core.lifespan._qdrant_client", None):
+    with patch.dict(os.environ, {"ADMIN_TOKEN": "test-admin-token"}), patch(
+        "app.routers.execution.get_settings", return_value=mock_settings
+    ), patch("app.core.lifespan._db_pool", MagicMock()), patch(
+        "app.core.lifespan._qdrant_client", None
+    ):
         # Also need to patch the execution router's _db_pool
         import app.routers.execution as execution_module
 
@@ -160,10 +161,11 @@ class TestPaperResetEndpoint:
         prod_settings = MagicMock()
         prod_settings.config_profile = "production"
 
-        with patch.dict(os.environ, {"ADMIN_TOKEN": "test-admin-token"}), \
-             patch("app.routers.execution.get_settings", return_value=prod_settings), \
-             patch("app.core.lifespan._db_pool", MagicMock()), \
-             patch("app.core.lifespan._qdrant_client", None):
+        with patch.dict(os.environ, {"ADMIN_TOKEN": "test-admin-token"}), patch(
+            "app.routers.execution.get_settings", return_value=prod_settings
+        ), patch("app.core.lifespan._db_pool", MagicMock()), patch(
+            "app.core.lifespan._qdrant_client", None
+        ):
             import app.routers.execution as execution_module
 
             execution_module._db_pool = MagicMock()

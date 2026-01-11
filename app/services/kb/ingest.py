@@ -354,9 +354,7 @@ class KBTrialIngester:
         payload["experiment_type"] = experiment_type
         payload["kb_status"] = kb_status
         payload["kb_promoted_at"] = (
-            row.get("kb_promoted_at").isoformat()
-            if row.get("kb_promoted_at")
-            else None
+            row.get("kb_promoted_at").isoformat() if row.get("kb_promoted_at") else None
         )
 
         # Upsert to Qdrant
