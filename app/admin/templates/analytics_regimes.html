@@ -1327,6 +1327,155 @@
     .coming-soon-card p {
         font-size: 12px;
     }
+
+    /* Recent Alerts Panel */
+    .recent-alerts-panel {
+        margin-top: 16px;
+    }
+
+    .recent-alerts-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .recent-alerts-title {
+        font-size: 14px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .recent-alerts-toggle {
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .recent-alerts-toggle-btn {
+        padding: 4px 10px;
+        font-size: 11px;
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .recent-alerts-toggle-btn:first-child {
+        border-right: 1px solid var(--border);
+    }
+
+    .recent-alerts-toggle-btn:hover {
+        color: var(--text);
+    }
+
+    .recent-alerts-toggle-btn.active {
+        background: var(--link);
+        color: white;
+    }
+
+    .recent-alerts-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .recent-alert-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .recent-alert-item:last-child {
+        border-bottom: none;
+    }
+
+    .recent-alert-item:hover {
+        background: rgba(56, 139, 253, 0.08);
+        margin: 0 -12px;
+        padding: 10px 12px;
+    }
+
+    .recent-alert-severity {
+        flex-shrink: 0;
+    }
+
+    .recent-alert-content {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .recent-alert-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .recent-alert-type {
+        font-size: 11px;
+        padding: 2px 6px;
+        background: var(--bg);
+        border-radius: 3px;
+        color: var(--text-muted);
+    }
+
+    .recent-alert-regime {
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .recent-alert-status {
+        flex-shrink: 0;
+    }
+
+    .recent-alert-status .badge {
+        font-size: 10px;
+        padding: 2px 6px;
+    }
+
+    .recent-alerts-footer {
+        margin-top: 12px;
+        text-align: center;
+    }
+
+    .recent-alerts-footer a {
+        font-size: 12px;
+        color: var(--link);
+        text-decoration: none;
+    }
+
+    .recent-alerts-footer a:hover {
+        text-decoration: underline;
+    }
+
+    .recent-alerts-empty {
+        text-align: center;
+        padding: 24px 16px;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .recent-alerts-empty-icon {
+        font-size: 24px;
+        margin-bottom: 8px;
+        opacity: 0.5;
+    }
 </style>
 
 <div class="page-header">
@@ -1465,7 +1614,7 @@
     </div>
 </div>
 
-<!-- Insight Cards -->
+<!-- Insight Cards and Recent Alerts -->
 <div class="insight-cards">
     <div class="insight-card">
         <div class="insight-title">
@@ -1496,6 +1645,59 @@
                 Loading...
             </li>
         </ul>
+    </div>
+</div>
+
+<!-- Recent Alerts Panel -->
+<div class="card recent-alerts-panel">
+    <div class="recent-alerts-header">
+        <span class="recent-alerts-title">
+            <span>&#128276;</span>
+            Recent Alerts
+        </span>
+        <div class="recent-alerts-toggle">
+            <button class="recent-alerts-toggle-btn active" id="btnAlertsActive" onclick="toggleAlertsView('active')">Active</button>
+            <button class="recent-alerts-toggle-btn" id="btnAlertsAll" onclick="toggleAlertsView('all')">All</button>
+        </div>
+    </div>
+    <div id="recentAlertsContainer">
+        <ul class="recent-alerts-list" id="recentAlertsList" {% if not recent_alerts %}style="display: none;"{% endif %}>
+            {% for alert in recent_alerts %}
+            <li class="recent-alert-item" data-status="{{ alert.status }}" data-alert-id="{{ alert.id }}" onclick="navigateToAlertDetail(this)">
+                <div class="recent-alert-severity">
+                    {% if alert.severity == 'high' %}
+                    <span class="badge badge-rejected">HIGH</span>
+                    {% elif alert.severity == 'medium' %}
+                    <span class="badge badge-pending">MED</span>
+                    {% else %}
+                    <span class="badge badge-weak">LOW</span>
+                    {% endif %}
+                </div>
+                <div class="recent-alert-content">
+                    <div class="recent-alert-meta">
+                        <span class="recent-alert-type">{{ alert.rule_type }}</span>
+                        {% if alert.regime_key %}
+                        <span class="recent-alert-regime" title="{{ alert.regime_key }}">{{ alert.regime_key[:25] }}{% if alert.regime_key|length > 25 %}...{% endif %}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="recent-alert-status">
+                    {% if alert.status == 'active' %}
+                    <span class="badge badge-type">active</span>
+                    {% else %}
+                    <span class="badge badge-verified">resolved</span>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        <div class="recent-alerts-empty" id="recentAlertsEmpty" {% if recent_alerts %}style="display: none;"{% endif %}>
+            <div class="recent-alerts-empty-icon">&#128276;</div>
+            <div id="recentAlertsEmptyText">No alerts found</div>
+        </div>
+    </div>
+    <div class="recent-alerts-footer">
+        <a href="/admin/alerts/page?workspace_id={{ workspace_id }}&token={{ admin_token | urlencode }}">View all alerts &rarr;</a>
     </div>
 </div>
 
@@ -1800,7 +2002,7 @@
 
     // Config from server
     const workspaceId = '{{ workspace_id }}';
-    const adminToken = '{{ admin_token }}';
+    const adminToken = {{ admin_token | tojson }};
 
     // =============================================================================
     // URL State Management (Source of Truth)
@@ -2925,6 +3127,85 @@
         loadAllData();
     }
 
+    // Recent Alerts navigation
+    function navigateToAlertDetail(element) {
+        const alertId = element.dataset.alertId;
+        window.location.href = '/admin/alerts/' + alertId + '/detail?token=' + encodeURIComponent(adminToken);
+    }
+
+    // Recent Alerts toggle
+    let currentAlertsView = 'active';
+
+    function toggleAlertsView(view) {
+        if (currentAlertsView === view) return;
+        currentAlertsView = view;
+
+        // Update button states
+        document.getElementById('btnAlertsActive').classList.toggle('active', view === 'active');
+        document.getElementById('btnAlertsAll').classList.toggle('active', view === 'all');
+
+        // Filter displayed alerts
+        const alertItems = document.querySelectorAll('.recent-alert-item');
+        let visibleCount = 0;
+
+        alertItems.forEach(item => {
+            const status = item.dataset.status;
+            if (view === 'all' || status === 'active') {
+                item.style.display = '';
+                visibleCount++;
+            } else {
+                item.style.display = 'none';
+            }
+        });
+
+        // Show empty state if no visible alerts
+        const emptyEl = document.getElementById('recentAlertsEmpty');
+        const emptyTextEl = document.getElementById('recentAlertsEmptyText');
+        const listEl = document.getElementById('recentAlertsList');
+        if (emptyEl && listEl) {
+            if (visibleCount === 0) {
+                listEl.style.display = 'none';
+                emptyEl.style.display = 'block';
+                if (emptyTextEl) {
+                    emptyTextEl.textContent = view === 'active' ? 'No active alerts' : 'No alerts found';
+                }
+            } else {
+                listEl.style.display = '';
+                emptyEl.style.display = 'none';
+            }
+        }
+    }
+
+    function initAlertsView() {
+        // On page load, filter to show only active alerts
+        const alertItems = document.querySelectorAll('.recent-alert-item');
+        let visibleCount = 0;
+
+        alertItems.forEach(item => {
+            const status = item.dataset.status;
+            if (status === 'active') {
+                item.style.display = '';
+                visibleCount++;
+            } else {
+                item.style.display = 'none';
+            }
+        });
+
+        // Update empty state visibility and text
+        const emptyEl = document.getElementById('recentAlertsEmpty');
+        const emptyTextEl = document.getElementById('recentAlertsEmptyText');
+        const listEl = document.getElementById('recentAlertsList');
+
+        if (visibleCount === 0) {
+            if (listEl) listEl.style.display = 'none';
+            if (emptyEl) emptyEl.style.display = 'block';
+            if (emptyTextEl) emptyTextEl.textContent = 'No active alerts';
+        } else {
+            if (listEl) listEl.style.display = '';
+            if (emptyEl) emptyEl.style.display = 'none';
+        }
+    }
+
     // Backlog generation
     async function generateTuningPlan() {
         const btn = document.getElementById('btnGeneratePlan');
@@ -3393,6 +3674,9 @@
         renderScopeBanner();
         renderTabs();
         renderModeContent();
+
+        // Initialize alerts view (show only active by default)
+        initAlertsView();
 
         // Load data
         loadAllData();

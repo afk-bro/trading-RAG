@@ -46,12 +46,16 @@ from app.config import Settings, get_settings  # noqa: E402
 from app.deps.security import require_admin_token  # noqa: E402
 from app.schemas import KBEntityType, KBClaimType  # noqa: E402
 from app.admin import analytics as analytics_router  # noqa: E402
+from app.admin import alerts as alerts_router  # noqa: E402
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
 
 # Include analytics sub-router
 router.include_router(analytics_router.router)
+
+# Include alerts sub-router
+router.include_router(alerts_router.router)
 
 # Setup Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
@@ -67,6 +71,8 @@ def set_db_pool(pool):
     _db_pool = pool
     # Also set pool for analytics router
     analytics_router.set_db_pool(pool)
+    # Also set pool for alerts router
+    alerts_router.set_db_pool(pool)
 
 
 def _get_kb_repo():
@@ -3759,6 +3765,68 @@ async def run_cleanup_job(
 
     except Exception as e:
         logger.exception("cleanup_events job failed", error=str(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "failed",
+                "error": str(e),
+                "workspace_id": str(workspace_id),
+            },
+        )
+
+
+@router.post("/jobs/evaluate-alerts")
+async def run_evaluate_alerts_job(
+    workspace_id: UUID = Query(..., description="Workspace to evaluate alerts for"),
+    dry_run: bool = Query(False, description="Preview only, no changes"),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Run alert evaluation job for workspace.
+
+    Evaluates all enabled alert rules for the workspace, checking current
+    regime drift and confidence metrics against configured thresholds.
+    Creates or resolves alerts based on rule conditions.
+
+    Returns:
+        200: Job completed successfully with metrics
+        409: Job already running (lock not acquired)
+        500: Job failed with error details
+    """
+    from app.services.alerts.job import AlertEvaluatorJob
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    job = AlertEvaluatorJob(_db_pool)
+    try:
+        result = await job.run(workspace_id=workspace_id, dry_run=dry_run)
+
+        if not result["lock_acquired"]:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={
+                    "status": "already_running",
+                    "workspace_id": str(workspace_id),
+                    "metrics": result["metrics"],
+                },
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "status": result["status"],
+                "workspace_id": str(workspace_id),
+                "dry_run": dry_run,
+                "metrics": result["metrics"],
+            },
+        )
+
+    except Exception as e:
+        logger.exception("evaluate_alerts job failed", error=str(e))
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
