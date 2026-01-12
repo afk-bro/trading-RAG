@@ -1697,7 +1697,7 @@
         </div>
     </div>
     <div class="recent-alerts-footer">
-        <a href="/admin/alerts/page?workspace_id={{ workspace_id }}&token={{ admin_token }}">View all alerts &rarr;</a>
+        <a href="/admin/alerts/page?workspace_id={{ workspace_id }}&token={{ admin_token | urlencode }}">View all alerts &rarr;</a>
     </div>
 </div>
 
@@ -2002,7 +2002,7 @@
 
     // Config from server
     const workspaceId = '{{ workspace_id }}';
-    const adminToken = '{{ admin_token }}';
+    const adminToken = {{ admin_token | tojson }};
 
     // =============================================================================
     // URL State Management (Source of Truth)
