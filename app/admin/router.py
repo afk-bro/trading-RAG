@@ -3607,16 +3607,27 @@ async def kb_trials_mark_candidate(
 
 @router.post("/jobs/rollup-events")
 async def run_rollup_job(
-    target_date: Optional[date] = None,
+    workspace_id: UUID = Query(..., description="Workspace to scope the rollup"),
+    target_date: Optional[date] = Query(
+        None, description="Date to roll up (defaults to yesterday)"
+    ),
+    dry_run: bool = Query(False, description="Preview only, no changes"),
     _: bool = Depends(require_admin_token),
 ):
     """
     Run daily event rollup job.
 
+    Aggregates trade_events into trade_event_rollups for the specified workspace.
     Defaults to yesterday if no date provided.
-    Idempotent - safe to run multiple times.
+    Idempotent via ON CONFLICT - safe to run multiple times.
+
+    Returns:
+        200: Job completed successfully
+        409: Job already running (lock not acquired)
+        500: Job failed with error details
     """
     from app.repositories.event_rollups import EventRollupsRepository
+    from app.services.jobs import JobRunner
 
     if _db_pool is None:
         raise HTTPException(
@@ -3627,29 +3638,80 @@ async def run_rollup_job(
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
 
-    repo = EventRollupsRepository(_db_pool)
-    count = await repo.run_daily_rollup(target_date)
+    repo = EventRollupsRepository()
 
-    return {
-        "status": "ok",
-        "target_date": str(target_date),
-        "rows_affected": count,
-    }
+    async def job_fn(conn, is_dry_run: bool, correlation_id: str) -> dict:
+        """Job function for rollup."""
+        if is_dry_run:
+            preview = await repo.preview_daily_rollup(conn, workspace_id, target_date)
+            return {
+                "dry_run": True,
+                "target_date": str(target_date),
+                **preview,
+            }
+        else:
+            count = await repo.run_daily_rollup(conn, workspace_id, target_date)
+            return {
+                "dry_run": False,
+                "target_date": str(target_date),
+                "rows_affected": count,
+            }
+
+    runner = JobRunner(_db_pool)
+    try:
+        result = await runner.run(
+            job_name="rollup_events",
+            workspace_id=workspace_id,
+            dry_run=dry_run,
+            triggered_by="admin_token",
+            job_fn=job_fn,
+        )
+
+        if not result.lock_acquired:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=result.to_dict(),
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=result.to_dict(),
+        )
+
+    except Exception as e:
+        logger.exception("rollup_events job failed", error=str(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "failed",
+                "error": str(e),
+                "workspace_id": str(workspace_id),
+                "target_date": str(target_date),
+            },
+        )
 
 
 @router.post("/jobs/cleanup-events")
 async def run_cleanup_job(
+    workspace_id: UUID = Query(..., description="Workspace to scope the cleanup"),
+    dry_run: bool = Query(False, description="Preview only, no changes"),
     _: bool = Depends(require_admin_token),
 ):
     """
     Run event retention cleanup job.
 
-    Deletes expired events based on severity tier:
+    Deletes expired events based on severity tier for the specified workspace:
     - INFO/DEBUG: 30 days
     - WARN/ERROR: 90 days
     - Pinned events: Never deleted
+
+    Returns:
+        200: Job completed successfully
+        409: Job already running (lock not acquired)
+        500: Job failed with error details
     """
     from app.services.retention import RetentionService
+    from app.services.jobs import JobRunner
 
     if _db_pool is None:
         raise HTTPException(
@@ -3657,10 +3719,51 @@ async def run_cleanup_job(
             detail="Database connection not available",
         )
 
-    service = RetentionService(_db_pool)
-    result = await service.run_cleanup()
+    service = RetentionService()
 
-    return {
-        "status": "ok",
-        **result,
-    }
+    async def job_fn(conn, is_dry_run: bool, correlation_id: str) -> dict:
+        """Job function for cleanup."""
+        if is_dry_run:
+            preview = await service.preview_cleanup(conn, workspace_id)
+            return {
+                "dry_run": True,
+                **preview,
+            }
+        else:
+            result = await service.run_cleanup(conn, workspace_id)
+            return {
+                "dry_run": False,
+                **result,
+            }
+
+    runner = JobRunner(_db_pool)
+    try:
+        result = await runner.run(
+            job_name="cleanup_events",
+            workspace_id=workspace_id,
+            dry_run=dry_run,
+            triggered_by="admin_token",
+            job_fn=job_fn,
+        )
+
+        if not result.lock_acquired:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=result.to_dict(),
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=result.to_dict(),
+        )
+
+    except Exception as e:
+        logger.exception("cleanup_events job failed", error=str(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "failed",
+                "error": str(e),
+                "workspace_id": str(workspace_id),
+            },
+        )
