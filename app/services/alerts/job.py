@@ -43,6 +43,7 @@ class AlertEvaluatorJob:
             "alerts_resolved": 0,
             "db_upserts": 0,
             "db_updates": 0,
+            "evaluation_errors": 0,
         }
 
         async with self.pool.acquire() as conn:
@@ -78,17 +79,28 @@ class AlertEvaluatorJob:
 
                 # Process each rule
                 for rule in rules:
-                    await self._process_rule(
-                        rule=rule,
-                        evaluator=evaluator,
-                        transition_mgr=transition_mgr,
-                        metrics=metrics,
-                        dry_run=dry_run,
-                    )
+                    try:
+                        await self._process_rule(
+                            rule=rule,
+                            evaluator=evaluator,
+                            transition_mgr=transition_mgr,
+                            metrics=metrics,
+                            dry_run=dry_run,
+                        )
+                    except Exception as e:
+                        logger.exception(
+                            "Rule evaluation failed", rule_id=rule["id"], error=str(e)
+                        )
+                        metrics["evaluation_errors"] += 1
 
             finally:
                 # Release lock
-                await conn.fetchval("SELECT pg_advisory_unlock($1)", lock_key)
+                try:
+                    await conn.fetchval("SELECT pg_advisory_unlock($1)", lock_key)
+                except Exception as e:
+                    logger.exception(
+                        "Failed to release advisory lock", lock_key=lock_key, error=str(e)
+                    )
 
         return {
             "lock_acquired": True,
