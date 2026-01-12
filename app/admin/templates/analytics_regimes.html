@@ -1661,10 +1661,9 @@
         </div>
     </div>
     <div id="recentAlertsContainer">
-        {% if recent_alerts %}
-        <ul class="recent-alerts-list" id="recentAlertsList">
+        <ul class="recent-alerts-list" id="recentAlertsList" {% if not recent_alerts %}style="display: none;"{% endif %}>
             {% for alert in recent_alerts %}
-            <li class="recent-alert-item" data-status="{{ alert.status }}" onclick="window.location.href='/admin/alerts/{{ alert.id }}/detail?token={{ admin_token }}'">
+            <li class="recent-alert-item" data-status="{{ alert.status }}" data-alert-id="{{ alert.id }}" onclick="navigateToAlertDetail(this)">
                 <div class="recent-alert-severity">
                     {% if alert.severity == 'high' %}
                     <span class="badge badge-rejected">HIGH</span>
@@ -1692,12 +1691,10 @@
             </li>
             {% endfor %}
         </ul>
-        {% else %}
-        <div class="recent-alerts-empty" id="recentAlertsEmpty">
+        <div class="recent-alerts-empty" id="recentAlertsEmpty" {% if recent_alerts %}style="display: none;"{% endif %}>
             <div class="recent-alerts-empty-icon">&#128276;</div>
-            <div>No alerts found</div>
+            <div id="recentAlertsEmptyText">No alerts found</div>
         </div>
-        {% endif %}
     </div>
     <div class="recent-alerts-footer">
         <a href="/admin/alerts/page?workspace_id={{ workspace_id }}&token={{ admin_token }}">View all alerts &rarr;</a>
@@ -3130,6 +3127,12 @@
         loadAllData();
     }
 
+    // Recent Alerts navigation
+    function navigateToAlertDetail(element) {
+        const alertId = element.dataset.alertId;
+        window.location.href = '/admin/alerts/' + alertId + '/detail?token=' + encodeURIComponent(adminToken);
+    }
+
     // Recent Alerts toggle
     let currentAlertsView = 'active';
 
@@ -3157,11 +3160,15 @@
 
         // Show empty state if no visible alerts
         const emptyEl = document.getElementById('recentAlertsEmpty');
+        const emptyTextEl = document.getElementById('recentAlertsEmptyText');
         const listEl = document.getElementById('recentAlertsList');
         if (emptyEl && listEl) {
             if (visibleCount === 0) {
                 listEl.style.display = 'none';
                 emptyEl.style.display = 'block';
+                if (emptyTextEl) {
+                    emptyTextEl.textContent = view === 'active' ? 'No active alerts' : 'No alerts found';
+                }
             } else {
                 listEl.style.display = '';
                 emptyEl.style.display = 'none';
@@ -3184,24 +3191,18 @@
             }
         });
 
-        // Show empty state if no active alerts
+        // Update empty state visibility and text
         const emptyEl = document.getElementById('recentAlertsEmpty');
+        const emptyTextEl = document.getElementById('recentAlertsEmptyText');
         const listEl = document.getElementById('recentAlertsList');
-        if (listEl && visibleCount === 0) {
-            // Create or show empty state for "no active alerts"
-            let container = document.getElementById('recentAlertsContainer');
-            if (container && !emptyEl) {
-                const emptyDiv = document.createElement('div');
-                emptyDiv.id = 'recentAlertsEmpty';
-                emptyDiv.className = 'recent-alerts-empty';
-                emptyDiv.innerHTML = '<div class="recent-alerts-empty-icon">&#9989;</div><div>No active alerts</div>';
-                container.appendChild(emptyDiv);
-            }
+
+        if (visibleCount === 0) {
             if (listEl) listEl.style.display = 'none';
-            if (emptyEl) {
-                emptyEl.innerHTML = '<div class="recent-alerts-empty-icon">&#9989;</div><div>No active alerts</div>';
-                emptyEl.style.display = 'block';
-            }
+            if (emptyEl) emptyEl.style.display = 'block';
+            if (emptyTextEl) emptyTextEl.textContent = 'No active alerts';
+        } else {
+            if (listEl) listEl.style.display = '';
+            if (emptyEl) emptyEl.style.display = 'none';
         }
     }
 
