@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+
+{% block title %}Job Runs - Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Job Runs</h2>
+        <span class="pagination-info">{{ total }} total</span>
+    </div>
+
+    <form class="filters" method="get">
+        <select name="job_name">
+            <option value="">All jobs</option>
+            {% for name in job_names %}
+            <option value="{{ name }}" {% if job_name == name %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="workspace_id" placeholder="Workspace ID" value="{{ workspace_id or '' }}" style="width: 300px;">
+        <select name="status">
+            <option value="">All statuses</option>
+            <option value="running" {% if status_filter == 'running' %}selected{% endif %}>Running</option>
+            <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
+        </select>
+        <button type="submit">Filter</button>
+        {% if job_name or workspace_id or status_filter %}
+        <a href="/admin/jobs" class="btn btn-secondary">Clear</a>
+        {% endif %}
+    </form>
+
+    {% if runs %}
+    <table>
+        <thead>
+            <tr>
+                <th>Job</th>
+                <th>Status</th>
+                <th>Workspace</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Dry Run</th>
+                <th>Triggered By</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr onclick="window.location='/admin/jobs/runs/{{ run.id }}/detail'" style="cursor: pointer;">
+                <td>
+                    <strong>{{ run.job_name }}</strong>
+                    {% if run.metrics_preview %}
+                    <div class="description truncate" style="color: var(--text-muted); font-size: 12px;">{{ run.metrics_preview[:50] }}{% if run.metrics_preview|length > 50 %}...{% endif %}</div>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if run.display_status == 'completed' %}
+                    <span class="badge badge-verified">completed</span>
+                    {% elif run.display_status == 'failed' %}
+                    <span class="badge badge-rejected">failed</span>
+                    {% elif run.display_status == 'running' %}
+                    <span class="badge badge-type">running</span>
+                    {% elif run.display_status == 'stale' %}
+                    <span class="badge badge-weak">stale</span>
+                    {% else %}
+                    <span class="badge badge-pending">{{ run.display_status }}</span>
+                    {% endif %}
+                </td>
+                <td style="font-family: monospace; font-size: 12px;">
+                    {{ run.workspace_id[:8] }}...
+                </td>
+                <td style="color: var(--text-muted); font-size: 13px;">
+                    {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') if run.started_at else '-' }}
+                </td>
+                <td>
+                    {% if run.duration_ms %}
+                    {{ (run.duration_ms / 1000)|round(2) }}s
+                    {% elif run.display_status == 'running' %}
+                    <span style="color: var(--info);">in progress</span>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if run.dry_run %}
+                    <span class="badge badge-weak">dry run</span>
+                    {% else %}
+                    <span style="color: var(--text-muted)">-</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 12px; color: var(--text-muted);">
+                    {{ run.triggered_by or '-' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="pagination">
+        <span class="pagination-info">
+            Showing {{ offset + 1 }}-{{ [offset + limit, total]|min }} of {{ total }}
+        </span>
+        <div class="pagination-buttons">
+            {% if offset > 0 %}
+            <a href="?job_name={{ job_name or '' }}&workspace_id={{ workspace_id or '' }}&status={{ status_filter or '' }}&limit={{ limit }}&offset={{ [offset - limit, 0]|max }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if offset + limit < total %}
+            <a href="?job_name={{ job_name or '' }}&workspace_id={{ workspace_id or '' }}&status={{ status_filter or '' }}&limit={{ limit }}&offset={{ offset + limit }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% else %}
+    <div class="empty-state">
+        <h3>No job runs found</h3>
+        <p>{% if job_name or workspace_id or status_filter %}Try adjusting your filters{% else %}No jobs have been executed yet{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
