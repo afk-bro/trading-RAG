@@ -328,3 +328,120 @@ class TestCleanupEndpoint:
         data = response.json()
         assert data["status"] == "failed"
         assert "Disk full" in data["error"]
+
+
+class TestJobConcurrency:
+    """Tests for job concurrency handling."""
+
+    def test_concurrent_job_returns_409(self, client, mock_db_pool, workspace_id):
+        """Second job attempt while first running returns 409."""
+        from app.services.jobs import JobResult
+
+        # Simulate lock not acquired (another job is running)
+        lock_not_acquired_result = JobResult(
+            run_id=None,
+            lock_acquired=False,
+            status="already_running",
+            duration_ms=0,
+            metrics={},
+            correlation_id="job-rollup_events-concurrent",
+        )
+
+        mock_runner = MagicMock()
+        mock_runner.run = AsyncMock(return_value=lock_not_acquired_result)
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.jobs.JobRunner", return_value=mock_runner
+        ):
+            response = client.post(
+                f"/admin/jobs/rollup-events?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 409
+        data = response.json()
+        assert data["lock_acquired"] is False
+        assert data["status"] == "already_running"
+        assert data["run_id"] is None
+
+    def test_cleanup_concurrent_returns_409(self, client, mock_db_pool, workspace_id):
+        """Cleanup job also returns 409 when lock not acquired."""
+        from app.services.jobs import JobResult
+
+        lock_not_acquired_result = JobResult(
+            run_id=None,
+            lock_acquired=False,
+            status="already_running",
+            duration_ms=0,
+            metrics={},
+            correlation_id="job-cleanup_events-concurrent",
+        )
+
+        mock_runner = MagicMock()
+        mock_runner.run = AsyncMock(return_value=lock_not_acquired_result)
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.jobs.JobRunner", return_value=mock_runner
+        ):
+            response = client.post(
+                f"/admin/jobs/cleanup-events?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 409
+        data = response.json()
+        assert data["lock_acquired"] is False
+
+
+class TestJobTriggeredBy:
+    """Tests for triggered_by tracking."""
+
+    def test_rollup_records_admin_token_trigger(
+        self, client, mock_db_pool, workspace_id, mock_job_result_completed
+    ):
+        """Rollup job records admin_token as trigger."""
+        mock_runner = MagicMock()
+        mock_runner.run = AsyncMock(return_value=mock_job_result_completed)
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.jobs.JobRunner", return_value=mock_runner
+        ):
+            response = client.post(
+                f"/admin/jobs/rollup-events?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 200
+        # Verify triggered_by was passed to JobRunner
+        call_kwargs = mock_runner.run.call_args[1]
+        assert call_kwargs["triggered_by"] == "admin_token"
+
+    def test_cleanup_records_admin_token_trigger(
+        self, client, mock_db_pool, workspace_id
+    ):
+        """Cleanup job records admin_token as trigger."""
+        from app.services.jobs import JobResult
+
+        cleanup_result = JobResult(
+            run_id=uuid4(),
+            lock_acquired=True,
+            status="completed",
+            duration_ms=100,
+            metrics={"dry_run": False, "info_debug_deleted": 5},
+            correlation_id="job-cleanup-trigger-test",
+        )
+
+        mock_runner = MagicMock()
+        mock_runner.run = AsyncMock(return_value=cleanup_result)
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.jobs.JobRunner", return_value=mock_runner
+        ):
+            response = client.post(
+                f"/admin/jobs/cleanup-events?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 200
+        call_kwargs = mock_runner.run.call_args[1]
+        assert call_kwargs["triggered_by"] == "admin_token"

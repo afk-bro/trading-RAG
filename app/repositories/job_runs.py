@@ -1,6 +1,5 @@
 """Repository for job runs tracking."""
 
-from datetime import datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
