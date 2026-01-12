@@ -87,7 +87,9 @@ class TestListJobRunsEndpoint:
         with patch("app.admin.router._db_pool", mock_db_pool), patch(
             "app.repositories.job_runs.JobRunsRepository", return_value=mock_repo
         ):
-            url = f"/admin/jobs/runs?job_name=cleanup_events&workspace_id={workspace_id}"
+            url = (
+                f"/admin/jobs/runs?job_name=cleanup_events&workspace_id={workspace_id}"
+            )
             url += "&status=failed&limit=10&offset=5"
             response = client.get(
                 url,

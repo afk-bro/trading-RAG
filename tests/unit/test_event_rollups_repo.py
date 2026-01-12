@@ -61,7 +61,9 @@ class TestEventRollupsRepository:
         workspace_id = uuid4()
 
         repo = EventRollupsRepository()
-        result = await repo.preview_daily_rollup(mock_conn, workspace_id, date(2026, 1, 10))
+        result = await repo.preview_daily_rollup(
+            mock_conn, workspace_id, date(2026, 1, 10)
+        )
 
         assert result["events_to_aggregate"] == 100
         assert result["rollup_rows_to_create"] == 15
