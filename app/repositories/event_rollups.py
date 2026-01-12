@@ -112,6 +112,7 @@ class EventRollupsRepository:
 
     async def get_rollups(
         self,
+        conn: Any,
         workspace_id: UUID,
         start_date: date,
         end_date: date,
@@ -122,6 +123,7 @@ class EventRollupsRepository:
         Get rollups for a workspace in date range.
 
         Args:
+            conn: Database connection
             workspace_id: Workspace ID
             start_date: Start of date range (inclusive)
             end_date: End of date range (inclusive)
@@ -156,7 +158,5 @@ class EventRollupsRepository:
             ORDER BY rollup_date DESC, event_type
         """
 
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(query, *params)
-
+        rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
