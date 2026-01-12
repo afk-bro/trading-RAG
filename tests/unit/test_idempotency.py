@@ -1,6 +1,5 @@
 """Tests for run plan idempotency utilities."""
 
-import pytest
 from uuid import UUID
 
 from app.services.testing.idempotency import compute_request_hash

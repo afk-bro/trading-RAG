@@ -35,9 +35,7 @@ class RunPlansRepository:
                 return None
             return dict(row)
 
-    async def get_by_request_hash(
-        self, request_hash: str
-    ) -> Optional[dict[str, Any]]:
+    async def get_by_request_hash(self, request_hash: str) -> Optional[dict[str, Any]]:
         """Get a run plan by request hash."""
         query = """
             SELECT id, status, idempotency_key, request_hash,

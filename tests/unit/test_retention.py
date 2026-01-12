@@ -1,7 +1,6 @@
 """Tests for event retention service."""
 
 import pytest
-from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 from app.services.retention import RetentionService
