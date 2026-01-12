@@ -778,3 +778,172 @@ class TestUnacknowledgeAlertEventEndpoint:
             )
 
         assert response.status_code == 404
+
+
+# =============================================================================
+# Alert Evaluation Job Endpoint
+# =============================================================================
+
+
+class TestAlertJobEndpoint:
+    """Tests for POST /admin/jobs/evaluate-alerts endpoint."""
+
+    def test_evaluate_alerts_requires_admin_token(self, client):
+        """Evaluate alerts requires admin auth."""
+        workspace_id = uuid4()
+        response = client.post(f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}")
+        assert response.status_code in (401, 403)
+
+    def test_evaluate_alerts_requires_workspace_id(self, client):
+        """Evaluate alerts requires workspace_id parameter."""
+        response = client.post(
+            "/admin/jobs/evaluate-alerts",
+            headers={"X-Admin-Token": "test-token"},
+        )
+        assert response.status_code == 422
+
+    def test_evaluate_alerts_success(self, client, mock_db_pool):
+        """Evaluate alerts job returns metrics on success."""
+        workspace_id = uuid4()
+
+        mock_job = MagicMock()
+        mock_job.run = AsyncMock(
+            return_value={
+                "lock_acquired": True,
+                "status": "completed",
+                "metrics": {
+                    "rules_loaded": 5,
+                    "tuples_evaluated": 10,
+                    "tuples_skipped_insufficient_data": 2,
+                    "activations_suppressed_cooldown": 0,
+                    "alerts_activated": 3,
+                    "alerts_resolved": 1,
+                    "db_upserts": 3,
+                    "db_updates": 1,
+                    "evaluation_errors": 0,
+                },
+            }
+        )
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
+        ):
+            response = client.post(
+                f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["workspace_id"] == str(workspace_id)
+        assert data["dry_run"] is False
+        assert data["metrics"]["rules_loaded"] == 5
+        assert data["metrics"]["alerts_activated"] == 3
+
+    def test_evaluate_alerts_dry_run(self, client, mock_db_pool):
+        """Evaluate alerts accepts dry_run parameter."""
+        workspace_id = uuid4()
+
+        mock_job = MagicMock()
+        mock_job.run = AsyncMock(
+            return_value={
+                "lock_acquired": True,
+                "status": "completed",
+                "metrics": {
+                    "rules_loaded": 2,
+                    "tuples_evaluated": 2,
+                    "tuples_skipped_insufficient_data": 0,
+                    "activations_suppressed_cooldown": 0,
+                    "alerts_activated": 0,
+                    "alerts_resolved": 0,
+                    "db_upserts": 0,
+                    "db_updates": 0,
+                    "evaluation_errors": 0,
+                },
+            }
+        )
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
+        ):
+            response = client.post(
+                f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}&dry_run=true",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["dry_run"] is True
+        # In dry_run, no DB changes should happen
+        assert data["metrics"]["db_upserts"] == 0
+        assert data["metrics"]["db_updates"] == 0
+
+    def test_evaluate_alerts_conflict_when_locked(self, client, mock_db_pool):
+        """Returns 409 when job is already running."""
+        workspace_id = uuid4()
+
+        mock_job = MagicMock()
+        mock_job.run = AsyncMock(
+            return_value={
+                "lock_acquired": False,
+                "status": "already_running",
+                "metrics": {
+                    "rules_loaded": 0,
+                    "tuples_evaluated": 0,
+                    "tuples_skipped_insufficient_data": 0,
+                    "activations_suppressed_cooldown": 0,
+                    "alerts_activated": 0,
+                    "alerts_resolved": 0,
+                    "db_upserts": 0,
+                    "db_updates": 0,
+                    "evaluation_errors": 0,
+                },
+            }
+        )
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
+        ):
+            response = client.post(
+                f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 409
+        data = response.json()
+        assert data["status"] == "already_running"
+        assert data["workspace_id"] == str(workspace_id)
+
+    def test_evaluate_alerts_handles_exception(self, client, mock_db_pool):
+        """Returns 500 when job raises exception."""
+        workspace_id = uuid4()
+
+        mock_job = MagicMock()
+        mock_job.run = AsyncMock(side_effect=Exception("Database connection failed"))
+
+        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+            "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
+        ):
+            response = client.post(
+                f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 500
+        data = response.json()
+        assert data["status"] == "failed"
+        assert "Database connection failed" in data["error"]
+
+    def test_evaluate_alerts_no_db_pool(self, client):
+        """Returns 503 when DB pool not available."""
+        workspace_id = uuid4()
+
+        with patch("app.admin.router._db_pool", None):
+            response = client.post(
+                f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 503
+        assert "Database" in response.json()["detail"]
