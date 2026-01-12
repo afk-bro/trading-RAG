@@ -74,11 +74,12 @@
             {% for alert in alerts %}
             <tr class="clickable-row" data-href="/admin/alerts/{{ alert.id }}">
                 <td>
+                    {% if alert.last_seen %}
                     <span class="relative-time" data-timestamp="{{ alert.last_seen.isoformat() }}" title="{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
                         {{ alert.last_seen.strftime('%Y-%m-%d %H:%M') }}
                     </span>
-                    {% if alert.occurrence_count > 1 %}
-                    <span class="occurrence-count" title="{{ alert.occurrence_count }} occurrences">x{{ alert.occurrence_count }}</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
                     {% endif %}
                 </td>
                 <td>
@@ -96,7 +97,7 @@
                 <td>
                     {% if alert.strategy_entity_id %}
                     <a href="/admin/kb/entities/{{ alert.strategy_entity_id }}" onclick="event.stopPropagation()">
-                        {{ alert.strategy_name or (alert.strategy_entity_id[:8] ~ '...') }}
+                        {{ (alert.strategy_entity_id | string)[:8] }}...
                     </a>
                     {% else %}
                     <span class="text-muted">-</span>
@@ -143,10 +144,10 @@
         </div>
         <div class="pagination-buttons">
             {% if has_prev %}
-            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&severity={{ severity_filter or '' }}&rule_type={{ rule_type_filter or '' }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            <a href="?workspace_id={{ workspace_id }}&status={{ (status_filter or '') | urlencode }}&severity={{ (severity_filter or '') | urlencode }}&rule_type={{ (rule_type_filter or '') | urlencode }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
             {% endif %}
             {% if has_next %}
-            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&severity={{ severity_filter or '' }}&rule_type={{ rule_type_filter or '' }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            <a href="?workspace_id={{ workspace_id }}&status={{ (status_filter or '') | urlencode }}&severity={{ (severity_filter or '') | urlencode }}&rule_type={{ (rule_type_filter or '') | urlencode }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
             {% endif %}
         </div>
     </div>
@@ -209,12 +210,6 @@
         border-radius: 4px;
     }
 
-    .occurrence-count {
-        font-size: 11px;
-        color: var(--warning);
-        margin-left: 4px;
-    }
-
     .ack-badge {
         padding: 2px 6px;
         border-radius: 4px;
@@ -265,7 +260,7 @@ async function acknowledgeAlert(eventId) {
         const response = await fetch(`/admin/alerts/${eventId}/acknowledge`, {
             method: 'POST',
             headers: {
-                'X-Admin-Token': '{{ admin_token }}',
+                'X-Admin-Token': {{ admin_token | tojson }},
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({})
