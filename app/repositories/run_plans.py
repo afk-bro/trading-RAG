@@ -18,6 +18,38 @@ class RunPlansRepository:
         """Initialize with database connection pool."""
         self.pool = pool
 
+    async def get_by_idempotency_key(
+        self, idempotency_key: str
+    ) -> Optional[dict[str, Any]]:
+        """Get a run plan by idempotency key."""
+        query = """
+            SELECT id, status, idempotency_key, request_hash,
+                   workspace_id, strategy_entity_id, objective_name,
+                   created_at
+            FROM run_plans
+            WHERE idempotency_key = $1
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, idempotency_key)
+            if not row:
+                return None
+            return dict(row)
+
+    async def get_by_request_hash(self, request_hash: str) -> Optional[dict[str, Any]]:
+        """Get a run plan by request hash."""
+        query = """
+            SELECT id, status, idempotency_key, request_hash,
+                   workspace_id, strategy_entity_id, objective_name,
+                   created_at
+            FROM run_plans
+            WHERE request_hash = $1
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, request_hash)
+            if not row:
+                return None
+            return dict(row)
+
     async def create_run_plan(
         self,
         workspace_id: UUID,
@@ -26,6 +58,8 @@ class RunPlansRepository:
         n_variants: int,
         plan: dict[str, Any],
         status: str = "pending",
+        idempotency_key: Optional[str] = None,
+        request_hash: Optional[str] = None,
     ) -> UUID:
         """
         Create a new run plan record.
@@ -37,6 +71,8 @@ class RunPlansRepository:
             n_variants: Number of variants in plan
             plan: Full plan JSON (inputs, resolved, provenance)
             status: Initial status (default: pending)
+            idempotency_key: Client-provided idempotency key
+            request_hash: Hash of request for deduplication
 
         Returns:
             The new run plan ID
@@ -44,9 +80,9 @@ class RunPlansRepository:
         query = """
             INSERT INTO run_plans (
                 workspace_id, strategy_entity_id, objective_name,
-                n_variants, plan, status
+                n_variants, plan, status, idempotency_key, request_hash
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
         """
 
@@ -59,6 +95,8 @@ class RunPlansRepository:
                 n_variants,
                 json.dumps(plan),
                 status,
+                idempotency_key,
+                request_hash,
             )
 
         logger.info(
@@ -66,6 +104,7 @@ class RunPlansRepository:
             plan_id=str(plan_id),
             workspace_id=str(workspace_id),
             n_variants=n_variants,
+            idempotency_key=idempotency_key,
         )
 
         return plan_id
