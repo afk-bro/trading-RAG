@@ -1,0 +1,171 @@
+{% extends "layout.html" %}
+
+{% block title %}Job Run - {{ run.job_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <a href="/admin/jobs" style="color: var(--text-muted); text-decoration: none;">&larr;</a>
+            Job Run: {{ run.job_name }}
+        </h2>
+        {% if run.display_status == 'completed' %}
+        <span class="badge badge-verified">completed</span>
+        {% elif run.display_status == 'failed' %}
+        <span class="badge badge-rejected">failed</span>
+        {% elif run.display_status == 'running' %}
+        <span class="badge badge-type">running</span>
+        {% elif run.display_status == 'stale' %}
+        <span class="badge badge-weak">stale</span>
+        {% else %}
+        <span class="badge badge-pending">{{ run.display_status }}</span>
+        {% endif %}
+    </div>
+
+    <div class="detail-grid">
+        <div class="detail-section">
+            <h3>Run Info</h3>
+            <table class="detail-table">
+                <tr>
+                    <th>Run ID</th>
+                    <td><code>{{ run.id }}</code></td>
+                </tr>
+                <tr>
+                    <th>Job Name</th>
+                    <td>{{ run.job_name }}</td>
+                </tr>
+                <tr>
+                    <th>Workspace ID</th>
+                    <td><code>{{ run.workspace_id }}</code></td>
+                </tr>
+                <tr>
+                    <th>Status</th>
+                    <td>{{ run.status }}{% if run.display_status != run.status %} ({{ run.display_status }}){% endif %}</td>
+                </tr>
+                <tr>
+                    <th>Dry Run</th>
+                    <td>{% if run.dry_run %}<span class="badge badge-weak">Yes</span>{% else %}No{% endif %}</td>
+                </tr>
+                <tr>
+                    <th>Triggered By</th>
+                    <td>{{ run.triggered_by or '-' }}</td>
+                </tr>
+                {% if run.correlation_id %}
+                <tr>
+                    <th>Correlation ID</th>
+                    <td><code>{{ run.correlation_id }}</code></td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>Timing</h3>
+            <table class="detail-table">
+                <tr>
+                    <th>Started At</th>
+                    <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M:%S UTC') if run.started_at else '-' }}</td>
+                </tr>
+                <tr>
+                    <th>Finished At</th>
+                    <td>{{ run.finished_at.strftime('%Y-%m-%d %H:%M:%S UTC') if run.finished_at else '-' }}</td>
+                </tr>
+                <tr>
+                    <th>Duration</th>
+                    <td>{% if run.duration_ms %}{{ (run.duration_ms / 1000)|round(3) }}s ({{ run.duration_ms }}ms){% else %}-{% endif %}</td>
+                </tr>
+                <tr>
+                    <th>Updated At</th>
+                    <td>{{ run.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC') if run.updated_at else '-' }}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    {% if run.metrics %}
+    <div class="detail-section">
+        <h3>Metrics</h3>
+        <pre class="code-block">{{ run.metrics | tojson(indent=2) }}</pre>
+    </div>
+    {% endif %}
+
+    {% if run.error %}
+    <div class="detail-section error-section">
+        <h3>Error</h3>
+        <pre class="code-block error-text">{{ run.error }}</pre>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        margin-bottom: 24px;
+    }
+
+    @media (max-width: 800px) {
+        .detail-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .detail-section {
+        margin-bottom: 24px;
+    }
+
+    .detail-section h3 {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .detail-table {
+        width: 100%;
+    }
+
+    .detail-table th {
+        width: 140px;
+        text-transform: none;
+        font-weight: 400;
+        color: var(--text-muted);
+    }
+
+    .detail-table td {
+        font-weight: 500;
+    }
+
+    code {
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+        background: var(--bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .code-block {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 16px;
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .error-section .code-block {
+        border-color: var(--danger);
+        background: rgba(248, 81, 73, 0.1);
+    }
+
+    .error-text {
+        color: var(--danger);
+    }
+</style>
+{% endblock %}

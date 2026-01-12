@@ -3857,3 +3857,105 @@ async def get_job_run(
         )
 
     return _json_serializable(run)
+
+
+# ===========================================
+# Jobs Admin UI Pages
+# ===========================================
+
+
+@router.get("/jobs", response_class=HTMLResponse)
+async def jobs_page(
+    request: Request,
+    job_name: Optional[str] = Query(None, description="Filter by job name"),
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    status_filter: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by status",
+    ),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(require_admin_token),
+):
+    """Admin job runs page with filters and status badges."""
+    from app.repositories.job_runs import JobRunsRepository
+
+    if _db_pool is None:
+        return templates.TemplateResponse(
+            "jobs.html",
+            {
+                "request": request,
+                "runs": [],
+                "total": 0,
+                "job_name": job_name,
+                "workspace_id": workspace_id,
+                "status_filter": status_filter,
+                "limit": limit,
+                "offset": offset,
+                "job_names": ["rollup_events", "cleanup_events"],
+                "error": "Database connection not available",
+            },
+        )
+
+    repo = JobRunsRepository(_db_pool)
+    runs = await repo.list_runs(
+        job_name=job_name,
+        workspace_id=workspace_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    total = await repo.count_runs(
+        job_name=job_name,
+        workspace_id=workspace_id,
+        status=status_filter,
+    )
+
+    return templates.TemplateResponse(
+        "jobs.html",
+        {
+            "request": request,
+            "runs": runs,
+            "total": total,
+            "job_name": job_name,
+            "workspace_id": str(workspace_id) if workspace_id else None,
+            "status_filter": status_filter,
+            "limit": limit,
+            "offset": offset,
+            "job_names": ["rollup_events", "cleanup_events"],
+        },
+    )
+
+
+@router.get("/jobs/runs/{run_id}/detail", response_class=HTMLResponse)
+async def job_run_detail_page(
+    request: Request,
+    run_id: UUID,
+    _: bool = Depends(require_admin_token),
+):
+    """Admin job run detail page."""
+    from app.repositories.job_runs import JobRunsRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    repo = JobRunsRepository(_db_pool)
+    run = await repo.get_run(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job run not found",
+        )
+
+    return templates.TemplateResponse(
+        "job_run_detail.html",
+        {
+            "request": request,
+            "run": run,
+        },
+    )
