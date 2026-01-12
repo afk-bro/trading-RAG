@@ -3767,3 +3767,93 @@ async def run_cleanup_job(
                 "workspace_id": str(workspace_id),
             },
         )
+
+
+# ===========================================
+# Job Runs List/Detail Endpoints
+# ===========================================
+
+
+@router.get("/jobs/runs")
+async def list_job_runs(
+    job_name: Optional[str] = Query(None, description="Filter by job name"),
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    status_filter: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by status (running, completed, failed)",
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    List job runs with filters.
+
+    Returns paginated list of job runs with filters for job name,
+    workspace, and status. Includes display_status which marks
+    running jobs older than 1 hour as 'stale'.
+    """
+    from app.repositories.job_runs import JobRunsRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    repo = JobRunsRepository(_db_pool)
+    runs = await repo.list_runs(
+        job_name=job_name,
+        workspace_id=workspace_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    total = await repo.count_runs(
+        job_name=job_name,
+        workspace_id=workspace_id,
+        status=status_filter,
+    )
+
+    # Convert to JSON-serializable format
+    runs_serializable = [_json_serializable(r) for r in runs]
+
+    return {
+        "runs": runs_serializable,
+        "count": len(runs),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/jobs/runs/{run_id}")
+async def get_job_run(
+    run_id: UUID,
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Get full job run details.
+
+    Returns complete job run record including full metrics JSON
+    and error message if failed.
+    """
+    from app.repositories.job_runs import JobRunsRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    repo = JobRunsRepository(_db_pool)
+    run = await repo.get_run(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job run not found",
+        )
+
+    return _json_serializable(run)
