@@ -72,7 +72,7 @@
         </thead>
         <tbody>
             {% for alert in alerts %}
-            <tr class="clickable-row" data-href="/admin/alerts/{{ alert.id }}">
+            <tr class="clickable-row" data-href="/admin/alerts/{{ alert.id }}/detail">
                 <td>
                     {% if alert.last_seen %}
                     <span class="relative-time" data-timestamp="{{ alert.last_seen.isoformat() }}" title="{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
@@ -129,7 +129,7 @@
                         {% if not alert.acknowledged %}
                         <button class="btn btn-sm" onclick="event.stopPropagation(); acknowledgeAlert('{{ alert.id }}')" title="Acknowledge">Ack</button>
                         {% endif %}
-                        <a href="/admin/alerts/{{ alert.id }}" class="btn btn-secondary btn-sm" onclick="event.stopPropagation()">View</a>
+                        <a href="/admin/alerts/{{ alert.id }}/detail" class="btn btn-secondary btn-sm" onclick="event.stopPropagation()">View</a>
                     </div>
                 </td>
             </tr>

@@ -153,6 +153,43 @@ async def alerts_page(
     )
 
 
+@router.get("/{event_id}/detail", response_class=HTMLResponse)
+async def alert_detail_page(
+    request: Request,
+    event_id: UUID,
+    token: Optional[str] = Query(None, description="Admin token (dev convenience)"),
+    _: str = Depends(require_admin_token),
+):
+    """Render alert detail page."""
+    import json
+
+    # Get admin token from header or query param
+    admin_token = request.headers.get("X-Admin-Token", "") or token or ""
+
+    repo = _get_alerts_repo()
+    event = await repo.get_event(event_id)
+
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert event not found",
+        )
+
+    # Parse context_json for template
+    context = event.get("context_json", {}) or {}
+
+    return templates.TemplateResponse(
+        "alert_detail.html",
+        {
+            "request": request,
+            "admin_token": admin_token,
+            "alert": event,
+            "context": context,
+            "context_json_pretty": json.dumps(context, indent=2, default=str),
+        },
+    )
+
+
 # =============================================================================
 # Alert Rules Endpoints
 # =============================================================================

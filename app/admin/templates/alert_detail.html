@@ -1,0 +1,537 @@
+{% extends "layout.html" %}
+
+{% block title %}Alert {{ alert.id | string | truncate(8, True, '') }} - KB Admin{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/admin/alerts/page?workspace_id={{ alert.workspace_id }}">Alerts</a> /
+    <span>{{ (alert.id | string)[:8] }}...</span>
+</div>
+
+<!-- Header -->
+<div class="detail-header">
+    <h1>
+        {% if alert.severity == 'high' %}
+        <span class="badge badge-rejected">HIGH</span>
+        {% elif alert.severity == 'medium' %}
+        <span class="badge badge-pending">MEDIUM</span>
+        {% else %}
+        <span class="badge badge-weak">LOW</span>
+        {% endif %}
+        <span class="badge badge-type">{{ alert.rule_type }}</span>
+        {% if alert.status == 'active' %}
+        <span class="badge badge-type">active</span>
+        {% else %}
+        <span class="badge badge-verified">resolved</span>
+        {% endif %}
+    </h1>
+    <div class="detail-meta">
+        <span>
+            ID: {{ (alert.id | string)[:12] }}...
+            <button onclick="copyToClipboard('{{ alert.id }}')" class="copy-btn" title="Copy alert ID">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+        </span>
+        {% if alert.last_seen %}
+        <span class="relative-time" data-timestamp="{{ alert.last_seen.isoformat() }}" title="{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+            Last seen: {{ alert.last_seen.strftime('%Y-%m-%d %H:%M') }}
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Actions Bar -->
+<div class="actions-bar">
+    {% if context.deep_link %}
+    <a href="/admin/analytics/regimes?workspace_id={{ alert.workspace_id }}&strategy_entity_id={{ context.deep_link.strategy_entity_id }}&timeframe={{ context.deep_link.timeframe }}&regime_key={{ context.deep_link.regime_key | urlencode }}" class="btn">
+        View in Analytics
+    </a>
+    {% endif %}
+    {% if alert.acknowledged %}
+    <button onclick="unacknowledgeAlert('{{ alert.id }}')" class="btn btn-secondary">Unacknowledge</button>
+    {% else %}
+    <button onclick="acknowledgeAlert('{{ alert.id }}')" class="btn">Acknowledge</button>
+    {% endif %}
+</div>
+
+<!-- Why It Triggered -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Why It Triggered</h3>
+    </div>
+
+    {% if alert.rule_type == 'drift_spike' %}
+    <!-- Drift Spike Context -->
+    <div class="trigger-context">
+        <div class="context-row">
+            <span class="context-label">Current Drift Score</span>
+            <span class="context-value value-highlight">{{ '%.4f' | format(context.current_drift or 0) }}</span>
+        </div>
+        <div class="context-row">
+            <span class="context-label">Threshold</span>
+            <span class="context-value">{{ '%.4f' | format(context.threshold or 0) }}</span>
+        </div>
+        <div class="context-row">
+            <span class="context-label">Consecutive Buckets</span>
+            <span class="context-value">{{ context.consecutive_buckets or '-' }}</span>
+        </div>
+        {% if context.recent_drifts %}
+        <div class="context-row">
+            <span class="context-label">Recent Values</span>
+            <span class="context-value">
+                {% for drift in context.recent_drifts %}
+                <span class="drift-chip {% if drift >= (context.threshold or 0) %}drift-high{% endif %}">{{ '%.3f' | format(drift) }}</span>
+                {% endfor %}
+            </span>
+        </div>
+        {% endif %}
+        <div class="context-row">
+            <span class="context-label">Hysteresis</span>
+            <span class="context-value">{{ '%.4f' | format(context.hysteresis or 0) }}</span>
+        </div>
+    </div>
+
+    {% elif alert.rule_type == 'confidence_drop' %}
+    <!-- Confidence Drop Context -->
+    <div class="trigger-context">
+        <div class="context-row">
+            <span class="context-label">Trend Delta</span>
+            <span class="context-value value-highlight">{{ '%.4f' | format(context.trend_delta or 0) }}</span>
+        </div>
+        <div class="context-row">
+            <span class="context-label">Threshold</span>
+            <span class="context-value">{{ '%.4f' | format(context.trend_threshold or 0) }}</span>
+        </div>
+        <div class="context-row">
+            <span class="context-label">First Half Avg</span>
+            <span class="context-value">{{ '%.4f' | format(context.first_half_avg or 0) }}</span>
+        </div>
+        <div class="context-row">
+            <span class="context-label">Second Half Avg</span>
+            <span class="context-value">{{ '%.4f' | format(context.second_half_avg or 0) }}</span>
+        </div>
+    </div>
+
+    {% elif alert.rule_type == 'combo' %}
+    <!-- Combo Context - show both drift and confidence -->
+    <div class="combo-sections">
+        <!-- Drift Section -->
+        <div class="combo-section">
+            <h4 class="combo-section-title">Drift Spike</h4>
+            {% set drift = context.drift or {} %}
+            <div class="trigger-context">
+                <div class="context-row">
+                    <span class="context-label">Current Drift</span>
+                    <span class="context-value value-highlight">{{ '%.4f' | format(drift.current_drift or 0) }}</span>
+                </div>
+                <div class="context-row">
+                    <span class="context-label">Threshold</span>
+                    <span class="context-value">{{ '%.4f' | format(drift.threshold or 0) }}</span>
+                </div>
+                {% if drift.recent_drifts %}
+                <div class="context-row">
+                    <span class="context-label">Recent Values</span>
+                    <span class="context-value">
+                        {% for dval in drift.recent_drifts %}
+                        <span class="drift-chip {% if dval >= (drift.threshold or 0) %}drift-high{% endif %}">{{ '%.3f' | format(dval) }}</span>
+                        {% endfor %}
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Confidence Section -->
+        <div class="combo-section">
+            <h4 class="combo-section-title">Confidence Drop</h4>
+            {% set conf = context.confidence or {} %}
+            <div class="trigger-context">
+                <div class="context-row">
+                    <span class="context-label">Trend Delta</span>
+                    <span class="context-value value-highlight">{{ '%.4f' | format(conf.trend_delta or 0) }}</span>
+                </div>
+                <div class="context-row">
+                    <span class="context-label">Threshold</span>
+                    <span class="context-value">{{ '%.4f' | format(conf.trend_threshold or 0) }}</span>
+                </div>
+                <div class="context-row">
+                    <span class="context-label">First Half Avg</span>
+                    <span class="context-value">{{ '%.4f' | format(conf.first_half_avg or 0) }}</span>
+                </div>
+                <div class="context-row">
+                    <span class="context-label">Second Half Avg</span>
+                    <span class="context-value">{{ '%.4f' | format(conf.second_half_avg or 0) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- Unknown type - just show raw context -->
+    <div class="code-block">{{ context_json_pretty }}</div>
+    {% endif %}
+</div>
+
+<!-- Timeline -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Timeline</h3>
+    </div>
+    <div class="timeline">
+        {% if alert.first_seen %}
+        <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-content">
+                <span class="timeline-label">First Seen</span>
+                <span class="timeline-time">{{ alert.first_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if alert.activated_at %}
+        <div class="timeline-item">
+            <div class="timeline-dot timeline-dot-active"></div>
+            <div class="timeline-content">
+                <span class="timeline-label">Activated</span>
+                <span class="timeline-time">{{ alert.activated_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if alert.acknowledged_at %}
+        <div class="timeline-item">
+            <div class="timeline-dot timeline-dot-ack"></div>
+            <div class="timeline-content">
+                <span class="timeline-label">Acknowledged{% if alert.acknowledged_by %} by {{ alert.acknowledged_by }}{% endif %}</span>
+                <span class="timeline-time">{{ alert.acknowledged_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if alert.last_seen %}
+        <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-content">
+                <span class="timeline-label">Last Seen</span>
+                <span class="timeline-time">{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+            </div>
+        </div>
+        {% endif %}
+        {% if alert.resolved_at %}
+        <div class="timeline-item">
+            <div class="timeline-dot timeline-dot-resolved"></div>
+            <div class="timeline-content">
+                <span class="timeline-label">Resolved</span>
+                <span class="timeline-time">{{ alert.resolved_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Details -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Details</h3>
+    </div>
+    <table>
+        <tr>
+            <th style="width: 180px;">Strategy Entity</th>
+            <td>
+                <a href="/admin/kb/entities/{{ alert.strategy_entity_id }}">{{ alert.strategy_entity_id }}</a>
+                <button onclick="copyToClipboard('{{ alert.strategy_entity_id }}')" class="copy-btn" title="Copy">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+            </td>
+        </tr>
+        <tr>
+            <th>Regime Key</th>
+            <td><code style="font-size: 12px;">{{ alert.regime_key }}</code></td>
+        </tr>
+        <tr>
+            <th>Timeframe</th>
+            <td>{{ alert.timeframe }}</td>
+        </tr>
+        <tr>
+            <th>Fingerprint</th>
+            <td>
+                <code style="font-size: 12px;">{{ alert.fingerprint }}</code>
+                <button onclick="copyToClipboard('{{ alert.fingerprint }}')" class="copy-btn" title="Copy">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+            </td>
+        </tr>
+        <tr>
+            <th>Rule ID</th>
+            <td>
+                <code style="font-size: 12px;">{{ alert.rule_id }}</code>
+            </td>
+        </tr>
+        <tr>
+            <th>Workspace ID</th>
+            <td>
+                <code style="font-size: 12px;">{{ alert.workspace_id }}</code>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<!-- Raw Context JSON -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Raw Context</h3>
+        <button onclick="copyJson()" class="btn btn-secondary" style="font-size: 12px; padding: 4px 12px;">Copy JSON</button>
+    </div>
+    <div class="code-block" id="context-json">{{ context_json_pretty }}</div>
+</div>
+
+<style>
+    .actions-bar {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        color: var(--text-muted);
+        border-radius: 4px;
+        transition: background 0.15s;
+        vertical-align: middle;
+    }
+    .copy-btn:hover { background: var(--bg); color: var(--text); }
+
+    /* Trigger context */
+    .trigger-context {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .context-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background: var(--bg);
+        border-radius: 4px;
+    }
+
+    .context-label {
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .context-value {
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+    }
+
+    .value-highlight {
+        font-weight: 600;
+        color: var(--warning);
+    }
+
+    .drift-chip {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        margin-right: 4px;
+    }
+
+    .drift-chip.drift-high {
+        background: rgba(248, 81, 73, 0.2);
+        border-color: var(--danger);
+        color: var(--danger);
+    }
+
+    /* Combo sections */
+    .combo-sections {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    .combo-section {
+        background: var(--bg);
+        border-radius: 6px;
+        padding: 12px;
+    }
+
+    .combo-section-title {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--text);
+    }
+
+    .combo-section .trigger-context {
+        gap: 8px;
+    }
+
+    .combo-section .context-row {
+        background: var(--bg-secondary);
+    }
+
+    /* Timeline */
+    .timeline {
+        position: relative;
+        padding-left: 24px;
+    }
+
+    .timeline-item {
+        position: relative;
+        padding: 12px 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        left: -18px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--border);
+    }
+
+    .timeline-item:first-child::before { top: 50%; }
+    .timeline-item:last-child::before { bottom: 50%; }
+
+    .timeline-dot {
+        position: absolute;
+        left: -24px;
+        top: 14px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--border);
+        border: 2px solid var(--bg-secondary);
+    }
+
+    .timeline-dot-active {
+        background: var(--warning);
+    }
+
+    .timeline-dot-ack {
+        background: var(--info);
+    }
+
+    .timeline-dot-resolved {
+        background: var(--success);
+    }
+
+    .timeline-content {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .timeline-label {
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .timeline-time {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-family: 'SF Mono', Consolas, monospace;
+    }
+
+    @media (max-width: 768px) {
+        .combo-sections {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<script>
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text);
+}
+
+function copyJson() {
+    const text = document.getElementById('context-json').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard');
+    });
+}
+
+async function acknowledgeAlert(eventId) {
+    try {
+        const response = await fetch(`/admin/alerts/${eventId}/acknowledge`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': {{ admin_token | tojson }},
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to acknowledge: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+async function unacknowledgeAlert(eventId) {
+    try {
+        const response = await fetch(`/admin/alerts/${eventId}/unacknowledge`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': {{ admin_token | tojson }},
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to unacknowledge: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = 'Last seen: ' + formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000);
+</script>
+{% endblock %}
