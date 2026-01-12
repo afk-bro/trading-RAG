@@ -168,6 +168,145 @@ def require_workspace_access(
 
 
 # =============================================================================
+# JWT-based Authentication (v2)
+# =============================================================================
+
+
+@dataclass
+class RequestContext:
+    """Auth context resolved from request.
+
+    This is the new v2 auth context that supports JWT-based authentication
+    with Supabase Auth. Unlike CurrentUser (v1 stub), this resolves actual
+    user identity from tokens.
+    """
+
+    user_id: Optional[UUID] = None
+    workspace_id: Optional[UUID] = None
+    role: Optional[str] = None
+    is_admin: bool = False
+
+
+ROLE_RANK = {"viewer": 1, "member": 2, "admin": 3, "owner": 4}
+
+
+def verify_admin_token(token: str) -> bool:
+    """
+    Verify admin token using constant-time comparison.
+
+    Returns True if token is valid, False otherwise.
+    """
+    admin_token = os.environ.get("ADMIN_TOKEN")
+    if not admin_token:
+        return False
+    return hmac.compare_digest(token.encode(), admin_token.encode())
+
+
+async def get_current_user_v2(
+    authorization: Optional[str] = None,
+    x_admin_token: Optional[str] = None,
+) -> RequestContext:
+    """
+    Resolve user identity from JWT or admin token.
+
+    Does NOT resolve workspace - that's separate.
+
+    Args:
+        authorization: Bearer token from Authorization header
+        x_admin_token: Admin token from X-Admin-Token header
+
+    Returns:
+        RequestContext with resolved user identity
+
+    Raises:
+        HTTPException 401: Missing or invalid authentication
+    """
+    # (1) Admin token bypass
+    if x_admin_token:
+        if verify_admin_token(x_admin_token):
+            return RequestContext(is_admin=True)
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+    # (2) Require Authorization header
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+
+    token = authorization.split(" ", 1)[1]
+
+    # (3) Validate via Supabase Auth API
+    try:
+        from app.deps.supabase import get_supabase_client
+
+        supabase = get_supabase_client()
+        user_response = supabase.auth.get_user(token)
+
+        if not user_response or not user_response.user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        return RequestContext(user_id=UUID(user_response.user.id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Auth validation failed", error=str(e))
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+
+async def require_workspace_access_v2(
+    ctx: RequestContext,
+    workspace_id: UUID,
+    min_role: str = "viewer",
+    pool=None,
+) -> RequestContext:
+    """
+    Verify user has access to workspace with minimum role.
+
+    Admin bypass still requires explicit workspace_id.
+
+    Args:
+        ctx: RequestContext from get_current_user_v2
+        workspace_id: Workspace to check access for
+        min_role: Minimum role required (viewer, member, admin, owner)
+        pool: Database connection pool
+
+    Returns:
+        RequestContext with workspace_id and role populated
+
+    Raises:
+        HTTPException 401: User ID required but missing
+        HTTPException 403: Not a member or insufficient role
+    """
+    # Admin bypass - still needs workspace_id for scoping
+    if ctx.is_admin:
+        return RequestContext(is_admin=True, workspace_id=workspace_id)
+
+    if not ctx.user_id:
+        raise HTTPException(status_code=401, detail="User ID required")
+
+    # Look up membership
+    query = """
+        SELECT role FROM workspace_members
+        WHERE workspace_id = $1 AND user_id = $2
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(query, workspace_id, ctx.user_id)
+
+    if not row:
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    role = row["role"]
+    if ROLE_RANK.get(role, 0) < ROLE_RANK.get(min_role, 0):
+        raise HTTPException(
+            status_code=403, detail=f"Requires {min_role} role, you have {role}"
+        )
+
+    return RequestContext(
+        user_id=ctx.user_id,
+        workspace_id=workspace_id,
+        role=role,
+    )
+
+
+# =============================================================================
 # Rate Limiting (In-Process with Redis upgrade path)
 # =============================================================================
 
