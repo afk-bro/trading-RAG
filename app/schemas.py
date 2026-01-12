@@ -1058,6 +1058,9 @@ class TradeEventType(str, Enum):
     RUN_FAILED = "run_failed"
     RUN_CANCELLED = "run_cancelled"
 
+    # Job runner events
+    JOB_FAILED = "job_failed"
+
 
 class TradeEvent(BaseModel):
     """
