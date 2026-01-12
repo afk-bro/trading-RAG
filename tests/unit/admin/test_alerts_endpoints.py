@@ -485,11 +485,14 @@ class TestListAlertEventsEndpoint:
 
         assert response.status_code == 200
         data = response.json()
-        assert "events" in data
-        assert len(data["events"]) == 1
-        assert data["events"][0]["status"] == "active"
-        assert data["events"][0]["severity"] == "high"
+        assert "items" in data
+        assert "events" not in data  # Verify old key is removed
+        assert len(data["items"]) == 1
+        assert data["items"][0]["status"] == "active"
+        assert data["items"][0]["severity"] == "high"
         assert data["total"] == 1
+        assert data["limit"] == 50
+        assert data["offset"] == 0
 
     def test_list_events_with_filters(self, client, mock_db_pool):
         """List events accepts multiple filters."""
@@ -520,6 +523,57 @@ class TestListAlertEventsEndpoint:
         assert call_kwargs["strategy_entity_id"] == strategy_id
         assert call_kwargs["limit"] == 25
         assert call_kwargs["offset"] == 10
+
+    def test_list_events_with_timeframe_and_regime_filters(self, client, mock_db_pool):
+        """List events accepts timeframe and regime_key filters."""
+        workspace_id = uuid4()
+
+        mock_repo = MagicMock()
+        mock_repo.list_events = AsyncMock(return_value=([], 0))
+
+        with patch("app.admin.alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_repo
+        ):
+            response = client.get(
+                f"/admin/alerts?workspace_id={workspace_id}"
+                f"&timeframe=1d&regime_key=btc_high_vol",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 200
+        mock_repo.list_events.assert_called_once()
+        call_kwargs = mock_repo.list_events.call_args[1]
+        assert call_kwargs["timeframe"] == "1d"
+        assert call_kwargs["regime_key"] == "btc_high_vol"
+
+    def test_list_events_with_timestamp_filters(self, client, mock_db_pool):
+        """List events accepts from and to timestamp filters."""
+        workspace_id = uuid4()
+        from_ts = "2025-01-01T00:00:00Z"
+        to_ts = "2025-01-10T23:59:59Z"
+
+        mock_repo = MagicMock()
+        mock_repo.list_events = AsyncMock(return_value=([], 0))
+
+        with patch("app.admin.alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_repo
+        ):
+            response = client.get(
+                f"/admin/alerts?workspace_id={workspace_id}"
+                f"&from={from_ts}&to={to_ts}",
+                headers={"X-Admin-Token": "test-token"},
+            )
+
+        assert response.status_code == 200
+        mock_repo.list_events.assert_called_once()
+        call_kwargs = mock_repo.list_events.call_args[1]
+        assert call_kwargs["from_ts"] is not None
+        assert call_kwargs["to_ts"] is not None
+        # Verify datetime objects were created from ISO strings
+        assert call_kwargs["from_ts"].year == 2025
+        assert call_kwargs["from_ts"].month == 1
+        assert call_kwargs["from_ts"].day == 1
+        assert call_kwargs["to_ts"].day == 10
 
 
 # =============================================================================

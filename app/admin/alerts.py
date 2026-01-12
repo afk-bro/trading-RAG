@@ -238,6 +238,14 @@ async def list_alert_events(
     strategy_entity_id: Optional[UUID] = Query(
         None, description="Filter by strategy entity"
     ),
+    timeframe: Optional[str] = Query(None, description="Filter by timeframe"),
+    regime_key: Optional[str] = Query(None, description="Filter by regime key"),
+    from_ts: Optional[datetime] = Query(
+        None, alias="from", description="Start timestamp filter (last_seen >= from)"
+    ),
+    to_ts: Optional[datetime] = Query(
+        None, alias="to", description="End timestamp filter (last_seen <= to)"
+    ),
     limit: int = Query(50, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: bool = Depends(require_admin_token),
@@ -246,7 +254,8 @@ async def list_alert_events(
     List alert events for a workspace.
 
     Returns paginated list of alert events with optional filters for
-    status, severity, acknowledgment state, rule type, and strategy.
+    status, severity, acknowledgment state, rule type, strategy, timeframe,
+    regime key, and time range.
     """
     repo = _get_alerts_repo()
     events, total = await repo.list_events(
@@ -256,13 +265,16 @@ async def list_alert_events(
         acknowledged=acknowledged,
         rule_type=rule_type,
         strategy_entity_id=strategy_entity_id,
+        timeframe=timeframe,
+        regime_key=regime_key,
+        from_ts=from_ts,
+        to_ts=to_ts,
         limit=limit,
         offset=offset,
     )
 
     return {
-        "events": [_json_serializable(e) for e in events],
-        "count": len(events),
+        "items": [_json_serializable(e) for e in events],
         "total": total,
         "limit": limit,
         "offset": offset,

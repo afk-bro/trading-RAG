@@ -157,6 +157,10 @@ class AlertsRepository:
         acknowledged: Optional[bool] = None,
         rule_type: Optional[RuleType] = None,
         strategy_entity_id: Optional[UUID] = None,
+        timeframe: Optional[str] = None,
+        regime_key: Optional[str] = None,
+        from_ts: Optional[datetime] = None,
+        to_ts: Optional[datetime] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
@@ -188,6 +192,26 @@ class AlertsRepository:
         if strategy_entity_id:
             conditions.append(f"strategy_entity_id = ${param_idx}")
             params.append(strategy_entity_id)
+            param_idx += 1
+
+        if timeframe:
+            conditions.append(f"timeframe = ${param_idx}")
+            params.append(timeframe)
+            param_idx += 1
+
+        if regime_key:
+            conditions.append(f"regime_key = ${param_idx}")
+            params.append(regime_key)
+            param_idx += 1
+
+        if from_ts:
+            conditions.append(f"last_seen >= ${param_idx}")
+            params.append(from_ts)
+            param_idx += 1
+
+        if to_ts:
+            conditions.append(f"last_seen <= ${param_idx}")
+            params.append(to_ts)
             param_idx += 1
 
         where_clause = " AND ".join(conditions)
