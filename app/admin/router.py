@@ -46,12 +46,16 @@ from app.config import Settings, get_settings  # noqa: E402
 from app.deps.security import require_admin_token  # noqa: E402
 from app.schemas import KBEntityType, KBClaimType  # noqa: E402
 from app.admin import analytics as analytics_router  # noqa: E402
+from app.admin import alerts as alerts_router  # noqa: E402
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
 
 # Include analytics sub-router
 router.include_router(analytics_router.router)
+
+# Include alerts sub-router
+router.include_router(alerts_router.router)
 
 # Setup Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
@@ -67,6 +71,8 @@ def set_db_pool(pool):
     _db_pool = pool
     # Also set pool for analytics router
     analytics_router.set_db_pool(pool)
+    # Also set pool for alerts router
+    alerts_router.set_db_pool(pool)
 
 
 def _get_kb_repo():
