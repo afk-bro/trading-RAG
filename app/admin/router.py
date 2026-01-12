@@ -1,7 +1,7 @@
 """Admin UI router for KB inspection and curation."""
 
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
@@ -3598,3 +3598,69 @@ async def kb_trials_mark_candidate(
         errors=errors,
         results=results,
     )
+
+
+# ===========================================
+# Retention Job Endpoints
+# ===========================================
+
+
+@router.post("/jobs/rollup-events")
+async def run_rollup_job(
+    target_date: Optional[date] = None,
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Run daily event rollup job.
+
+    Defaults to yesterday if no date provided.
+    Idempotent - safe to run multiple times.
+    """
+    from app.repositories.event_rollups import EventRollupsRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    if target_date is None:
+        target_date = date.today() - timedelta(days=1)
+
+    repo = EventRollupsRepository(_db_pool)
+    count = await repo.run_daily_rollup(target_date)
+
+    return {
+        "status": "ok",
+        "target_date": str(target_date),
+        "rows_affected": count,
+    }
+
+
+@router.post("/jobs/cleanup-events")
+async def run_cleanup_job(
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Run event retention cleanup job.
+
+    Deletes expired events based on severity tier:
+    - INFO/DEBUG: 30 days
+    - WARN/ERROR: 90 days
+    - Pinned events: Never deleted
+    """
+    from app.services.retention import RetentionService
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    service = RetentionService(_db_pool)
+    result = await service.run_cleanup()
+
+    return {
+        "status": "ok",
+        **result,
+    }
