@@ -18,6 +18,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
+from app.repositories.alerts import AlertsRepository
+from app.services.alerts.models import AlertStatus
 
 router = APIRouter(prefix="/analytics", tags=["admin-analytics"])
 logger = structlog.get_logger(__name__)
@@ -331,12 +333,27 @@ async def analytics_regimes_page(
     # Get admin token from header or query param (query param for dev convenience)
     admin_token = request.headers.get("X-Admin-Token", "") or token or ""
 
+    # Fetch recent alerts for the workspace
+    recent_alerts = []
+    if _db_pool is not None:
+        try:
+            alerts_repo = AlertsRepository(_db_pool)
+            alerts, _ = await alerts_repo.list_events(
+                workspace_id=workspace_id,
+                limit=7,
+                offset=0,
+            )
+            recent_alerts = alerts
+        except Exception as e:
+            logger.warning("failed_to_fetch_recent_alerts", error=str(e))
+
     return templates.TemplateResponse(
         "analytics_regimes.html",
         {
             "request": request,
             "workspace_id": str(workspace_id),
             "admin_token": admin_token,
+            "recent_alerts": recent_alerts,
         },
     )
 
