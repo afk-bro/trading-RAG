@@ -1,5 +1,6 @@
 """Alert services."""
 
+from app.services.alerts.evaluators import RuleEvaluator
 from app.services.alerts.models import (
     AlertEvent,
     AlertRule,
@@ -20,6 +21,7 @@ __all__ = [
     "ConfidenceDropConfig",
     "DriftSpikeConfig",
     "EvalResult",
+    "RuleEvaluator",
     "RuleType",
     "Severity",
 ]
