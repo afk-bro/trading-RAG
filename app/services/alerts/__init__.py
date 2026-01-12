@@ -12,11 +12,13 @@ from app.services.alerts.models import (
     RuleType,
     Severity,
 )
+from app.services.alerts.transitions import AlertTransitionManager
 
 __all__ = [
     "AlertEvent",
     "AlertRule",
     "AlertStatus",
+    "AlertTransitionManager",
     "ComboConfig",
     "ConfidenceDropConfig",
     "DriftSpikeConfig",
