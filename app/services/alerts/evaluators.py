@@ -11,6 +11,7 @@ from app.services.alerts.models import (
 
 class BucketProtocol(Protocol):
     """Protocol for drift/confidence buckets."""
+
     drift_score: float
     avg_confidence: float
 
@@ -122,7 +123,9 @@ class RuleEvaluator:
             return EvalResult(insufficient_data=True)
 
         condition_met = drift_result.condition_met and confidence_result.condition_met
-        condition_clear = drift_result.condition_clear or confidence_result.condition_clear
+        condition_clear = (
+            drift_result.condition_clear or confidence_result.condition_clear
+        )
 
         # Tie-break: prioritize alerting
         if condition_met:

@@ -99,7 +99,9 @@ class AlertEvaluatorJob:
                     await conn.fetchval("SELECT pg_advisory_unlock($1)", lock_key)
                 except Exception as e:
                     logger.exception(
-                        "Failed to release advisory lock", lock_key=lock_key, error=str(e)
+                        "Failed to release advisory lock",
+                        lock_key=lock_key,
+                        error=str(e),
                     )
 
         return {
