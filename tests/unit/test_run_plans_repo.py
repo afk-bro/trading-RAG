@@ -272,3 +272,122 @@ class TestListRunsForPlan:
             or "SELECT id\n" in fetch_call
             or "id," in fetch_call
         )
+
+
+class TestIdempotencyKeySupport:
+    """Tests for idempotency key handling."""
+
+    @pytest.mark.asyncio
+    async def test_get_by_idempotency_key_found(self, repo, mock_pool):
+        """Returns plan when idempotency key exists."""
+        plan_id = uuid4()
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "id": plan_id,
+                "status": "pending",
+                "idempotency_key": "test-key-123",
+            }
+        )
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.get_by_idempotency_key("test-key-123")
+
+        assert result is not None
+        assert result["id"] == plan_id
+        mock_conn.fetchrow.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_by_idempotency_key_not_found(self, repo, mock_pool):
+        """Returns None when idempotency key doesn't exist."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.get_by_idempotency_key("nonexistent-key")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_by_request_hash_found(self, repo, mock_pool):
+        """Returns plan when request hash exists."""
+        plan_id = uuid4()
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "id": plan_id,
+                "status": "pending",
+                "request_hash": "abc123",
+            }
+        )
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.get_by_request_hash("abc123")
+
+        assert result is not None
+        assert result["id"] == plan_id
+
+    @pytest.mark.asyncio
+    async def test_get_by_request_hash_not_found(self, repo, mock_pool):
+        """Returns None when request hash doesn't exist."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.get_by_request_hash("nonexistent-hash")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_create_run_plan_with_idempotency(self, repo, mock_pool):
+        """Creates plan with idempotency key and request hash."""
+        plan_id = uuid4()
+        workspace_id = uuid4()
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=plan_id)
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.create_run_plan(
+            workspace_id=workspace_id,
+            strategy_entity_id=None,
+            objective_name="sharpe",
+            n_variants=5,
+            plan={"test": True},
+            status="pending",
+            idempotency_key="client-key-456",
+            request_hash="hash789",
+        )
+
+        assert result == plan_id
+        # Verify query includes new columns
+        call_args = mock_conn.fetchval.call_args[0]
+        assert "idempotency_key" in call_args[0]
+        assert "request_hash" in call_args[0]
+
+    @pytest.mark.asyncio
+    async def test_create_run_plan_without_idempotency(self, repo, mock_pool):
+        """Creates plan without idempotency key (backward compatible)."""
+        plan_id = uuid4()
+        workspace_id = uuid4()
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=plan_id)
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+        result = await repo.create_run_plan(
+            workspace_id=workspace_id,
+            strategy_entity_id=None,
+            objective_name="sharpe",
+            n_variants=5,
+            plan={"test": True},
+        )
+
+        assert result == plan_id
+        # Verify None values are passed for optional columns
+        call_args = mock_conn.fetchval.call_args[0]
+        # idempotency_key is arg 7 (0-indexed), request_hash is arg 8
+        assert call_args[7] is None  # idempotency_key
+        assert call_args[8] is None  # request_hash

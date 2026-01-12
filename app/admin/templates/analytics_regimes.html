@@ -742,6 +742,19 @@
         background: rgba(56, 139, 253, 0.05);
     }
 
+    .drift-drivers-table tr.driver-row {
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .drift-drivers-table tr.driver-row:hover {
+        background: rgba(56, 139, 253, 0.12);
+    }
+
+    .drift-drivers-table tr.driver-row:active {
+        background: rgba(56, 139, 253, 0.2);
+    }
+
     .loading-cell {
         text-align: center;
         color: var(--text-muted);
@@ -919,6 +932,401 @@
         stroke: var(--bg-secondary);
         stroke-width: 2;
     }
+
+    /* Filter Pills */
+    .filter-pills-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+        min-height: 28px;
+    }
+
+    .filter-pills-empty {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-style: italic;
+    }
+
+    .filter-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        font-size: 12px;
+        color: var(--text);
+        cursor: default;
+    }
+
+    .filter-pill-primary {
+        background: rgba(56, 139, 253, 0.15);
+        border-color: var(--link);
+        color: var(--link);
+    }
+
+    .filter-pill-clear {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: 50%;
+        color: var(--text-muted);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .filter-pill-clear:hover {
+        background: rgba(248, 81, 73, 0.2);
+        color: var(--danger);
+    }
+
+    .filter-pill-primary .filter-pill-clear:hover {
+        background: rgba(56, 139, 253, 0.3);
+        color: var(--link);
+    }
+
+    .filter-reset-btn {
+        padding: 4px 10px;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .filter-reset-btn:hover {
+        background: rgba(248, 81, 73, 0.1);
+        border-color: var(--danger);
+        color: var(--danger);
+    }
+
+    /* Scope Banner */
+    .scope-banner {
+        display: none;
+        padding: 10px 16px;
+        background: rgba(56, 139, 253, 0.1);
+        border: 1px solid rgba(56, 139, 253, 0.3);
+        border-radius: 6px;
+        margin-bottom: 16px;
+        font-size: 13px;
+    }
+
+    .scope-banner.visible {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .scope-banner-text {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .scope-banner-label {
+        color: var(--text-muted);
+    }
+
+    .scope-banner-value {
+        font-family: monospace;
+        color: var(--link);
+        font-weight: 500;
+    }
+
+    .scope-banner-clear {
+        padding: 4px 10px;
+        background: transparent;
+        border: 1px solid var(--link);
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--link);
+        cursor: pointer;
+    }
+
+    .scope-banner-clear:hover {
+        background: rgba(56, 139, 253, 0.2);
+    }
+
+    /* Mode Tabs (Segmented Control) */
+    .mode-tabs-container {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: var(--bg);
+        padding: 12px 0;
+        margin-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .mode-tabs {
+        display: inline-flex;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 3px;
+        gap: 2px;
+    }
+
+    .mode-tab {
+        padding: 8px 20px;
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 6px;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .mode-tab:hover {
+        color: var(--text);
+        background: rgba(139, 148, 158, 0.1);
+    }
+
+    .mode-tab.active {
+        background: var(--bg);
+        color: var(--text);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    .mode-tab-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        background: var(--border);
+        border-radius: 9px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .mode-tab.active .mode-tab-badge {
+        background: var(--link);
+        color: white;
+    }
+
+    /* Mode Content Panels */
+    .mode-content {
+        display: none;
+    }
+
+    .mode-content.active {
+        display: block;
+    }
+
+    /* Act Mode: Scope Warning */
+    .scope-warning {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        background: rgba(227, 179, 65, 0.1);
+        border: 1px solid rgba(227, 179, 65, 0.4);
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+
+    .scope-warning-text {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--warning);
+        font-size: 13px;
+    }
+
+    .scope-warning-icon {
+        font-size: 18px;
+    }
+
+    .scope-warning-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .scope-quick-btn {
+        padding: 6px 12px;
+        background: rgba(227, 179, 65, 0.15);
+        border: 1px solid var(--warning);
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--warning);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .scope-quick-btn:hover {
+        background: rgba(227, 179, 65, 0.25);
+    }
+
+    /* Export Mode */
+    .export-section {
+        margin-bottom: 24px;
+    }
+
+    .export-section h3 {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--text);
+    }
+
+    .export-buttons {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .export-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 20px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .export-btn:hover {
+        border-color: var(--link);
+        background: rgba(56, 139, 253, 0.05);
+    }
+
+    .export-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .export-btn-icon {
+        font-size: 16px;
+    }
+
+    .export-summary {
+        padding: 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-top: 16px;
+    }
+
+    .export-summary-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        font-size: 13px;
+    }
+
+    .export-summary-label {
+        color: var(--text-muted);
+    }
+
+    .export-summary-value {
+        color: var(--text);
+        font-family: monospace;
+    }
+
+    /* Analyze Mode */
+    .analyze-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 20px;
+    }
+
+    .analyze-panel {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+    }
+
+    .analyze-panel h3 {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--text);
+    }
+
+    /* Act Mode: Primary Backlog */
+    .act-backlog-container {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+    }
+
+    .act-backlog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .act-backlog-title {
+        font-size: 16px;
+        font-weight: 600;
+    }
+
+    .act-cta-btn {
+        padding: 10px 24px;
+        background: var(--link);
+        border: none;
+        border-radius: 6px;
+        color: white;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .act-cta-btn:hover {
+        background: #1f6feb;
+    }
+
+    .act-cta-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .coming-soon-card {
+        padding: 20px;
+        background: var(--bg-secondary);
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        text-align: center;
+        color: var(--text-muted);
+        margin-top: 20px;
+    }
+
+    .coming-soon-card h4 {
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 6px;
+    }
+
+    .coming-soon-card p {
+        font-size: 12px;
+    }
 </style>
 
 <div class="page-header">
@@ -957,6 +1365,44 @@
         <input type="number" id="minSamplesInput" value="5" min="1" max="100" style="width: 80px;" onchange="onFilterChange()">
     </div>
 </div>
+
+<!-- Active Filter Pills -->
+<div class="filter-pills-row" id="filterPills">
+    <span class="filter-pills-empty">No active filters</span>
+</div>
+
+<!-- Scope Banner (shown when filtered to specific regime) -->
+<div class="scope-banner" id="scopeBanner">
+    <div class="scope-banner-text">
+        <span class="scope-banner-label">Filtered to regime:</span>
+        <span class="scope-banner-value" id="scopeBannerValue"></span>
+    </div>
+    <button class="scope-banner-clear" onclick="clearRegimeFilter()">Clear filter</button>
+</div>
+
+<!-- Mode Tabs -->
+<div class="mode-tabs-container">
+    <div class="mode-tabs" id="modeTabs">
+        <button class="mode-tab active" data-mode="overview" onclick="setMode('overview')">
+            Overview
+        </button>
+        <button class="mode-tab" data-mode="analyze" onclick="setMode('analyze')">
+            Analyze
+        </button>
+        <button class="mode-tab" data-mode="act" onclick="setMode('act')">
+            Act
+            <span class="mode-tab-badge" id="actBadge" style="display: none;">0</span>
+        </button>
+        <button class="mode-tab" data-mode="export" onclick="setMode('export')">
+            Export
+        </button>
+    </div>
+</div>
+
+<!-- ============================================================================= -->
+<!-- OVERVIEW MODE -->
+<!-- ============================================================================= -->
+<div class="mode-content active" id="modeOverview" data-mode="overview">
 
 <!-- Summary Stats -->
 <div class="card">
@@ -1159,6 +1605,58 @@
     </div>
 </div>
 
+</div><!-- End Overview Mode -->
+
+<!-- ============================================================================= -->
+<!-- ANALYZE MODE -->
+<!-- ============================================================================= -->
+<div class="mode-content" id="modeAnalyze" data-mode="analyze">
+
+<!-- Analyze: Tier Distribution Over Time -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+        <span class="card-title">Tier Distribution Over Time</span>
+        <div class="toggle-group" id="analyzeTimeModeControls">
+            <button id="btnAnalyzeTotals" class="toggle-btn" onclick="toggleAnalyzeTimeMode('totals')">Totals</button>
+            <button id="btnAnalyzeOverTime" class="toggle-btn active" onclick="toggleAnalyzeTimeMode('timeseries')">Over Time</button>
+        </div>
+    </div>
+    <div id="analyzeTierChartContainer" style="min-height: 200px;">
+        <!-- Will be rendered by JS -->
+    </div>
+</div>
+
+<!-- Analyze: Driver Drilldown (shown when regime selected) -->
+<div class="card analyze-panel" id="analyzeDriverDrilldown" style="margin-bottom: 20px; display: none;">
+    <h3>Driver Drilldown: <span id="analyzeDriverRegime">-</span></h3>
+    <div class="analyze-grid">
+        <div>
+            <div class="drift-metric">
+                <div class="drift-metric-value" id="analyzeDriverRequests">-</div>
+                <div class="drift-metric-label">Total Requests</div>
+            </div>
+        </div>
+        <div>
+            <div class="drift-metric">
+                <div class="drift-metric-value" id="analyzeDriverNonExact">-</div>
+                <div class="drift-metric-label">Non-Exact %</div>
+            </div>
+        </div>
+        <div>
+            <div class="drift-metric">
+                <div class="drift-metric-value" id="analyzeDriverWoW">-</div>
+                <div class="drift-metric-label">WoW Change</div>
+            </div>
+        </div>
+        <div>
+            <div class="drift-metric">
+                <div class="drift-metric-value" id="analyzeDriverGap">-</div>
+                <div class="drift-metric-label">Coverage Gap</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Coverage Table -->
 <div class="card" style="margin-top: 24px;">
     <div class="card-header">
@@ -1193,8 +1691,103 @@
     </div>
 </div>
 
+</div><!-- End Analyze Mode -->
+
+<!-- ============================================================================= -->
+<!-- ACT MODE -->
+<!-- ============================================================================= -->
+<div class="mode-content" id="modeAct" data-mode="act">
+
+<!-- Scope Warning (shown when no regime filter) -->
+<div class="scope-warning" id="actScopeWarning">
+    <div class="scope-warning-text">
+        <span class="scope-warning-icon">⚠️</span>
+        <span>Act mode works best when scoped to a specific regime. Select a driver to focus your actions.</span>
+    </div>
+    <div class="scope-warning-actions" id="actScopeQuickBtns">
+        <!-- Quick scope buttons will be rendered here -->
+    </div>
+</div>
+
+<!-- Primary Backlog Triage -->
+<div class="act-backlog-container">
+    <div class="act-backlog-header">
+        <span class="act-backlog-title">Tuning Backlog</span>
+        <button class="act-cta-btn" id="actGeneratePlanBtn" onclick="generateActPlan()">
+            Generate Tuning Plan
+        </button>
+    </div>
+    <div class="backlog-summary" id="actBacklogSummary" style="margin-bottom: 16px;">
+        <div class="backlog-stat">
+            <div class="backlog-stat-value" id="actBacklogGaps">-</div>
+            <div class="backlog-stat-label">Regimes with gaps</div>
+        </div>
+        <div class="backlog-stat">
+            <div class="backlog-stat-value" id="actBacklogMissing">-</div>
+            <div class="backlog-stat-label">Total tunes needed</div>
+        </div>
+    </div>
+    <div id="actBacklogItems">
+        <div class="empty-state">Click "Generate Tuning Plan" to see coverage gaps and recommendations.</div>
+    </div>
+</div>
+
+<!-- Coming Soon: Alert Rules -->
+<div class="coming-soon-card">
+    <h4>🔔 Create Alert Rule</h4>
+    <p>Automated drift alerts coming soon. You'll be able to set thresholds and receive notifications when regime performance degrades.</p>
+</div>
+
+</div><!-- End Act Mode -->
+
+<!-- ============================================================================= -->
+<!-- EXPORT MODE -->
+<!-- ============================================================================= -->
+<div class="mode-content" id="modeExport" data-mode="export">
+
+<div class="export-section">
+    <h3>Export Current View</h3>
+    <div class="export-buttons">
+        <button class="export-btn" onclick="exportDriversJSON()">
+            <span class="export-btn-icon">📄</span>
+            Drift Drivers (JSON)
+        </button>
+        <button class="export-btn" onclick="exportDriversCSV()">
+            <span class="export-btn-icon">📊</span>
+            Drift Drivers (CSV)
+        </button>
+        <button class="export-btn" onclick="exportBacklogJSON()">
+            <span class="export-btn-icon">📋</span>
+            Backlog (JSON)
+        </button>
+        <button class="export-btn" onclick="exportCoverageCSV()">
+            <span class="export-btn-icon">📈</span>
+            Coverage Table (CSV)
+        </button>
+    </div>
+</div>
+
+<div class="export-summary" id="exportSummary">
+    <div class="export-summary-row">
+        <span class="export-summary-label">Period</span>
+        <span class="export-summary-value" id="exportPeriod">-</span>
+    </div>
+    <div class="export-summary-row">
+        <span class="export-summary-label">Regime Filter</span>
+        <span class="export-summary-value" id="exportRegime">None (all regimes)</span>
+    </div>
+    <div class="export-summary-row">
+        <span class="export-summary-label">Timestamp</span>
+        <span class="export-summary-value" id="exportTimestamp">-</span>
+    </div>
+</div>
+
+</div><!-- End Export Mode -->
+
 <script>
+    // =============================================================================
     // State
+    // =============================================================================
     let tierData = null;
     let tierTimeSeriesData = null;
     let coverageData = null;
@@ -1209,7 +1802,128 @@
     const workspaceId = '{{ workspace_id }}';
     const adminToken = '{{ admin_token }}';
 
+    // =============================================================================
+    // URL State Management (Source of Truth)
+    // =============================================================================
+
+    // Valid modes
+    const VALID_MODES = ['overview', 'analyze', 'act', 'export'];
+    const DEFAULT_MODE = 'overview';
+
+    // Get current filters from URL
+    function getFiltersFromURL() {
+        const params = new URLSearchParams(window.location.search);
+        let mode = params.get('mode') || DEFAULT_MODE;
+        if (!VALID_MODES.includes(mode)) mode = DEFAULT_MODE;
+
+        return {
+            workspace_id: params.get('workspace_id') || workspaceId,
+            strategy_entity_id: params.get('strategy') || '',
+            period_days: params.get('period') || '30',
+            min_samples: params.get('min_samples') || '5',
+            regime_key: params.get('regime') || '',
+            mode: mode,
+        };
+    }
+
+    // Update URL with current filters (no page reload)
+    function updateURL(filters, usePushState = false) {
+        const params = new URLSearchParams();
+
+        // Always include workspace
+        params.set('workspace_id', filters.workspace_id || workspaceId);
+
+        // Only include non-default/non-empty values
+        if (filters.strategy_entity_id) params.set('strategy', filters.strategy_entity_id);
+        if (filters.period_days && filters.period_days !== '30') params.set('period', filters.period_days);
+        if (filters.min_samples && filters.min_samples !== '5') params.set('min_samples', filters.min_samples);
+        if (filters.regime_key) params.set('regime', filters.regime_key);
+        if (filters.mode && filters.mode !== DEFAULT_MODE) params.set('mode', filters.mode);
+
+        const newURL = `${window.location.pathname}?${params.toString()}`;
+
+        // Use pushState for tab changes (enables back/forward), replaceState for filter changes
+        if (usePushState) {
+            window.history.pushState({}, '', newURL);
+        } else {
+            window.history.replaceState({}, '', newURL);
+        }
+
+        // Update filter pills
+        renderFilterPills();
+    }
+
+    // Get current mode
+    function getCurrentMode() {
+        return getFiltersFromURL().mode;
+    }
+
+    // Set mode (updates URL with pushState for navigation)
+    function setMode(mode) {
+        if (!VALID_MODES.includes(mode)) return;
+        const filters = getFiltersFromURL();
+        filters.mode = mode;
+        updateURL(filters, true);  // pushState for back/forward
+        renderTabs();
+        renderModeContent();
+    }
+
+    // Sync form controls from URL state
+    function syncControlsFromURL() {
+        const filters = getFiltersFromURL();
+
+        document.getElementById('workspaceSelect').value = filters.workspace_id;
+        document.getElementById('strategySelect').value = filters.strategy_entity_id;
+        document.getElementById('periodSelect').value = filters.period_days;
+        document.getElementById('minSamplesInput').value = filters.min_samples;
+
+        // Render filter pills
+        renderFilterPills();
+    }
+
+    // Get current regime filter
+    function getCurrentRegimeFilter() {
+        return getFiltersFromURL().regime_key;
+    }
+
+    // Set regime filter (updates URL and reloads data)
+    function setRegimeFilter(regimeKey) {
+        const filters = getFiltersFromURL();
+        filters.regime_key = regimeKey;
+        updateURL(filters);
+
+        // Clear cached time-series data
+        tierTimeSeriesData = null;
+
+        loadAllData();
+    }
+
+    // Clear regime filter
+    function clearRegimeFilter() {
+        setRegimeFilter('');
+    }
+
+    // Clear all filters (reset to defaults, preserve mode)
+    function clearAllFilters() {
+        const currentMode = getCurrentMode();
+        const filters = {
+            workspace_id: workspaceId,
+            strategy_entity_id: '',
+            period_days: '30',
+            min_samples: '5',
+            regime_key: '',
+            mode: currentMode,  // Preserve current mode
+        };
+        updateURL(filters);
+        syncControlsFromURL();
+        tierTimeSeriesData = null;
+        loadAllData();
+    }
+
+    // =============================================================================
     // API helpers
+    // =============================================================================
+
     async function fetchWithAuth(url) {
         const response = await fetch(url, {
             headers: {
@@ -1223,14 +1937,14 @@
     }
 
     function getFilterParams() {
-        const workspace = document.getElementById('workspaceSelect').value || workspaceId;
-        const strategy = document.getElementById('strategySelect').value;
-        const period = document.getElementById('periodSelect').value;
-        const minSamples = document.getElementById('minSamplesInput').value || 5;
+        const filters = getFiltersFromURL();
 
-        let params = `workspace_id=${workspace}&period_days=${period}&min_samples=${minSamples}`;
-        if (strategy) {
-            params += `&strategy_entity_id=${strategy}`;
+        let params = `workspace_id=${filters.workspace_id}&period_days=${filters.period_days}&min_samples=${filters.min_samples}`;
+        if (filters.strategy_entity_id) {
+            params += `&strategy_entity_id=${filters.strategy_entity_id}`;
+        }
+        if (filters.regime_key) {
+            params += `&regime_key=${encodeURIComponent(filters.regime_key)}`;
         }
         return params;
     }
@@ -1304,6 +2018,7 @@
         renderDriftPanel();
         renderDriftDrivers();
         renderCoverageTable();
+        renderScopeBanner();
     }
 
     // Summary stats
@@ -1905,9 +2620,12 @@
                 </div>
             ` : '-';
 
+            // Escape regime key for onclick (handle quotes and special chars)
+            const escapedKey = driver.regime_key.replace(/'/g, "\\'").replace(/"/g, '\\"');
+
             return `
-                <tr>
-                    <td class="regime-key-cell" title="${driver.regime_key}">${truncate(driver.regime_key, 25)}</td>
+                <tr class="driver-row" onclick="filterByRegime('${escapedKey}')" title="Click to filter by this regime">
+                    <td class="regime-key-cell">${truncate(driver.regime_key, 25)}</td>
                     <td>${driver.total_requests}</td>
                     <td>${driver.non_exact_count} (${driver.non_exact_pct.toFixed(0)}%)</td>
                     <td class="${wowClass}">${wowText}</td>
@@ -2091,9 +2809,8 @@
     }
 
     function filterByRegime(regimeKey) {
-        // Future: Add regime filter to filters row
-        console.log('Filter by regime:', regimeKey);
-        alert('Regime filter: ' + regimeKey + '\n\nFilter functionality coming soon.');
+        // Set regime filter via URL state
+        setRegimeFilter(regimeKey);
     }
 
     function updateLastUpdated() {
@@ -2110,9 +2827,98 @@
     }
 
     function onFilterChange() {
+        // Update URL with current form values
+        const filters = {
+            workspace_id: document.getElementById('workspaceSelect').value || workspaceId,
+            strategy_entity_id: document.getElementById('strategySelect').value,
+            period_days: document.getElementById('periodSelect').value,
+            min_samples: document.getElementById('minSamplesInput').value || '5',
+            regime_key: getCurrentRegimeFilter(),  // Preserve regime filter
+        };
+        updateURL(filters);
+
         // Clear time-series cache on filter change
         tierTimeSeriesData = null;
         loadAllData();
+    }
+
+    // =============================================================================
+    // Filter Pills
+    // =============================================================================
+
+    function renderFilterPills() {
+        const container = document.getElementById('filterPills');
+        if (!container) return;
+
+        const filters = getFiltersFromURL();
+        const pills = [];
+
+        // Period pill (only if non-default)
+        if (filters.period_days && filters.period_days !== '30') {
+            pills.push({
+                label: `Period: ${filters.period_days}d`,
+                onClear: () => {
+                    const f = getFiltersFromURL();
+                    f.period_days = '30';
+                    updateURL(f);
+                    syncControlsFromURL();
+                    tierTimeSeriesData = null;
+                    loadAllData();
+                }
+            });
+        }
+
+        // Min samples pill (only if non-default)
+        if (filters.min_samples && filters.min_samples !== '5') {
+            pills.push({
+                label: `Min Samples: ${filters.min_samples}`,
+                onClear: () => {
+                    const f = getFiltersFromURL();
+                    f.min_samples = '5';
+                    updateURL(f);
+                    syncControlsFromURL();
+                    loadAllData();
+                }
+            });
+        }
+
+        // Regime filter pill (primary)
+        if (filters.regime_key) {
+            pills.push({
+                label: `Regime: ${truncate(filters.regime_key, 30)}`,
+                primary: true,
+                onClear: clearRegimeFilter
+            });
+        }
+
+        // Render pills
+        if (pills.length === 0) {
+            container.innerHTML = '<span class="filter-pills-empty">No active filters</span>';
+            return;
+        }
+
+        let html = pills.map(pill => `
+            <span class="filter-pill ${pill.primary ? 'filter-pill-primary' : ''}"
+                  title="${pill.label}">
+                ${pill.label}
+                <button class="filter-pill-clear" onclick="event.stopPropagation();">×</button>
+            </span>
+        `).join('');
+
+        if (pills.length > 0) {
+            html += `<button class="filter-reset-btn" onclick="clearAllFilters()">Reset all</button>`;
+        }
+
+        container.innerHTML = html;
+
+        // Wire up clear buttons
+        const clearBtns = container.querySelectorAll('.filter-pill-clear');
+        clearBtns.forEach((btn, i) => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                pills[i].onClear();
+            };
+        });
     }
 
     function refreshData() {
@@ -2126,17 +2932,18 @@
         btn.textContent = 'Generating...';
         btn.disabled = true;
 
-        const workspace = document.getElementById('workspaceSelect').value || workspaceId;
-        const strategy = document.getElementById('strategySelect').value;
-        const minSamples = parseInt(document.getElementById('minSamplesInput').value) || 5;
-
+        const filters = getFiltersFromURL();
         const requestBody = {
-            workspace_id: workspace,
-            min_samples: minSamples,
+            workspace_id: filters.workspace_id,
+            min_samples: parseInt(filters.min_samples) || 5,
             max_items: 10
         };
-        if (strategy) {
-            requestBody.strategy_entity_id = strategy;
+        if (filters.strategy_entity_id) {
+            requestBody.strategy_entity_id = filters.strategy_entity_id;
+        }
+        // If regime filter is active, scope backlog to that regime
+        if (filters.regime_key) {
+            requestBody.only_regimes = [filters.regime_key];
         }
 
         try {
@@ -2209,7 +3016,366 @@
         document.getElementById('backlogPanel').classList.remove('visible');
     }
 
+    // =============================================================================
+    // Scope Banner
+    // =============================================================================
+
+    function renderScopeBanner() {
+        const banner = document.getElementById('scopeBanner');
+        if (!banner) return;
+
+        const filters = getFiltersFromURL();
+
+        if (filters.regime_key) {
+            document.getElementById('scopeBannerValue').textContent = filters.regime_key;
+            banner.classList.add('visible');
+        } else {
+            banner.classList.remove('visible');
+        }
+    }
+
+    // =============================================================================
+    // Mode Tabs & Content
+    // =============================================================================
+
+    function renderTabs() {
+        const mode = getCurrentMode();
+        document.querySelectorAll('.mode-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.mode === mode);
+        });
+    }
+
+    function renderModeContent() {
+        const mode = getCurrentMode();
+
+        // Show/hide mode panels
+        document.querySelectorAll('.mode-content').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.mode === mode);
+        });
+
+        // Mode-specific rendering
+        if (mode === 'analyze') {
+            renderAnalyzeMode();
+        } else if (mode === 'act') {
+            renderActMode();
+        } else if (mode === 'export') {
+            renderExportMode();
+        }
+    }
+
+    // =============================================================================
+    // Analyze Mode
+    // =============================================================================
+
+    let analyzeTimeMode = 'timeseries';
+
+    function toggleAnalyzeTimeMode(mode) {
+        if (analyzeTimeMode === mode) return;
+        analyzeTimeMode = mode;
+
+        document.getElementById('btnAnalyzeTotals').classList.toggle('active', mode === 'totals');
+        document.getElementById('btnAnalyzeOverTime').classList.toggle('active', mode === 'timeseries');
+
+        renderAnalyzeTierChart();
+    }
+
+    function renderAnalyzeMode() {
+        renderAnalyzeTierChart();
+        renderAnalyzeDriverDrilldown();
+    }
+
+    function renderAnalyzeTierChart() {
+        const container = document.getElementById('analyzeTierChartContainer');
+        if (!container) return;
+
+        if (analyzeTimeMode === 'timeseries' && tierTimeSeriesData?.buckets?.length) {
+            // Reuse time-series rendering logic
+            const buckets = tierTimeSeriesData.buckets;
+            const maxTotal = Math.max(...buckets.map(b => b.total));
+
+            let barsHtml = buckets.map(bucket => {
+                const height = maxTotal > 0 ? (bucket.total / maxTotal * 100) : 0;
+                const date = new Date(bucket.bucket_start);
+                const nonExact = bucket.total - (bucket.tiers.exact || 0);
+                const nonExactPct = bucket.total > 0 ? (nonExact / bucket.total * 100) : 0;
+
+                let colorClass = 'success';
+                if (nonExactPct > 50) colorClass = 'danger';
+                else if (nonExactPct > 20) colorClass = 'warning';
+
+                return `
+                    <div class="drift-chart-bar" style="height: ${height}%; background: var(--${colorClass});"
+                         title="${date.toLocaleDateString()}: ${bucket.total} requests, ${nonExactPct.toFixed(0)}% non-exact">
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="drift-chart-area" style="height: 120px; display: flex; align-items: flex-end; gap: 2px; padding: 8px;">
+                    ${barsHtml}
+                </div>
+            `;
+        } else if (tierData?.items?.length) {
+            // Totals view - pie-like breakdown
+            const total = tierData.total_recommendations || 0;
+            const items = tierData.items;
+
+            container.innerHTML = `
+                <div style="padding: 16px;">
+                    ${items.map(item => `
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <div style="width: 80px; font-size: 12px; color: var(--text-muted);">${item.tier}</div>
+                            <div style="flex: 1; background: var(--bg); border-radius: 4px; height: 20px; overflow: hidden;">
+                                <div style="height: 100%; width: ${item.pct}%; background: ${item.tier === 'exact' ? 'var(--success)' : 'var(--warning)'};"></div>
+                            </div>
+                            <div style="width: 60px; text-align: right; font-size: 13px;">${item.pct.toFixed(1)}%</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else {
+            container.innerHTML = '<div class="empty-state">No tier data available</div>';
+        }
+    }
+
+    function renderAnalyzeDriverDrilldown() {
+        const panel = document.getElementById('analyzeDriverDrilldown');
+        const filters = getFiltersFromURL();
+
+        if (!filters.regime_key || !driftDriversData?.drivers?.length) {
+            panel.style.display = 'none';
+            return;
+        }
+
+        // Find the selected driver
+        const driver = driftDriversData.drivers.find(d => d.regime_key === filters.regime_key);
+        if (!driver) {
+            panel.style.display = 'none';
+            return;
+        }
+
+        panel.style.display = 'block';
+        document.getElementById('analyzeDriverRegime').textContent = truncate(driver.regime_key, 40);
+        document.getElementById('analyzeDriverRequests').textContent = driver.total_requests;
+        document.getElementById('analyzeDriverNonExact').textContent = `${driver.non_exact_pct.toFixed(1)}%`;
+        document.getElementById('analyzeDriverWoW').textContent = driver.wow_change !== null
+            ? `${driver.wow_change > 0 ? '+' : ''}${driver.wow_change.toFixed(1)}pp`
+            : '-';
+        document.getElementById('analyzeDriverGap').textContent = driver.coverage_gap > 0
+            ? `-${driver.coverage_gap}`
+            : 'OK';
+    }
+
+    // =============================================================================
+    // Act Mode
+    // =============================================================================
+
+    let actBacklogData = null;
+
+    function renderActMode() {
+        renderActScopeWarning();
+    }
+
+    function renderActScopeWarning() {
+        const warning = document.getElementById('actScopeWarning');
+        const quickBtns = document.getElementById('actScopeQuickBtns');
+        const filters = getFiltersFromURL();
+
+        if (filters.regime_key) {
+            // Has scope - hide warning
+            warning.style.display = 'none';
+        } else {
+            // No scope - show warning with quick buttons
+            warning.style.display = 'flex';
+
+            // Render quick scope buttons from top drivers
+            if (driftDriversData?.drivers?.length) {
+                const topDrivers = driftDriversData.drivers.slice(0, 3);
+                quickBtns.innerHTML = topDrivers.map((d, i) => {
+                    const escapedKey = d.regime_key.replace(/'/g, "\\'");
+                    return `<button class="scope-quick-btn" onclick="filterByRegime('${escapedKey}')">
+                        Scope to #${i + 1}: ${truncate(d.regime_key, 20)}
+                    </button>`;
+                }).join('');
+            } else {
+                quickBtns.innerHTML = '';
+            }
+        }
+    }
+
+    async function generateActPlan() {
+        const btn = document.getElementById('actGeneratePlanBtn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Generating...';
+        btn.disabled = true;
+
+        const filters = getFiltersFromURL();
+        const requestBody = {
+            workspace_id: filters.workspace_id,
+            min_samples: parseInt(filters.min_samples) || 5,
+            max_items: 20  // More items in Act mode
+        };
+        if (filters.strategy_entity_id) {
+            requestBody.strategy_entity_id = filters.strategy_entity_id;
+        }
+        if (filters.regime_key) {
+            requestBody.only_regimes = [filters.regime_key];
+        }
+
+        try {
+            const response = await fetch('/admin/analytics/regime-backlog', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-Token': adminToken
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            actBacklogData = await response.json();
+            renderActBacklog();
+        } catch (error) {
+            console.error('Failed to generate plan:', error);
+            alert('Failed to generate tuning plan: ' + error.message);
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    function renderActBacklog() {
+        if (!actBacklogData) return;
+
+        document.getElementById('actBacklogGaps').textContent = actBacklogData.total_gaps || 0;
+        document.getElementById('actBacklogMissing').textContent = actBacklogData.total_missing || 0;
+
+        const container = document.getElementById('actBacklogItems');
+        if (!actBacklogData.regimes?.length) {
+            container.innerHTML = '<div class="empty-state">No coverage gaps found. All regimes meet the minimum samples threshold!</div>';
+            return;
+        }
+
+        container.innerHTML = actBacklogData.regimes.map(item => `
+            <div class="backlog-item">
+                <div class="backlog-item-header">
+                    <span class="backlog-regime">${truncate(item.regime_key, 50)}</span>
+                    <span class="priority-badge priority-${item.suggested_actions.priority}">${item.suggested_actions.priority}</span>
+                </div>
+                <div class="backlog-details">
+                    <span><span class="backlog-detail-label">Current:</span> ${item.current_tunes}</span>
+                    <span><span class="backlog-detail-label">Needed:</span> +${item.missing_samples}</span>
+                    <span><span class="backlog-detail-label">Timeframes:</span> ${item.suggested_actions.timeframes.join(', ')}</span>
+                    <span><span class="backlog-detail-label">Symbols:</span> ${item.suggested_actions.symbols.join(', ')}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // =============================================================================
+    // Export Mode
+    // =============================================================================
+
+    function renderExportMode() {
+        const filters = getFiltersFromURL();
+
+        document.getElementById('exportPeriod').textContent = `${filters.period_days} days`;
+        document.getElementById('exportRegime').textContent = filters.regime_key || 'None (all regimes)';
+        document.getElementById('exportTimestamp').textContent = new Date().toISOString();
+    }
+
+    function downloadFile(content, filename, type) {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function exportDriversJSON() {
+        if (!driftDriversData) {
+            alert('No drift drivers data loaded');
+            return;
+        }
+        const filters = getFiltersFromURL();
+        const exportData = {
+            exported_at: new Date().toISOString(),
+            period_days: filters.period_days,
+            regime_filter: filters.regime_key || null,
+            data: driftDriversData
+        };
+        downloadFile(JSON.stringify(exportData, null, 2), 'drift-drivers.json', 'application/json');
+    }
+
+    function exportDriversCSV() {
+        if (!driftDriversData?.drivers?.length) {
+            alert('No drift drivers data loaded');
+            return;
+        }
+        const headers = ['regime_key', 'total_requests', 'non_exact_count', 'non_exact_pct', 'wow_change', 'coverage_gap', 'exact', 'partial', 'distance', 'global'];
+        const rows = driftDriversData.drivers.map(d => [
+            `"${d.regime_key}"`,
+            d.total_requests,
+            d.non_exact_count,
+            d.non_exact_pct.toFixed(2),
+            d.wow_change !== null ? d.wow_change.toFixed(2) : '',
+            d.coverage_gap,
+            d.tier_distribution.exact,
+            d.tier_distribution.partial_trend + d.tier_distribution.partial_vol,
+            d.tier_distribution.distance,
+            d.tier_distribution.global_best
+        ]);
+        const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        downloadFile(csv, 'drift-drivers.csv', 'text/csv');
+    }
+
+    function exportBacklogJSON() {
+        // Generate backlog first if needed
+        if (!actBacklogData) {
+            alert('Generate a tuning plan first (Act mode) to export backlog');
+            return;
+        }
+        const filters = getFiltersFromURL();
+        const exportData = {
+            exported_at: new Date().toISOString(),
+            period_days: filters.period_days,
+            regime_filter: filters.regime_key || null,
+            data: actBacklogData
+        };
+        downloadFile(JSON.stringify(exportData, null, 2), 'tuning-backlog.json', 'application/json');
+    }
+
+    function exportCoverageCSV() {
+        if (!coverageData?.regimes?.length) {
+            alert('No coverage data loaded');
+            return;
+        }
+        const headers = ['regime_key', 'trend_tag', 'vol_tag', 'n_tunes', 'n_runs', 'avg_best_oos', 'p50_best_oos', 'p90_best_oos', 'min_samples_met', 'coverage_gap'];
+        const rows = coverageData.regimes.map(r => [
+            `"${r.regime_key}"`,
+            r.trend_tag || '',
+            r.vol_tag || '',
+            r.n_tunes,
+            r.n_runs,
+            r.avg_best_oos?.toFixed(4) || '',
+            r.p50_best_oos?.toFixed(4) || '',
+            r.p90_best_oos?.toFixed(4) || '',
+            r.min_samples_met ? 'true' : 'false',
+            r.coverage_gap
+        ]);
+        const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        downloadFile(csv, 'regime-coverage.csv', 'text/csv');
+    }
+
+    // =============================================================================
     // Initialize
+    // =============================================================================
+
     document.addEventListener('DOMContentLoaded', () => {
         // Set workspace in dropdown
         const wsSelect = document.getElementById('workspaceSelect');
@@ -2219,7 +3385,27 @@
         document.getElementById('generateDriftPlanBtn').addEventListener('click', generateDriftPlan);
         document.getElementById('closeDriftBacklogBtn').addEventListener('click', closeDriftBacklog);
 
+        // Sync form controls from URL (restore filters from query string)
+        syncControlsFromURL();
+
+        // Render initial UI state
+        renderFilterPills();
+        renderScopeBanner();
+        renderTabs();
+        renderModeContent();
+
         // Load data
+        loadAllData();
+    });
+
+    // Handle browser back/forward navigation
+    window.addEventListener('popstate', () => {
+        syncControlsFromURL();
+        renderFilterPills();
+        renderScopeBanner();
+        renderTabs();
+        renderModeContent();
+        tierTimeSeriesData = null;
         loadAllData();
     });
 </script>

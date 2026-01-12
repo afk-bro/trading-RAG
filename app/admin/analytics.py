@@ -528,6 +528,9 @@ async def get_tier_usage(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
     period_days: int = Query(30, ge=1, le=365, description="Analysis period"),
+    regime_key: Optional[str] = Query(
+        None, description="Filter to specific regime (e.g., 'trend=flat|vol=high_vol')"
+    ),
     bucket: Optional[str] = Query(
         None,
         description="Time bucket: 'day' or 'week'. Omit for totals only.",
@@ -552,6 +555,11 @@ async def get_tier_usage(
     if strategy_entity_id:
         conditions.append(f"strategy_entity_id = ${param_idx}")
         params.append(strategy_entity_id)
+        param_idx += 1
+
+    if regime_key:
+        conditions.append(f"query_regime_key = ${param_idx}")
+        params.append(regime_key)
         param_idx += 1
 
     where_clause = " AND ".join(conditions)
@@ -724,6 +732,9 @@ async def get_uplift(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
     period_days: int = Query(30, ge=1, le=365, description="Analysis period"),
+    regime_key: Optional[str] = Query(
+        None, description="Filter to specific regime (e.g., 'trend=flat|vol=high_vol')"
+    ),
     _: bool = Depends(require_admin_token),
 ) -> UpliftResponse:
     """Get uplift analysis comparing regime selection to baseline."""
@@ -743,6 +754,11 @@ async def get_uplift(
     if strategy_entity_id:
         base_conditions.append(f"strategy_entity_id = ${param_idx}")
         params.append(strategy_entity_id)
+        param_idx += 1
+
+    if regime_key:
+        base_conditions.append(f"query_regime_key = ${param_idx}")
+        params.append(regime_key)
         param_idx += 1
 
     where_clause = " AND ".join(base_conditions)
@@ -1003,6 +1019,9 @@ async def get_regime_drift(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     strategy_entity_id: Optional[UUID] = Query(None, description="Filter by strategy"),
     period_days: int = Query(30, ge=7, le=365, description="Analysis period"),
+    regime_key: Optional[str] = Query(
+        None, description="Filter to specific regime (e.g., 'trend=flat|vol=high_vol')"
+    ),
     bucket: str = Query("day", regex="^(day|week)$", description="Time bucket"),
     _: bool = Depends(require_admin_token),
 ) -> RegimeDriftResponse:
@@ -1024,6 +1043,11 @@ async def get_regime_drift(
     if strategy_entity_id:
         conditions.append(f"strategy_entity_id = ${param_idx}")
         params.append(strategy_entity_id)
+        param_idx += 1
+
+    if regime_key:
+        conditions.append(f"query_regime_key = ${param_idx}")
+        params.append(regime_key)
         param_idx += 1
 
     where_clause = " AND ".join(conditions)
