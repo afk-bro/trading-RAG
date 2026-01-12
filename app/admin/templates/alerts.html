@@ -1,0 +1,314 @@
+{% extends "layout.html" %}
+
+{% block title %}Alerts - KB Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Alert Events</h2>
+        <span class="pagination-info">{{ total }} alerts</span>
+    </div>
+
+    <!-- Quick Filter Chips -->
+    <div class="quick-filters">
+        <a href="?workspace_id={{ workspace_id }}&status=active&acknowledged=false&limit={{ limit }}"
+           class="chip {% if status_filter == 'active' and acknowledged_filter == false %}chip-active{% endif %}">
+            Needs Attention
+        </a>
+        <a href="?workspace_id={{ workspace_id }}&status=active&limit={{ limit }}"
+           class="chip {% if status_filter == 'active' and acknowledged_filter is none %}chip-active{% endif %}">
+            Active
+        </a>
+        <a href="?workspace_id={{ workspace_id }}&status=resolved&limit={{ limit }}"
+           class="chip {% if status_filter == 'resolved' %}chip-active{% endif %}">
+            Resolved
+        </a>
+        <a href="?workspace_id={{ workspace_id }}&limit={{ limit }}"
+           class="chip {% if status_filter is none and severity_filter is none and rule_type_filter is none %}chip-active{% endif %}">
+            All
+        </a>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        <select name="severity" onchange="this.form.submit()">
+            <option value="">All Severities</option>
+            <option value="high" {% if severity_filter == 'high' %}selected{% endif %}>High</option>
+            <option value="medium" {% if severity_filter == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="low" {% if severity_filter == 'low' %}selected{% endif %}>Low</option>
+        </select>
+        <select name="rule_type" onchange="this.form.submit()">
+            <option value="">All Rule Types</option>
+            <option value="regime_drift" {% if rule_type_filter == 'regime_drift' %}selected{% endif %}>Regime Drift</option>
+            <option value="confidence_drop" {% if rule_type_filter == 'confidence_drop' %}selected{% endif %}>Confidence Drop</option>
+            <option value="coverage_gap" {% if rule_type_filter == 'coverage_gap' %}selected{% endif %}>Coverage Gap</option>
+            <option value="drawdown_breach" {% if rule_type_filter == 'drawdown_breach' %}selected{% endif %}>Drawdown Breach</option>
+            <option value="manual" {% if rule_type_filter == 'manual' %}selected{% endif %}>Manual</option>
+        </select>
+        <select name="status" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+            <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>Resolved</option>
+        </select>
+        {% if status_filter or severity_filter or rule_type_filter or acknowledged_filter is not none %}
+        <a href="?workspace_id={{ workspace_id }}&limit={{ limit }}" class="btn btn-secondary" style="font-size: 13px;">Clear Filters</a>
+        {% endif %}
+    </form>
+
+    {% if alerts %}
+    <table>
+        <thead>
+            <tr>
+                <th>Last Seen</th>
+                <th>Severity</th>
+                <th>Type</th>
+                <th>Strategy</th>
+                <th>Regime</th>
+                <th>Status</th>
+                <th>Ack</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alert in alerts %}
+            <tr class="clickable-row" data-href="/admin/alerts/{{ alert.id }}">
+                <td>
+                    <span class="relative-time" data-timestamp="{{ alert.last_seen.isoformat() }}" title="{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                        {{ alert.last_seen.strftime('%Y-%m-%d %H:%M') }}
+                    </span>
+                    {% if alert.occurrence_count > 1 %}
+                    <span class="occurrence-count" title="{{ alert.occurrence_count }} occurrences">x{{ alert.occurrence_count }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if alert.severity == 'high' %}
+                    <span class="badge badge-rejected">HIGH</span>
+                    {% elif alert.severity == 'medium' %}
+                    <span class="badge badge-pending">MEDIUM</span>
+                    {% else %}
+                    <span class="badge badge-weak">LOW</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge badge-type">{{ alert.rule_type }}</span>
+                </td>
+                <td>
+                    {% if alert.strategy_entity_id %}
+                    <a href="/admin/kb/entities/{{ alert.strategy_entity_id }}" onclick="event.stopPropagation()">
+                        {{ alert.strategy_name or (alert.strategy_entity_id[:8] ~ '...') }}
+                    </a>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if alert.regime_key %}
+                    <code class="regime-key" title="{{ alert.regime_key }}">{{ alert.regime_key[:20] }}{% if alert.regime_key|length > 20 %}...{% endif %}</code>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if alert.status == 'active' %}
+                    <span class="badge badge-type">active</span>
+                    {% else %}
+                    <span class="badge badge-verified">resolved</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if alert.acknowledged %}
+                    <span class="ack-badge ack-yes" title="Acknowledged{% if alert.acknowledged_by %} by {{ alert.acknowledged_by }}{% endif %}{% if alert.acknowledged_at %} at {{ alert.acknowledged_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}">Yes</span>
+                    {% else %}
+                    <span class="ack-badge ack-no">No</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="row-actions">
+                        {% if not alert.acknowledged %}
+                        <button class="btn btn-sm" onclick="event.stopPropagation(); acknowledgeAlert('{{ alert.id }}')" title="Acknowledge">Ack</button>
+                        {% endif %}
+                        <a href="/admin/alerts/{{ alert.id }}" class="btn btn-secondary btn-sm" onclick="event.stopPropagation()">View</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&severity={{ severity_filter or '' }}&rule_type={{ rule_type_filter or '' }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter or '' }}&severity={{ severity_filter or '' }}&rule_type={{ rule_type_filter or '' }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No alerts found</h3>
+        <p>{% if status_filter or severity_filter or rule_type_filter or acknowledged_filter is not none %}No alerts match the current filters.{% else %}No alert events have been recorded yet.{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .quick-filters {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+    }
+
+    .chip {
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+
+    .chip:hover {
+        border-color: var(--link);
+        color: var(--text);
+        text-decoration: none;
+    }
+
+    .chip-active {
+        background: rgba(88, 166, 255, 0.2);
+        border-color: var(--link);
+        color: var(--link);
+    }
+
+    .clickable-row {
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .clickable-row:hover {
+        background: rgba(56, 139, 253, 0.15);
+    }
+
+    .text-muted {
+        color: var(--text-muted);
+    }
+
+    .regime-key {
+        font-size: 11px;
+        background: var(--bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .occurrence-count {
+        font-size: 11px;
+        color: var(--warning);
+        margin-left: 4px;
+    }
+
+    .ack-badge {
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    .ack-yes {
+        background: rgba(63, 185, 80, 0.2);
+        color: var(--success);
+    }
+
+    .ack-no {
+        background: rgba(139, 148, 158, 0.2);
+        color: var(--text-muted);
+    }
+
+    .row-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+    }
+
+    .btn-sm {
+        font-size: 12px;
+        padding: 4px 8px;
+    }
+</style>
+
+<script>
+// Clickable rows with Ctrl/Cmd+click for new tab
+document.querySelectorAll('.clickable-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const href = row.dataset.href;
+        if (e.ctrlKey || e.metaKey) {
+            window.open(href, '_blank');
+        } else {
+            window.location.href = href;
+        }
+    });
+});
+
+// Acknowledge alert via API
+async function acknowledgeAlert(eventId) {
+    try {
+        const response = await fetch(`/admin/alerts/${eventId}/acknowledge`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': '{{ admin_token }}',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to acknowledge: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+
+updateRelativeTimes();
+setInterval(updateRelativeTimes, 60000); // Update every minute
+</script>
+{% endblock %}

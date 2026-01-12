@@ -1,17 +1,24 @@
 """Admin endpoints for alert rules and events."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 from app.services.alerts.models import AlertStatus, RuleType, Severity
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+# Templates setup
+templates_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
 logger = structlog.get_logger(__name__)
 
 # Global connection pool (set during app startup via set_db_pool)
@@ -77,6 +84,73 @@ class AcknowledgeRequest(BaseModel):
     """Request model for acknowledging an alert."""
 
     acknowledged_by: Optional[str] = None
+
+
+# =============================================================================
+# HTML Page Route
+# =============================================================================
+
+
+@router.get("/page", response_class=HTMLResponse)
+async def alerts_page(
+    request: Request,
+    workspace_id: UUID = Query(..., description="Workspace ID (required)"),
+    status_filter: Optional[AlertStatus] = Query(
+        None,
+        alias="status",
+        description="Filter by status (active, resolved)",
+    ),
+    severity: Optional[Severity] = Query(None, description="Filter by severity"),
+    rule_type: Optional[RuleType] = Query(None, description="Filter by rule type"),
+    acknowledged: Optional[bool] = Query(None, description="Filter by acknowledged"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    token: Optional[str] = Query(None, description="Admin token (dev convenience)"),
+    _: str = Depends(require_admin_token),
+):
+    """Render alerts list page."""
+    # Get admin token from header or query param (query param for dev convenience)
+    admin_token = request.headers.get("X-Admin-Token", "") or token or ""
+
+    repo = _get_alerts_repo()
+
+    # Fetch alerts
+    events, total = await repo.list_events(
+        workspace_id=workspace_id,
+        status=status_filter,
+        severity=severity,
+        acknowledged=acknowledged,
+        rule_type=rule_type,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Calculate pagination
+    has_prev = offset > 0
+    has_next = offset + limit < total
+    prev_offset = max(0, offset - limit)
+    next_offset = offset + limit
+
+    return templates.TemplateResponse(
+        "alerts.html",
+        {
+            "request": request,
+            "workspace_id": str(workspace_id),
+            "admin_token": admin_token,
+            "alerts": events,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_prev": has_prev,
+            "has_next": has_next,
+            "prev_offset": prev_offset,
+            "next_offset": next_offset,
+            "status_filter": status_filter.value if status_filter else None,
+            "severity_filter": severity.value if severity else None,
+            "rule_type_filter": rule_type.value if rule_type else None,
+            "acknowledged_filter": acknowledged,
+        },
+    )
 
 
 # =============================================================================
