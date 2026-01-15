@@ -4,8 +4,6 @@ Unit tests for Pine Script ingestion service.
 Tests content formatting and ingest logic without database/vector dependencies.
 """
 
-import pytest
-
 from app.services.pine.ingest import (
     extract_symbols_from_script,
     format_script_content,
