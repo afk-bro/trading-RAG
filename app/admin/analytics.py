@@ -337,7 +337,7 @@ async def analytics_regimes_page(
     if _db_pool is not None:
         try:
             alerts_repo = AlertsRepository(_db_pool)
-            alerts, _ = await alerts_repo.list_events(
+            alerts, _count = await alerts_repo.list_events(
                 workspace_id=workspace_id,
                 limit=7,
                 offset=0,
