@@ -99,6 +99,13 @@ from app.services.pine.registry import (
     load_registry,
     load_lint_report,
 )
+from app.services.pine.ingest import (
+    PineIngestService,
+    PineIngestResult,
+    ScriptIngestResult,
+    ingest_pine_registry,
+    format_script_content,
+)
 
 __all__ = [
     # Enums
@@ -174,4 +181,10 @@ __all__ = [
     "build_and_write_registry",
     "load_registry",
     "load_lint_report",
+    # Ingest
+    "PineIngestService",
+    "PineIngestResult",
+    "ScriptIngestResult",
+    "ingest_pine_registry",
+    "format_script_content",
 ]

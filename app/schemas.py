@@ -17,6 +17,7 @@ class SourceType(str, Enum):
     ARTICLE = "article"
     NOTE = "note"
     TRANSCRIPT = "transcript"
+    PINE_SCRIPT = "pine_script"
 
 
 class DocumentStatus(str, Enum):
