@@ -9,6 +9,7 @@ from app.services.alerts.models import DriftSpikeConfig, ConfidenceDropConfig
 @dataclass
 class MockBucket:
     """Mock bucket for testing."""
+
     drift_score: float = 0.0
     avg_confidence: float = 0.0
 
@@ -45,7 +46,9 @@ class TestDriftSpikeEvaluator:
     def test_condition_clear_with_hysteresis(self):
         """Condition clears when below threshold minus hysteresis."""
         evaluator = RuleEvaluator()
-        config = DriftSpikeConfig(drift_threshold=0.30, consecutive_buckets=2, hysteresis=0.05)
+        config = DriftSpikeConfig(
+            drift_threshold=0.30, consecutive_buckets=2, hysteresis=0.05
+        )
         buckets = [
             MockBucket(drift_score=0.28),
             MockBucket(drift_score=0.24),
@@ -65,7 +68,9 @@ class TestDriftSpikeEvaluator:
     def test_tie_break_prioritizes_alerting(self):
         """When both condition_met and condition_clear possible, prioritize alerting."""
         evaluator = RuleEvaluator()
-        config = DriftSpikeConfig(drift_threshold=0.30, consecutive_buckets=2, hysteresis=0.0)
+        config = DriftSpikeConfig(
+            drift_threshold=0.30, consecutive_buckets=2, hysteresis=0.0
+        )
         buckets = [MockBucket(drift_score=0.30), MockBucket(drift_score=0.30)]
         result = evaluator.evaluate_drift_spike(buckets, config)
         assert result.condition_met is True

@@ -311,7 +311,9 @@ class TestAlertLifecycle:
         # Step 1: Acknowledge active alert
         conn.execute = AsyncMock(return_value="UPDATE 1")
 
-        acknowledged = await repo.acknowledge(event_id, acknowledged_by="admin@test.com")
+        acknowledged = await repo.acknowledge(
+            event_id, acknowledged_by="admin@test.com"
+        )
         assert acknowledged is True
 
         # Verify ack query was called
@@ -1010,7 +1012,9 @@ class TestAlertEdgeCases:
         # Track how many times _fetch_buckets is called
         fetch_count = 0
 
-        async def mock_fetch_buckets(workspace_id, strategy_entity_id, regime_key, timeframe):
+        async def mock_fetch_buckets(
+            workspace_id, strategy_entity_id, regime_key, timeframe
+        ):
             nonlocal fetch_count
             fetch_count += 1
             if fetch_count == 1:
