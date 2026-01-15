@@ -41,6 +41,7 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Model Migration**: Re-embed support for model upgrades
 - **Backtest Parameter Tuning**: Grid/random search, IS/OOS splits, overfit detection
 - **Trading KB Recommend**: Strategy parameter recommendations with confidence scoring
+- **Pine Script Registry**: Parse, lint, and catalog Pine Script files with CLI tooling
 - **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, CSV/JSON exports
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
 - **Production Monitoring**: Sentry integration, structured logging, alerting rules
@@ -212,6 +213,39 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
 | `/admin/ops/snapshot` | Go-live verification (release, config, health) |
 
+### Pine Script Registry CLI
+
+Build a registry of Pine Script files with metadata and lint findings:
+
+```bash
+# Build registry from directory
+python -m app.services.pine --build ./scripts
+
+# Custom output directory
+python -m app.services.pine --build ./scripts -o ./data
+
+# Include additional extensions
+python -m app.services.pine --build ./scripts --extensions .pine .txt
+
+# Quiet mode (suppress info logging)
+python -m app.services.pine --build ./scripts -q
+```
+
+**Output files:**
+- `pine_registry.json` - Script metadata (version, type, inputs, features) with lint summaries
+- `pine_lint_report.json` - Full lint findings per script
+
+**Lint Rules:**
+| Code | Severity | Description |
+|------|----------|-------------|
+| E001 | Error | Missing `//@version` directive |
+| E002 | Error | Invalid version number |
+| E003 | Error | Missing `indicator()`/`strategy()`/`library()` declaration |
+| W002 | Warning | `lookahead=barmerge.lookahead_on` usage (future data leakage risk) |
+| W003 | Warning | Deprecated `security()` instead of `request.security()` |
+| I001 | Info | Script has exports but is not a library |
+| I002 | Info | Script exceeds recommended line count |
+
 ## Project Structure
 
 ```
@@ -240,7 +274,13 @@ trading-RAG/
 │   │   ├── chunker.py
 │   │   ├── embedder.py
 │   │   ├── extractor.py
-│   │   └── llm.py
+│   │   ├── llm.py
+│   │   └── pine/              # Pine Script registry module
+│   │       ├── models.py      # Data models (PineRegistry, PineScriptEntry)
+│   │       ├── parser.py      # Regex-based Pine Script parser
+│   │       ├── linter.py      # Static analysis rules
+│   │       ├── registry.py    # Build orchestration + CLI
+│   │       └── adapters/      # File system adapter
 │   └── repositories/
 │       ├── documents.py
 │       ├── chunks.py

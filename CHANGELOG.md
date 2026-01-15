@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Pine Script Registry Module** - Complete parsing and linting system for Pine Script files
+  - Regex-based parser extracts version, declaration, inputs, imports, and feature flags
+  - Static analysis linter with rules: E001-E003 (errors), W002-W003 (warnings), I001-I002 (info)
+  - Registry builder produces `pine_registry.json` (metadata + lint summaries) and `pine_lint_report.json` (full findings)
+  - CLI entry point: `python -m app.services.pine --build ./scripts`
+  - Best-effort parsing: failures recorded as E999 synthetic errors, build continues
+  - Deterministic output: sorted keys, SHA256 fingerprinting for change detection
+  - Designed for future GitHub adapter parity (root_kind field)
 - **Cross-Encoder Reranking with Neighbor Expansion**
   - Optional two-stage retrieval: vector search → cross-encoder rerank
   - BGE-reranker-v2-m3 model (local inference, no external API)

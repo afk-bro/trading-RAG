@@ -149,6 +149,52 @@ Research workflow for strategy optimization via parameter sweeps.
 - `/admin/backtests/leaderboard` - Global ranking by objective score (CSV export)
 - `/admin/backtests/compare?tune_id=A&tune_id=B` - N-way diff table (JSON export)
 
+## Pine Script Registry
+
+Parsing and linting system for Pine Script files (`app/services/pine/`).
+
+**Purpose**: Catalog Pine Script files with metadata extraction and static analysis for downstream RAG ingestion.
+
+**Architecture**:
+```
+.pine files → Filesystem Adapter → Parser → Linter → Registry Builder → JSON artifacts
+```
+
+**Components**:
+- `models.py` - Data models: `PineRegistry`, `PineScriptEntry`, `PineLintReport`, `LintFinding`
+- `parser.py` - Regex-based parser extracts version, declaration, inputs, imports, features
+- `linter.py` - Static analysis rules (E001-E003 errors, W002-W003 warnings, I001-I002 info)
+- `registry.py` - Build orchestration + CLI entry point
+- `adapters/filesystem.py` - File scanning returning `SourceFile` structured output
+
+**CLI Usage**:
+```bash
+python -m app.services.pine --build ./scripts           # Build from directory
+python -m app.services.pine --build ./scripts -o ./data # Custom output dir
+python -m app.services.pine --build ./scripts -q        # Quiet mode
+```
+
+**Output Artifacts**:
+- `pine_registry.json` - Script metadata (version, type, title, inputs, imports, features) with lint summaries
+- `pine_lint_report.json` - Full lint findings per script
+
+**Design Choices**:
+- **Best-effort**: Parse errors recorded as E999 synthetic errors, build continues
+- **Deterministic**: Sorted keys, consistent JSON formatting for diff stability
+- **Fingerprinted**: SHA256 from raw content for change detection
+- **GitHub-ready**: `root_kind` field distinguishes filesystem vs future GitHub adapter
+
+**Lint Rules**:
+| Code | Severity | Description |
+|------|----------|-------------|
+| E001 | Error | Missing `//@version` directive |
+| E002 | Error | Invalid version number |
+| E003 | Error | Missing declaration (`indicator`/`strategy`/`library`) |
+| W002 | Warning | `lookahead=barmerge.lookahead_on` (future data leakage risk) |
+| W003 | Warning | Deprecated `security()` instead of `request.security()` |
+| I001 | Info | Script has exports but is not a library |
+| I002 | Info | Script exceeds recommended line count (500) |
+
 ## API Endpoints
 
 **Health & Readiness**:
