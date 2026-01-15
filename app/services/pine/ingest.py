@@ -138,7 +138,9 @@ def format_script_content(
         lines.append("## Features")
         for feat in sorted(active_features):
             # Convert feature key to readable label
-            label = feat.replace("uses_", "Uses ").replace("is_", "Is ").replace("_", " ")
+            label = (
+                feat.replace("uses_", "Uses ").replace("is_", "Is ").replace("_", " ")
+            )
             lines.append(f"- {label}")
         lines.append("")
 

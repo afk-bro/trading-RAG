@@ -36,7 +36,9 @@ class TestFormatScriptContent:
             title="Test Indicator",
         )
 
-        content = format_script_content(entry, source_content=None, include_source=False)
+        content = format_script_content(
+            entry, source_content=None, include_source=False
+        )
 
         assert "# Test Indicator" in content
         assert "**Type**: indicator" in content
@@ -150,7 +152,9 @@ class TestFormatScriptContent:
         )
 
         source = "//@version=5\nindicator('Test')\nplot(close)"
-        content = format_script_content(entry, source_content=source, include_source=True)
+        content = format_script_content(
+            entry, source_content=source, include_source=True
+        )
 
         assert "## Source Code" in content
         assert "```pine" in content
@@ -206,12 +210,12 @@ class TestExtractSymbolsFromScript:
             script_type=ScriptType.INDICATOR,
         )
 
-        content = '''
+        content = """
 //@version=5
 indicator("Test")
 spy = request.security("SPY", "D", close)
 aapl = request.security("AAPL", "D", close)
-'''
+"""
 
         symbols = extract_symbols_from_script(entry, content)
 
@@ -249,10 +253,10 @@ plot(close)
             script_type=ScriptType.INDICATOR,
         )
 
-        content = '''
+        content = """
 btc = request.security("BTCUSD", "D", close)
 eth = request.security("ETHUSDT", "D", close)
-'''
+"""
 
         symbols = extract_symbols_from_script(entry, content)
 
@@ -268,10 +272,10 @@ eth = request.security("ETHUSDT", "D", close)
             script_type=ScriptType.INDICATOR,
         )
 
-        content = '''
+        content = """
 if condition == "TRUE"
     label.set_text(lbl, "NA")
-'''
+"""
 
         symbols = extract_symbols_from_script(entry, content)
 
