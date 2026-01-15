@@ -14,7 +14,6 @@ from app.services.pine.constants import (
 from app.services.pine.models import LintSeverity, PineVersion, ScriptType
 from app.services.pine.registry import (
     LINT_E_INTERNAL_PARSE,
-    RegistryBuildResult,
     RegistryConfig,
     build_and_write_registry,
     build_registry,

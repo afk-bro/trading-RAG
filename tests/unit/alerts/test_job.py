@@ -176,7 +176,6 @@ class TestAlertEvaluatorJob:
 
         # Track calls to fetchval
         call_count = 0
-        original_fetchval = mock_conn.fetchval
 
         async def fetchval_with_failing_unlock(query, *args):
             nonlocal call_count

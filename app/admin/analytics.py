@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 from app.repositories.alerts import AlertsRepository
-from app.services.alerts.models import AlertStatus
 
 router = APIRouter(prefix="/analytics", tags=["admin-analytics"])
 logger = structlog.get_logger(__name__)
