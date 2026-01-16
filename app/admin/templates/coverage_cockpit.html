@@ -1,0 +1,1006 @@
+{% extends "layout.html" %}
+
+{% block title %}Coverage Cockpit - KB Admin{% endblock %}
+
+{% block content %}
+<div class="cockpit-container">
+    <!-- Left Panel: Queue -->
+    <div class="queue-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Weak Coverage Queue</h2>
+                <div class="header-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="refreshQueue()" title="Refresh">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                        </svg>
+                    </button>
+                    <span class="queue-count">{{ items|length }} items</span>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="queue-toolbar">
+                <div class="status-tabs">
+                    <a href="?workspace_id={{ workspace_id }}&status=open" class="tab {% if status_filter == 'open' or not status_filter %}active{% endif %}">Open</a>
+                    <a href="?workspace_id={{ workspace_id }}&status=acknowledged" class="tab {% if status_filter == 'acknowledged' %}active{% endif %}">Acknowledged</a>
+                    <a href="?workspace_id={{ workspace_id }}&status=resolved" class="tab {% if status_filter == 'resolved' %}active{% endif %}">Resolved</a>
+                    <a href="?workspace_id={{ workspace_id }}&status=all" class="tab {% if status_filter == 'all' %}active{% endif %}">All</a>
+                </div>
+                <div class="sort-toggle">
+                    <label class="sort-label">
+                        <input type="checkbox" id="sort-newest" onchange="toggleSort()" {% if sort_by == 'newest' %}checked{% endif %}>
+                        Newest first
+                    </label>
+                </div>
+            </div>
+
+            <!-- Queue List -->
+            <div class="queue-list" id="queue-list">
+                {% if items %}
+                {% for item in items %}
+                <div class="queue-item {% if loop.first %}selected{% endif %}"
+                     data-run-id="{{ item.run_id }}"
+                     data-item='{{ item | tojson | e }}'
+                     onclick="selectItem(this)">
+                    <div class="item-header">
+                        <span class="priority-badge priority-{{ 'p1' if item.priority_score >= 0.75 else ('p2' if item.priority_score >= 0.40 else 'p3') }}">
+                            {{ 'P1' if item.priority_score >= 0.75 else ('P2' if item.priority_score >= 0.40 else 'P3') }}
+                        </span>
+                        <span class="item-time relative-time" data-timestamp="{{ item.created_at }}" title="{{ item.created_at }}">
+                            {{ item.created_at[:16] }}
+                        </span>
+                        <span class="status-dot status-{{ item.coverage_status }}"></span>
+                    </div>
+                    <div class="item-source truncate" title="{{ item.source_ref or '' }}">
+                        {{ item.source_ref or 'No source' }}
+                    </div>
+                    <div class="item-query truncate-2" title="{{ item.query_preview }}">
+                        {{ item.query_preview }}
+                    </div>
+                    <div class="item-stats">
+                        <span class="stat-chip" title="Best score">{{ "%.2f"|format(item.best_score or 0) }}</span>
+                        <span class="stat-chip" title="Above threshold">{{ item.num_above_threshold }} above</span>
+                    </div>
+                    <div class="item-reasons">
+                        {% for code in item.weak_reason_codes[:2] %}
+                        <span class="reason-chip">{{ code }}</span>
+                        {% endfor %}
+                        {% if item.weak_reason_codes|length > 2 %}
+                        <span class="reason-chip more">+{{ item.weak_reason_codes|length - 2 }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="item-candidates">
+                        {% for cid in item.candidate_strategy_ids[:3] %}
+                            {% set card = strategy_cards.get(cid|string) %}
+                            {% if card %}
+                            <span class="candidate-chip" title="{{ card.name }}">{{ card.name[:20] }}{% if card.name|length > 20 %}...{% endif %}</span>
+                            {% endif %}
+                        {% endfor %}
+                        {% if item.candidate_strategy_ids|length > 3 %}
+                        <span class="candidate-chip more">+{{ item.candidate_strategy_ids|length - 3 }}</span>
+                        {% endif %}
+                        {% if not item.candidate_strategy_ids %}
+                        <span class="no-candidates">No candidates</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="empty-state">
+                    <h3>{% if status_filter == 'open' or not status_filter %}No weak coverage items{% else %}No items{% endif %}</h3>
+                    <p>{% if status_filter == 'open' or not status_filter %}All coverage gaps resolved!{% else %}No items match this filter.{% endif %}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel: Detail -->
+    <div class="detail-panel">
+        <div class="card" id="detail-card">
+            {% if items %}
+            <!-- Initial state populated by JS on load -->
+            <div class="detail-placeholder" id="detail-placeholder" style="display: none;">
+                <h3>Select an item</h3>
+                <p>Click a coverage gap from the queue to see details</p>
+            </div>
+            <div id="detail-content">
+                <!-- Populated by selectItem() -->
+            </div>
+            {% else %}
+            <div class="detail-placeholder">
+                <h3>No items to display</h3>
+                <p>The queue is empty</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Store strategy cards for JS access -->
+<script id="strategy-cards-data" type="application/json">
+{{ strategy_cards | tojson }}
+</script>
+<script id="missing-ids-data" type="application/json">
+{{ missing_strategy_ids | tojson }}
+</script>
+
+<style>
+/* Two-panel layout */
+.cockpit-container {
+    display: grid;
+    grid-template-columns: 55% 45%;
+    gap: 20px;
+    height: calc(100vh - 120px);
+    min-height: 600px;
+}
+
+.queue-panel, .detail-panel {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.queue-panel .card, .detail-panel .card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin-bottom: 0;
+}
+
+/* Queue toolbar */
+.queue-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+}
+
+.status-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.tab {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: all 0.15s;
+}
+
+.tab:hover {
+    background: var(--bg);
+    color: var(--text);
+    text-decoration: none;
+}
+
+.tab.active {
+    background: var(--link);
+    color: white;
+}
+
+.sort-toggle {
+    font-size: 12px;
+}
+
+.sort-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+/* Queue list */
+.queue-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+.queue-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.queue-item:hover {
+    border-color: var(--link);
+}
+
+.queue-item.selected {
+    border-color: var(--link);
+    background: rgba(56, 139, 253, 0.1);
+}
+
+.item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.priority-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.priority-p1 { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+.priority-p2 { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+.priority-p3 { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+
+.item-time {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex: 1;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-dot.status-open { background: var(--warning); }
+.status-dot.status-acknowledged { background: var(--info); }
+.status-dot.status-resolved { background: var(--success); }
+
+.item-source {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.item-query {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.item-stats {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.stat-chip {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    color: var(--text-muted);
+}
+
+.item-reasons {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.reason-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--danger);
+    border-radius: 4px;
+}
+
+.reason-chip.more {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+}
+
+.item-candidates {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.candidate-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--success);
+    border-radius: 4px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.candidate-chip.more {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+}
+
+.no-candidates {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Detail panel */
+.detail-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+}
+
+.detail-placeholder h3 {
+    margin-bottom: 8px;
+    color: var(--text);
+}
+
+#detail-content {
+    padding: 4px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Detail sections */
+.detail-section {
+    margin-bottom: 20px;
+}
+
+.detail-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.detail-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.detail-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.detail-status {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.detail-status.open { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+.detail-status.acknowledged { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+.detail-status.resolved { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+
+/* Stats grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.stat-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.stat-value {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* Candidate list */
+.candidate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.candidate-row {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.candidate-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.candidate-name {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.candidate-score {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--success);
+}
+
+.candidate-tags {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.tag-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--info);
+    border-radius: 4px;
+}
+
+.candidate-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 12px;
+}
+
+.candidate-actions {
+    margin-top: 8px;
+}
+
+.show-more-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.show-more-btn:hover {
+    border-color: var(--link);
+    color: var(--link);
+}
+
+/* Triage controls */
+.triage-controls {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.triage-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.triage-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+
+.triage-btn:hover {
+    border-color: var(--link);
+}
+
+.triage-btn.active {
+    border-color: var(--link);
+    background: rgba(56, 139, 253, 0.15);
+}
+
+.triage-btn.btn-acknowledge.active { border-color: var(--info); background: rgba(88, 166, 255, 0.15); }
+.triage-btn.btn-resolve.active { border-color: var(--success); background: rgba(63, 185, 80, 0.15); }
+.triage-btn.btn-reopen.active { border-color: var(--warning); background: rgba(210, 153, 34, 0.15); }
+
+.note-input {
+    width: 100%;
+    min-height: 60px;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    resize: vertical;
+    margin-bottom: 12px;
+}
+
+.note-input:focus {
+    outline: none;
+    border-color: var(--link);
+}
+
+.save-btn {
+    width: 100%;
+    padding: 10px;
+    background: var(--link);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.save-btn:hover {
+    opacity: 0.9;
+}
+
+.save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Suggested actions */
+.suggested-actions {
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.suggestion-item {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 6px;
+    padding-left: 16px;
+    position: relative;
+}
+
+.suggestion-item:before {
+    content: '>';
+    position: absolute;
+    left: 0;
+    color: var(--info);
+}
+
+.suggestion-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Missing strategies warning */
+.missing-warning {
+    background: rgba(210, 153, 34, 0.15);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--warning);
+    margin-bottom: 12px;
+}
+
+/* Copy button */
+.copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    color: var(--text-muted);
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.copy-btn:hover {
+    background: var(--bg);
+    color: var(--text);
+}
+
+/* Header actions */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn-sm {
+    padding: 4px 8px;
+}
+
+.queue-count {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Query preview */
+.query-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    max-height: 120px;
+    overflow-y: auto;
+}
+</style>
+
+<script>
+const strategyCards = JSON.parse(document.getElementById('strategy-cards-data').textContent || '{}');
+const missingIds = JSON.parse(document.getElementById('missing-ids-data').textContent || '[]');
+const workspaceId = '{{ workspace_id }}';
+let selectedRunId = null;
+let pendingStatus = null;
+
+// Select first item on load
+document.addEventListener('DOMContentLoaded', () => {
+    const firstItem = document.querySelector('.queue-item');
+    if (firstItem) {
+        selectItem(firstItem);
+    }
+    updateRelativeTimes();
+    setInterval(updateRelativeTimes, 60000);
+});
+
+function selectItem(el) {
+    // Update selection UI
+    document.querySelectorAll('.queue-item').forEach(item => item.classList.remove('selected'));
+    el.classList.add('selected');
+
+    // Parse item data
+    const item = JSON.parse(el.dataset.item);
+    selectedRunId = item.run_id;
+    pendingStatus = null;
+
+    renderDetail(item);
+}
+
+function renderDetail(item) {
+    const content = document.getElementById('detail-content');
+    const placeholder = document.getElementById('detail-placeholder');
+
+    if (placeholder) placeholder.style.display = 'none';
+
+    // Get candidate cards for this item
+    const candidates = (item.candidate_strategy_ids || []).map(id => ({
+        id: id,
+        card: strategyCards[id],
+        score: item.candidate_scores?.[id]
+    })).filter(c => c.card);
+
+    // Check for missing candidates in this item
+    const itemMissing = (item.candidate_strategy_ids || []).filter(id => !strategyCards[id]);
+
+    // Determine suggested actions based on reason codes
+    const suggestions = getSuggestions(item.weak_reason_codes || []);
+
+    content.innerHTML = `
+        <!-- Header -->
+        <div class="detail-section">
+            <div class="detail-header">
+                <div>
+                    <div class="detail-title">${item.source_ref || 'Unknown source'}</div>
+                    <div class="detail-meta">
+                        <span class="relative-time" data-timestamp="${item.created_at}">${item.created_at.slice(0, 16)}</span>
+                        <button class="copy-btn" onclick="copyToClipboard('${item.run_id}')" title="Copy run ID">
+                            ${item.run_id.slice(0, 8)}... <small>copy</small>
+                        </button>
+                    </div>
+                </div>
+                <span class="detail-status ${item.coverage_status}">${item.coverage_status}</span>
+            </div>
+        </div>
+
+        <!-- Coverage Snapshot -->
+        <div class="detail-section">
+            <div class="detail-section-title">Coverage Snapshot</div>
+            <div class="item-reasons" style="margin-bottom: 12px;">
+                ${(item.weak_reason_codes || []).map(c => `<span class="reason-chip">${c}</span>`).join('')}
+            </div>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-label">Best Score</div>
+                    <div class="stat-value">${item.best_score?.toFixed(3) || 'N/A'}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Above Threshold</div>
+                    <div class="stat-value">${item.num_above_threshold}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Script Type</div>
+                    <div class="stat-value">${item.script_type || 'Any'}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Intent Signature</div>
+                    <div class="stat-value" style="font-size: 11px; font-family: monospace;">
+                        <button class="copy-btn" onclick="copyToClipboard('${item.intent_signature}')" title="Copy signature">
+                            ${item.intent_signature?.slice(0, 12) || 'N/A'}... copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recommended Strategies -->
+        <div class="detail-section">
+            <div class="detail-section-title">Recommended Strategies (${candidates.length})</div>
+            ${itemMissing.length > 0 ? `
+                <div class="missing-warning">
+                    ${itemMissing.length} candidate strategies no longer exist (deleted/archived)
+                </div>
+            ` : ''}
+            ${candidates.length > 0 ? `
+                <div class="candidate-list" id="candidate-list">
+                    ${candidates.slice(0, 10).map((c, i) => renderCandidateRow(c, i)).join('')}
+                </div>
+                ${candidates.length > 10 ? `
+                    <button class="show-more-btn" onclick="showAllCandidates()">
+                        Show all ${candidates.length} candidates
+                    </button>
+                ` : ''}
+            ` : `
+                <div class="empty-state" style="padding: 20px;">
+                    <p>No candidate strategies found</p>
+                </div>
+            `}
+        </div>
+
+        <!-- Query Context -->
+        <div class="detail-section">
+            <div class="detail-section-title">Query Context</div>
+            <div class="query-box">${escapeHtml(item.query_preview || 'No query available')}</div>
+        </div>
+
+        <!-- Suggested Actions -->
+        ${suggestions.length > 0 ? `
+        <div class="detail-section">
+            <div class="detail-section-title">Suggested Next Steps</div>
+            <div class="suggested-actions">
+                ${suggestions.map(s => `<div class="suggestion-item">${s}</div>`).join('')}
+            </div>
+        </div>
+        ` : ''}
+
+        <!-- Triage Controls -->
+        <div class="detail-section">
+            <div class="detail-section-title">Triage Actions</div>
+            <div class="triage-controls">
+                <div class="triage-buttons">
+                    <button class="triage-btn btn-acknowledge ${item.coverage_status === 'acknowledged' ? 'active' : ''}"
+                            onclick="setStatus('acknowledged')" ${item.coverage_status === 'acknowledged' ? 'disabled' : ''}>
+                        Acknowledge
+                    </button>
+                    <button class="triage-btn btn-resolve ${item.coverage_status === 'resolved' ? 'active' : ''}"
+                            onclick="setStatus('resolved')" ${item.coverage_status === 'resolved' ? 'disabled' : ''}>
+                        Resolve
+                    </button>
+                    <button class="triage-btn btn-reopen ${item.coverage_status === 'open' ? 'active' : ''}"
+                            onclick="setStatus('open')" ${item.coverage_status === 'open' ? 'disabled' : ''}>
+                        Reopen
+                    </button>
+                </div>
+                <textarea class="note-input" id="resolution-note"
+                          placeholder="Resolution note (required for resolve without candidates)...">${item.resolution_note || ''}</textarea>
+                <button class="save-btn" id="save-btn" onclick="saveStatus()" disabled>
+                    Save Changes
+                </button>
+            </div>
+        </div>
+    `;
+
+    updateRelativeTimes();
+}
+
+function renderCandidateRow(c, index) {
+    const card = c.card;
+    const score = c.score;
+    const tags = card.tags || {};
+    const allTags = [
+        ...(tags.strategy_archetypes || []),
+        ...(tags.indicators || []),
+        ...(tags.timeframe_buckets || [])
+    ].slice(0, 6);
+
+    return `
+        <div class="candidate-row">
+            <div class="candidate-header">
+                <span class="candidate-name">${escapeHtml(card.name)}</span>
+                ${score ? `<span class="candidate-score">${score.score?.toFixed(3) || ''}</span>` : ''}
+            </div>
+            <div class="candidate-tags">
+                <span class="tag-chip">${card.engine}</span>
+                <span class="tag-chip">${card.status}</span>
+                ${allTags.map(t => `<span class="tag-chip">${t}</span>`).join('')}
+            </div>
+            <div class="candidate-meta">
+                ${card.backtest_status ? `<span>Backtest: ${card.backtest_status}</span>` : ''}
+                ${card.best_oos_score ? `<span>OOS: ${card.best_oos_score.toFixed(3)}</span>` : ''}
+                ${card.max_drawdown ? `<span>DD: ${(card.max_drawdown * 100).toFixed(1)}%</span>` : ''}
+            </div>
+            <div class="candidate-actions">
+                <a href="/admin/strategies/${c.id}" target="_blank" class="btn btn-secondary btn-sm">View Strategy</a>
+            </div>
+        </div>
+    `;
+}
+
+function getSuggestions(reasonCodes) {
+    const suggestions = [];
+    if (reasonCodes.includes('NO_RESULTS') || reasonCodes.includes('NO_MATCHES')) {
+        suggestions.push('Ingest more Pine scripts or broaden search query');
+    }
+    if (reasonCodes.includes('NO_RESULTS_ABOVE_THRESHOLD') || reasonCodes.includes('NO_STRONG_MATCHES')) {
+        suggestions.push('Try one of the recommended strategies or adjust match thresholds');
+    }
+    if (reasonCodes.includes('LOW_BEST_SCORE')) {
+        suggestions.push('Review recommended strategies for partial matches');
+    }
+    if (reasonCodes.includes('LOW_SIGNAL_INPUT')) {
+        suggestions.push('Source content may lack clear trading signals - consider manual review');
+    }
+    return suggestions;
+}
+
+function setStatus(status) {
+    pendingStatus = status;
+    document.querySelectorAll('.triage-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelector(`.btn-${status === 'open' ? 'reopen' : status}`).classList.add('active');
+    document.getElementById('save-btn').disabled = false;
+}
+
+async function saveStatus() {
+    if (!selectedRunId || !pendingStatus) return;
+
+    const note = document.getElementById('resolution-note').value.trim();
+    const saveBtn = document.getElementById('save-btn');
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+        const response = await fetch(`/admin/coverage/weak/${selectedRunId}?workspace_id=${workspaceId}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': '{{ admin_token or "" }}'
+            },
+            body: JSON.stringify({
+                status: pendingStatus,
+                note: note || null
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to update status');
+        }
+
+        // Update UI
+        const selectedItem = document.querySelector(`.queue-item[data-run-id="${selectedRunId}"]`);
+        if (selectedItem) {
+            const item = JSON.parse(selectedItem.dataset.item);
+            item.coverage_status = pendingStatus;
+            item.resolution_note = note;
+            selectedItem.dataset.item = JSON.stringify(item);
+
+            // Update status dot
+            const statusDot = selectedItem.querySelector('.status-dot');
+            statusDot.className = `status-dot status-${pendingStatus}`;
+
+            // If status filter doesn't match, optionally remove from list
+            const currentFilter = new URLSearchParams(window.location.search).get('status') || 'open';
+            if (currentFilter !== 'all' && currentFilter !== pendingStatus) {
+                selectedItem.style.opacity = '0.5';
+            }
+
+            // Re-render detail
+            renderDetail(item);
+        }
+
+        saveBtn.textContent = 'Saved!';
+        setTimeout(() => {
+            saveBtn.textContent = 'Save Changes';
+            saveBtn.disabled = true;
+            pendingStatus = null;
+        }, 1500);
+
+    } catch (error) {
+        alert('Error: ' + error.message);
+        saveBtn.textContent = 'Save Changes';
+        saveBtn.disabled = false;
+    }
+}
+
+function refreshQueue() {
+    window.location.reload();
+}
+
+function toggleSort() {
+    const url = new URL(window.location);
+    const isNewest = document.getElementById('sort-newest').checked;
+    url.searchParams.set('sort', isNewest ? 'newest' : 'priority');
+    window.location = url;
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+</script>
+{% endblock %}

@@ -1,15 +1,23 @@
 """Admin endpoints for coverage gap inspection."""
 
+import os
 from enum import Enum
+from pathlib import Path
 from typing import Literal, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 from app.schemas import StrategyCard
+
+# Templates
+_template_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(_template_dir))
 
 router = APIRouter(prefix="/coverage", tags=["admin-coverage"])
 logger = structlog.get_logger(__name__)
@@ -304,4 +312,170 @@ async def update_coverage_status(
         ),
         resolved_by=result.get("resolved_by"),
         resolution_note=result.get("resolution_note"),
+    )
+
+
+@router.get("/cockpit", response_class=HTMLResponse)
+async def coverage_cockpit(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Workspace ID"),
+    status: Optional[Literal["open", "acknowledged", "resolved", "all"]] = Query(
+        "open", description="Filter by status"
+    ),
+    sort: Optional[str] = Query("priority", description="Sort by: priority or newest"),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Coverage cockpit UI - two-panel triage interface.
+
+    Left panel: Queue of weak coverage items sorted by priority.
+    Right panel: Selected item detail with triage controls.
+    """
+    pool = _get_pool()
+
+    # Get default workspace if not specified
+    if not workspace_id:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
+                if row:
+                    workspace_id = row["id"]
+        except Exception as e:
+            logger.warning("Could not fetch default workspace", error=str(e))
+
+    if not workspace_id:
+        return templates.TemplateResponse(
+            "coverage_cockpit.html",
+            {
+                "request": request,
+                "items": [],
+                "strategy_cards": {},
+                "missing_strategy_ids": [],
+                "workspace_id": None,
+                "status_filter": status,
+                "sort_by": sort,
+                "error": "No workspace found.",
+            },
+        )
+
+    from app.services.coverage_gap import MatchRunRepository
+    from app.services.strategy import StrategyRepository
+
+    repo = MatchRunRepository(pool)
+
+    try:
+        items = await repo.list_weak_coverage_for_cockpit(
+            workspace_id=workspace_id,
+            limit=50,
+            since=None,
+            status=status if status != "all" else "all",
+        )
+    except Exception as e:
+        logger.error("coverage_cockpit_list_failed", error=str(e))
+        return templates.TemplateResponse(
+            "coverage_cockpit.html",
+            {
+                "request": request,
+                "items": [],
+                "strategy_cards": {},
+                "missing_strategy_ids": [],
+                "workspace_id": str(workspace_id),
+                "status_filter": status,
+                "sort_by": sort,
+                "error": f"Failed to load coverage data: {e}",
+            },
+        )
+
+    # Sort by newest if requested (default is priority from repo)
+    if sort == "newest":
+        items = sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
+
+    # Hydrate strategy cards
+    strategy_cards: dict = {}
+    missing_strategy_ids: list = []
+
+    all_candidate_ids: list[UUID] = []
+    seen: set[UUID] = set()
+    for item in items:
+        for cid in item.get("candidate_strategy_ids", []):
+            if cid and cid not in seen:
+                seen.add(cid)
+                all_candidate_ids.append(cid)
+                if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
+                    break
+        if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
+            break
+
+    if all_candidate_ids:
+        try:
+            strategy_repo = StrategyRepository(pool)
+            cards_dict = await strategy_repo.get_cards_by_ids(
+                workspace_id, all_candidate_ids
+            )
+
+            for uuid_str, card in cards_dict.items():
+                tags_data = card.get("tags") or {}
+                strategy_cards[uuid_str] = {
+                    "id": str(card["id"]),
+                    "name": card["name"],
+                    "slug": card["slug"],
+                    "engine": card["engine"],
+                    "status": card["status"],
+                    "tags": tags_data,
+                    "backtest_status": card.get("backtest_status"),
+                    "last_backtest_at": (
+                        card["last_backtest_at"].isoformat()
+                        if card.get("last_backtest_at")
+                        else None
+                    ),
+                    "best_oos_score": card.get("best_oos_score"),
+                    "max_drawdown": card.get("max_drawdown"),
+                }
+
+            found_ids = set(cards_dict.keys())
+            for cid in all_candidate_ids:
+                if str(cid) not in found_ids:
+                    missing_strategy_ids.append(str(cid))
+
+        except Exception as e:
+            logger.warning("cockpit_card_hydration_failed", error=str(e))
+
+    # Convert items for template (ensure UUIDs are strings for JSON)
+    template_items = []
+    for item in items:
+        template_item = {
+            "run_id": str(item["run_id"]),
+            "created_at": item["created_at"],
+            "intent_signature": item.get("intent_signature", ""),
+            "script_type": item.get("script_type"),
+            "weak_reason_codes": item.get("weak_reason_codes", []),
+            "best_score": item.get("best_score"),
+            "num_above_threshold": item.get("num_above_threshold", 0),
+            "candidate_strategy_ids": [
+                str(c) for c in item.get("candidate_strategy_ids", [])
+            ],
+            "candidate_scores": item.get("candidate_scores", {}),
+            "query_preview": item.get("query_preview", ""),
+            "source_ref": item.get("source_ref"),
+            "coverage_status": item.get("coverage_status", "open"),
+            "priority_score": item.get("priority_score", 0.0),
+            "resolution_note": item.get("resolution_note"),
+        }
+        template_items.append(template_item)
+
+    # Get admin token from environment for JS PATCH calls
+    admin_token = os.environ.get("ADMIN_TOKEN", "")
+
+    return templates.TemplateResponse(
+        "coverage_cockpit.html",
+        {
+            "request": request,
+            "items": template_items,
+            "strategy_cards": strategy_cards,
+            "missing_strategy_ids": missing_strategy_ids,
+            "workspace_id": str(workspace_id),
+            "status_filter": status,
+            "sort_by": sort,
+            "admin_token": admin_token,
+        },
     )
