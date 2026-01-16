@@ -150,7 +150,7 @@ async def fetch_transcript(
     """
     Fetch transcript for a YouTube video using youtube-transcript-api.
 
-    Returns list of segments with 'text', 'start', 'duration' keys.
+    Returns list of segments with 'text', 'start', 'end' keys.
     """
     from youtube_transcript_api import (
         NoTranscriptFound,
@@ -164,34 +164,22 @@ async def fetch_transcript(
 
     delay = initial_delay
 
+    # Create API instance (v1.2+ is instance-based)
+    api = YouTubeTranscriptApi()
+
     for attempt in range(max_retries):
         try:
-            # Try to get transcript (prefers manual > auto-generated)
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # Fetch transcript directly (API handles language preference)
+            transcript_data = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
 
-            # Prefer manually created transcripts
-            try:
-                transcript = transcript_list.find_manually_created_transcript(["en"])
-            except Exception:
-                # Fall back to auto-generated
-                try:
-                    transcript = transcript_list.find_generated_transcript(["en"])
-                except Exception:
-                    # Try any available transcript
-                    transcript = transcript_list.find_transcript(
-                        ["en", "en-US", "en-GB"]
-                    )
-
-            # Fetch the transcript data
-            transcript_data = transcript.fetch()
-
+            # New API returns FetchedTranscript with snippets
             return [
                 {
-                    "text": segment.get("text", ""),
-                    "start": segment.get("start", 0),
-                    "end": segment.get("start", 0) + segment.get("duration", 0),
+                    "text": snippet.text,
+                    "start": snippet.start,
+                    "end": snippet.start + snippet.duration,
                 }
-                for segment in transcript_data
+                for snippet in transcript_data.snippets
             ]
 
         except VideoUnavailable as e:

@@ -18,7 +18,7 @@ supabase==2.3.4
 qdrant-client==1.7.3
 
 # YouTube
-youtube-transcript-api==0.6.2
+youtube-transcript-api>=1.2.3
 pytube==15.0.0
 
 # Text processing
