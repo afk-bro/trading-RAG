@@ -2004,3 +2004,22 @@ class CandidateStrategy(BaseModel):
     name: str = Field(..., description="Strategy name")
     score: float = Field(..., description="Tag overlap score")
     matched_tags: list[str] = Field(..., description="Tags that matched")
+
+
+class StrategyCard(BaseModel):
+    """Lightweight strategy card for bulk fetches (cockpit UI)."""
+
+    id: UUID = Field(..., description="Strategy ID")
+    name: str = Field(..., description="Strategy name")
+    slug: str = Field(..., description="URL-safe slug")
+    engine: StrategyEngine = Field(..., description="Execution engine")
+    status: StrategyStatus = Field(..., description="Lifecycle status")
+    tags: StrategyTags = Field(default_factory=StrategyTags, description="Tags")
+    backtest_status: Optional[BacktestSummaryStatus] = Field(
+        None, description="Backtest status"
+    )
+    last_backtest_at: Optional[datetime] = Field(
+        None, description="Last backtest timestamp"
+    )
+    best_oos_score: Optional[float] = Field(None, description="Best OOS score")
+    max_drawdown: Optional[float] = Field(None, description="Max drawdown percentage")

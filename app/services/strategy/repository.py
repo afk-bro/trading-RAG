@@ -286,6 +286,83 @@ class StrategyRepository:
 
         return self._row_to_dict(row) if row else None
 
+    async def get_cards_by_ids(
+        self,
+        workspace_id: UUID,
+        ids: list[UUID],
+    ) -> dict[str, dict]:
+        """
+        Get strategy cards by IDs for bulk fetch.
+
+        Args:
+            workspace_id: Workspace UUID for scoping
+            ids: List of strategy UUIDs to fetch
+
+        Returns:
+            Dict of {str(uuid): card_dict} for found strategies
+        """
+        if not ids:
+            return {}
+
+        # Use ANY for efficient array query
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, name, slug, engine, status, tags, backtest_summary
+                FROM strategies
+                WHERE workspace_id = $1 AND id = ANY($2)
+                """,
+                workspace_id,
+                ids,
+            )
+
+        result = {}
+        for row in rows:
+            d = dict(row)
+            # Parse JSONB fields
+            tags_data = d.get("tags")
+            if isinstance(tags_data, str):
+                try:
+                    tags_data = json.loads(tags_data)
+                except json.JSONDecodeError:
+                    tags_data = {}
+            elif not tags_data:
+                tags_data = {}
+
+            backtest_data = d.get("backtest_summary")
+            if isinstance(backtest_data, str):
+                try:
+                    backtest_data = json.loads(backtest_data)
+                except json.JSONDecodeError:
+                    backtest_data = None
+            elif not backtest_data:
+                backtest_data = None
+
+            # Build card with extracted backtest fields
+            card = {
+                "id": d["id"],
+                "name": d["name"],
+                "slug": d["slug"],
+                "engine": d["engine"],
+                "status": d["status"],
+                "tags": tags_data,
+                "backtest_status": (
+                    backtest_data.get("status") if backtest_data else None
+                ),
+                "last_backtest_at": (
+                    backtest_data.get("last_backtest_at") if backtest_data else None
+                ),
+                "best_oos_score": (
+                    backtest_data.get("best_oos_score") if backtest_data else None
+                ),
+                "max_drawdown": (
+                    backtest_data.get("max_drawdown") if backtest_data else None
+                ),
+            }
+            result[str(d["id"])] = card
+
+        return result
+
     async def find_candidates_by_tags(
         self,
         workspace_id: UUID,

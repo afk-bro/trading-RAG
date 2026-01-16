@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
+from app.schemas import StrategyCard
 
 router = APIRouter(prefix="/coverage", tags=["admin-coverage"])
 logger = structlog.get_logger(__name__)
@@ -57,6 +58,10 @@ class WeakCoverageResponse(BaseModel):
 
     items: list[WeakCoverageItem] = Field(default_factory=list)
     count: int = Field(..., description="Number of items returned")
+    strategy_cards_by_id: Optional[dict[str, StrategyCard]] = Field(
+        None,
+        description="Hydrated strategy cards keyed by UUID (include_candidate_cards=true)",
+    )
 
 
 @router.get(
@@ -71,6 +76,9 @@ async def list_weak_coverage(
     since: Optional[str] = Query(
         None, description="ISO timestamp filter (e.g., 2026-01-01T00:00:00Z)"
     ),
+    include_candidate_cards: bool = Query(
+        False, description="Include hydrated strategy cards in response"
+    ),
     _: bool = Depends(require_admin_token),
 ) -> WeakCoverageResponse:
     """
@@ -84,6 +92,9 @@ async def list_weak_coverage(
     - candidate_strategy_ids[] (point-in-time snapshot)
     - query_preview (first ~120 chars)
     - source_ref (youtube:ID or doc:UUID)
+
+    When include_candidate_cards=true, also returns:
+    - strategy_cards_by_id: {uuid: StrategyCard} for all candidates across items
     """
     pool = _get_pool()
 
@@ -101,7 +112,65 @@ async def list_weak_coverage(
         logger.error("weak_coverage_list_failed", error=str(e))
         raise HTTPException(500, f"Failed to list weak coverage: {e}")
 
+    response_items = [WeakCoverageItem(**item) for item in items]
+
+    # Optionally hydrate strategy cards
+    strategy_cards_by_id = None
+    if include_candidate_cards and items:
+        # Collect all unique candidate IDs across all items
+        all_candidate_ids: set[UUID] = set()
+        for item in items:
+            for cid in item.get("candidate_strategy_ids", []):
+                if cid:
+                    all_candidate_ids.add(cid)
+
+        if all_candidate_ids:
+            try:
+                from app.services.strategy import StrategyRepository
+                from app.schemas import (
+                    BacktestSummaryStatus,
+                    StrategyEngine,
+                    StrategyStatus,
+                    StrategyTags,
+                )
+
+                strategy_repo = StrategyRepository(pool)
+                cards_dict = await strategy_repo.get_cards_by_ids(
+                    workspace_id, list(all_candidate_ids)
+                )
+
+                # Convert to schema
+                strategy_cards_by_id = {}
+                for uuid_str, card in cards_dict.items():
+                    tags_data = card.get("tags") or {}
+                    strategy_cards_by_id[uuid_str] = StrategyCard(
+                        id=card["id"],
+                        name=card["name"],
+                        slug=card["slug"],
+                        engine=StrategyEngine(card["engine"]),
+                        status=StrategyStatus(card["status"]),
+                        tags=StrategyTags(**tags_data) if tags_data else StrategyTags(),
+                        backtest_status=(
+                            BacktestSummaryStatus(card["backtest_status"])
+                            if card.get("backtest_status")
+                            else None
+                        ),
+                        last_backtest_at=card.get("last_backtest_at"),
+                        best_oos_score=card.get("best_oos_score"),
+                        max_drawdown=card.get("max_drawdown"),
+                    )
+
+                logger.info(
+                    "hydrated_candidate_cards",
+                    requested=len(all_candidate_ids),
+                    found=len(strategy_cards_by_id),
+                )
+            except Exception as e:
+                logger.warning("candidate_card_hydration_failed", error=str(e))
+                # Don't fail the whole request, just skip hydration
+
     return WeakCoverageResponse(
-        items=[WeakCoverageItem(**item) for item in items],
-        count=len(items),
+        items=response_items,
+        count=len(response_items),
+        strategy_cards_by_id=strategy_cards_by_id,
     )

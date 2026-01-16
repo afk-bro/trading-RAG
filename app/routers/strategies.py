@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.deps.security import require_admin_token
 from app.schemas import (
     BacktestSummary,
+    BacktestSummaryStatus,
     CandidateStrategy,
+    StrategyCard,
     StrategyCreateRequest,
     StrategyDetailResponse,
     StrategyEngine,
@@ -35,6 +37,28 @@ def _get_pool():
     if _db_pool is None:
         raise HTTPException(503, "Database not available")
     return _db_pool
+
+
+def _card_dict_to_schema(card: dict) -> StrategyCard:
+    """Convert repository card dict to StrategyCard schema."""
+    tags_data = card.get("tags") or {}
+
+    return StrategyCard(
+        id=card["id"],
+        name=card["name"],
+        slug=card["slug"],
+        engine=StrategyEngine(card["engine"]),
+        status=StrategyStatus(card["status"]),
+        tags=StrategyTags(**tags_data) if tags_data else StrategyTags(),
+        backtest_status=(
+            BacktestSummaryStatus(card["backtest_status"])
+            if card.get("backtest_status")
+            else None
+        ),
+        last_backtest_at=card.get("last_backtest_at"),
+        best_oos_score=card.get("best_oos_score"),
+        max_drawdown=card.get("max_drawdown"),
+    )
 
 
 def _row_to_list_item(row: dict) -> StrategyListItem:
@@ -83,6 +107,50 @@ def _row_to_detail(row: dict) -> StrategyDetailResponse:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+@router.get(
+    "/cards",
+    response_model=dict[str, StrategyCard],
+    summary="Get strategy cards by IDs",
+    description="Bulk fetch lightweight strategy cards by IDs. Returns {uuid: card} map.",
+)
+async def get_strategy_cards(
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    ids: str = Query(..., description="Comma-separated strategy UUIDs"),
+    _: bool = Depends(require_admin_token),
+) -> dict[str, StrategyCard]:
+    """
+    Bulk fetch strategy cards by IDs.
+
+    Optimized for cockpit UI to avoid N+1 queries when hydrating
+    candidate strategies from weak coverage items.
+
+    Returns a dict mapping UUID strings to StrategyCard objects.
+    Missing IDs are silently omitted from response.
+    """
+    pool = _get_pool()
+    repo = StrategyRepository(pool)
+
+    # Parse comma-separated UUIDs
+    try:
+        id_list = [UUID(id_str.strip()) for id_str in ids.split(",") if id_str.strip()]
+    except ValueError as e:
+        raise HTTPException(422, f"Invalid UUID in ids parameter: {e}")
+
+    if not id_list:
+        return {}
+
+    if len(id_list) > 100:
+        raise HTTPException(422, "Maximum 100 IDs per request")
+
+    cards_dict = await repo.get_cards_by_ids(workspace_id, id_list)
+
+    # Convert to schema
+    return {
+        uuid_str: _card_dict_to_schema(card)
+        for uuid_str, card in cards_dict.items()
+    }
 
 
 @router.get(
