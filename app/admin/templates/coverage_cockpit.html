@@ -707,6 +707,49 @@
 .explain-btn:disabled {
     opacity: 0.7;
 }
+
+/* Verbosity toggle */
+.verbosity-btn {
+    margin-left: 4px;
+}
+
+.verbosity-btn.active {
+    background: rgba(88, 166, 255, 0.15);
+    border-color: var(--info);
+}
+
+/* Confidence qualifier */
+.confidence-line {
+    font-weight: 500;
+    font-size: 12px;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: rgba(63, 185, 80, 0.1);
+    color: var(--text);
+}
+
+.confidence-line.high { background: rgba(63, 185, 80, 0.15); }
+.confidence-line.medium { background: rgba(210, 153, 34, 0.15); }
+.confidence-line.low { background: rgba(139, 148, 158, 0.15); }
+
+/* Cache indicator */
+.cache-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--success);
+    margin-left: 8px;
+}
+
+.cache-indicator.miss {
+    background: rgba(139, 148, 158, 0.15);
+    color: var(--text-muted);
+}
 </style>
 
 <script>
@@ -715,6 +758,9 @@ const missingIds = JSON.parse(document.getElementById('missing-ids-data').textCo
 const workspaceId = '{{ workspace_id }}';
 let selectedRunId = null;
 let pendingStatus = null;
+
+// Track current verbosity per strategy for toggle
+const explanationState = {};
 
 // Select first item on load
 // Pre-selected run ID from deep link (null if not a deep link)
@@ -925,9 +971,13 @@ function renderCandidateRow(c, index) {
             </div>
             <div class="explanation-box" id="explanation-${c.id}" style="display: none;"></div>
             <div class="candidate-actions">
-                <button class="btn btn-secondary btn-sm explain-btn" onclick="explainStrategy('${c.id}')">
+                <button class="btn btn-secondary btn-sm explain-btn" onclick="explainStrategy('${c.id}', 'short')">
                     <span class="explain-text">Explain Match</span>
                     <span class="explain-loading" style="display: none;">Loading...</span>
+                </button>
+                <button class="btn btn-secondary btn-sm verbosity-btn" id="verbosity-${c.id}"
+                        onclick="toggleVerbosity('${c.id}')" style="display: none;" title="Toggle detail level">
+                    Detailed
                 </button>
                 <a href="/admin/strategies/${c.id}" target="_blank" class="btn btn-secondary btn-sm">View Strategy</a>
             </div>
@@ -1042,18 +1092,22 @@ function copyDeepLink(runId) {
     navigator.clipboard.writeText(url);
 }
 
-async function explainStrategy(strategyId) {
+async function explainStrategy(strategyId, verbosity = 'short') {
     if (!selectedRunId) return;
 
     const candidateRow = document.getElementById(`candidate-${strategyId}`);
     const explainBox = document.getElementById(`explanation-${strategyId}`);
     const explainBtn = candidateRow.querySelector('.explain-btn');
+    const verbosityBtn = document.getElementById(`verbosity-${strategyId}`);
     const explainText = explainBtn.querySelector('.explain-text');
     const explainLoading = explainBtn.querySelector('.explain-loading');
 
-    // If already showing, toggle hide
-    if (explainBox.style.display !== 'none' && !explainBox.classList.contains('loading')) {
+    // If already showing and not switching verbosity, toggle hide
+    const currentState = explanationState[strategyId];
+    if (explainBox.style.display !== 'none' && !explainBox.classList.contains('loading') &&
+        currentState && currentState.verbosity === verbosity) {
         explainBox.style.display = 'none';
+        verbosityBtn.style.display = 'none';
         explainText.textContent = 'Explain Match';
         return;
     }
@@ -1075,7 +1129,8 @@ async function explainStrategy(strategyId) {
             },
             body: JSON.stringify({
                 run_id: selectedRunId,
-                strategy_id: strategyId
+                strategy_id: strategyId,
+                verbosity: verbosity
             })
         });
 
@@ -1086,26 +1141,53 @@ async function explainStrategy(strategyId) {
 
         const data = await response.json();
 
-        // Display explanation
+        // Store state for verbosity toggle
+        explanationState[strategyId] = {
+            verbosity: data.verbosity,
+            data: data
+        };
+
+        // Determine confidence level for styling
+        const confidenceLevel = data.confidence_qualifier.toLowerCase().includes('high') ? 'high' :
+                               data.confidence_qualifier.toLowerCase().includes('medium') ? 'medium' : 'low';
+
+        // Display explanation with confidence qualifier and cache indicator
         explainBox.className = 'explanation-box';
         explainBox.innerHTML = `
+            <div class="confidence-line ${confidenceLevel}">${escapeHtml(data.confidence_qualifier)}</div>
             <div class="explanation-text">${escapeHtml(data.explanation)}</div>
             <div class="explanation-meta">
                 Generated by ${data.model} (${data.provider})
                 ${data.latency_ms ? ` in ${data.latency_ms.toFixed(0)}ms` : ''}
+                <span class="cache-indicator ${data.cache_hit ? '' : 'miss'}">
+                    ${data.cache_hit ? '⚡ cached' : '🔄 fresh'}
+                </span>
             </div>
         `;
         explainText.textContent = 'Hide';
+
+        // Show and update verbosity toggle
+        verbosityBtn.style.display = 'inline-block';
+        verbosityBtn.textContent = data.verbosity === 'short' ? 'Detailed' : 'Short';
+        verbosityBtn.className = 'btn btn-secondary btn-sm verbosity-btn' +
+                                 (data.verbosity === 'detailed' ? ' active' : '');
 
     } catch (error) {
         explainBox.className = 'explanation-box error';
         explainBox.innerHTML = `Failed to generate explanation: ${escapeHtml(error.message)}`;
         explainText.textContent = 'Retry';
+        verbosityBtn.style.display = 'none';
     } finally {
         explainText.style.display = 'inline';
         explainLoading.style.display = 'none';
         explainBtn.disabled = false;
     }
+}
+
+function toggleVerbosity(strategyId) {
+    const currentState = explanationState[strategyId];
+    const newVerbosity = currentState?.verbosity === 'short' ? 'detailed' : 'short';
+    explainStrategy(strategyId, newVerbosity);
 }
 
 function escapeHtml(text) {

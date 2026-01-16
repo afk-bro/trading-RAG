@@ -1,7 +1,8 @@
 """LLM-powered explanation service for strategy recommendations."""
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any, Literal, Optional
 
 import structlog
 
@@ -9,6 +10,9 @@ from app.services.llm_base import LLMResponse
 from app.services.llm_factory import get_llm, get_llm_status
 
 logger = structlog.get_logger(__name__)
+
+# Verbosity types
+Verbosity = Literal["short", "detailed"]
 
 
 @dataclass
@@ -18,13 +22,109 @@ class StrategyExplanation:
     strategy_id: str
     strategy_name: str
     explanation: str
+    confidence_qualifier: str
     model: str
     provider: str
+    verbosity: Verbosity = "short"
     latency_ms: Optional[float] = None
+    cache_hit: bool = False
+    generated_at: Optional[str] = None
+
+
+@dataclass
+class CachedExplanation:
+    """Cached explanation entry for storage in match_runs.explanations_cache."""
+
+    explanation: str
+    confidence_qualifier: str
+    model: str
+    provider: str
+    verbosity: Verbosity
+    latency_ms: Optional[float]
+    generated_at: str
+    strategy_updated_at: Optional[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for JSONB storage."""
+        return {
+            "explanation": self.explanation,
+            "confidence_qualifier": self.confidence_qualifier,
+            "model": self.model,
+            "provider": self.provider,
+            "verbosity": self.verbosity,
+            "latency_ms": self.latency_ms,
+            "generated_at": self.generated_at,
+            "strategy_updated_at": self.strategy_updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CachedExplanation":
+        """Create from JSONB dict."""
+        return cls(
+            explanation=data.get("explanation", ""),
+            confidence_qualifier=data.get("confidence_qualifier", ""),
+            model=data.get("model", ""),
+            provider=data.get("provider", ""),
+            verbosity=data.get("verbosity", "short"),
+            latency_ms=data.get("latency_ms"),
+            generated_at=data.get("generated_at", ""),
+            strategy_updated_at=data.get("strategy_updated_at"),
+        )
 
 
 class ExplanationError(Exception):
     """Error generating explanation."""
+
+
+def compute_confidence_qualifier(
+    matched_tags: list[str],
+    match_score: Optional[float],
+    has_backtest: bool,
+    backtest_validated: bool,
+) -> str:
+    """
+    Compute a deterministic confidence qualifier for the explanation.
+
+    Args:
+        matched_tags: Tags that overlap between intent and strategy
+        match_score: Similarity score (0-1)
+        has_backtest: Whether backtest_summary exists
+        backtest_validated: Whether backtest status is 'validated'
+
+    Returns:
+        Confidence qualifier string (e.g., "High — based on...")
+    """
+    # Score components
+    tag_score = min(len(matched_tags) / 3.0, 1.0)  # 3+ tags = full credit
+    match_score_val = match_score if match_score is not None else 0.5
+    backtest_score = 0.3 if backtest_validated else (0.1 if has_backtest else 0.0)
+
+    # Weighted average
+    confidence = (tag_score * 0.4) + (match_score_val * 0.4) + (backtest_score * 0.2)
+
+    # Determine level
+    if confidence >= 0.7:
+        level = "High"
+    elif confidence >= 0.4:
+        level = "Medium"
+    else:
+        level = "Low"
+
+    # Build reasoning
+    reasons = []
+    if matched_tags:
+        reasons.append(f"{len(matched_tags)} matching tag{'s' if len(matched_tags) > 1 else ''}")
+    elif match_score and match_score > 0.5:
+        reasons.append("semantic similarity")
+    if backtest_validated:
+        reasons.append("validated backtest")
+    elif has_backtest:
+        reasons.append("backtest available")
+
+    if not reasons:
+        reasons.append("general alignment")
+
+    return f"Confidence: {level} — based on {', '.join(reasons)}."
 
 
 async def generate_strategy_explanation(
@@ -32,6 +132,7 @@ async def generate_strategy_explanation(
     strategy: dict[str, Any],
     matched_tags: list[str],
     match_score: Optional[float] = None,
+    verbosity: Verbosity = "short",
 ) -> StrategyExplanation:
     """
     Generate an LLM-powered explanation of why a strategy matches a user's intent.
@@ -41,9 +142,10 @@ async def generate_strategy_explanation(
         strategy: Strategy dict with name, description, tags, backtest_summary
         matched_tags: List of tags that overlap between intent and strategy
         match_score: Optional similarity score (0-1)
+        verbosity: "short" (2-4 sentences) or "detailed" (2-3 paragraphs)
 
     Returns:
-        StrategyExplanation with generated text
+        StrategyExplanation with generated text and confidence qualifier
 
     Raises:
         ExplanationError: If LLM is not configured or generation fails
@@ -71,6 +173,18 @@ async def generate_strategy_explanation(
     description = strategy.get("description", "")
     strategy_tags = strategy.get("tags", {})
     backtest = strategy.get("backtest_summary")
+
+    # Compute confidence qualifier (deterministic)
+    has_backtest = backtest is not None
+    backtest_validated = (
+        has_backtest and backtest.get("status") == "validated"
+    )
+    confidence_qualifier = compute_confidence_qualifier(
+        matched_tags=matched_tags,
+        match_score=match_score,
+        has_backtest=has_backtest,
+        backtest_validated=backtest_validated,
+    )
 
     # Build intent summary
     intent_parts = []
@@ -130,12 +244,25 @@ async def generate_strategy_explanation(
     if match_score is not None:
         matched_summary += f"\nMatch score: {match_score:.0%}"
 
-    # Build prompt
-    system_prompt = """You are a trading strategy analyst helping users understand
+    # Build prompt based on verbosity
+    if verbosity == "detailed":
+        length_instruction = """Write a detailed explanation (2-3 paragraphs) covering:
+1. How the strategy's approach aligns with the user's trading style
+2. Specific technical aspects that match (indicators, timeframes, risk management)
+3. Any caveats or considerations the user should be aware of"""
+        max_tokens = 600
+    else:
+        length_instruction = (
+            "Write a brief (2-4 sentence) explanation of why this strategy aligns "
+            "with what the user is looking for. Focus on the practical fit."
+        )
+        max_tokens = 300
+
+    system_prompt = f"""You are a trading strategy analyst helping users understand
 why a particular strategy might fit their trading needs.
 
 Your explanations should be:
-- Concise (2-4 sentences)
+- {"Thorough and educational" if verbosity == "detailed" else "Concise"}
 - Focused on the practical alignment between user intent and strategy capabilities
 - Honest about any limitations or caveats
 - Written for a trader, not a developer
@@ -154,14 +281,14 @@ CANDIDATE STRATEGY:
 OVERLAP:
 {matched_summary}
 
-Write a brief (2-4 sentence) explanation of why this strategy aligns with what the user
-is looking for. Focus on the practical fit."""
+{length_instruction}"""
 
     log = logger.bind(
         strategy_id=strategy_id,
         strategy_name=strategy_name,
         matched_tags=matched_tags,
         intent_archetypes=archetypes,
+        verbosity=verbosity,
     )
     log.info("generating_strategy_explanation")
 
@@ -171,7 +298,7 @@ is looking for. Focus on the practical fit."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=300,
+            max_tokens=max_tokens,
         )
 
         log.info(
@@ -185,9 +312,13 @@ is looking for. Focus on the practical fit."""
             strategy_id=strategy_id,
             strategy_name=strategy_name,
             explanation=response.text.strip(),
+            confidence_qualifier=confidence_qualifier,
             model=response.model,
             provider=response.provider,
+            verbosity=verbosity,
             latency_ms=response.latency_ms,
+            cache_hit=False,
+            generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
     except Exception as e:

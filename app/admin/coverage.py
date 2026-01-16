@@ -101,6 +101,9 @@ class ExplainStrategyRequest(BaseModel):
 
     run_id: UUID = Field(..., description="Match run ID")
     strategy_id: UUID = Field(..., description="Strategy ID to explain")
+    verbosity: Literal["short", "detailed"] = Field(
+        "short", description="Explanation verbosity: short (2-4 sentences) or detailed"
+    )
 
 
 class ExplainStrategyResponse(BaseModel):
@@ -110,9 +113,12 @@ class ExplainStrategyResponse(BaseModel):
     strategy_id: UUID = Field(..., description="Strategy ID")
     strategy_name: str = Field(..., description="Strategy name")
     explanation: str = Field(..., description="LLM-generated explanation")
+    confidence_qualifier: str = Field(..., description="Deterministic confidence line")
     model: str = Field(..., description="LLM model used")
     provider: str = Field(..., description="LLM provider used")
+    verbosity: Literal["short", "detailed"] = Field(..., description="Verbosity level")
     latency_ms: Optional[float] = Field(None, description="Generation latency")
+    cache_hit: bool = Field(False, description="True if returned from cache")
 
 
 class WeakCoverageResponse(BaseModel):
@@ -351,6 +357,12 @@ async def explain_strategy_match(
     This endpoint uses the intent from a match run and strategy metadata
     to generate a natural language explanation of the match.
 
+    Features:
+    - Caches explanations per (run_id, strategy_id, verbosity) in match_runs JSONB
+    - Invalidates cache if strategy has been updated since generation
+    - Verbosity: "short" (2-4 sentences) or "detailed" (2-3 paragraphs)
+    - Includes deterministic confidence qualifier based on tag overlap and backtest
+
     Requires LLM to be configured (ANTHROPIC_API_KEY, OPENAI_API_KEY, or
     OPENROUTER_API_KEY).
     """
@@ -358,11 +370,11 @@ async def explain_strategy_match(
 
     pool = _get_pool()
 
-    # Fetch match run to get intent_json and candidate_scores
+    # Fetch match run to get intent_json, candidate_scores, and cache
     async with pool.acquire() as conn:
         run_row = await conn.fetchrow(
             """
-            SELECT intent_json, candidate_scores
+            SELECT intent_json, candidate_scores, explanations_cache
             FROM match_runs
             WHERE id = $1 AND workspace_id = $2
             """,
@@ -393,6 +405,16 @@ async def explain_strategy_match(
     elif not candidate_scores:
         candidate_scores = {}
 
+    # Parse explanations_cache
+    explanations_cache = run_row["explanations_cache"]
+    if isinstance(explanations_cache, str):
+        try:
+            explanations_cache = json.loads(explanations_cache)
+        except json.JSONDecodeError:
+            explanations_cache = {}
+    elif not explanations_cache:
+        explanations_cache = {}
+
     strategy_id_str = str(request.strategy_id)
     strategy_score_data = candidate_scores.get(strategy_id_str, {})
     matched_tags = strategy_score_data.get("matched_tags", [])
@@ -407,6 +429,54 @@ async def explain_strategy_match(
     if not strategy:
         raise HTTPException(404, "Strategy not found")
 
+    strategy_updated_at = strategy.get("updated_at")
+    strategy_updated_at_str = (
+        strategy_updated_at.isoformat()
+        if hasattr(strategy_updated_at, "isoformat")
+        else str(strategy_updated_at) if strategy_updated_at else None
+    )
+
+    # Build cache key: strategy_id:verbosity
+    cache_key = f"{strategy_id_str}:{request.verbosity}"
+
+    # Check cache
+    from app.services.coverage_gap import CachedExplanation
+
+    cached = explanations_cache.get(cache_key)
+    if cached:
+        cached_entry = CachedExplanation.from_dict(cached)
+        # Validate: invalidate if strategy changed since generation
+        cache_valid = True
+        if strategy_updated_at_str and cached_entry.strategy_updated_at:
+            if strategy_updated_at_str > cached_entry.strategy_updated_at:
+                cache_valid = False
+                logger.info(
+                    "explanation_cache_invalidated",
+                    run_id=str(request.run_id),
+                    strategy_id=strategy_id_str,
+                    reason="strategy_updated",
+                )
+
+        if cache_valid:
+            logger.info(
+                "explanation_cache_hit",
+                run_id=str(request.run_id),
+                strategy_id=strategy_id_str,
+                verbosity=request.verbosity,
+            )
+            return ExplainStrategyResponse(
+                run_id=request.run_id,
+                strategy_id=request.strategy_id,
+                strategy_name=strategy.get("name", "Unknown"),
+                explanation=cached_entry.explanation,
+                confidence_qualifier=cached_entry.confidence_qualifier,
+                model=cached_entry.model,
+                provider=cached_entry.provider,
+                verbosity=cached_entry.verbosity,
+                latency_ms=cached_entry.latency_ms,
+                cache_hit=True,
+            )
+
     # Generate explanation
     from app.services.coverage_gap import (
         ExplanationError,
@@ -419,6 +489,7 @@ async def explain_strategy_match(
             strategy=strategy,
             matched_tags=matched_tags,
             match_score=match_score,
+            verbosity=request.verbosity,
         )
     except ExplanationError as e:
         logger.warning("explanation_generation_failed", error=str(e))
@@ -427,14 +498,52 @@ async def explain_strategy_match(
         logger.error("explanation_generation_error", error=str(e))
         raise HTTPException(500, f"Failed to generate explanation: {e}")
 
+    # Store in cache
+    cache_entry = CachedExplanation(
+        explanation=result.explanation,
+        confidence_qualifier=result.confidence_qualifier,
+        model=result.model,
+        provider=result.provider,
+        verbosity=result.verbosity,
+        latency_ms=result.latency_ms,
+        generated_at=result.generated_at or "",
+        strategy_updated_at=strategy_updated_at_str,
+    )
+    explanations_cache[cache_key] = cache_entry.to_dict()
+
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE match_runs
+                SET explanations_cache = $1
+                WHERE id = $2 AND workspace_id = $3
+                """,
+                json.dumps(explanations_cache),
+                request.run_id,
+                workspace_id,
+            )
+        logger.info(
+            "explanation_cached",
+            run_id=str(request.run_id),
+            strategy_id=strategy_id_str,
+            verbosity=request.verbosity,
+        )
+    except Exception as e:
+        # Don't fail the request if caching fails
+        logger.warning("explanation_cache_write_failed", error=str(e))
+
     return ExplainStrategyResponse(
         run_id=request.run_id,
         strategy_id=request.strategy_id,
         strategy_name=result.strategy_name,
         explanation=result.explanation,
+        confidence_qualifier=result.confidence_qualifier,
         model=result.model,
         provider=result.provider,
+        verbosity=result.verbosity,
         latency_ms=result.latency_ms,
+        cache_hit=False,
     )
 
 

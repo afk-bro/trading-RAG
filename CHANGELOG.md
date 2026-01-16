@@ -10,15 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **LLM-Powered Strategy Explanation** - Generate explanations of why strategies match user intent
   - `POST /admin/coverage/explain` - API endpoint for on-demand explanations
-    - Takes `run_id` + `strategy_id`, returns natural language explanation
+    - Takes `run_id` + `strategy_id` + `verbosity` (short/detailed)
     - Builds prompts from intent (archetypes, indicators, timeframes) + strategy (tags, description)
     - Shows matched tags and similarity score context
-    - Returns model, provider, and latency metadata
-  - "Explain Match" button in cockpit UI per candidate strategy
-    - Toggle behavior (show/hide), loading state, error retry
-    - Displays explanation with LLM metadata
+    - Returns model, provider, latency, cache_hit, and confidence_qualifier
+  - **Explanation caching** - Stored in `match_runs.explanations_cache` JSONB
+    - Cache key: `strategy_id:verbosity`
+    - Invalidated if strategy.updated_at > cached.strategy_updated_at
+    - Avoids redundant LLM calls when toggling verbosity
+  - **Verbosity toggle** - "Short / Detailed" button in cockpit UI
+    - Short: 2-4 sentences (300 tokens max)
+    - Detailed: 2-3 paragraphs (600 tokens max)
+  - **Confidence qualifier** - Deterministic line appended to explanations
+    - Formula: 40% tag overlap + 40% match score + 20% backtest status
+    - High (≥0.7), Medium (≥0.4), Low (<0.4)
+    - Shows reasoning: "based on 3 matching tags, validated backtest"
+  - "Explain Match" button with toggle behavior, loading state, error retry
+  - Cache hit indicator (⚡ cached / 🔄 fresh) in UI
   - Requires LLM configuration (ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY)
   - Returns 503 if LLM not configured, graceful error handling
+  - Migration: `052_match_runs_explanations_cache.sql`
 
 - **Pine Script Read APIs** - Admin endpoints for querying indexed Pine scripts
   - `GET /sources/pine/scripts` - List scripts with filtering (symbol, status, free-text)
