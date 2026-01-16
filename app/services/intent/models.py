@@ -77,6 +77,17 @@ VALID_TIMEFRAME_EXPLICIT = set(TIMEFRAME_EXPLICIT_PATTERNS.keys())
 VALID_RISK_TERMS = set(RISK_TERM_PATTERNS.keys())
 
 
+def _filter_and_dedupe(tags: list[str], valid_set: set[str]) -> list[str]:
+    """Filter to valid tags and dedupe while preserving order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for tag in tags:
+        if tag in valid_set and tag not in seen:
+            result.append(tag)
+            seen.add(tag)
+    return result
+
+
 class MatchIntent(BaseModel):
     """Extracted trading intent from content."""
 
@@ -106,29 +117,29 @@ class MatchIntent(BaseModel):
     @field_validator("strategy_archetypes")
     @classmethod
     def validate_archetypes(cls, v: list[str]) -> list[str]:
-        """Filter to valid archetype tags."""
-        return [tag for tag in v if tag in VALID_ARCHETYPES]
+        """Filter to valid archetype tags and dedupe preserving order."""
+        return _filter_and_dedupe(v, VALID_ARCHETYPES)
 
     @field_validator("indicators")
     @classmethod
     def validate_indicators(cls, v: list[str]) -> list[str]:
-        """Filter to valid indicator tags."""
-        return [tag for tag in v if tag in VALID_INDICATORS]
+        """Filter to valid indicator tags and dedupe preserving order."""
+        return _filter_and_dedupe(v, VALID_INDICATORS)
 
     @field_validator("timeframe_buckets")
     @classmethod
     def validate_timeframe_buckets(cls, v: list[str]) -> list[str]:
-        """Filter to valid timeframe bucket tags."""
-        return [tag for tag in v if tag in VALID_TIMEFRAME_BUCKETS]
+        """Filter to valid timeframe bucket tags and dedupe preserving order."""
+        return _filter_and_dedupe(v, VALID_TIMEFRAME_BUCKETS)
 
     @field_validator("timeframe_explicit")
     @classmethod
     def validate_timeframe_explicit(cls, v: list[str]) -> list[str]:
-        """Filter to valid explicit timeframe tags."""
-        return [tag for tag in v if tag in VALID_TIMEFRAME_EXPLICIT]
+        """Filter to valid explicit timeframe tags and dedupe preserving order."""
+        return _filter_and_dedupe(v, VALID_TIMEFRAME_EXPLICIT)
 
     @field_validator("risk_terms")
     @classmethod
     def validate_risk_terms(cls, v: list[str]) -> list[str]:
-        """Filter to valid risk term tags."""
-        return [tag for tag in v if tag in VALID_RISK_TERMS]
+        """Filter to valid risk term tags and dedupe preserving order."""
+        return _filter_and_dedupe(v, VALID_RISK_TERMS)
