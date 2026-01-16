@@ -356,6 +356,9 @@ GET /sources/pine/scripts/<uuid>?workspace_id=<uuid>&include_chunks=true&include
 - `GET /admin/backtests/*` - Backtest admin UI
 - `GET /admin/coverage/weak` - List weak coverage runs for triage
 - `PATCH /admin/coverage/weak/{run_id}` - Update coverage status (open/acknowledged/resolved)
+- `POST /admin/coverage/explain` - LLM-powered strategy match explanation
+- `GET /admin/coverage/cockpit` - Coverage triage cockpit UI
+- `GET /admin/coverage/cockpit/{run_id}` - Deep link to specific coverage run
 
 **Execution** (requires `X-Admin-Token` header):
 - `POST /execute/intents` - Execute trade intent (paper mode only)
@@ -497,6 +500,27 @@ When `/youtube/match-pine` produces `weak_coverage=false`:
 3. Set `resolution_note='Auto-resolved by successful match'`
 
 This closes coverage gaps automatically when a matching strategy is added.
+
+**LLM-Powered Strategy Explanation**:
+- `POST /admin/coverage/explain` - Generate explanation of why a strategy matches an intent
+  - Request: `{run_id, strategy_id}` + `workspace_id` query param
+  - Response: `{explanation, model, provider, latency_ms}`
+- Builds prompts from:
+  - Intent: archetypes, indicators, timeframes, symbols, risk terms
+  - Strategy: name, description, tags, backtest summary
+  - Overlap: matched tags and similarity score
+- Generates 2-4 sentence practical explanation
+- Requires LLM configuration (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`)
+- Returns 503 if LLM not configured, 404 if run/strategy not found
+
+**Cockpit UI** (`/admin/coverage/cockpit`):
+- Two-panel layout: queue (left) + detail (right)
+- Status tabs: Open, Acknowledged, Resolved, All
+- Priority badges: P1 (>=0.75), P2 (>=0.40), P3 (<0.40)
+- Strategy cards with tags, backtest status, OOS score
+- "Explain Match" button generates LLM explanation per candidate
+- Deep link support: `/admin/coverage/cockpit/{run_id}`
+- Triage controls: Acknowledge, Resolve, Reopen with optional notes
 
 ## Strategy Runner
 
