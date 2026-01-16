@@ -77,6 +77,15 @@ class RerankState(str, Enum):
     ERROR_FALLBACK = "error_fallback"
 
 
+class PineIngestStatus(str, Enum):
+    """Status of pine script ingest operation."""
+
+    SUCCESS = "success"  # All processed without failures
+    PARTIAL = "partial"  # Some succeeded, some failed
+    FAILED = "failed"  # All failed or critical error
+    DRY_RUN = "dry_run"  # Validation only, no changes
+
+
 # Request Models
 class SourceInfo(BaseModel):
     """Source information for document ingestion."""
@@ -1283,3 +1292,66 @@ class ReconciliationResult(BaseModel):
 
     last_event_at: Optional[datetime] = Field(None, description="Last event timestamp")
     errors: list[str] = Field(default_factory=list, description="Errors encountered")
+
+
+# =============================================================================
+# Pine Script Ingest
+# =============================================================================
+
+
+class PineIngestRequest(BaseModel):
+    """Request for Pine Script registry ingestion."""
+
+    workspace_id: UUID = Field(..., description="Target workspace ID")
+    registry_path: str = Field(
+        ..., description="Server path to pine_registry.json (must be within DATA_DIR)"
+    )
+    lint_path: Optional[str] = Field(
+        default=None,
+        description="Server path to pine_lint_report.json (auto-derived if None)",
+    )
+    source_root: Optional[str] = Field(
+        default=None,
+        description="Directory containing .pine source files (required if include_source=True)",
+    )
+    include_source: bool = Field(
+        default=True, description="Include source code in embedded content"
+    )
+    max_source_lines: int = Field(
+        default=100, description="Maximum lines of source to include per script"
+    )
+    skip_lint_errors: bool = Field(
+        default=False,
+        description="Skip scripts with lint errors (runs inline lint if no report)",
+    )
+    update_existing: bool = Field(
+        default=False,
+        description="Update existing documents if sha256 changed (False=skip changed scripts)",
+    )
+    dry_run: bool = Field(
+        default=False, description="Validate only, do not write to database"
+    )
+
+
+class PineIngestResponse(BaseModel):
+    """Response for Pine Script registry ingestion."""
+
+    status: PineIngestStatus = Field(..., description="Overall ingest status")
+    scripts_processed: int = Field(default=0, description="Total scripts in registry")
+    scripts_indexed: int = Field(
+        default=0, description="Scripts newly indexed or updated"
+    )
+    scripts_already_indexed: int = Field(
+        default=0, description="Scripts already indexed (unchanged sha256)"
+    )
+    scripts_skipped: int = Field(
+        default=0, description="Scripts skipped (lint errors, changed but not updated)"
+    )
+    scripts_failed: int = Field(default=0, description="Scripts that failed to ingest")
+    chunks_added: int = Field(default=0, description="Total chunks written to database")
+    errors: list[str] = Field(
+        default_factory=list, description="Error messages for failed scripts"
+    )
+    ingest_run_id: Optional[str] = Field(
+        default=None, description="Run ID for log correlation"
+    )

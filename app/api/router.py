@@ -14,6 +14,7 @@ from app.routers import (
     kb_trials,
     metrics,
     pdf,
+    pine,
     query,
     reembed,
     testing,
@@ -32,6 +33,7 @@ api_router.include_router(metrics.router)  # Metrics endpoint (excluded from Ope
 api_router.include_router(ingest.router, tags=["Ingestion"])
 api_router.include_router(youtube.router, prefix="/sources/youtube", tags=["YouTube"])
 api_router.include_router(pdf.router, tags=["PDF"])
+api_router.include_router(pine.router, prefix="/sources/pine", tags=["Pine Script"])
 api_router.include_router(query.router, tags=["Query"])
 api_router.include_router(reembed.router, tags=["Re-embed"])
 api_router.include_router(jobs.router, tags=["Jobs"])

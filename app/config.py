@@ -142,6 +142,12 @@ class Settings(BaseSettings):
         description="Maximum request body size in bytes",
     )
 
+    # Filesystem access (for admin endpoints accepting server paths)
+    data_dir: str = Field(
+        default="/data",
+        description="Allowed directory for file operations (e.g., pine registry ingest)",
+    )
+
     # API Key Authentication
     api_key: Optional[str] = Field(
         default=None,
