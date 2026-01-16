@@ -332,7 +332,14 @@ def _build_list_item(
     doc: dict, symbols: list[str], chunk_count: int
 ) -> PineScriptListItem:
     """Build PineScriptListItem from document row."""
-    metadata = doc.get("pine_metadata") or {}
+    import json
+
+    raw_metadata = doc.get("pine_metadata")
+    # Handle JSONB returned as string (asyncpg codec issue)
+    if isinstance(raw_metadata, str):
+        metadata = json.loads(raw_metadata)
+    else:
+        metadata = raw_metadata or {}
 
     # Extract rel_path from canonical_url or metadata
     rel_path = metadata.get("rel_path") or _extract_rel_path(doc["canonical_url"])
@@ -584,8 +591,15 @@ async def get_pine_script(
             chunk_next_offset = chunk_offset + chunk_limit if chunk_has_more else None
 
     # Extract metadata
+    import json
+
     doc_dict = dict(doc)
-    metadata = doc_dict.get("pine_metadata") or {}
+    raw_metadata = doc_dict.get("pine_metadata")
+    # Handle JSONB returned as string (asyncpg codec issue)
+    if isinstance(raw_metadata, str):
+        metadata = json.loads(raw_metadata)
+    else:
+        metadata = raw_metadata or {}
     rel_path = metadata.get("rel_path") or _extract_rel_path(doc_dict["canonical_url"])
     title = doc_dict.get("title") or Path(rel_path).name
 
