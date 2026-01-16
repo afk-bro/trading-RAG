@@ -54,6 +54,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Partial indexes for efficient weak coverage queries
   - Migration: `050_match_runs_candidates.sql`
 
+- **Cockpit UX Endpoints** - Bulk fetching to avoid N+1 queries
+  - `GET /strategies/cards?ids=uuid,uuid,...` - Bulk fetch strategy cards by IDs
+    - Returns `{uuid: StrategyCard}` map for efficient lookups
+    - Max 100 IDs per request, missing IDs silently omitted
+  - `GET /admin/coverage/weak?include_candidate_cards=true` - Hydrate candidates
+    - Collects all candidate IDs across items in one query
+    - Returns `strategy_cards_by_id` alongside items
+    - Single call for weak items + all candidate cards
+  - `StrategyCard` schema (lightweight for UI):
+    - `id`, `name`, `slug`, `engine`, `status`, `tags`
+    - `backtest_status`, `last_backtest_at`, `best_oos_score`, `max_drawdown`
+
 - **Strategy Registry v1** - Multi-engine strategy catalog with coverage integration
   - Supports engines: `pine`, `python`, `vectorbt`, `backtesting_py`
   - JSONB columns for flexible schema: `source_ref`, `tags`, `backtest_summary`
