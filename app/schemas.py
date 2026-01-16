@@ -1510,13 +1510,20 @@ class PineRebuildAndIngestRequest(BaseModel):
     workspace_id: UUID = Field(..., description="Target workspace ID")
     scripts_root: str = Field(..., description="Root directory containing .pine files")
     output_dir: Optional[str] = Field(
-        None, description="Output directory for registry files (defaults to scripts_root)"
+        None,
+        description="Output directory for registry files (defaults to scripts_root)",
     )
 
     # Ingest flags (passthrough)
-    include_source: bool = Field(default=True, description="Include source code preview")
-    max_source_lines: int = Field(default=100, ge=0, le=500, description="Max source lines")
-    skip_lint_errors: bool = Field(default=False, description="Skip scripts with lint errors")
+    include_source: bool = Field(
+        default=True, description="Include source code preview"
+    )
+    max_source_lines: int = Field(
+        default=100, ge=0, le=500, description="Max source lines"
+    )
+    skip_lint_errors: bool = Field(
+        default=False, description="Skip scripts with lint errors"
+    )
     update_existing: bool = Field(default=False, description="Update if sha256 changed")
 
     dry_run: bool = Field(default=False, description="Validate only, no DB changes")
@@ -1528,10 +1535,16 @@ class PineBuildStats(BaseModel):
     files_scanned: int = Field(default=0, description="Files found")
     files_parsed: int = Field(default=0, description="Files successfully parsed")
     parse_errors: int = Field(default=0, description="Files with parse errors")
-    lint_errors: int = Field(default=0, description="Total lint errors across all files")
-    lint_warnings: int = Field(default=0, description="Total lint warnings across all files")
+    lint_errors: int = Field(
+        default=0, description="Total lint errors across all files"
+    )
+    lint_warnings: int = Field(
+        default=0, description="Total lint warnings across all files"
+    )
     registry_path: Optional[str] = Field(None, description="Path to generated registry")
-    lint_report_path: Optional[str] = Field(None, description="Path to generated lint report")
+    lint_report_path: Optional[str] = Field(
+        None, description="Path to generated lint report"
+    )
 
 
 class PineRebuildAndIngestResponse(BaseModel):
@@ -1540,13 +1553,17 @@ class PineRebuildAndIngestResponse(BaseModel):
     status: PineIngestStatus = Field(..., description="Overall status")
 
     # Build phase
-    build: PineBuildStats = Field(default_factory=PineBuildStats, description="Build statistics")
+    build: PineBuildStats = Field(
+        default_factory=PineBuildStats, description="Build statistics"
+    )
 
     # Ingest phase (mirrors PineIngestResponse)
     scripts_processed: int = Field(default=0, description="Total scripts in registry")
     scripts_indexed: int = Field(default=0, description="Scripts newly indexed")
     scripts_already_indexed: int = Field(default=0, description="Scripts unchanged")
-    scripts_skipped: int = Field(default=0, description="Scripts skipped (lint errors, etc.)")
+    scripts_skipped: int = Field(
+        default=0, description="Scripts skipped (lint errors, etc.)"
+    )
     scripts_failed: int = Field(default=0, description="Scripts that failed to ingest")
     chunks_added: int = Field(default=0, description="New chunks created")
 
@@ -1563,7 +1580,9 @@ class PineMatchResult(BaseModel):
     script_type: Optional[PineScriptType] = Field(None, description="Script type")
     pine_version: Optional[PineVersionType] = Field(None, description="Pine version")
     score: float = Field(..., description="Match score (0-1)")
-    match_reasons: list[str] = Field(default_factory=list, description="Why this matched")
+    match_reasons: list[str] = Field(
+        default_factory=list, description="Why this matched"
+    )
     snippet: Optional[str] = Field(None, description="Relevant text snippet")
     inputs_preview: list[str] = Field(
         default_factory=list, description="First few input names"
@@ -1574,10 +1593,14 @@ class PineMatchResult(BaseModel):
 class PineMatchResponse(BaseModel):
     """Response for Pine script match endpoint."""
 
-    results: list[PineMatchResult] = Field(default_factory=list, description="Matched scripts")
+    results: list[PineMatchResult] = Field(
+        default_factory=list, description="Matched scripts"
+    )
     total_searched: int = Field(default=0, description="Total scripts searched")
     query: str = Field(..., description="Original query")
-    filters_applied: dict = Field(default_factory=dict, description="Filters that were applied")
+    filters_applied: dict = Field(
+        default_factory=dict, description="Filters that were applied"
+    )
 
 
 # =============================================================================
