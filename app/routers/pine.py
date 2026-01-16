@@ -392,8 +392,14 @@ async def rebuild_and_ingest_pine(
         parse_errors=build_result.parse_errors,
         lint_errors=build_result.total_errors,
         lint_warnings=build_result.total_warnings,
-        registry_path=str(build_result.registry_path) if build_result.registry_path else None,
-        lint_report_path=str(build_result.lint_report_path) if build_result.lint_report_path else None,
+        registry_path=(
+            str(build_result.registry_path) if build_result.registry_path else None
+        ),
+        lint_report_path=(
+            str(build_result.lint_report_path)
+            if build_result.lint_report_path
+            else None
+        ),
     )
 
     log.info(
@@ -407,10 +413,18 @@ async def rebuild_and_ingest_pine(
     # Check if build produced any scripts
     if build_result.files_parsed == 0:
         return PineRebuildAndIngestResponse(
-            status=PineIngestStatus.SUCCESS if build_result.files_scanned == 0 else PineIngestStatus.FAILED,
+            status=(
+                PineIngestStatus.SUCCESS
+                if build_result.files_scanned == 0
+                else PineIngestStatus.FAILED
+            ),
             build=build_stats,
             scripts_processed=0,
-            errors=["No .pine files found"] if build_result.files_scanned == 0 else ["All files failed to parse"],
+            errors=(
+                ["No .pine files found"]
+                if build_result.files_scanned == 0
+                else ["All files failed to parse"]
+            ),
             ingest_run_id=ingest_run_id,
         )
 
@@ -467,10 +481,14 @@ async def rebuild_and_ingest_pine(
 
     # Collect errors
     errors = [
-        f"{r.rel_path}: {r.error}" for r in ingest_result.results if not r.success and r.error
+        f"{r.rel_path}: {r.error}"
+        for r in ingest_result.results
+        if not r.success and r.error
     ]
 
-    scripts_already_indexed = sum(1 for r in ingest_result.results if r.status == "exists")
+    scripts_already_indexed = sum(
+        1 for r in ingest_result.results if r.status == "exists"
+    )
 
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
     log.info(
@@ -707,8 +725,12 @@ async def match_pine_scripts(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     q: str = Query(..., min_length=1, description="Search query"),
     symbol: Optional[str] = Query(None, description="Filter by ticker symbol"),
-    script_type: Optional[PineScriptType] = Query(None, description="Filter by script type (strategy/indicator/library)"),
-    lint_ok: Optional[bool] = Query(None, description="Filter by lint status (true=no errors)"),
+    script_type: Optional[PineScriptType] = Query(
+        None, description="Filter by script type (strategy/indicator/library)"
+    ),
+    lint_ok: Optional[bool] = Query(
+        None, description="Filter by lint status (true=no errors)"
+    ),
     top_k: int = Query(10, ge=1, le=50, description="Max results to return"),
     _: bool = Depends(require_admin_token),
 ) -> PineMatchResponse:
@@ -736,7 +758,7 @@ async def match_pine_scripts(
 
     # Normalize query
     query_lower = q.lower().strip()
-    query_terms = [t for t in re.split(r'\W+', query_lower) if t]
+    query_terms = [t for t in re.split(r"\W+", query_lower) if t]
 
     filters_applied: dict = {"q": q}
     if symbol:
@@ -814,7 +836,9 @@ async def match_pine_scripts(
             continue
 
         # Extract searchable fields
-        rel_path = metadata.get("rel_path") or _extract_rel_path(doc_dict["canonical_url"])
+        rel_path = metadata.get("rel_path") or _extract_rel_path(
+            doc_dict["canonical_url"]
+        )
         title = doc_dict.get("title") or Path(rel_path).name
         inputs = metadata.get("inputs", [])
         input_names = [inp.get("name", "") for inp in inputs]
@@ -872,18 +896,20 @@ async def match_pine_scripts(
         if score == 0:
             continue
 
-        results.append(PineMatchResult(
-            id=doc_dict["id"],
-            rel_path=rel_path,
-            title=title,
-            script_type=metadata.get("script_type"),
-            pine_version=metadata.get("pine_version"),
-            score=round(score, 3),
-            match_reasons=match_reasons[:3],  # Top 3 reasons
-            snippet=snippet,
-            inputs_preview=input_names[:5],  # First 5 inputs
-            lint_ok=not has_lint_errors,
-        ))
+        results.append(
+            PineMatchResult(
+                id=doc_dict["id"],
+                rel_path=rel_path,
+                title=title,
+                script_type=metadata.get("script_type"),
+                pine_version=metadata.get("pine_version"),
+                score=round(score, 3),
+                match_reasons=match_reasons[:3],  # Top 3 reasons
+                snippet=snippet,
+                inputs_preview=input_names[:5],  # First 5 inputs
+                lint_ok=not has_lint_errors,
+            )
+        )
 
     # Sort by score descending, then id ascending for deterministic tie-breaking
     results.sort(key=lambda r: (-r.score, str(r.id)))
@@ -914,7 +940,9 @@ async def match_pine_scripts(
 )
 async def lookup_pine_script(
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    rel_path: str = Query(..., description="Relative file path (e.g., 'macd_mean_reversion.pine')"),
+    rel_path: str = Query(
+        ..., description="Relative file path (e.g., 'macd_mean_reversion.pine')"
+    ),
     _: bool = Depends(require_admin_token),
 ) -> PineScriptLookupResponse:
     """Lookup a Pine script by its relative path."""
@@ -954,7 +982,9 @@ async def lookup_pine_script(
     else:
         metadata = raw_metadata or {}
 
-    actual_rel_path = metadata.get("rel_path") or _extract_rel_path(doc_dict["canonical_url"])
+    actual_rel_path = metadata.get("rel_path") or _extract_rel_path(
+        doc_dict["canonical_url"]
+    )
     title = doc_dict.get("title") or Path(actual_rel_path).name
 
     return PineScriptLookupResponse(
