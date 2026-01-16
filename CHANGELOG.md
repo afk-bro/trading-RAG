@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Pine Script Read APIs** - Admin endpoints for querying indexed Pine scripts
+  - `GET /sources/pine/scripts` - List scripts with filtering (symbol, status, free-text)
+  - `GET /sources/pine/scripts/{doc_id}` - Script details with chunks and lint findings
+  - `pine_metadata` JSONB column stores structured metadata (inputs, imports, features, lint)
+  - Symbol filtering uses existing GIN index on chunks for efficient queries
+  - Pagination with `has_more`/`next_offset` for both scripts and chunks
+  - Literal types for constrained values (script_type, pine_version, status)
 - **Pine Script Registry Module** - Complete parsing and linting system for Pine Script files
   - Regex-based parser extracts version, declaration, inputs, imports, and feature flags
   - Static analysis linter with rules: E001-E003 (errors), W002-W003 (warnings), I001-I002 (info)

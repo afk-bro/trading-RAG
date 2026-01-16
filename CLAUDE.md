@@ -248,6 +248,77 @@ Admin-only endpoint for ingesting Pine Script registries into the RAG system.
 - Path traversal attempts return 403
 - Non-.json extensions rejected with 400
 
+## Pine Script Read APIs
+
+Admin-only endpoints for querying indexed Pine scripts.
+
+**List Endpoint**: `GET /sources/pine/scripts`
+
+```
+GET /sources/pine/scripts?workspace_id=<uuid>&symbol=BTC&q=breakout&limit=20
+```
+
+**Query Parameters**:
+- `workspace_id` (required) - Target workspace UUID
+- `symbol` - Filter by ticker symbol (uses GIN index on chunks)
+- `status` - Filter by status: `active` (default), `superseded`, `deleted`, `all`
+- `q` - Free-text search on title
+- `order_by` - Sort field: `updated_at` (default), `created_at`, `title`
+- `order_dir` - Sort direction: `desc` (default), `asc`
+- `limit` - Results per page (1-100, default 20)
+- `offset` - Pagination offset (default 0)
+
+**List Response**:
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "canonical_url": "pine://local/strategies/breakout.pine",
+      "rel_path": "strategies/breakout.pine",
+      "title": "52W Breakout Strategy",
+      "script_type": "strategy",
+      "pine_version": "5",
+      "symbols": ["BTC", "ETH"],
+      "lint_summary": {"errors": 0, "warnings": 1, "info": 2},
+      "lint_available": true,
+      "sha256": "abc123...",
+      "chunk_count": 3,
+      "created_at": "2025-01-15T...",
+      "updated_at": "2025-01-15T...",
+      "status": "active"
+    }
+  ],
+  "total": 45,
+  "limit": 20,
+  "offset": 0,
+  "has_more": true,
+  "next_offset": 20
+}
+```
+
+**Detail Endpoint**: `GET /sources/pine/scripts/{doc_id}`
+
+```
+GET /sources/pine/scripts/<uuid>?workspace_id=<uuid>&include_chunks=true&include_lint_findings=true
+```
+
+**Query Parameters**:
+- `workspace_id` (required) - Target workspace UUID
+- `include_chunks` - Include chunk content (default false)
+- `chunk_limit` - Chunks per page (1-200, default 50)
+- `chunk_offset` - Chunk pagination offset (default 0)
+- `include_lint_findings` - Include lint findings array (default false, capped at 200)
+
+**Detail Response** includes all list fields plus:
+- `inputs` - Input parameter definitions
+- `imports` - Library imports
+- `features` - Feature flags (uses_alerts, is_repainting, etc.)
+- `chunks` - Optional chunk array with pagination
+- `lint_findings` - Optional lint findings array
+
+**Authentication**: Both endpoints require `X-Admin-Token` header.
+
 ## API Endpoints
 
 **Health & Readiness**:
@@ -260,6 +331,8 @@ Admin-only endpoint for ingesting Pine Script registries into the RAG system.
 - `POST /sources/youtube/ingest` - YouTube transcript ingestion
 - `POST /sources/pdf/ingest` - PDF file upload ingestion (multipart form)
 - `POST /sources/pine/ingest` - Pine Script registry ingestion (admin-only)
+- `GET /sources/pine/scripts` - List indexed Pine scripts (admin-only)
+- `GET /sources/pine/scripts/{doc_id}` - Pine script details (admin-only)
 - `POST /query` - Semantic search (modes: `retrieve` or `answer`)
 - `POST /reembed` - Migrate to new embedding model
 - `GET /jobs/{job_id}` - Async job status
