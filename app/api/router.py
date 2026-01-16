@@ -19,6 +19,7 @@ from app.routers import (
     reembed,
     testing,
     youtube,
+    youtube_pine,
 )
 from app.admin import router as admin_router
 
@@ -32,6 +33,9 @@ api_router.include_router(metrics.router)  # Metrics endpoint (excluded from Ope
 # Core RAG functionality
 api_router.include_router(ingest.router, tags=["Ingestion"])
 api_router.include_router(youtube.router, prefix="/sources/youtube", tags=["YouTube"])
+api_router.include_router(
+    youtube_pine.router, prefix="/sources/youtube", tags=["YouTube"]
+)
 api_router.include_router(pdf.router, tags=["PDF"])
 api_router.include_router(pine.router, prefix="/sources/pine", tags=["Pine Script"])
 api_router.include_router(query.router, tags=["Query"])
