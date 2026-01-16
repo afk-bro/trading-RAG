@@ -1552,3 +1552,29 @@ class PineRebuildAndIngestResponse(BaseModel):
 
     errors: list[str] = Field(default_factory=list, description="Error messages")
     ingest_run_id: Optional[str] = Field(None, description="Run ID for log correlation")
+
+
+class PineMatchResult(BaseModel):
+    """A single match result from Pine script search."""
+
+    id: UUID = Field(..., description="Document ID")
+    rel_path: str = Field(..., description="Relative file path")
+    title: str = Field(..., description="Script title")
+    script_type: Optional[PineScriptType] = Field(None, description="Script type")
+    pine_version: Optional[PineVersionType] = Field(None, description="Pine version")
+    score: float = Field(..., description="Match score (0-1)")
+    match_reasons: list[str] = Field(default_factory=list, description="Why this matched")
+    snippet: Optional[str] = Field(None, description="Relevant text snippet")
+    inputs_preview: list[str] = Field(
+        default_factory=list, description="First few input names"
+    )
+    lint_ok: bool = Field(default=True, description="No lint errors")
+
+
+class PineMatchResponse(BaseModel):
+    """Response for Pine script match endpoint."""
+
+    results: list[PineMatchResult] = Field(default_factory=list, description="Matched scripts")
+    total_searched: int = Field(default=0, description="Total scripts searched")
+    query: str = Field(..., description="Original query")
+    filters_applied: dict = Field(default_factory=dict, description="Filters that were applied")

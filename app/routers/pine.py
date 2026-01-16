@@ -19,6 +19,8 @@ from app.schemas import (
     PineInputSchema,
     PineLintFinding,
     PineLintSummary,
+    PineMatchResponse,
+    PineMatchResult,
     PineRebuildAndIngestRequest,
     PineRebuildAndIngestResponse,
     PineScriptDetailResponse,
@@ -685,6 +687,214 @@ async def list_pine_scripts(
         offset=offset,
         has_more=has_more,
         next_offset=next_offset,
+    )
+
+
+@router.get(
+    "/scripts/match",
+    response_model=PineMatchResponse,
+    responses={
+        200: {"description": "Match results"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Invalid admin token"},
+    },
+    summary="Search Pine scripts (admin)",
+    description="Semantic search for Pine scripts. Returns ranked results with match reasons.",
+)
+async def match_pine_scripts(
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    q: str = Query(..., min_length=1, description="Search query"),
+    symbol: Optional[str] = Query(None, description="Filter by ticker symbol"),
+    script_type: Optional[str] = Query(None, description="Filter by script type (strategy/indicator/library)"),
+    lint_ok: Optional[bool] = Query(None, description="Filter by lint status (true=no errors)"),
+    top_k: int = Query(10, ge=1, le=50, description="Max results to return"),
+    _: bool = Depends(require_admin_token),
+) -> PineMatchResponse:
+    """
+    Search Pine scripts with semantic matching.
+
+    Searches across:
+    - Script title and path
+    - Input parameter names
+    - Chunk content (if indexed)
+
+    Returns ranked results with:
+    - Match score (0-1)
+    - Match reasons (why it matched)
+    - Relevant snippet
+    - Input parameter preview
+    """
+    import json
+    import re
+
+    from app.routers.ingest import _db_pool
+
+    if _db_pool is None:
+        raise HTTPException(503, "Database connection not available")
+
+    # Normalize query
+    query_lower = q.lower().strip()
+    query_terms = [t for t in re.split(r'\W+', query_lower) if t]
+
+    filters_applied: dict = {"q": q}
+    if symbol:
+        filters_applied["symbol"] = symbol.upper()
+    if script_type:
+        filters_applied["script_type"] = script_type
+    if lint_ok is not None:
+        filters_applied["lint_ok"] = lint_ok
+
+    # Build SQL query
+    params: list = [workspace_id]
+    param_idx = 1
+
+    # Get all pine scripts with their chunks aggregated
+    sql = """
+        WITH script_data AS (
+            SELECT
+                d.id,
+                d.canonical_url,
+                d.title,
+                d.pine_metadata,
+                d.status,
+                string_agg(c.content, ' ') as all_content,
+                array_agg(DISTINCT s) FILTER (WHERE s IS NOT NULL) as symbols
+            FROM documents d
+            LEFT JOIN chunks c ON c.doc_id = d.id
+            LEFT JOIN LATERAL unnest(c.symbols) AS s ON true
+            WHERE d.workspace_id = $1
+              AND d.source_type = 'pine_script'
+              AND d.status = 'active'
+    """
+
+    # Symbol filter
+    if symbol:
+        param_idx += 1
+        sql += f"""
+            AND EXISTS (
+                SELECT 1 FROM chunks c2
+                WHERE c2.doc_id = d.id
+                AND ${param_idx} = ANY(c2.symbols)
+            )
+        """
+        params.append(symbol.upper())
+
+    sql += """
+            GROUP BY d.id
+        )
+        SELECT * FROM script_data
+    """
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(sql, *params)
+
+    # Score and rank results
+    results: list[PineMatchResult] = []
+    total_searched = len(rows)
+
+    for row in rows:
+        doc_dict = dict(row)
+        raw_metadata = doc_dict.get("pine_metadata")
+        if isinstance(raw_metadata, str):
+            metadata = json.loads(raw_metadata)
+        else:
+            metadata = raw_metadata or {}
+
+        # Apply filters
+        if script_type and metadata.get("script_type") != script_type:
+            continue
+
+        lint_summary = metadata.get("lint_summary", {})
+        has_lint_errors = lint_summary.get("errors", 0) > 0
+        if lint_ok is True and has_lint_errors:
+            continue
+        if lint_ok is False and not has_lint_errors:
+            continue
+
+        # Extract searchable fields
+        rel_path = metadata.get("rel_path") or _extract_rel_path(doc_dict["canonical_url"])
+        title = doc_dict.get("title") or Path(rel_path).name
+        inputs = metadata.get("inputs", [])
+        input_names = [inp.get("name", "") for inp in inputs]
+        all_content = doc_dict.get("all_content") or ""
+
+        # Calculate match score
+        score = 0.0
+        match_reasons: list[str] = []
+        snippet: Optional[str] = None
+
+        # Title/path match (highest weight)
+        title_lower = title.lower()
+        path_lower = rel_path.lower()
+        for term in query_terms:
+            if term in title_lower:
+                score += 0.4
+                match_reasons.append(f"Title contains '{term}'")
+            if term in path_lower and f"Title contains '{term}'" not in match_reasons:
+                score += 0.3
+                match_reasons.append(f"Path contains '{term}'")
+
+        # Input name match
+        for inp_name in input_names:
+            inp_lower = inp_name.lower()
+            for term in query_terms:
+                if term in inp_lower:
+                    score += 0.2
+                    if f"Input '{inp_name}'" not in str(match_reasons):
+                        match_reasons.append(f"Input '{inp_name}' matches")
+                    break
+
+        # Content match (lower weight)
+        content_lower = all_content.lower()
+        for term in query_terms:
+            if term in content_lower:
+                score += 0.1
+                if "Content matches" not in match_reasons:
+                    match_reasons.append("Content matches")
+                    # Extract snippet around match
+                    idx = content_lower.find(term)
+                    if idx >= 0:
+                        start = max(0, idx - 50)
+                        end = min(len(all_content), idx + len(term) + 50)
+                        snippet = "..." + all_content[start:end].strip() + "..."
+
+        # Script type bonus
+        if script_type and metadata.get("script_type") == script_type:
+            score += 0.1
+            match_reasons.append(f"Type is '{script_type}'")
+
+        # Normalize score to 0-1
+        score = min(1.0, score)
+
+        # Skip if no match
+        if score == 0:
+            continue
+
+        results.append(PineMatchResult(
+            id=doc_dict["id"],
+            rel_path=rel_path,
+            title=title,
+            script_type=metadata.get("script_type"),
+            pine_version=metadata.get("pine_version"),
+            score=round(score, 3),
+            match_reasons=match_reasons[:3],  # Top 3 reasons
+            snippet=snippet,
+            inputs_preview=input_names[:5],  # First 5 inputs
+            lint_ok=not has_lint_errors,
+        ))
+
+    # Sort by score descending
+    results.sort(key=lambda r: r.score, reverse=True)
+
+    # Limit results
+    results = results[:top_k]
+
+    return PineMatchResponse(
+        results=results,
+        total_searched=total_searched,
+        query=q,
+        filters_applied=filters_applied,
     )
 
 
