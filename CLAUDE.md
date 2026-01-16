@@ -354,6 +354,8 @@ GET /sources/pine/scripts/<uuid>?workspace_id=<uuid>&include_chunks=true&include
 - `GET /admin/ops/snapshot` - Operational health snapshot for go-live
 - `GET /admin/kb/*` - KB inspection and curation endpoints
 - `GET /admin/backtests/*` - Backtest admin UI
+- `GET /admin/coverage/weak` - List weak coverage runs for triage
+- `PATCH /admin/coverage/weak/{run_id}` - Update coverage status (open/acknowledged/resolved)
 
 **Execution** (requires `X-Admin-Token` header):
 - `POST /execute/intents` - Execute trade intent (paper mode only)
@@ -434,6 +436,52 @@ POST /execute/intents
 ```
 
 Returns 409 Conflict if intent already executed.
+
+## Coverage Triage Workflow
+
+Admin endpoints for managing coverage gaps in the cockpit UI.
+
+**Architecture** (`app/admin/coverage.py`, `app/services/coverage_gap/repository.py`):
+```
+Match Run (weak_coverage=true)
+       │
+       ▼
+┌─────────────────┐
+│ Coverage Status │ ──► open → acknowledged → resolved
+└─────────────────┘
+       │
+       ▼
+   Priority Score (deterministic ranking)
+```
+
+**Status Lifecycle**:
+- `open` - New coverage gap, needs attention (default)
+- `acknowledged` - Someone is investigating
+- `resolved` - Gap addressed (strategy added, false positive, etc.)
+
+**Priority Score Formula** (higher = more urgent):
+| Component | Value | Condition |
+|-----------|-------|-----------|
+| Base | `0.5 - best_score` | Clamped to [0, 0.5] |
+| No results | +0.2 | `num_above_threshold == 0` |
+| NO_MATCHES | +0.15 | Reason code present |
+| NO_STRONG_MATCHES | +0.1 | Reason code present |
+| Recency | +0.05 | Created in last 24h |
+
+**Key Endpoints**:
+- `GET /admin/coverage/weak?workspace_id=...&status=open` - List weak coverage runs
+  - `status`: `open` (default), `acknowledged`, `resolved`, `all`
+  - `include_candidate_cards=true` (default) - Hydrate strategy cards
+  - Results sorted by `priority_score` descending
+- `PATCH /admin/coverage/weak/{run_id}` - Update status
+  - Body: `{"status": "acknowledged|resolved", "note": "optional resolution note"}`
+  - Tracks `acknowledged_at/by`, `resolved_at/by`, `resolution_note`
+
+**Response Fields**:
+- `coverage_status` - Current triage status
+- `priority_score` - Computed ranking score (0.0 to ~1.0)
+- `strategy_cards_by_id` - Hydrated candidate strategy cards
+- `missing_strategy_ids` - IDs of deleted/archived strategies
 
 ## Strategy Runner
 
