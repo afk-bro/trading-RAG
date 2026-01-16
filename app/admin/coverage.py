@@ -62,6 +62,14 @@ class WeakCoverageResponse(BaseModel):
         None,
         description="Hydrated strategy cards keyed by UUID (include_candidate_cards=true)",
     )
+    missing_strategy_ids: list[UUID] = Field(
+        default_factory=list,
+        description="Strategy IDs referenced but not found (deleted/archived)",
+    )
+
+
+# Max unique strategy IDs to hydrate (prevents payload bloat)
+MAX_HYDRATION_IDS = 300
 
 
 @router.get(
@@ -77,7 +85,7 @@ async def list_weak_coverage(
         None, description="ISO timestamp filter (e.g., 2026-01-01T00:00:00Z)"
     ),
     include_candidate_cards: bool = Query(
-        False, description="Include hydrated strategy cards in response"
+        True, description="Include hydrated strategy cards (default: true for cockpit)"
     ),
     _: bool = Depends(require_admin_token),
 ) -> WeakCoverageResponse:
@@ -89,12 +97,15 @@ async def list_weak_coverage(
     - script_type (from filters)
     - weak_reason_codes[]
     - best_score, num_above_threshold
-    - candidate_strategy_ids[] (point-in-time snapshot)
+    - candidate_strategy_ids[] (point-in-time snapshot, ordered by recommendation)
     - query_preview (first ~120 chars)
     - source_ref (youtube:ID or doc:UUID)
 
-    When include_candidate_cards=true, also returns:
+    By default (include_candidate_cards=true), also returns:
     - strategy_cards_by_id: {uuid: StrategyCard} for all candidates across items
+    - missing_strategy_ids: IDs referenced but not found (deleted/archived)
+
+    Hydration is capped at 300 unique IDs to prevent payload bloat.
     """
     pool = _get_pool()
 
@@ -114,15 +125,23 @@ async def list_weak_coverage(
 
     response_items = [WeakCoverageItem(**item) for item in items]
 
-    # Optionally hydrate strategy cards
-    strategy_cards_by_id = None
+    # Hydrate strategy cards (default on for cockpit)
+    strategy_cards_by_id: Optional[dict[str, StrategyCard]] = None
+    missing_strategy_ids: list[UUID] = []
+
     if include_candidate_cards and items:
-        # Collect all unique candidate IDs across all items
-        all_candidate_ids: set[UUID] = set()
+        # Collect all unique candidate IDs across all items (preserve order for first N)
+        all_candidate_ids: list[UUID] = []
+        seen: set[UUID] = set()
         for item in items:
             for cid in item.get("candidate_strategy_ids", []):
-                if cid:
-                    all_candidate_ids.add(cid)
+                if cid and cid not in seen:
+                    seen.add(cid)
+                    all_candidate_ids.append(cid)
+                    if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
+                        break
+            if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
+                break
 
         if all_candidate_ids:
             try:
@@ -136,7 +155,7 @@ async def list_weak_coverage(
 
                 strategy_repo = StrategyRepository(pool)
                 cards_dict = await strategy_repo.get_cards_by_ids(
-                    workspace_id, list(all_candidate_ids)
+                    workspace_id, all_candidate_ids
                 )
 
                 # Convert to schema
@@ -160,10 +179,17 @@ async def list_weak_coverage(
                         max_drawdown=card.get("max_drawdown"),
                     )
 
+                # Track missing IDs (deleted/archived strategies)
+                found_ids = set(cards_dict.keys())
+                for cid in all_candidate_ids:
+                    if str(cid) not in found_ids:
+                        missing_strategy_ids.append(cid)
+
                 logger.info(
                     "hydrated_candidate_cards",
                     requested=len(all_candidate_ids),
                     found=len(strategy_cards_by_id),
+                    missing=len(missing_strategy_ids),
                 )
             except Exception as e:
                 logger.warning("candidate_card_hydration_failed", error=str(e))
@@ -173,4 +199,5 @@ async def list_weak_coverage(
         items=response_items,
         count=len(response_items),
         strategy_cards_by_id=strategy_cards_by_id,
+        missing_strategy_ids=missing_strategy_ids,
     )
