@@ -1649,6 +1649,7 @@ class YouTubeMatchPineResponse(BaseModel):
 
     # KB status
     in_knowledge_base: bool = Field(..., description="Whether video is in KB")
+    source_id: Optional[UUID] = Field(None, description="Document ID if in KB")
     transcript_source: Literal["kb", "transient"] = Field(
         ..., description="Where transcript came from"
     )
@@ -1673,3 +1674,94 @@ class YouTubeMatchPineResponse(BaseModel):
     ingest_request_hint: Optional[IngestRequestHint] = Field(
         None, description="Hint for ingesting video"
     )
+
+
+# =============================================================================
+# Generic Sources Listing
+# =============================================================================
+
+
+class SourceListItem(BaseModel):
+    """Single item in sources list response."""
+
+    id: UUID = Field(..., description="Document ID")
+    source_type: str = Field(..., description="Source type (youtube, pdf, pine_script)")
+    canonical_url: str = Field(..., description="Canonical URL")
+    title: Optional[str] = Field(None, description="Document title")
+    author: Optional[str] = Field(None, description="Author name")
+    channel: Optional[str] = Field(None, description="Channel name (for YouTube)")
+    video_id: Optional[str] = Field(None, description="YouTube video ID")
+    status: str = Field(..., description="Document status")
+    chunk_count: int = Field(..., description="Number of chunks")
+    version: int = Field(default=1, description="Document version")
+    created_at: datetime = Field(..., description="Created timestamp")
+    updated_at: datetime = Field(..., description="Updated timestamp")
+    last_indexed_at: Optional[datetime] = Field(
+        None, description="Last indexed timestamp"
+    )
+
+
+class SourceListResponse(BaseModel):
+    """Response for sources list endpoint."""
+
+    items: list[SourceListItem] = Field(
+        default_factory=list, description="Source items"
+    )
+    total: int = Field(..., description="Total count")
+    limit: int = Field(..., description="Items per page")
+    offset: int = Field(..., description="Current offset")
+    has_more: bool = Field(..., description="More items available")
+    next_offset: Optional[int] = Field(None, description="Next page offset")
+
+
+class SourceChunkItem(BaseModel):
+    """Chunk item in source detail response."""
+
+    id: str = Field(..., description="Chunk ID")
+    content: str = Field(..., description="Chunk content")
+    chunk_index: int = Field(..., description="Chunk position")
+    token_count: Optional[int] = Field(None, description="Token count")
+    time_start_secs: Optional[int] = Field(None, description="Start time (video)")
+    time_end_secs: Optional[int] = Field(None, description="End time (video)")
+    page_start: Optional[int] = Field(None, description="Start page (PDF)")
+    page_end: Optional[int] = Field(None, description="End page (PDF)")
+    symbols: list[str] = Field(default_factory=list, description="Ticker symbols")
+    entities: list[str] = Field(default_factory=list, description="Named entities")
+    topics: list[str] = Field(default_factory=list, description="Topics")
+
+
+class SourceDetailResponse(BaseModel):
+    """Response for source detail endpoint."""
+
+    # Core fields
+    id: UUID = Field(..., description="Document ID")
+    source_type: str = Field(..., description="Source type")
+    canonical_url: str = Field(..., description="Canonical URL")
+    source_url: Optional[str] = Field(None, description="Original source URL")
+    title: Optional[str] = Field(None, description="Document title")
+    author: Optional[str] = Field(None, description="Author name")
+    channel: Optional[str] = Field(None, description="Channel name (YouTube)")
+    video_id: Optional[str] = Field(None, description="YouTube video ID")
+    playlist_id: Optional[str] = Field(None, description="YouTube playlist ID")
+    published_at: Optional[datetime] = Field(None, description="Publication date")
+    language: Optional[str] = Field(None, description="Content language")
+    duration_secs: Optional[int] = Field(None, description="Duration (video)")
+    content_hash: str = Field(..., description="SHA-256 content hash")
+
+    # Status
+    status: str = Field(..., description="Document status")
+    version: int = Field(default=1, description="Document version")
+    chunk_count: int = Field(..., description="Number of chunks")
+
+    # Timestamps
+    created_at: datetime = Field(..., description="Created timestamp")
+    updated_at: datetime = Field(..., description="Updated timestamp")
+    last_indexed_at: Optional[datetime] = Field(
+        None, description="Last indexed timestamp"
+    )
+
+    # Optional extras
+    pine_metadata: Optional[dict] = Field(None, description="Pine script metadata")
+    chunks: Optional[list[dict]] = Field(None, description="Chunk content")
+    chunks_total: int = Field(default=0, description="Total chunks")
+    chunks_has_more: bool = Field(default=False, description="More chunks available")

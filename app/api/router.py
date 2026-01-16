@@ -17,6 +17,7 @@ from app.routers import (
     pine,
     query,
     reembed,
+    sources,
     testing,
     youtube,
     youtube_pine,
@@ -38,6 +39,7 @@ api_router.include_router(
 )
 api_router.include_router(pdf.router, tags=["PDF"])
 api_router.include_router(pine.router, prefix="/sources/pine", tags=["Pine Script"])
+api_router.include_router(sources.router, prefix="/sources", tags=["Sources"])
 api_router.include_router(query.router, tags=["Query"])
 api_router.include_router(reembed.router, tags=["Re-embed"])
 api_router.include_router(jobs.router, tags=["Jobs"])
