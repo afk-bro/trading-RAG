@@ -413,6 +413,26 @@ class MatchRunRepository:
             """
             params = [run_id, workspace_id, status, now, updated_by, note]
         elif status == "resolved":
+            # Guard: cannot resolve without candidates OR resolution note
+            if not note:
+                async with self.pool.acquire() as conn:
+                    existing = await conn.fetchrow(
+                        """
+                        SELECT candidate_strategy_ids
+                        FROM match_runs
+                        WHERE id = $1 AND workspace_id = $2
+                        """,
+                        run_id,
+                        workspace_id,
+                    )
+                    if not existing:
+                        return None  # Not found, let caller handle
+                    candidates = existing["candidate_strategy_ids"] or []
+                    if not candidates:
+                        raise ValueError(
+                            "Cannot resolve without candidate_strategy_ids or resolution_note"
+                        )
+
             query = """
                 UPDATE match_runs
                 SET coverage_status = $3::coverage_status,
@@ -454,3 +474,64 @@ class MatchRunRepository:
             return dict(row)
 
         return None
+
+    async def auto_resolve_by_intent_signature(
+        self,
+        workspace_id: UUID,
+        intent_signature: str,
+        exclude_run_id: Optional[UUID] = None,
+    ) -> int:
+        """
+        Auto-resolve open/acknowledged runs with same intent_signature.
+
+        Called when a new match_run succeeds (weak=false) to close out
+        previous coverage gaps that have now been addressed.
+
+        Args:
+            workspace_id: Workspace for scoping
+            intent_signature: The intent signature that succeeded
+            exclude_run_id: Optionally exclude the current run from auto-resolve
+
+        Returns:
+            Number of runs auto-resolved
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+
+        query = """
+            UPDATE match_runs
+            SET coverage_status = 'resolved'::coverage_status,
+                resolved_at = $3,
+                resolved_by = 'system',
+                resolution_note = 'Auto-resolved by successful match'
+            WHERE workspace_id = $1
+              AND intent_signature = $2
+              AND coverage_status IN ('open', 'acknowledged')
+              AND weak_coverage = true
+        """
+        params = [workspace_id, intent_signature, now]
+
+        # Optionally exclude the current run
+        if exclude_run_id:
+            query = query.replace(
+                "AND weak_coverage = true",
+                "AND weak_coverage = true AND id != $4",
+            )
+            params.append(exclude_run_id)
+
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(query, *params)
+
+        # Parse "UPDATE N" result
+        count = int(result.split()[-1]) if result else 0
+
+        if count > 0:
+            logger.info(
+                "auto_resolved_coverage_gaps",
+                workspace_id=str(workspace_id),
+                intent_signature=intent_signature[:16] + "...",
+                count=count,
+            )
+
+        return count

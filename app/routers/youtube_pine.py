@@ -349,6 +349,23 @@ async def youtube_match_pine(
                 candidate_strategy_ids=candidate_ids,
                 candidate_scores=candidate_scores_dict,
             )
+
+            # Auto-resolve previous weak coverage runs with same intent
+            if not coverage_assessment.weak:
+                try:
+                    resolved_count = await match_run_repo.auto_resolve_by_intent_signature(
+                        workspace_id=request.workspace_id,
+                        intent_signature=intent_sig,
+                    )
+                    if resolved_count > 0:
+                        log.info(
+                            "auto_resolved_previous_coverage_gaps",
+                            intent_signature=intent_sig[:16] + "...",
+                            resolved_count=resolved_count,
+                        )
+                except Exception as resolve_err:
+                    log.warning("auto_resolve_failed", error=str(resolve_err))
+
         except Exception as e:
             # Log but don't fail the request
             log.warning("match_run_record_failed", error=str(e))
