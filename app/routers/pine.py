@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
 from app.schemas import (
+    PineBuildStats,
     PineChunkItem,
     PineImportSchema,
     PineIngestRequest,
@@ -18,12 +19,14 @@ from app.schemas import (
     PineInputSchema,
     PineLintFinding,
     PineLintSummary,
+    PineRebuildAndIngestRequest,
+    PineRebuildAndIngestResponse,
     PineScriptDetailResponse,
     PineScriptListItem,
     PineScriptListResponse,
     PineScriptLookupResponse,
 )
-from app.services.pine import PineIngestService, load_registry
+from app.services.pine import PineIngestService, build_and_write_registry, load_registry
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -297,6 +300,194 @@ async def ingest_pine_registry(
         scripts_skipped=result.scripts_skipped,
         scripts_failed=result.scripts_failed,
         chunks_added=result.total_chunks,
+        errors=errors,
+        ingest_run_id=ingest_run_id,
+    )
+
+
+@router.post(
+    "/rebuild-and-ingest",
+    response_model=PineRebuildAndIngestResponse,
+    responses={
+        200: {"description": "Rebuild and ingest completed (check status field)"},
+        400: {"description": "Invalid path or build error"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Invalid admin token or path outside allowlist"},
+        404: {"description": "Scripts directory not found"},
+    },
+    summary="Rebuild registry and ingest (admin)",
+    description="Scan directory for Pine files, build registry, and ingest into RAG. "
+    "Single admin action for updating Pine knowledge base.",
+)
+async def rebuild_and_ingest_pine(
+    request: PineRebuildAndIngestRequest,
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+) -> PineRebuildAndIngestResponse:
+    """
+    Rebuild Pine registry from source files and ingest into RAG.
+
+    This combines:
+    1. Scanning scripts_root for .pine files
+    2. Building registry and lint report
+    3. Ingesting scripts into the workspace
+
+    All paths must be within DATA_DIR for security.
+    """
+    import time
+
+    ingest_run_id = f"pine-rebuild-{uuid4().hex[:8]}"
+    log = logger.bind(
+        ingest_run_id=ingest_run_id,
+        workspace_id=str(request.workspace_id),
+        dry_run=request.dry_run,
+    )
+    start_time = time.monotonic()
+
+    # Validate scripts_root (must be directory within DATA_DIR)
+    scripts_root = validate_path(
+        request.scripts_root,
+        settings,
+        must_be_file=False,  # Directory
+    )
+
+    # Validate output_dir if provided
+    if request.output_dir:
+        output_dir = validate_path(
+            request.output_dir,
+            settings,
+            must_be_file=False,
+        )
+    else:
+        output_dir = scripts_root  # Default to same directory
+
+    log.info(
+        "pine_rebuild_started",
+        scripts_root=str(scripts_root),
+        output_dir=str(output_dir),
+    )
+
+    # Phase 1: Build registry
+    errors: list[str] = []
+    try:
+        build_result = build_and_write_registry(
+            root=scripts_root,
+            output_dir=output_dir,
+        )
+    except Exception as e:
+        log.error("registry_build_failed", error=str(e))
+        return PineRebuildAndIngestResponse(
+            status=PineIngestStatus.FAILED,
+            build=PineBuildStats(parse_errors=1),
+            errors=[f"Build failed: {e}"],
+            ingest_run_id=ingest_run_id,
+        )
+
+    build_stats = PineBuildStats(
+        files_scanned=build_result.files_scanned,
+        files_parsed=build_result.files_parsed,
+        parse_errors=build_result.parse_errors,
+        lint_errors=build_result.total_errors,
+        lint_warnings=build_result.total_warnings,
+        registry_path=str(build_result.registry_path) if build_result.registry_path else None,
+        lint_report_path=str(build_result.lint_report_path) if build_result.lint_report_path else None,
+    )
+
+    log.info(
+        "pine_build_completed",
+        files_scanned=build_stats.files_scanned,
+        files_parsed=build_stats.files_parsed,
+        parse_errors=build_stats.parse_errors,
+        lint_errors=build_stats.lint_errors,
+    )
+
+    # Check if build produced any scripts
+    if build_result.files_parsed == 0:
+        return PineRebuildAndIngestResponse(
+            status=PineIngestStatus.SUCCESS if build_result.files_scanned == 0 else PineIngestStatus.FAILED,
+            build=build_stats,
+            scripts_processed=0,
+            errors=["No .pine files found"] if build_result.files_scanned == 0 else ["All files failed to parse"],
+            ingest_run_id=ingest_run_id,
+        )
+
+    # Dry run - return build stats only
+    if request.dry_run:
+        return PineRebuildAndIngestResponse(
+            status=PineIngestStatus.DRY_RUN,
+            build=build_stats,
+            scripts_processed=len(build_result.registry.scripts),
+            ingest_run_id=ingest_run_id,
+        )
+
+    # Phase 2: Ingest from built registry
+    from app.routers.ingest import _db_pool, _qdrant_client
+
+    if _db_pool is None:
+        raise HTTPException(503, "Database connection not available")
+    if _qdrant_client is None:
+        raise HTTPException(503, "Qdrant connection not available")
+
+    service = PineIngestService(_db_pool, _qdrant_client, settings)
+
+    try:
+        ingest_result = await service.ingest_from_registry(
+            workspace_id=request.workspace_id,
+            registry_path=build_result.registry_path,
+            source_root=scripts_root if request.include_source else None,
+            lint_report_path=build_result.lint_report_path,
+            include_source=request.include_source,
+            max_source_lines=request.max_source_lines,
+            skip_lint_errors=request.skip_lint_errors,
+            update_existing=request.update_existing,
+        )
+    except Exception as e:
+        log.error("ingest_failed", error=str(e))
+        return PineRebuildAndIngestResponse(
+            status=PineIngestStatus.FAILED,
+            build=build_stats,
+            scripts_processed=len(build_result.registry.scripts),
+            errors=[f"Ingest failed: {e}"],
+            ingest_run_id=ingest_run_id,
+        )
+
+    # Determine final status
+    if (
+        ingest_result.scripts_failed == ingest_result.scripts_processed
+        and ingest_result.scripts_processed > 0
+    ):
+        status = PineIngestStatus.FAILED
+    elif ingest_result.scripts_failed > 0:
+        status = PineIngestStatus.PARTIAL
+    else:
+        status = PineIngestStatus.SUCCESS
+
+    # Collect errors
+    errors = [
+        f"{r.rel_path}: {r.error}" for r in ingest_result.results if not r.success and r.error
+    ]
+
+    scripts_already_indexed = sum(1 for r in ingest_result.results if r.status == "exists")
+
+    elapsed_ms = int((time.monotonic() - start_time) * 1000)
+    log.info(
+        "pine_rebuild_and_ingest_completed",
+        status=status.value,
+        scripts_processed=ingest_result.scripts_processed,
+        scripts_indexed=ingest_result.scripts_indexed,
+        scripts_already_indexed=scripts_already_indexed,
+        elapsed_ms=elapsed_ms,
+    )
+
+    return PineRebuildAndIngestResponse(
+        status=status,
+        build=build_stats,
+        scripts_processed=ingest_result.scripts_processed,
+        scripts_indexed=ingest_result.scripts_indexed,
+        scripts_already_indexed=scripts_already_indexed,
+        scripts_skipped=ingest_result.scripts_skipped,
+        scripts_failed=ingest_result.scripts_failed,
+        chunks_added=ingest_result.total_chunks,
         errors=errors,
         ingest_run_id=ingest_run_id,
     )

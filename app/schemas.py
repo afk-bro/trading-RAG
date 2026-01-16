@@ -1502,3 +1502,53 @@ class PineScriptLookupResponse(BaseModel):
     status: PineDocStatus = Field(default="active", description="Document status")
     script_type: Optional[PineScriptType] = Field(None, description="Script type")
     pine_version: Optional[PineVersionType] = Field(None, description="Pine version")
+
+
+class PineRebuildAndIngestRequest(BaseModel):
+    """Request for rebuild-and-ingest endpoint."""
+
+    workspace_id: UUID = Field(..., description="Target workspace ID")
+    scripts_root: str = Field(..., description="Root directory containing .pine files")
+    output_dir: Optional[str] = Field(
+        None, description="Output directory for registry files (defaults to scripts_root)"
+    )
+
+    # Ingest flags (passthrough)
+    include_source: bool = Field(default=True, description="Include source code preview")
+    max_source_lines: int = Field(default=100, ge=0, le=500, description="Max source lines")
+    skip_lint_errors: bool = Field(default=False, description="Skip scripts with lint errors")
+    update_existing: bool = Field(default=False, description="Update if sha256 changed")
+
+    dry_run: bool = Field(default=False, description="Validate only, no DB changes")
+
+
+class PineBuildStats(BaseModel):
+    """Statistics from registry build phase."""
+
+    files_scanned: int = Field(default=0, description="Files found")
+    files_parsed: int = Field(default=0, description="Files successfully parsed")
+    parse_errors: int = Field(default=0, description="Files with parse errors")
+    lint_errors: int = Field(default=0, description="Total lint errors across all files")
+    lint_warnings: int = Field(default=0, description="Total lint warnings across all files")
+    registry_path: Optional[str] = Field(None, description="Path to generated registry")
+    lint_report_path: Optional[str] = Field(None, description="Path to generated lint report")
+
+
+class PineRebuildAndIngestResponse(BaseModel):
+    """Response for rebuild-and-ingest endpoint."""
+
+    status: PineIngestStatus = Field(..., description="Overall status")
+
+    # Build phase
+    build: PineBuildStats = Field(default_factory=PineBuildStats, description="Build statistics")
+
+    # Ingest phase (mirrors PineIngestResponse)
+    scripts_processed: int = Field(default=0, description="Total scripts in registry")
+    scripts_indexed: int = Field(default=0, description="Scripts newly indexed")
+    scripts_already_indexed: int = Field(default=0, description="Scripts unchanged")
+    scripts_skipped: int = Field(default=0, description="Scripts skipped (lint errors, etc.)")
+    scripts_failed: int = Field(default=0, description="Scripts that failed to ingest")
+    chunks_added: int = Field(default=0, description="New chunks created")
+
+    errors: list[str] = Field(default_factory=list, description="Error messages")
+    ingest_run_id: Optional[str] = Field(None, description="Run ID for log correlation")
