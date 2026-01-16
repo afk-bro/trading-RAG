@@ -27,6 +27,7 @@ from app.schemas import (
     PineScriptListItem,
     PineScriptListResponse,
     PineScriptLookupResponse,
+    PineScriptType,
 )
 from app.services.pine import PineIngestService, build_and_write_registry, load_registry
 
@@ -706,7 +707,7 @@ async def match_pine_scripts(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     q: str = Query(..., min_length=1, description="Search query"),
     symbol: Optional[str] = Query(None, description="Filter by ticker symbol"),
-    script_type: Optional[str] = Query(None, description="Filter by script type (strategy/indicator/library)"),
+    script_type: Optional[PineScriptType] = Query(None, description="Filter by script type (strategy/indicator/library)"),
     lint_ok: Optional[bool] = Query(None, description="Filter by lint status (true=no errors)"),
     top_k: int = Query(10, ge=1, le=50, description="Max results to return"),
     _: bool = Depends(require_admin_token),
@@ -884,8 +885,8 @@ async def match_pine_scripts(
             lint_ok=not has_lint_errors,
         ))
 
-    # Sort by score descending
-    results.sort(key=lambda r: r.score, reverse=True)
+    # Sort by score descending, then id ascending for deterministic tie-breaking
+    results.sort(key=lambda r: (-r.score, str(r.id)))
 
     # Limit results
     results = results[:top_k]

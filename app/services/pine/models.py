@@ -211,11 +211,16 @@ class LintFinding:
     line: Optional[int] = None
     column: Optional[int] = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, max_message_len: int = 500) -> dict:
+        """Convert to dict with optional message truncation."""
+        msg = self.message
+        if len(msg) > max_message_len:
+            msg = msg[: max_message_len - 3] + "..."
+
         d: dict[str, Any] = {
             "severity": self.severity.value,
             "code": self.code,
-            "message": self.message,
+            "message": msg,
         }
         if self.line is not None:
             d["line"] = self.line
