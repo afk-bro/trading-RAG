@@ -314,6 +314,21 @@ async def youtube_match_pine(
     # Record match run for analytics (async, don't block response)
     if _db_pool is not None:
         try:
+            # Build candidate data for persistence
+            candidate_ids = None
+            candidate_scores_dict = None
+            if candidate_strategies:
+                candidate_ids = [
+                    UUID(c["strategy_id"]) for c in candidate_strategies
+                ]
+                candidate_scores_dict = {
+                    c["strategy_id"]: {
+                        "score": c["score"],
+                        "matched_tags": c["matched_tags"],
+                    }
+                    for c in candidate_strategies
+                }
+
             match_run_repo = MatchRunRepository(_db_pool)
             await match_run_repo.record_match_run(
                 workspace_id=request.workspace_id,
@@ -331,6 +346,8 @@ async def youtube_match_pine(
                 source_id=source_id,
                 video_id=video_id,
                 intent_json=intent.model_dump(),
+                candidate_strategy_ids=candidate_ids,
+                candidate_scores=candidate_scores_dict,
             )
         except Exception as e:
             # Log but don't fail the request

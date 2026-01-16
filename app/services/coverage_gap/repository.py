@@ -38,9 +38,15 @@ class MatchRunRepository:
         source_id: Optional[UUID] = None,
         video_id: Optional[str] = None,
         intent_json: Optional[dict[str, Any]] = None,
+        candidate_strategy_ids: Optional[list[UUID]] = None,
+        candidate_scores: Optional[dict[str, Any]] = None,
     ) -> UUID:
         """
         Record a match run for analytics.
+
+        Args:
+            candidate_strategy_ids: Strategy IDs with tag overlap (point-in-time)
+            candidate_scores: Detailed scores {strategy_id: {score, matched_tags}}
 
         Returns:
             Created match_run ID
@@ -50,9 +56,11 @@ class MatchRunRepository:
                 workspace_id, source_type, source_id, video_id,
                 intent_signature, intent_json, query_used, filters_applied,
                 top_k, total_searched, best_score, avg_top_k_score,
-                num_above_threshold, weak_coverage, reason_codes
+                num_above_threshold, weak_coverage, reason_codes,
+                candidate_strategy_ids, candidate_scores
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                $16, $17
             )
             RETURNING id
         """
@@ -75,6 +83,8 @@ class MatchRunRepository:
                 num_above_threshold,
                 weak_coverage,
                 reason_codes,
+                candidate_strategy_ids or [],
+                json.dumps(candidate_scores) if candidate_scores else None,
             )
             match_run_id = row["id"]
 
@@ -84,6 +94,7 @@ class MatchRunRepository:
                 workspace_id=str(workspace_id),
                 weak_coverage=weak_coverage,
                 reason_codes=reason_codes,
+                candidate_count=len(candidate_strategy_ids) if candidate_strategy_ids else 0,
             )
 
             return match_run_id
@@ -186,3 +197,92 @@ class MatchRunRepository:
             rows = await conn.fetch(query, workspace_id, limit)
 
         return [dict(row) for row in rows]
+
+    async def list_weak_coverage_for_cockpit(
+        self,
+        workspace_id: UUID,
+        limit: int = 50,
+        since: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        List weak coverage runs shaped for cockpit UI.
+
+        Returns rows with:
+            run_id, created_at, intent_signature, script_type,
+            weak_reason_codes[], best_score, num_above_threshold,
+            candidate_strategy_ids[], query_preview, source_ref
+
+        Args:
+            workspace_id: Workspace to query
+            limit: Max results (default 50)
+            since: ISO timestamp filter (e.g., "2026-01-01T00:00:00Z")
+
+        Returns:
+            List of cockpit-ready match run dicts
+        """
+        query = """
+            SELECT
+                id as run_id,
+                created_at,
+                intent_signature,
+                filters_applied->>'script_type' as script_type,
+                reason_codes as weak_reason_codes,
+                best_score,
+                num_above_threshold,
+                candidate_strategy_ids,
+                candidate_scores,
+                LEFT(query_used, 120) as query_preview,
+                source_type,
+                source_id,
+                video_id
+            FROM match_runs
+            WHERE workspace_id = $1
+              AND weak_coverage = true
+        """
+        params: list[Any] = [workspace_id]
+        param_idx = 2
+
+        if since:
+            query += f" AND created_at >= ${param_idx}::timestamptz"
+            params.append(since)
+            param_idx += 1
+
+        query += f" ORDER BY created_at DESC LIMIT ${param_idx}"
+        params.append(limit)
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        results = []
+        for row in rows:
+            d = dict(row)
+            # Build source_ref for UI display
+            source_ref = None
+            if d.get("source_type") == "youtube" and d.get("video_id"):
+                source_ref = f"youtube:{d['video_id']}"
+            elif d.get("source_id"):
+                source_ref = f"doc:{d['source_id']}"
+
+            # Parse candidate_scores if it's a string
+            candidate_scores = d.get("candidate_scores")
+            if isinstance(candidate_scores, str):
+                try:
+                    candidate_scores = json.loads(candidate_scores)
+                except json.JSONDecodeError:
+                    candidate_scores = None
+
+            results.append({
+                "run_id": d["run_id"],
+                "created_at": d["created_at"].isoformat() if d["created_at"] else None,
+                "intent_signature": d["intent_signature"],
+                "script_type": d["script_type"],
+                "weak_reason_codes": d["weak_reason_codes"] or [],
+                "best_score": d["best_score"],
+                "num_above_threshold": d["num_above_threshold"],
+                "candidate_strategy_ids": d["candidate_strategy_ids"] or [],
+                "candidate_scores": candidate_scores,
+                "query_preview": d["query_preview"],
+                "source_ref": source_ref,
+            })
+
+        return results
