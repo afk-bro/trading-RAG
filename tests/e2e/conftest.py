@@ -212,3 +212,59 @@ def api_request_no_auth(playwright, base_url: str):
     )
     yield context
     context.dispose()
+
+
+# =============================================================================
+# Seeded Data Fixtures
+# =============================================================================
+
+
+@pytest.fixture(scope="function")
+def seeded_cockpit(api_request, admin_page: Page, base_url: str):
+    """
+    Seed coverage fixture data and return page ready for testing.
+
+    Seeds:
+    - 5 strategies with varied tags and backtest status
+    - 8 match_runs with varied reason codes, candidates, triage status
+    - 1 match_run with missing strategy ID for warning test
+
+    Waits for seed to complete before navigating to cockpit.
+    """
+    # Seed fixture data (clear existing first)
+    response = api_request.post("/admin/coverage/seed?clear_existing=true")
+    assert response.status == 200, f"Seed failed: {response.text()}"
+
+    seed_data = response.json()
+    assert seed_data["status"] == "success"
+    assert seed_data["strategies_created"] == 5
+    assert seed_data["match_runs_created"] == 8
+
+    # Navigate to cockpit and wait for data to load
+    admin_page.goto(f"{base_url}/admin/coverage/cockpit?status=all")
+
+    # Wait for the API response that populates the page
+    # The cockpit template fetches items server-side, so wait for networkidle
+    admin_page.wait_for_load_state("networkidle")
+
+    # Wait for queue items to render
+    admin_page.locator(".queue-item").first.wait_for(state="visible", timeout=5000)
+
+    return {
+        "page": admin_page,
+        "seed_data": seed_data,
+        "workspace_id": seed_data["workspace_id"],
+    }
+
+
+def wait_for_cockpit_data(page: Page) -> None:
+    """
+    Wait for cockpit to finish loading data.
+
+    Use after navigation to ensure UI is ready for interaction.
+    """
+    page.wait_for_load_state("networkidle")
+    # Wait for either queue items OR empty state message
+    page.locator(".queue-item, .empty-state").first.wait_for(
+        state="visible", timeout=5000
+    )

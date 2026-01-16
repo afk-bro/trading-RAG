@@ -335,29 +335,32 @@ class TestCoverageCockpitTriageControls:
             save_btn = admin_page.locator("#save-btn")
             expect(save_btn).to_be_disabled()
 
-    @pytest.mark.xfail(reason="Dynamic JS timing - needs investigation")
-    def test_clicking_status_button_enables_save(self, admin_page: Page, base_url: str):
+    def test_clicking_status_button_enables_save(self, seeded_cockpit):
         """Clicking a status button enables the save button."""
-        admin_page.goto(f"{base_url}/admin/coverage/cockpit?status=open")
-        admin_page.wait_for_load_state("networkidle")
+        page = seeded_cockpit["page"]
 
-        items = admin_page.locator(".queue-item")
-        if items.count() > 0:
-            # First select an item to populate the detail panel
-            items.first.click()
+        # Navigate to open tab with seeded data
+        page.goto(page.url.replace("status=all", "status=open"))
+        page.wait_for_load_state("networkidle")
+        page.locator(".queue-item").first.wait_for(state="visible", timeout=5000)
 
-            # Wait for detail panel to render with triage controls
-            triage_section = admin_page.locator(".triage-controls")
-            triage_section.wait_for(state="visible", timeout=3000)
+        # First select an item to populate the detail panel
+        first_item = page.locator(".queue-item").first
+        expect(first_item).to_be_visible()
+        first_item.click()
 
-            # Click Acknowledge button (should be available for open items)
-            ack_btn = admin_page.locator(".triage-btn.btn-acknowledge:not([disabled])")
-            if ack_btn.count() > 0:
-                ack_btn.click()
+        # Wait for detail panel to render with triage controls
+        triage_section = page.locator(".triage-controls")
+        expect(triage_section).to_be_visible(timeout=3000)
 
-                # Save button should now be enabled (setStatus enables it)
-                save_btn = admin_page.locator("#save-btn")
-                expect(save_btn).to_be_enabled(timeout=2000)
+        # Click Acknowledge button (should be available for open items)
+        ack_btn = page.locator(".triage-btn.btn-acknowledge:not([disabled])")
+        expect(ack_btn).to_be_visible()
+        ack_btn.click()
+
+        # Save button should now be enabled (setStatus enables it)
+        save_btn = page.locator("#save-btn")
+        expect(save_btn).to_be_enabled(timeout=2000)
 
 
 # =============================================================================
@@ -583,25 +586,29 @@ class TestCoverageCockpitDeepLinks:
             )
             expect(admin_page.locator(".cockpit-container")).to_be_visible()
 
-    @pytest.mark.xfail(reason="Deep link JS selection timing - needs investigation")
-    def test_deep_link_selects_correct_item(self, admin_page: Page, base_url: str):
+    def test_deep_link_selects_correct_item(self, seeded_cockpit, base_url: str):
         """Deep link pre-selects the specified run in the queue."""
-        admin_page.goto(f"{base_url}/admin/coverage/cockpit?status=all")
+        page = seeded_cockpit["page"]
 
-        items = admin_page.locator(".queue-item")
-        if items.count() > 1:
-            # Get run_id from second item
-            second_item = items.nth(1)
-            run_id = second_item.get_attribute("data-run-id")
+        # We already have seeded data with 8 items in status=all
+        items = page.locator(".queue-item")
+        assert items.count() >= 2, "Need at least 2 items for deep link test"
 
-            # Navigate to deep link
-            admin_page.goto(f"{base_url}/admin/coverage/cockpit/{run_id}")
-            admin_page.wait_for_load_state("networkidle")
+        # Get run_id from second item
+        second_item = items.nth(1)
+        run_id = second_item.get_attribute("data-run-id")
+        assert run_id, "Second item should have data-run-id attribute"
 
-            # Wait for JS to run and select the item
-            # The selected item should have the 'selected' class after DOMContentLoaded
-            selected_item = admin_page.locator(f".queue-item.selected[data-run-id='{run_id}']")
-            expect(selected_item).to_be_visible(timeout=3000)
+        # Navigate to deep link
+        page.goto(f"{base_url}/admin/coverage/cockpit/{run_id}")
+        page.wait_for_load_state("networkidle")
+
+        # Wait for queue items to render first
+        page.locator(".queue-item").first.wait_for(state="visible", timeout=5000)
+
+        # The selected item should have the 'selected' class after DOMContentLoaded
+        selected_item = page.locator(f".queue-item.selected[data-run-id='{run_id}']")
+        expect(selected_item).to_be_visible(timeout=5000)
 
     def test_invalid_run_id_shows_graceful_error(self, admin_page: Page, base_url: str):
         """Invalid run_id shows graceful handling, not 500 error."""
@@ -667,3 +674,221 @@ class TestCoverageCockpitErrorHandling:
         # This test checks if the missing warning appears when applicable
         # Just verify page loads - missing warning only shows when strategies deleted
         expect(admin_page.locator("body")).not_to_contain_text("Internal Server Error")
+
+
+# =============================================================================
+# Populated State Tests (uses seeded fixture data)
+# =============================================================================
+
+
+class TestCoverageCockpitPopulatedState:
+    """Tests with seeded fixture data to verify populated UI state.
+
+    These tests use the seeded_cockpit fixture which:
+    - Seeds 5 strategies with varied tags/backtest status
+    - Seeds 8 match_runs with varied reason codes, candidates, triage status
+    - One match_run has a missing strategy ID (tests warning display)
+    """
+
+    def test_queue_has_eight_items_in_all_tab(self, seeded_cockpit):
+        """All tab shows all 8 seeded match_runs."""
+        page = seeded_cockpit["page"]
+        seed_data = seeded_cockpit["seed_data"]
+
+        # Verify we have the expected count
+        items = page.locator(".queue-item")
+        assert items.count() == seed_data["match_runs_created"], (
+            f"Expected {seed_data['match_runs_created']} items, got {items.count()}"
+        )
+
+    def test_open_tab_count_matches_fixture(self, seeded_cockpit, base_url: str):
+        """Open tab shows only open status items (6 seeded as open)."""
+        page = seeded_cockpit["page"]
+
+        # Navigate to Open tab
+        page.goto(f"{base_url}/admin/coverage/cockpit?status=open")
+        page.wait_for_load_state("networkidle")
+
+        # Wait for queue to render
+        page.locator(".queue-item, .empty-state").first.wait_for(
+            state="visible", timeout=5000
+        )
+
+        # Expect 6 open items (seed creates 1 ack, 1 resolved, 6 open)
+        items = page.locator(".queue-item")
+        assert items.count() == 6, f"Expected 6 open items, got {items.count()}"
+
+    def test_acknowledged_tab_count_matches_fixture(self, seeded_cockpit, base_url: str):
+        """Acknowledged tab shows only acknowledged items (1 seeded)."""
+        page = seeded_cockpit["page"]
+
+        # Navigate to Acknowledged tab
+        page.goto(f"{base_url}/admin/coverage/cockpit?status=acknowledged")
+        page.wait_for_load_state("networkidle")
+
+        # Wait for queue to render
+        page.locator(".queue-item, .empty-state").first.wait_for(
+            state="visible", timeout=5000
+        )
+
+        # Expect 1 acknowledged item
+        items = page.locator(".queue-item")
+        assert items.count() == 1, f"Expected 1 acknowledged item, got {items.count()}"
+
+    def test_resolved_tab_count_matches_fixture(self, seeded_cockpit, base_url: str):
+        """Resolved tab shows only resolved items (1 seeded)."""
+        page = seeded_cockpit["page"]
+
+        # Navigate to Resolved tab
+        page.goto(f"{base_url}/admin/coverage/cockpit?status=resolved")
+        page.wait_for_load_state("networkidle")
+
+        # Wait for queue to render
+        page.locator(".queue-item, .empty-state").first.wait_for(
+            state="visible", timeout=5000
+        )
+
+        # Expect 1 resolved item
+        items = page.locator(".queue-item")
+        assert items.count() == 1, f"Expected 1 resolved item, got {items.count()}"
+
+    def test_selecting_item_renders_detail_panel(self, seeded_cockpit):
+        """Clicking a queue item populates the detail panel with content."""
+        page = seeded_cockpit["page"]
+
+        # Click second item (first is auto-selected)
+        items = page.locator(".queue-item")
+        second_item = items.nth(1)
+        second_item.click()
+
+        # Verify detail panel has content
+        detail_content = page.locator("#detail-content")
+        expect(detail_content).to_be_visible()
+
+        # Check key sections are populated
+        expect(page.locator(".stats-grid")).to_be_visible()
+        expect(page.locator(".query-box")).to_be_visible()
+        expect(page.locator(".triage-controls")).to_be_visible()
+
+    def test_missing_strategy_warning_appears(self, seeded_cockpit):
+        """Warning appears for match_run with missing strategy ID."""
+        page = seeded_cockpit["page"]
+
+        # Find the item with missing strategy (look for warning indicator)
+        # The seed creates one item with a non-existent strategy_id
+        missing_warning = page.locator(".missing-strategies-warning")
+
+        # Click through items to find one with the warning
+        items = page.locator(".queue-item")
+        found_warning = False
+
+        for i in range(items.count()):
+            items.nth(i).click()
+            page.wait_for_timeout(300)  # Brief wait for detail to load
+
+            if missing_warning.count() > 0 and missing_warning.is_visible():
+                found_warning = True
+                expect(missing_warning).to_contain_text("missing")
+                break
+
+        assert found_warning, "Expected to find a match_run with missing strategy warning"
+
+    def test_triage_moves_item_between_tabs(self, seeded_cockpit, base_url: str):
+        """Triaging an item moves it to the appropriate tab."""
+        page = seeded_cockpit["page"]
+
+        # Start on Open tab
+        page.goto(f"{base_url}/admin/coverage/cockpit?status=open")
+        page.wait_for_load_state("networkidle")
+        page.locator(".queue-item").first.wait_for(state="visible", timeout=5000)
+
+        # Count open items before
+        open_count_before = page.locator(".queue-item").count()
+
+        # Select first item and acknowledge it
+        first_item = page.locator(".queue-item").first
+        run_id = first_item.get_attribute("data-run-id")
+        first_item.click()
+
+        # Wait for triage controls to be ready
+        ack_btn = page.locator(".triage-btn.btn-acknowledge:not([disabled])")
+        expect(ack_btn).to_be_visible()
+        ack_btn.click()
+
+        # Click save button
+        save_btn = page.locator("#save-btn")
+        expect(save_btn).to_be_enabled(timeout=2000)
+        save_btn.click()
+
+        # Wait for save to complete (page refreshes or updates)
+        page.wait_for_load_state("networkidle")
+
+        # Verify item moved - Open tab should have one fewer item
+        page.goto(f"{base_url}/admin/coverage/cockpit?status=open")
+        page.wait_for_load_state("networkidle")
+        page.locator(".queue-item, .empty-state").first.wait_for(
+            state="visible", timeout=5000
+        )
+
+        open_count_after = page.locator(".queue-item").count()
+        assert open_count_after == open_count_before - 1, (
+            f"Expected {open_count_before - 1} open items after triage, "
+            f"got {open_count_after}"
+        )
+
+        # Verify item appears in Acknowledged tab
+        page.goto(f"{base_url}/admin/coverage/cockpit?status=acknowledged")
+        page.wait_for_load_state("networkidle")
+        page.locator(".queue-item").first.wait_for(state="visible", timeout=5000)
+
+        # Should find the triaged item
+        triaged_item = page.locator(f".queue-item[data-run-id='{run_id}']")
+        expect(triaged_item).to_be_visible()
+
+    def test_candidate_cards_displayed_for_items_with_candidates(self, seeded_cockpit):
+        """Items with candidate_strategy_ids show strategy cards."""
+        page = seeded_cockpit["page"]
+
+        # Find an item that has candidates (click through to find one)
+        items = page.locator(".queue-item")
+        found_candidates = False
+
+        for i in range(min(items.count(), 5)):  # Check first 5 items
+            items.nth(i).click()
+            page.wait_for_timeout(300)  # Brief wait for detail to load
+
+            candidate_list = page.locator(".candidate-list")
+            candidate_rows = page.locator(".candidate-row")
+
+            if candidate_rows.count() > 0:
+                found_candidates = True
+                expect(candidate_list).to_be_visible()
+
+                # Verify candidate card has expected elements
+                first_candidate = candidate_rows.first
+                expect(first_candidate.locator(".candidate-name")).to_be_visible()
+                expect(first_candidate.locator(".explain-btn")).to_be_visible()
+                break
+
+        assert found_candidates, "Expected to find at least one item with candidate strategies"
+
+    def test_priority_badges_show_correct_levels(self, seeded_cockpit):
+        """Priority badges reflect the computed priority scores."""
+        page = seeded_cockpit["page"]
+
+        # Check that priority badges exist and have valid values
+        priority_badges = page.locator(".priority-badge")
+        assert priority_badges.count() > 0, "Expected priority badges on queue items"
+
+        # Verify badges contain P1, P2, or P3
+        badge_texts = []
+        for i in range(min(priority_badges.count(), 8)):
+            text = priority_badges.nth(i).text_content()
+            badge_texts.append(text)
+            assert text in ["P1", "P2", "P3"], f"Unexpected priority badge: {text}"
+
+        # With varied fixture data, we should have multiple priority levels
+        unique_badges = set(badge_texts)
+        assert len(unique_badges) >= 2, (
+            f"Expected at least 2 different priority levels, got: {unique_badges}"
+        )

@@ -918,6 +918,7 @@ def _is_dev_mode() -> bool:
     description="Create deterministic strategies and match_runs for UI testing.",
 )
 async def seed_coverage_fixtures(
+    request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Workspace ID (creates if missing)"),
     clear_existing: bool = Query(False, description="Delete existing seeded data first"),
     _: bool = Depends(require_admin_token),
@@ -941,6 +942,15 @@ async def seed_coverage_fixtures(
             "Seed endpoint only available in development mode. "
             f"Current CONFIG_PROFILE: {os.environ.get('CONFIG_PROFILE', 'not set')}",
         )
+
+    # Log seed invocation with caller IP
+    caller_ip = request.client.host if request.client else "unknown"
+    logger.info(
+        "SEED CALLED",
+        caller_ip=caller_ip,
+        workspace_id=str(workspace_id) if workspace_id else None,
+        clear_existing=clear_existing,
+    )
 
     pool = _get_pool()
 
