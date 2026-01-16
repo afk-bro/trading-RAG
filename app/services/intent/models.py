@@ -8,9 +8,28 @@ from pydantic import BaseModel, Field, field_validator
 # All tags are lowercase for consistency
 
 STRATEGY_ARCHETYPE_PATTERNS: dict[str, list[str]] = {
-    "trend_following": ["trend", "ride the trend", "trend continuation", "higher highs", "higher lows"],
-    "mean_reversion": ["mean revert", "reversal", "snap back", "oversold bounce", "overbought"],
-    "breakout": ["breakout", "range break", "ath breakout", "support break", "resistance break", "52 week high"],
+    "trend_following": [
+        "trend",
+        "ride the trend",
+        "trend continuation",
+        "higher highs",
+        "higher lows",
+    ],
+    "mean_reversion": [
+        "mean revert",
+        "reversal",
+        "snap back",
+        "oversold bounce",
+        "overbought",
+    ],
+    "breakout": [
+        "breakout",
+        "range break",
+        "ath breakout",
+        "support break",
+        "resistance break",
+        "52 week high",
+    ],
     "momentum": ["momentum", "impulse", "strength", "relative strength"],
     "range_bound": ["range", "chop", "sideways", "box", "consolidation"],
     "volatility": ["volatility expansion", "squeeze", "atr", "iv expansion"],
@@ -55,18 +74,41 @@ RISK_TERM_PATTERNS: dict[str, list[str]] = {
     "stop_loss": ["stop loss", "stop-loss", "stoploss", " sl "],
     "take_profit": ["take profit", "take-profit", "takeprofit", " tp ", "target"],
     "trailing_stop": ["trailing stop", "trailing"],
-    "position_sizing": ["position size", "position sizing", "risk per trade", "r-multiple", "risk reward"],
+    "position_sizing": [
+        "position size",
+        "position sizing",
+        "risk per trade",
+        "r-multiple",
+        "risk reward",
+    ],
     "dca": ["dca", "dollar cost average", "pyramiding", "scaling in", "scaling out"],
 }
 
 # Script type inference cues
 STRATEGY_CUES = [
-    "strategy", "strategy.entry", "strategy.exit", "backtest", "backtesting",
-    "drawdown", "win rate", "entry", "exit", "pnl", "profit", "trade",
+    "strategy",
+    "strategy.entry",
+    "strategy.exit",
+    "backtest",
+    "backtesting",
+    "drawdown",
+    "win rate",
+    "entry",
+    "exit",
+    "pnl",
+    "profit",
+    "trade",
 ]
 INDICATOR_CUES = [
-    "indicator", "plot", "alert", "overlay", "oscillator", "histogram",
-    "signal line", "divergence", "tradingview indicator",
+    "indicator",
+    "plot",
+    "alert",
+    "overlay",
+    "oscillator",
+    "histogram",
+    "signal line",
+    "divergence",
+    "tradingview indicator",
 ]
 
 # Valid canonical tags for validation
@@ -92,16 +134,30 @@ class MatchIntent(BaseModel):
     """Extracted trading intent from content."""
 
     # From existing MetadataExtractor
-    symbols: list[str] = Field(default_factory=list, description="Ticker symbols (uppercase)")
-    topics: list[str] = Field(default_factory=list, description="Topic tags (lowercase)")
+    symbols: list[str] = Field(
+        default_factory=list, description="Ticker symbols (uppercase)"
+    )
+    topics: list[str] = Field(
+        default_factory=list, description="Topic tags (lowercase)"
+    )
     entities: list[str] = Field(default_factory=list, description="Named entities")
 
     # Trading-specific (lowercase canonical tags, deduped, order-preserved)
-    strategy_archetypes: list[str] = Field(default_factory=list, description="Strategy types")
-    indicators: list[str] = Field(default_factory=list, description="Technical indicators")
-    timeframe_buckets: list[str] = Field(default_factory=list, description="Timeframe categories")
-    timeframe_explicit: list[str] = Field(default_factory=list, description="Explicit timeframes")
-    risk_terms: list[str] = Field(default_factory=list, description="Risk management terms")
+    strategy_archetypes: list[str] = Field(
+        default_factory=list, description="Strategy types"
+    )
+    indicators: list[str] = Field(
+        default_factory=list, description="Technical indicators"
+    )
+    timeframe_buckets: list[str] = Field(
+        default_factory=list, description="Timeframe categories"
+    )
+    timeframe_explicit: list[str] = Field(
+        default_factory=list, description="Explicit timeframes"
+    )
+    risk_terms: list[str] = Field(
+        default_factory=list, description="Risk management terms"
+    )
 
     # Script type inference
     inferred_script_type: Optional[Literal["strategy", "indicator"]] = Field(

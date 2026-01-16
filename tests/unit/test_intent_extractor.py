@@ -23,7 +23,9 @@ class TestMatchIntentModel:
 
     def test_invalid_archetypes_filtered(self):
         """Test that invalid archetypes are filtered out."""
-        intent = MatchIntent(strategy_archetypes=["breakout", "invalid_tag", "momentum"])
+        intent = MatchIntent(
+            strategy_archetypes=["breakout", "invalid_tag", "momentum"]
+        )
         assert "breakout" in intent.strategy_archetypes
         assert "momentum" in intent.strategy_archetypes
         assert "invalid_tag" not in intent.strategy_archetypes
@@ -66,6 +68,7 @@ class TestRuleBasedIntentExtractor:
     def extractor(self):
         """Create extractor instance."""
         from app.services.intent.extractor import RuleBasedIntentExtractor
+
         return RuleBasedIntentExtractor()
 
     def test_extract_strategy_archetypes(self, extractor):
@@ -120,6 +123,7 @@ class TestRuleBasedIntentExtractor:
     def test_uses_existing_metadata(self, extractor):
         """Test that extractor uses existing MetadataExtractor output."""
         from app.services.extractor import ExtractedMetadata
+
         text = "Trading $AAPL with RSI"
         metadata = ExtractedMetadata(symbols=["AAPL"], topics=["tech"])
         intent = extractor.extract(text, metadata=metadata)

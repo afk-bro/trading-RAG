@@ -58,10 +58,14 @@ class RuleBasedIntentExtractor(IntentExtractor):
             metadata = self._metadata_extractor.extract(text)
 
         # Extract trading-specific fields
-        archetypes = self._extract_with_patterns(text_lower, STRATEGY_ARCHETYPE_PATTERNS)
+        archetypes = self._extract_with_patterns(
+            text_lower, STRATEGY_ARCHETYPE_PATTERNS
+        )
         indicators = self._extract_with_patterns(text_lower, INDICATOR_PATTERNS)
         tf_buckets = self._extract_with_patterns(text_lower, TIMEFRAME_BUCKET_PATTERNS)
-        tf_explicit = self._extract_with_patterns(text_lower, TIMEFRAME_EXPLICIT_PATTERNS)
+        tf_explicit = self._extract_with_patterns(
+            text_lower, TIMEFRAME_EXPLICIT_PATTERNS
+        )
         risk_terms = self._extract_with_patterns(text_lower, RISK_TERM_PATTERNS)
 
         # Infer script type
