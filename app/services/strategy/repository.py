@@ -2,12 +2,20 @@
 
 import json
 import re
+from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+def _json_serial(obj: Any) -> str:
+    """JSON serializer for objects not serializable by default."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def slugify(name: str) -> str:
@@ -238,7 +246,7 @@ class StrategyRepository:
                 param_idx += 1
             elif field in ("source_ref", "tags", "backtest_summary"):
                 set_parts.append(f"{field} = ${param_idx}")
-                params.append(json.dumps(value) if value else None)
+                params.append(json.dumps(value, default=_json_serial) if value else None)
                 param_idx += 1
             elif field in (
                 "description",
@@ -330,7 +338,16 @@ class StrategyRepository:
         tag_set = set(t.lower() for t in all_tags)
 
         for row in rows:
-            tags = row["tags"] if isinstance(row["tags"], dict) else {}
+            raw_tags = row["tags"]
+            if isinstance(raw_tags, str):
+                try:
+                    tags = json.loads(raw_tags)
+                except json.JSONDecodeError:
+                    tags = {}
+            elif isinstance(raw_tags, dict):
+                tags = raw_tags
+            else:
+                tags = {}
             strategy_tags = set()
             for field in [
                 "strategy_archetypes",
