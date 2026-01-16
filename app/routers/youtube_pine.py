@@ -23,7 +23,7 @@ from app.schemas import (
     YouTubeMatchPineResponse,
 )
 from app.services.chunker import normalize_transcript
-from app.services.coverage import (
+from app.services.coverage_gap import (
     assess_coverage,
     compute_intent_signature,
     MatchRunRepository,

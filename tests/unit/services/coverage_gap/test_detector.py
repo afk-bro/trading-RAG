@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.coverage.detector import (
+from app.services.coverage_gap.detector import (
     CoverageReasonCode,
     assess_coverage,
     compute_intent_signature,
