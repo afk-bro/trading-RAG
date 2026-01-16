@@ -161,13 +161,13 @@ class MatchIntent(BaseModel):
 
     # Script type inference
     inferred_script_type: Optional[Literal["strategy", "indicator"]] = Field(
-        None, description="Inferred Pine script type"
+        default=None, description="Inferred Pine script type"
     )
     script_type_confidence: float = Field(
-        0.0, ge=0.0, le=1.0, description="Confidence in script type (Laplace smoothed)"
+        default=0.0, ge=0.0, le=1.0, description="Confidence in script type (Laplace smoothed)"
     )
     overall_confidence: float = Field(
-        0.0, ge=0.0, le=1.0, description="Overall extraction confidence"
+        default=0.0, ge=0.0, le=1.0, description="Overall extraction confidence"
     )
 
     @field_validator("strategy_archetypes")

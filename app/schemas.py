@@ -1541,9 +1541,11 @@ class PineBuildStats(BaseModel):
     lint_warnings: int = Field(
         default=0, description="Total lint warnings across all files"
     )
-    registry_path: Optional[str] = Field(None, description="Path to generated registry")
+    registry_path: Optional[str] = Field(
+        default=None, description="Path to generated registry"
+    )
     lint_report_path: Optional[str] = Field(
-        None, description="Path to generated lint report"
+        default=None, description="Path to generated lint report"
     )
 
 
