@@ -1640,6 +1640,22 @@ class YouTubeMatchPineRequest(BaseModel):
     force_transient: bool = Field(False, description="Bypass KB, fetch live")
 
 
+class CoverageResponse(BaseModel):
+    """Coverage gap assessment for match results."""
+
+    weak: bool = Field(..., description="True if coverage gap detected")
+    best_score: Optional[float] = Field(None, description="Best match score")
+    avg_top_k_score: Optional[float] = Field(None, description="Average top-k score")
+    num_above_threshold: int = Field(..., description="Results above threshold")
+    threshold: float = Field(..., description="Score threshold used")
+    reason_codes: list[str] = Field(
+        default_factory=list, description="Gap reason codes"
+    )
+    suggestions: list[str] = Field(
+        default_factory=list, description="Actionable suggestions"
+    )
+
+
 class YouTubeMatchPineResponse(BaseModel):
     """Response for YouTube to Pine script matching."""
 
@@ -1669,6 +1685,9 @@ class YouTubeMatchPineResponse(BaseModel):
     total_searched: int = Field(..., description="Total scripts searched")
     query_used: str = Field(..., description="Query string used for matching")
     filters_applied: dict = Field(..., description="Filters applied")
+
+    # Coverage assessment
+    coverage: CoverageResponse = Field(..., description="Coverage gap assessment")
 
     # Next actions
     ingest_available: bool = Field(..., description="Whether ingest is available")

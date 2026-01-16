@@ -16,12 +16,18 @@ from app.routers.youtube import (
     parse_youtube_url,
 )
 from app.schemas import (
+    CoverageResponse,
     IngestRequestHint,
     PineMatchRankedResult,
     YouTubeMatchPineRequest,
     YouTubeMatchPineResponse,
 )
 from app.services.chunker import normalize_transcript
+from app.services.coverage_gap import (
+    assess_coverage,
+    compute_intent_signature,
+    MatchRunRepository,
+)
 from app.services.intent import (
     build_filters,
     build_query_string,
@@ -245,6 +251,55 @@ async def youtube_match_pine(
         for r in ranked[: request.top_k]
     ]
 
+    # Assess coverage
+    scores = [r.final_score for r in ranked[: request.top_k]]
+    coverage_assessment = assess_coverage(scores, intent, top_k=request.top_k)
+
+    coverage = CoverageResponse(
+        weak=coverage_assessment.weak,
+        best_score=coverage_assessment.best_score,
+        avg_top_k_score=coverage_assessment.avg_top_k_score,
+        num_above_threshold=coverage_assessment.num_above_threshold,
+        threshold=coverage_assessment.threshold,
+        reason_codes=coverage_assessment.reason_codes,
+        suggestions=coverage_assessment.suggestions,
+    )
+
+    log.info(
+        "coverage_assessed",
+        weak=coverage_assessment.weak,
+        best_score=coverage_assessment.best_score,
+        num_above_threshold=coverage_assessment.num_above_threshold,
+        reason_codes=coverage_assessment.reason_codes,
+    )
+
+    # Record match run for analytics (async, don't block response)
+    from app.routers.ingest import _db_pool
+
+    if _db_pool is not None:
+        try:
+            match_run_repo = MatchRunRepository(_db_pool)
+            await match_run_repo.record_match_run(
+                workspace_id=request.workspace_id,
+                source_type="youtube",
+                intent_signature=compute_intent_signature(intent),
+                query_used=query_string,
+                filters_applied=filters.model_dump(),
+                top_k=request.top_k,
+                total_searched=match_response.total_searched,
+                best_score=coverage_assessment.best_score,
+                avg_top_k_score=coverage_assessment.avg_top_k_score,
+                num_above_threshold=coverage_assessment.num_above_threshold,
+                weak_coverage=coverage_assessment.weak,
+                reason_codes=coverage_assessment.reason_codes,
+                source_id=source_id,
+                video_id=video_id,
+                intent_json=intent.model_dump(),
+            )
+        except Exception as e:
+            # Log but don't fail the request
+            log.warning("match_run_record_failed", error=str(e))
+
     # Build response
     return YouTubeMatchPineResponse(
         video_id=video_id,
@@ -260,6 +315,7 @@ async def youtube_match_pine(
         total_searched=match_response.total_searched,
         query_used=query_string,
         filters_applied=filters.model_dump(),
+        coverage=coverage,
         ingest_available=not in_kb,
         ingest_request_hint=(
             IngestRequestHint(workspace_id=request.workspace_id, url=request.url)
