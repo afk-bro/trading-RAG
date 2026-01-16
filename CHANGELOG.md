@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pine Script Read APIs** - Admin endpoints for querying indexed Pine scripts
   - `GET /sources/pine/scripts` - List scripts with filtering (symbol, status, free-text)
   - `GET /sources/pine/scripts/{doc_id}` - Script details with chunks and lint findings
+  - `GET /sources/pine/scripts/lookup` - Find script by rel_path (filesystem linking)
+  - `GET /sources/pine/scripts/match` - Semantic search with ranked results
+    - Searches title, path, input names, and chunk content
+    - Returns match score (0-1), match reasons, snippets, input preview
+    - Filters: `symbol`, `script_type`, `lint_ok`
   - `pine_metadata` JSONB column stores structured metadata (inputs, imports, features, lint)
   - Symbol filtering uses existing GIN index on chunks for efficient queries
   - Pagination with `has_more`/`next_offset` for both scripts and chunks
@@ -23,8 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Best-effort parsing: failures recorded as E999 synthetic errors, build continues
   - Deterministic output: sorted keys, SHA256 fingerprinting for change detection
   - Designed for future GitHub adapter parity (root_kind field)
-- **Pine Script Ingest API** - Admin endpoint for ingesting Pine Script registries into RAG
+- **Pine Script Ingest API** - Admin endpoints for ingesting Pine Script registries into RAG
   - `POST /sources/pine/ingest` - Ingest scripts from registry file
+  - `POST /sources/pine/rebuild-and-ingest` - Build registry + ingest in single action
+    - Scans `scripts_root` for .pine files, builds registry, ingests to workspace
+    - Returns build stats (files_scanned, parse_errors, lint_errors) and ingest stats
+    - Ideal for cron/CI automation of Pine knowledge base updates
   - Path validation against `DATA_DIR` allowlist (prevents path traversal attacks)
   - Auto-derives lint report path from registry location
   - `dry_run` mode for validation without database writes
