@@ -477,5 +477,179 @@ async def coverage_cockpit(
             "status_filter": status,
             "sort_by": sort,
             "admin_token": admin_token,
+            "selected_run_id": None,
+        },
+    )
+
+
+@router.get("/cockpit/{run_id}", response_class=HTMLResponse)
+async def coverage_cockpit_detail(
+    request: Request,
+    run_id: UUID,
+    workspace_id: Optional[UUID] = Query(None, description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Deep link to coverage cockpit with a specific run pre-selected.
+
+    If the run exists and belongs to the workspace, it will be shown
+    in the detail panel. The queue shows all items (status=all) to
+    ensure the linked item is visible.
+    """
+    pool = _get_pool()
+
+    # Get workspace from run if not specified
+    if not workspace_id:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT workspace_id FROM match_runs WHERE id = $1",
+                    run_id,
+                )
+                if row:
+                    workspace_id = row["workspace_id"]
+        except Exception as e:
+            logger.warning("Could not fetch workspace from run", error=str(e))
+
+    if not workspace_id:
+        return templates.TemplateResponse(
+            "coverage_cockpit.html",
+            {
+                "request": request,
+                "items": [],
+                "strategy_cards": {},
+                "missing_strategy_ids": [],
+                "workspace_id": None,
+                "status_filter": "all",
+                "sort_by": "priority",
+                "admin_token": "",
+                "selected_run_id": str(run_id),
+                "error": f"Run {run_id} not found.",
+            },
+        )
+
+    from app.services.coverage_gap import MatchRunRepository
+    from app.services.strategy import StrategyRepository
+
+    repo = MatchRunRepository(pool)
+
+    # Fetch all items (status=all) to ensure linked run is visible
+    try:
+        items = await repo.list_weak_coverage_for_cockpit(
+            workspace_id=workspace_id,
+            limit=100,
+            since=None,
+            status="all",
+        )
+    except Exception as e:
+        logger.error("coverage_cockpit_detail_failed", error=str(e))
+        return templates.TemplateResponse(
+            "coverage_cockpit.html",
+            {
+                "request": request,
+                "items": [],
+                "strategy_cards": {},
+                "missing_strategy_ids": [],
+                "workspace_id": str(workspace_id),
+                "status_filter": "all",
+                "sort_by": "priority",
+                "admin_token": "",
+                "selected_run_id": str(run_id),
+                "error": f"Failed to load coverage data: {e}",
+            },
+        )
+
+    # Check if requested run is in the list
+    run_found = any(str(item.get("run_id")) == str(run_id) for item in items)
+    if not run_found:
+        logger.warning("deep_link_run_not_in_list", run_id=str(run_id))
+
+    # Hydrate strategy cards (same logic as main cockpit)
+    strategy_cards: dict = {}
+    missing_strategy_ids: list = []
+
+    all_candidate_ids: list[UUID] = []
+    seen: set[UUID] = set()
+    for item in items:
+        for cid in item.get("candidate_strategy_ids", []):
+            if cid and cid not in seen:
+                seen.add(cid)
+                all_candidate_ids.append(cid)
+                if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
+                    break
+        if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
+            break
+
+    if all_candidate_ids:
+        try:
+            strategy_repo = StrategyRepository(pool)
+            cards_dict = await strategy_repo.get_cards_by_ids(
+                workspace_id, all_candidate_ids
+            )
+
+            for uuid_str, card in cards_dict.items():
+                tags_data = card.get("tags") or {}
+                strategy_cards[uuid_str] = {
+                    "id": str(card["id"]),
+                    "name": card["name"],
+                    "slug": card["slug"],
+                    "engine": card["engine"],
+                    "status": card["status"],
+                    "tags": tags_data,
+                    "backtest_status": card.get("backtest_status"),
+                    "last_backtest_at": (
+                        card["last_backtest_at"].isoformat()
+                        if card.get("last_backtest_at")
+                        else None
+                    ),
+                    "best_oos_score": card.get("best_oos_score"),
+                    "max_drawdown": card.get("max_drawdown"),
+                }
+
+            found_ids = set(cards_dict.keys())
+            for cid in all_candidate_ids:
+                if str(cid) not in found_ids:
+                    missing_strategy_ids.append(str(cid))
+
+        except Exception as e:
+            logger.warning("cockpit_detail_card_hydration_failed", error=str(e))
+
+    # Convert items for template
+    template_items = []
+    for item in items:
+        template_item = {
+            "run_id": str(item["run_id"]),
+            "created_at": item["created_at"],
+            "intent_signature": item.get("intent_signature", ""),
+            "script_type": item.get("script_type"),
+            "weak_reason_codes": item.get("weak_reason_codes", []),
+            "best_score": item.get("best_score"),
+            "num_above_threshold": item.get("num_above_threshold", 0),
+            "candidate_strategy_ids": [
+                str(c) for c in item.get("candidate_strategy_ids", [])
+            ],
+            "candidate_scores": item.get("candidate_scores", {}),
+            "query_preview": item.get("query_preview", ""),
+            "source_ref": item.get("source_ref"),
+            "coverage_status": item.get("coverage_status", "open"),
+            "priority_score": item.get("priority_score", 0.0),
+            "resolution_note": item.get("resolution_note"),
+        }
+        template_items.append(template_item)
+
+    admin_token = os.environ.get("ADMIN_TOKEN", "")
+
+    return templates.TemplateResponse(
+        "coverage_cockpit.html",
+        {
+            "request": request,
+            "items": template_items,
+            "strategy_cards": strategy_cards,
+            "missing_strategy_ids": missing_strategy_ids,
+            "workspace_id": str(workspace_id),
+            "status_filter": "all",
+            "sort_by": "priority",
+            "admin_token": admin_token,
+            "selected_run_id": str(run_id),
         },
     )

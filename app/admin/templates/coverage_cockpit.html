@@ -679,11 +679,30 @@ let selectedRunId = null;
 let pendingStatus = null;
 
 // Select first item on load
+// Pre-selected run ID from deep link (null if not a deep link)
+const selectedRunIdFromUrl = {{ ('"' + selected_run_id + '"') if selected_run_id else 'null' | safe }};
+
 document.addEventListener('DOMContentLoaded', () => {
-    const firstItem = document.querySelector('.queue-item');
-    if (firstItem) {
-        selectItem(firstItem);
+    let itemToSelect = null;
+
+    // If deep link, find and select that specific run
+    if (selectedRunIdFromUrl) {
+        itemToSelect = document.querySelector(`.queue-item[data-run-id="${selectedRunIdFromUrl}"]`);
+        if (itemToSelect) {
+            // Scroll the item into view
+            itemToSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
     }
+
+    // Fall back to first item if no deep link or run not found
+    if (!itemToSelect) {
+        itemToSelect = document.querySelector('.queue-item');
+    }
+
+    if (itemToSelect) {
+        selectItem(itemToSelect);
+    }
+
     updateRelativeTimes();
     setInterval(updateRelativeTimes, 60000);
 });
@@ -730,6 +749,9 @@ function renderDetail(item) {
                         <span class="relative-time" data-timestamp="${item.created_at}">${item.created_at.slice(0, 16)}</span>
                         <button class="copy-btn" onclick="copyToClipboard('${item.run_id}')" title="Copy run ID">
                             ${item.run_id.slice(0, 8)}... <small>copy</small>
+                        </button>
+                        <button class="copy-btn" onclick="copyDeepLink('${item.run_id}')" title="Copy shareable link">
+                            <small>share</small>
                         </button>
                     </div>
                 </div>
@@ -970,6 +992,11 @@ function toggleSort() {
 
 function copyToClipboard(text) {
     navigator.clipboard.writeText(text);
+}
+
+function copyDeepLink(runId) {
+    const url = `${window.location.origin}/admin/coverage/cockpit/${runId}`;
+    navigator.clipboard.writeText(url);
 }
 
 function escapeHtml(text) {
