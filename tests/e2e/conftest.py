@@ -87,6 +87,7 @@ def admin_routes() -> dict:
         "leaderboard": "/admin/backtests/leaderboard",
         "run_plans": "/admin/testing/run-plans",
         "trade_events": "/admin/trade/events",
+        "coverage_cockpit": "/admin/coverage/cockpit",
     }
 
 
