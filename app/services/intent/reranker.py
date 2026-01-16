@@ -1,7 +1,7 @@
 # app/services/intent/reranker.py
 """Intent-based reranking for Pine script matches."""
 
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,7 +29,7 @@ class RankedResult(BaseModel):
 
 
 def rerank(
-    results: list[PineMatchResultProtocol],
+    results: Sequence[PineMatchResultProtocol],
     intent: MatchIntent,
 ) -> list[RankedResult]:
     """

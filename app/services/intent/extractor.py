@@ -2,7 +2,7 @@
 """Intent extraction from trading content."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Literal, Optional
 
 from app.services.extractor import ExtractedMetadata, get_extractor
 from app.services.intent.models import (
@@ -121,7 +121,7 @@ class RuleBasedIntentExtractor(IntentExtractor):
 
     def _infer_script_type(
         self, text_lower: str, archetypes: list[str]
-    ) -> tuple[Optional[str], float]:
+    ) -> tuple[Optional[Literal["strategy", "indicator"]], float]:
         """
         Infer whether content describes a strategy or indicator.
 
