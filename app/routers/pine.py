@@ -1,14 +1,27 @@
-"""Pine Script registry ingestion endpoint."""
+"""Pine Script registry and read endpoints."""
 
 from pathlib import Path
-from uuid import uuid4
+from typing import Literal, Optional
+from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
-from app.schemas import PineIngestRequest, PineIngestResponse, PineIngestStatus
+from app.schemas import (
+    PineChunkItem,
+    PineImportSchema,
+    PineIngestRequest,
+    PineIngestResponse,
+    PineIngestStatus,
+    PineInputSchema,
+    PineLintFinding,
+    PineLintSummary,
+    PineScriptDetailResponse,
+    PineScriptListItem,
+    PineScriptListResponse,
+)
 from app.services.pine import PineIngestService, load_registry
 
 router = APIRouter()
@@ -235,6 +248,7 @@ async def ingest_pine_registry(
             workspace_id=request.workspace_id,
             registry_path=registry_path,
             source_root=source_root,
+            lint_report_path=lint_path,
             include_source=request.include_source,
             max_source_lines=request.max_source_lines,
             skip_lint_errors=request.skip_lint_errors,
@@ -284,4 +298,351 @@ async def ingest_pine_registry(
         chunks_added=result.total_chunks,
         errors=errors,
         ingest_run_id=ingest_run_id,
+    )
+
+
+# =============================================================================
+# Read Endpoints
+# =============================================================================
+
+
+def _extract_rel_path(canonical_url: str) -> str:
+    """Extract rel_path from canonical URL (pine://source/rel/path.pine)."""
+    if canonical_url.startswith("pine://"):
+        # Remove pine:// prefix and source_id
+        parts = canonical_url[7:].split("/", 1)
+        if len(parts) > 1:
+            return parts[1]
+    return canonical_url
+
+
+def _build_lint_summary(metadata: Optional[dict]) -> PineLintSummary:
+    """Build PineLintSummary from pine_metadata."""
+    if not metadata or "lint_summary" not in metadata:
+        return PineLintSummary()
+    lint = metadata["lint_summary"]
+    return PineLintSummary(
+        errors=lint.get("errors", 0),
+        warnings=lint.get("warnings", 0),
+        info=lint.get("info", 0),
+    )
+
+
+def _build_list_item(
+    doc: dict, symbols: list[str], chunk_count: int
+) -> PineScriptListItem:
+    """Build PineScriptListItem from document row."""
+    metadata = doc.get("pine_metadata") or {}
+
+    # Extract rel_path from canonical_url or metadata
+    rel_path = metadata.get("rel_path") or _extract_rel_path(doc["canonical_url"])
+
+    # Title fallback to basename
+    title = doc.get("title") or Path(rel_path).name
+
+    return PineScriptListItem(
+        id=doc["id"],
+        canonical_url=doc["canonical_url"],
+        rel_path=rel_path,
+        title=title,
+        script_type=metadata.get("script_type"),
+        pine_version=metadata.get("pine_version"),
+        symbols=symbols,
+        lint_summary=_build_lint_summary(metadata),
+        lint_available=metadata.get("lint_available", False),
+        sha256=doc["content_hash"],
+        chunk_count=chunk_count,
+        created_at=doc["created_at"],
+        updated_at=doc["updated_at"],
+        status=doc["status"],
+    )
+
+
+@router.get(
+    "/scripts",
+    response_model=PineScriptListResponse,
+    responses={
+        200: {"description": "List of Pine scripts"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Invalid admin token"},
+    },
+    summary="List indexed Pine scripts (admin)",
+    description="List Pine scripts indexed in the RAG system with filtering and pagination.",
+)
+async def list_pine_scripts(
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    symbol: Optional[str] = Query(None, description="Filter by ticker symbol"),
+    status: Literal["active", "superseded", "deleted", "all"] = Query(
+        "active", description="Filter by document status"
+    ),
+    q: Optional[str] = Query(None, description="Free-text search in title/path"),
+    order_by: Literal["updated_at", "created_at", "title"] = Query(
+        "updated_at", description="Sort field"
+    ),
+    order_dir: Literal["asc", "desc"] = Query("desc", description="Sort direction"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    _: bool = Depends(require_admin_token),
+) -> PineScriptListResponse:
+    """List Pine scripts with filtering and pagination."""
+    from app.routers.ingest import _db_pool
+
+    if _db_pool is None:
+        raise HTTPException(503, "Database connection not available")
+
+    # Build query with filters
+    params: list = [workspace_id]
+    param_idx = 1
+
+    # Base query - get documents with chunk counts and aggregated symbols
+    query = """
+        WITH script_data AS (
+            SELECT
+                d.id, d.canonical_url, d.title, d.content_hash,
+                d.pine_metadata, d.status, d.created_at, d.updated_at,
+                COUNT(DISTINCT c.id) as chunk_count,
+                array_agg(DISTINCT s) FILTER (WHERE s IS NOT NULL) as symbols
+            FROM documents d
+            LEFT JOIN chunks c ON c.doc_id = d.id
+            LEFT JOIN LATERAL unnest(c.symbols) AS s ON true
+            WHERE d.workspace_id = $1
+              AND d.source_type = 'pine_script'
+    """
+
+    # Status filter
+    if status != "all":
+        param_idx += 1
+        query += f" AND d.status = ${param_idx}"
+        params.append(status)
+
+    # Symbol filter (check if symbol is in any chunk's symbols array)
+    if symbol:
+        param_idx += 1
+        query += f"""
+            AND EXISTS (
+                SELECT 1 FROM chunks c2
+                WHERE c2.doc_id = d.id
+                AND ${param_idx} = ANY(c2.symbols)
+            )
+        """
+        params.append(symbol.upper())
+
+    # Free-text search
+    if q:
+        param_idx += 1
+        query += f"""
+            AND (
+                d.title ILIKE '%' || ${param_idx} || '%'
+                OR d.canonical_url ILIKE '%' || ${param_idx} || '%'
+            )
+        """
+        params.append(q)
+
+    query += """
+            GROUP BY d.id
+        )
+        SELECT *, (SELECT COUNT(*) FROM script_data) as total_count
+        FROM script_data
+    """
+
+    # Ordering
+    order_col = {
+        "updated_at": "updated_at",
+        "created_at": "created_at",
+        "title": "title",
+    }[order_by]
+    order_dir_sql = "DESC" if order_dir == "desc" else "ASC"
+    query += f" ORDER BY {order_col} {order_dir_sql} NULLS LAST"
+
+    # Pagination
+    param_idx += 1
+    query += f" LIMIT ${param_idx}"
+    params.append(limit)
+
+    param_idx += 1
+    query += f" OFFSET ${param_idx}"
+    params.append(offset)
+
+    async with _db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    # Build response
+    items = []
+    total = 0
+    for row in rows:
+        total = row.get("total_count", 0)
+        symbols_list = row.get("symbols") or []
+        chunk_count = row.get("chunk_count", 0)
+        items.append(_build_list_item(dict(row), symbols_list, chunk_count))
+
+    has_more = offset + len(items) < total
+    next_offset = offset + limit if has_more else None
+
+    return PineScriptListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+        next_offset=next_offset,
+    )
+
+
+@router.get(
+    "/scripts/{doc_id}",
+    response_model=PineScriptDetailResponse,
+    responses={
+        200: {"description": "Pine script details"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Invalid admin token or workspace mismatch"},
+        404: {"description": "Document not found"},
+    },
+    summary="Get Pine script details (admin)",
+    description="Get detailed information about a Pine script including metadata and chunks.",
+)
+async def get_pine_script(
+    doc_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID (must match document)"),
+    include_chunks: bool = Query(False, description="Include chunk content"),
+    chunk_limit: int = Query(50, ge=1, le=200, description="Max chunks to return"),
+    chunk_offset: int = Query(0, ge=0, description="Chunk pagination offset"),
+    include_lint_findings: bool = Query(False, description="Include lint findings"),
+    _: bool = Depends(require_admin_token),
+) -> PineScriptDetailResponse:
+    """Get Pine script details by document ID."""
+    from app.routers.ingest import _db_pool
+
+    if _db_pool is None:
+        raise HTTPException(503, "Database connection not available")
+
+    async with _db_pool.acquire() as conn:
+        # Get document
+        doc = await conn.fetchrow(
+            """
+            SELECT * FROM documents
+            WHERE id = $1 AND source_type = 'pine_script'
+            """,
+            doc_id,
+        )
+
+        if not doc:
+            raise HTTPException(404, f"Pine script not found: {doc_id}")
+
+        # Check workspace matches
+        if doc["workspace_id"] != workspace_id:
+            raise HTTPException(403, "Workspace mismatch")
+
+        # Get aggregated symbols
+        symbols_row = await conn.fetchrow(
+            """
+            SELECT array_agg(DISTINCT s) FILTER (WHERE s IS NOT NULL) as symbols
+            FROM chunks c
+            CROSS JOIN LATERAL unnest(c.symbols) AS s
+            WHERE c.doc_id = $1
+            """,
+            doc_id,
+        )
+        symbols = symbols_row["symbols"] or [] if symbols_row else []
+
+        # Get chunk total
+        chunk_total_row = await conn.fetchrow(
+            "SELECT COUNT(*) as cnt FROM chunks WHERE doc_id = $1",
+            doc_id,
+        )
+        chunk_total = chunk_total_row["cnt"] if chunk_total_row else 0
+
+        # Get chunks if requested
+        chunks = None
+        chunk_has_more = None
+        chunk_next_offset = None
+        if include_chunks:
+            chunk_rows = await conn.fetch(
+                """
+                SELECT id, chunk_index, content, token_count, symbols
+                FROM chunks
+                WHERE doc_id = $1
+                ORDER BY chunk_index
+                LIMIT $2 OFFSET $3
+                """,
+                doc_id,
+                chunk_limit,
+                chunk_offset,
+            )
+            chunks = [
+                PineChunkItem(
+                    id=row["id"],
+                    index=row["chunk_index"],
+                    content=row["content"],
+                    token_count=row["token_count"],
+                    symbols=row["symbols"] or [],
+                )
+                for row in chunk_rows
+            ]
+            chunk_has_more = chunk_offset + len(chunks) < chunk_total
+            chunk_next_offset = chunk_offset + chunk_limit if chunk_has_more else None
+
+    # Extract metadata
+    doc_dict = dict(doc)
+    metadata = doc_dict.get("pine_metadata") or {}
+    rel_path = metadata.get("rel_path") or _extract_rel_path(doc_dict["canonical_url"])
+    title = doc_dict.get("title") or Path(rel_path).name
+
+    # Build lint findings if requested
+    lint_findings = None
+    if include_lint_findings and metadata.get("lint_findings"):
+        lint_findings = [
+            PineLintFinding(
+                code=f["code"],
+                severity=f["severity"],
+                message=f["message"],
+                line=f.get("line"),
+                column=f.get("column"),
+            )
+            for f in metadata["lint_findings"]
+        ]
+
+    # Build inputs/imports from metadata
+    inputs = None
+    if metadata.get("inputs"):
+        inputs = [
+            PineInputSchema(
+                name=inp["name"],
+                type=inp.get("type", "unknown"),
+                default=str(inp["default"]) if inp.get("default") is not None else None,
+                tooltip=inp.get("tooltip"),
+            )
+            for inp in metadata["inputs"]
+        ]
+
+    imports = None
+    if metadata.get("imports"):
+        imports = [
+            PineImportSchema(path=imp["path"], alias=imp.get("alias"))
+            for imp in metadata["imports"]
+        ]
+
+    return PineScriptDetailResponse(
+        id=doc_dict["id"],
+        canonical_url=doc_dict["canonical_url"],
+        rel_path=rel_path,
+        title=title,
+        script_type=metadata.get("script_type"),
+        pine_version=metadata.get("pine_version"),
+        symbols=symbols,
+        lint_summary=_build_lint_summary(metadata),
+        lint_available=metadata.get("lint_available", False),
+        lint_findings=lint_findings,
+        sha256=doc_dict["content_hash"],
+        created_at=doc_dict["created_at"],
+        updated_at=doc_dict["updated_at"],
+        status=doc_dict["status"],
+        inputs=inputs,
+        imports=imports,
+        features=metadata.get("features"),
+        chunk_total=chunk_total,
+        chunks=chunks,
+        chunk_has_more=chunk_has_more,
+        chunk_next_offset=chunk_next_offset,
     )

@@ -15,15 +15,16 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from app.config import Settings
 from app.schemas import SourceType
-from app.services.pine.models import PineScriptEntry
+from app.services.pine.models import LintFinding, PineLintReport, PineScriptEntry
 from app.services.pine.registry import load_registry
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,7 @@ class PineIngestService:
         workspace_id: UUID,
         registry_path: Path | str,
         source_root: Optional[Path | str] = None,
+        lint_report_path: Optional[Path | str] = None,
         include_source: bool = True,
         max_source_lines: int = 100,
         skip_lint_errors: bool = False,
@@ -248,6 +250,7 @@ class PineIngestService:
             registry_path: Path to pine_registry.json
             source_root: Root directory containing .pine files
                          (defaults to registry's root field)
+            lint_report_path: Path to pine_lint_report.json (for lint findings)
             include_source: Include source code in embedded content
             max_source_lines: Max lines of source to include
             skip_lint_errors: Skip scripts with lint errors
@@ -268,6 +271,21 @@ class PineIngestService:
         logger.info(f"Loading registry from {registry_path}")
         registry = load_registry(registry_path)
 
+        # Load lint report if provided
+        lint_report: Optional[PineLintReport] = None
+        if lint_report_path:
+            lint_report_path = Path(lint_report_path)
+            if lint_report_path.exists():
+                try:
+                    with open(lint_report_path, "r", encoding="utf-8") as f:
+                        lint_data = json.load(f)
+                    lint_report = PineLintReport.from_dict(lint_data)
+                    logger.info(
+                        f"Loaded lint report with {len(lint_report.results)} results"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to load lint report: {e}")
+
         # Determine source root
         if source_root is not None:
             root = Path(source_root).resolve()
@@ -286,10 +304,16 @@ class PineIngestService:
         result.results = []
 
         for rel_path, entry in registry.scripts.items():
+            # Get lint findings for this script if available
+            lint_findings: Optional[list[LintFinding]] = None
+            if lint_report and rel_path in lint_report.results:
+                lint_findings = lint_report.results[rel_path].findings
+
             script_result = await self._ingest_script(
                 workspace_id=workspace_id,
                 entry=entry,
                 root=root,
+                lint_findings=lint_findings,
                 include_source=include_source,
                 max_source_lines=max_source_lines,
                 skip_lint_errors=skip_lint_errors,
@@ -321,6 +345,7 @@ class PineIngestService:
         workspace_id: UUID,
         entry: PineScriptEntry,
         root: Path,
+        lint_findings: Optional[list[LintFinding]],
         include_source: bool,
         max_source_lines: int,
         skip_lint_errors: bool,
@@ -364,6 +389,9 @@ class PineIngestService:
         source_id = entry.source_id or "local"
         canonical_url = f"pine://{source_id}/{rel_path}"
 
+        # Build pine_metadata for structured storage
+        pine_metadata = self._build_pine_metadata(entry, lint_findings)
+
         try:
             response = await ingest_fn(
                 workspace_id=workspace_id,
@@ -379,6 +407,7 @@ class PineIngestService:
                 language="pine",
                 settings=self._settings,
                 update_existing=update_existing,
+                pine_metadata=pine_metadata,
             )
 
             return ScriptIngestResult(
@@ -397,6 +426,40 @@ class PineIngestService:
                 status="failed",
                 error=str(e),
             )
+
+    def _build_pine_metadata(
+        self,
+        entry: PineScriptEntry,
+        lint_findings: Optional[list[LintFinding]],
+    ) -> dict[str, Any]:
+        """
+        Build pine_metadata JSONB for storage.
+
+        Includes structured metadata for efficient querying.
+        """
+        # Build lint findings list (capped at 200)
+        findings_list: Optional[list[dict]] = None
+        if lint_findings:
+            findings_list = [f.to_dict() for f in lint_findings[:200]]
+
+        return {
+            "schema_version": "pine_meta_v1",
+            "script_type": entry.script_type.value if entry.script_type else None,
+            "pine_version": entry.pine_version.value if entry.pine_version else None,
+            "rel_path": entry.rel_path,
+            "inputs": [inp.to_dict() for inp in entry.inputs] if entry.inputs else [],
+            "imports": (
+                [imp.to_dict() for imp in entry.imports] if entry.imports else []
+            ),
+            "features": entry.features or {},
+            "lint_summary": {
+                "errors": entry.lint.error_count if entry.lint else 0,
+                "warnings": entry.lint.warning_count if entry.lint else 0,
+                "info": entry.lint.info_count if entry.lint else 0,
+            },
+            "lint_available": entry.lint is not None,
+            "lint_findings": findings_list,
+        }
 
 
 # =============================================================================

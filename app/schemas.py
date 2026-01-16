@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -1354,4 +1354,139 @@ class PineIngestResponse(BaseModel):
     )
     ingest_run_id: Optional[str] = Field(
         default=None, description="Run ID for log correlation"
+    )
+
+
+# =============================================================================
+# Pine Script Read APIs
+# =============================================================================
+
+# Constrained types for Pine scripts
+PineScriptType = Literal["indicator", "strategy", "library"]
+PineVersionType = Literal["4", "5", "6"]
+PineDocStatus = Literal["active", "superseded", "deleted"]
+PineLintSeverity = Literal["error", "warning", "info"]
+
+
+class PineLintSummary(BaseModel):
+    """Lint summary for a Pine script."""
+
+    errors: int = Field(default=0, description="Number of lint errors")
+    warnings: int = Field(default=0, description="Number of lint warnings")
+    info: int = Field(default=0, description="Number of lint info messages")
+
+
+class PineLintFinding(BaseModel):
+    """Single lint finding for a Pine script."""
+
+    code: str = Field(..., description="Lint rule code (e.g., E001, W002)")
+    severity: PineLintSeverity = Field(..., description="Finding severity")
+    message: str = Field(..., description="Finding message")
+    line: Optional[int] = Field(None, description="Line number (1-indexed)")
+    column: Optional[int] = Field(None, description="Column number (1-indexed)")
+
+
+class PineInputSchema(BaseModel):
+    """Input parameter definition for a Pine script."""
+
+    name: str = Field(..., description="Input parameter name")
+    type: str = Field(..., description="Input type (int, float, bool, etc.)")
+    default: Optional[str] = Field(None, description="Default value")
+    tooltip: Optional[str] = Field(None, description="Tooltip description")
+
+
+class PineImportSchema(BaseModel):
+    """Import reference for a Pine script."""
+
+    path: str = Field(..., description="Import path")
+    alias: Optional[str] = Field(None, description="Import alias")
+
+
+class PineChunkItem(BaseModel):
+    """Single chunk of a Pine script document."""
+
+    id: UUID = Field(..., description="Chunk ID")
+    index: int = Field(..., description="Chunk index (0-based)")
+    content: str = Field(..., description="Chunk content")
+    token_count: int = Field(..., description="Token count")
+    symbols: list[str] = Field(default_factory=list, description="Ticker symbols")
+
+
+class PineScriptListItem(BaseModel):
+    """Summary of a Pine script for list endpoints."""
+
+    id: UUID = Field(..., description="Document ID")
+    canonical_url: str = Field(..., description="Canonical URL (pine://source/path)")
+    rel_path: str = Field(..., description="Relative file path")
+    title: str = Field(..., description="Script title (fallback to basename)")
+    script_type: Optional[PineScriptType] = Field(
+        None, description="Script declaration type"
+    )
+    pine_version: Optional[PineVersionType] = Field(None, description="Pine version")
+    symbols: list[str] = Field(default_factory=list, description="Ticker symbols")
+    lint_summary: PineLintSummary = Field(
+        default_factory=PineLintSummary, description="Lint summary"
+    )
+    lint_available: bool = Field(
+        default=False, description="Whether lint data is available"
+    )
+    sha256: str = Field(..., description="Content hash")
+    chunk_count: int = Field(default=0, description="Number of chunks")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    status: PineDocStatus = Field(default="active", description="Document status")
+
+
+class PineScriptListResponse(BaseModel):
+    """Response for Pine script list endpoint."""
+
+    items: list[PineScriptListItem] = Field(
+        default_factory=list, description="List of Pine scripts"
+    )
+    total: int = Field(default=0, description="Total matching scripts")
+    limit: int = Field(..., description="Requested limit")
+    offset: int = Field(default=0, description="Requested offset")
+    has_more: bool = Field(default=False, description="More results available")
+    next_offset: Optional[int] = Field(None, description="Next offset for pagination")
+
+
+class PineScriptDetailResponse(BaseModel):
+    """Response for Pine script detail endpoint."""
+
+    id: UUID = Field(..., description="Document ID")
+    canonical_url: str = Field(..., description="Canonical URL")
+    rel_path: str = Field(..., description="Relative file path")
+    title: str = Field(..., description="Script title")
+    script_type: Optional[PineScriptType] = Field(None, description="Script type")
+    pine_version: Optional[PineVersionType] = Field(None, description="Pine version")
+    symbols: list[str] = Field(default_factory=list, description="Ticker symbols")
+    lint_summary: PineLintSummary = Field(
+        default_factory=PineLintSummary, description="Lint summary"
+    )
+    lint_available: bool = Field(default=False, description="Lint data available")
+    lint_findings: Optional[list[PineLintFinding]] = Field(
+        None, description="Lint findings (if include_lint_findings=true)"
+    )
+    sha256: str = Field(..., description="Content hash")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    status: PineDocStatus = Field(default="active", description="Document status")
+
+    # Structured metadata
+    inputs: Optional[list[PineInputSchema]] = Field(
+        None, description="Input parameters"
+    )
+    imports: Optional[list[PineImportSchema]] = Field(None, description="Imports")
+    features: Optional[dict[str, bool]] = Field(None, description="Feature flags")
+
+    # Chunks
+    chunk_total: int = Field(default=0, description="Total chunks in document")
+    chunks: Optional[list[PineChunkItem]] = Field(
+        None, description="Chunks (if include_chunks=true)"
+    )
+    chunk_has_more: Optional[bool] = Field(
+        None, description="More chunks available for pagination"
+    )
+    chunk_next_offset: Optional[int] = Field(
+        None, description="Next chunk offset for pagination"
     )

@@ -1,7 +1,8 @@
 """Document repository for Supabase Postgres."""
 
+import json
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
@@ -38,6 +39,7 @@ class DocumentRepository:
         duration_secs: Optional[int] = None,
         video_id: Optional[str] = None,
         playlist_id: Optional[str] = None,
+        pine_metadata: Optional[dict[str, Any]] = None,
     ) -> UUID:
         """
         Create a new document.
@@ -50,10 +52,10 @@ class DocumentRepository:
                 workspace_id, source_url, canonical_url, source_type,
                 content_hash, title, author, channel, published_at,
                 language, duration_secs, video_id, playlist_id,
-                status, version, created_at, updated_at
+                pine_metadata, status, version, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                'active', 1, NOW(), NOW()
+                $14, 'active', 1, NOW(), NOW()
             )
             RETURNING id
         """
@@ -74,6 +76,7 @@ class DocumentRepository:
                 duration_secs,
                 video_id,
                 playlist_id,
+                json.dumps(pine_metadata) if pine_metadata else None,
             )
             doc_id = row["id"]
 
@@ -217,6 +220,7 @@ class DocumentRepository:
         duration_secs: Optional[int] = None,
         video_id: Optional[str] = None,
         playlist_id: Optional[str] = None,
+        pine_metadata: Optional[dict[str, Any]] = None,
     ) -> tuple[UUID, int]:
         """
         Supersede an existing document and create a new version.
@@ -261,10 +265,10 @@ class DocumentRepository:
                         workspace_id, source_url, canonical_url, source_type,
                         content_hash, title, author, channel, published_at,
                         language, duration_secs, video_id, playlist_id,
-                        status, version, created_at, updated_at
+                        pine_metadata, status, version, created_at, updated_at
                     ) VALUES (
                         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                        'active', $14, NOW(), NOW()
+                        $14, 'active', $15, NOW(), NOW()
                     )
                     RETURNING id
                 """
@@ -284,6 +288,7 @@ class DocumentRepository:
                     duration_secs,
                     video_id,
                     playlist_id,
+                    json.dumps(pine_metadata) if pine_metadata else None,
                     new_version,
                 )
                 new_doc_id = row["id"]

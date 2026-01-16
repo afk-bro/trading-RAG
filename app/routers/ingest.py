@@ -2,7 +2,7 @@
 
 import hashlib
 import time
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
@@ -57,6 +57,7 @@ async def ingest_pipeline(
     pre_chunks: Optional[list] = None,
     settings: Settings = None,
     update_existing: bool = False,
+    pine_metadata: Optional[dict[str, Any]] = None,
 ) -> IngestResponse:
     """
     Core ingestion pipeline.
@@ -168,6 +169,7 @@ async def ingest_pipeline(
             duration_secs=duration_secs,
             video_id=video_id,
             playlist_id=playlist_id,
+            pine_metadata=pine_metadata,
         )
         logger.info(
             "Created new document version",
@@ -192,6 +194,7 @@ async def ingest_pipeline(
             duration_secs=duration_secs,
             video_id=video_id,
             playlist_id=playlist_id,
+            pine_metadata=pine_metadata,
         )
         doc_version = 1
 
