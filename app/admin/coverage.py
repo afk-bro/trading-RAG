@@ -1,6 +1,7 @@
 """Admin endpoints for coverage gap inspection."""
 
-from typing import Optional
+from enum import Enum
+from typing import Literal, Optional
 from uuid import UUID
 
 import structlog
@@ -12,6 +13,15 @@ from app.schemas import StrategyCard
 
 router = APIRouter(prefix="/coverage", tags=["admin-coverage"])
 logger = structlog.get_logger(__name__)
+
+
+class CoverageStatusEnum(str, Enum):
+    """Coverage status for triage workflow."""
+
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
 
 # Global connection pool (set during app startup)
 _db_pool = None
@@ -51,6 +61,31 @@ class WeakCoverageItem(BaseModel):
     )
     query_preview: str = Field(..., description="First ~120 chars of query")
     source_ref: Optional[str] = Field(None, description="Source reference for display")
+    coverage_status: CoverageStatusEnum = Field(
+        default=CoverageStatusEnum.OPEN, description="Triage status"
+    )
+    priority_score: float = Field(
+        default=0.0, description="Priority score for sorting (higher = more urgent)"
+    )
+
+
+class CoverageStatusUpdateRequest(BaseModel):
+    """Request for PATCH /admin/coverage/weak/{run_id}."""
+
+    status: CoverageStatusEnum = Field(..., description="New status")
+    note: Optional[str] = Field(None, max_length=1000, description="Resolution note")
+
+
+class CoverageStatusUpdateResponse(BaseModel):
+    """Response for PATCH /admin/coverage/weak/{run_id}."""
+
+    run_id: UUID = Field(..., description="Match run ID")
+    coverage_status: CoverageStatusEnum = Field(..., description="New status")
+    acknowledged_at: Optional[str] = Field(None, description="When acknowledged")
+    acknowledged_by: Optional[str] = Field(None, description="Who acknowledged")
+    resolved_at: Optional[str] = Field(None, description="When resolved")
+    resolved_by: Optional[str] = Field(None, description="Who resolved")
+    resolution_note: Optional[str] = Field(None, description="Resolution note")
 
 
 class WeakCoverageResponse(BaseModel):
@@ -84,6 +119,9 @@ async def list_weak_coverage(
     since: Optional[str] = Query(
         None, description="ISO timestamp filter (e.g., 2026-01-01T00:00:00Z)"
     ),
+    status: Optional[Literal["open", "acknowledged", "resolved", "all"]] = Query(
+        None, description="Filter by status (default: open)"
+    ),
     include_candidate_cards: bool = Query(
         True, description="Include hydrated strategy cards (default: true for cockpit)"
     ),
@@ -100,12 +138,17 @@ async def list_weak_coverage(
     - candidate_strategy_ids[] (point-in-time snapshot, ordered by recommendation)
     - query_preview (first ~120 chars)
     - source_ref (youtube:ID or doc:UUID)
+    - coverage_status (open, acknowledged, resolved)
+    - priority_score (higher = more urgent, sorted desc)
 
     By default (include_candidate_cards=true), also returns:
     - strategy_cards_by_id: {uuid: StrategyCard} for all candidates across items
     - missing_strategy_ids: IDs referenced but not found (deleted/archived)
 
-    Hydration is capped at 300 unique IDs to prevent payload bloat.
+    Filters:
+    - status: open (default), acknowledged, resolved, or all
+    - Hydration capped at 300 unique IDs to prevent payload bloat
+    - Results sorted by priority_score descending (most actionable first)
     """
     pool = _get_pool()
 
@@ -118,6 +161,7 @@ async def list_weak_coverage(
             workspace_id=workspace_id,
             limit=limit,
             since=since,
+            status=status,
         )
     except Exception as e:
         logger.error("weak_coverage_list_failed", error=str(e))
@@ -200,4 +244,64 @@ async def list_weak_coverage(
         count=len(response_items),
         strategy_cards_by_id=strategy_cards_by_id,
         missing_strategy_ids=missing_strategy_ids,
+    )
+
+
+@router.patch(
+    "/weak/{run_id}",
+    response_model=CoverageStatusUpdateResponse,
+    summary="Update coverage status",
+    description="Mark a weak coverage run as acknowledged or resolved.",
+)
+async def update_coverage_status(
+    run_id: UUID,
+    request: CoverageStatusUpdateRequest,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> CoverageStatusUpdateResponse:
+    """
+    Update coverage status for a match run.
+
+    Use this to triage weak coverage items:
+    - acknowledged: Someone is looking at it
+    - resolved: The coverage gap has been addressed
+    - open: Reopen if needed
+    """
+    pool = _get_pool()
+
+    from app.services.coverage_gap import MatchRunRepository
+
+    repo = MatchRunRepository(pool)
+
+    try:
+        result = await repo.update_coverage_status(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            status=request.status.value,
+            note=request.note,
+            updated_by="admin",  # Could be extracted from token in future
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("coverage_status_update_failed", run_id=str(run_id), error=str(e))
+        raise HTTPException(500, f"Failed to update coverage status: {e}")
+
+    if not result:
+        raise HTTPException(404, "Match run not found")
+
+    return CoverageStatusUpdateResponse(
+        run_id=result["id"],
+        coverage_status=CoverageStatusEnum(result["coverage_status"]),
+        acknowledged_at=(
+            result["acknowledged_at"].isoformat()
+            if result.get("acknowledged_at")
+            else None
+        ),
+        acknowledged_by=result.get("acknowledged_by"),
+        resolved_at=(
+            result["resolved_at"].isoformat() if result.get("resolved_at") else None
+        ),
+        resolved_by=result.get("resolved_by"),
+        resolution_note=result.get("resolution_note"),
     )
