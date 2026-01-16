@@ -96,6 +96,25 @@ class CoverageStatusUpdateResponse(BaseModel):
     resolution_note: Optional[str] = Field(None, description="Resolution note")
 
 
+class ExplainStrategyRequest(BaseModel):
+    """Request for POST /admin/coverage/explain."""
+
+    run_id: UUID = Field(..., description="Match run ID")
+    strategy_id: UUID = Field(..., description="Strategy ID to explain")
+
+
+class ExplainStrategyResponse(BaseModel):
+    """Response for POST /admin/coverage/explain."""
+
+    run_id: UUID = Field(..., description="Match run ID")
+    strategy_id: UUID = Field(..., description="Strategy ID")
+    strategy_name: str = Field(..., description="Strategy name")
+    explanation: str = Field(..., description="LLM-generated explanation")
+    model: str = Field(..., description="LLM model used")
+    provider: str = Field(..., description="LLM provider used")
+    latency_ms: Optional[float] = Field(None, description="Generation latency")
+
+
 class WeakCoverageResponse(BaseModel):
     """Response for weak coverage list endpoint."""
 
@@ -312,6 +331,110 @@ async def update_coverage_status(
         ),
         resolved_by=result.get("resolved_by"),
         resolution_note=result.get("resolution_note"),
+    )
+
+
+@router.post(
+    "/explain",
+    response_model=ExplainStrategyResponse,
+    summary="Generate strategy explanation",
+    description="Generate LLM-powered explanation of why a strategy matches an intent.",
+)
+async def explain_strategy_match(
+    request: ExplainStrategyRequest,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> ExplainStrategyResponse:
+    """
+    Generate an LLM-powered explanation of why a strategy matches an intent.
+
+    This endpoint uses the intent from a match run and strategy metadata
+    to generate a natural language explanation of the match.
+
+    Requires LLM to be configured (ANTHROPIC_API_KEY, OPENAI_API_KEY, or
+    OPENROUTER_API_KEY).
+    """
+    import json
+
+    pool = _get_pool()
+
+    # Fetch match run to get intent_json and candidate_scores
+    async with pool.acquire() as conn:
+        run_row = await conn.fetchrow(
+            """
+            SELECT intent_json, candidate_scores
+            FROM match_runs
+            WHERE id = $1 AND workspace_id = $2
+            """,
+            request.run_id,
+            workspace_id,
+        )
+
+    if not run_row:
+        raise HTTPException(404, "Match run not found")
+
+    # Parse intent_json
+    intent_json = run_row["intent_json"]
+    if isinstance(intent_json, str):
+        try:
+            intent_json = json.loads(intent_json)
+        except json.JSONDecodeError:
+            intent_json = {}
+    elif not intent_json:
+        intent_json = {}
+
+    # Parse candidate_scores to get matched_tags for this strategy
+    candidate_scores = run_row["candidate_scores"]
+    if isinstance(candidate_scores, str):
+        try:
+            candidate_scores = json.loads(candidate_scores)
+        except json.JSONDecodeError:
+            candidate_scores = {}
+    elif not candidate_scores:
+        candidate_scores = {}
+
+    strategy_id_str = str(request.strategy_id)
+    strategy_score_data = candidate_scores.get(strategy_id_str, {})
+    matched_tags = strategy_score_data.get("matched_tags", [])
+    match_score = strategy_score_data.get("score")
+
+    # Fetch strategy
+    from app.services.strategy import StrategyRepository
+
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(request.strategy_id, workspace_id)
+
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    # Generate explanation
+    from app.services.coverage_gap import (
+        ExplanationError,
+        generate_strategy_explanation,
+    )
+
+    try:
+        result = await generate_strategy_explanation(
+            intent_json=intent_json,
+            strategy=strategy,
+            matched_tags=matched_tags,
+            match_score=match_score,
+        )
+    except ExplanationError as e:
+        logger.warning("explanation_generation_failed", error=str(e))
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        logger.error("explanation_generation_error", error=str(e))
+        raise HTTPException(500, f"Failed to generate explanation: {e}")
+
+    return ExplainStrategyResponse(
+        run_id=request.run_id,
+        strategy_id=request.strategy_id,
+        strategy_name=result.strategy_name,
+        explanation=result.explanation,
+        model=result.model,
+        provider=result.provider,
+        latency_ms=result.latency_ms,
     )
 
 
