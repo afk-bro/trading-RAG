@@ -42,6 +42,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports `skip_lint_errors` to filter scripts with lint errors
   - `update_existing` controls upsert behavior for changed scripts (sha256-based)
 
+- **Strategy Registry v1** - Multi-engine strategy catalog with coverage integration
+  - Supports engines: `pine`, `python`, `vectorbt`, `backtesting_py`
+  - JSONB columns for flexible schema: `source_ref`, `tags`, `backtest_summary`
+  - MatchIntent-compatible tags for coverage gap routing
+  - API Endpoints (`/strategies`):
+    - `GET /` - List strategies with filters (engine, status, review_status, search)
+    - `GET /{id}` - Full details with source_ref and backtest_summary
+    - `POST /` - Create strategy in draft status (auto-generates slug)
+    - `PATCH /{id}` - Update status, tags, backtest_summary
+    - `GET /candidates/by-intent` - Find strategies by tag overlap with scoring
+  - Coverage Integration:
+    - `CoverageResponse.intent_signature` - SHA256 hash for candidate lookup
+    - `CoverageResponse.candidate_strategies` - Matching strategies when weak=true
+    - YouTube match-pine endpoint surfaces candidates on coverage gaps
+  - Database: `strategies` table with GIN index on tags for efficient overlap queries
+  - Migration: `049_strategies.sql`
+
 - **Cross-Encoder Reranking with Neighbor Expansion**
   - Optional two-stage retrieval: vector search → cross-encoder rerank
   - BGE-reranker-v2-m3 model (local inference, no external API)
