@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Best-effort parsing: failures recorded as E999 synthetic errors, build continues
   - Deterministic output: sorted keys, SHA256 fingerprinting for change detection
   - Designed for future GitHub adapter parity (root_kind field)
+- **Pine Script Ingest API** - Admin endpoint for ingesting Pine Script registries into RAG
+  - `POST /sources/pine/ingest` - Ingest scripts from registry file
+  - Path validation against `DATA_DIR` allowlist (prevents path traversal attacks)
+  - Auto-derives lint report path from registry location
+  - `dry_run` mode for validation without database writes
+  - Detailed response: `scripts_indexed`, `scripts_already_indexed`, `scripts_skipped`, `scripts_failed`
+  - Requires `X-Admin-Token` header for authentication
+  - Supports `skip_lint_errors` to filter scripts with lint errors
+  - `update_existing` controls upsert behavior for changed scripts (sha256-based)
 - **Cross-Encoder Reranking with Neighbor Expansion**
   - Optional two-stage retrieval: vector search → cross-encoder rerank
   - BGE-reranker-v2-m3 model (local inference, no external API)

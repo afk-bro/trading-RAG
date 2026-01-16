@@ -195,6 +195,59 @@ python -m app.services.pine --build ./scripts -q        # Quiet mode
 | I001 | Info | Script has exports but is not a library |
 | I002 | Info | Script exceeds recommended line count (500) |
 
+## Pine Script Ingest API
+
+Admin-only endpoint for ingesting Pine Script registries into the RAG system.
+
+**Endpoint**: `POST /sources/pine/ingest`
+
+**Authentication**: Requires `X-Admin-Token` header.
+
+**Request**:
+```json
+{
+  "workspace_id": "uuid",
+  "registry_path": "/data/pine/pine_registry.json",
+  "lint_path": null,
+  "source_root": null,
+  "include_source": true,
+  "max_source_lines": 100,
+  "skip_lint_errors": false,
+  "update_existing": false,
+  "dry_run": false
+}
+```
+
+**Key Parameters**:
+- `registry_path` - Server path to `pine_registry.json` (must be within `DATA_DIR`)
+- `lint_path` - Optional lint report path (auto-derived if null)
+- `source_root` - Directory with `.pine` files (defaults to registry parent)
+- `skip_lint_errors` - Skip scripts with lint errors
+- `update_existing` - Upsert if sha256 changed (false = skip changed scripts)
+- `dry_run` - Validate without database writes
+
+**Response**:
+```json
+{
+  "status": "success",
+  "scripts_processed": 50,
+  "scripts_indexed": 45,
+  "scripts_already_indexed": 3,
+  "scripts_skipped": 2,
+  "scripts_failed": 0,
+  "chunks_added": 96,
+  "errors": [],
+  "ingest_run_id": "pine-ingest-abc12345"
+}
+```
+
+**Status Values**: `success`, `partial`, `failed`, `dry_run`
+
+**Security**:
+- All paths validated against `DATA_DIR` allowlist
+- Path traversal attempts return 403
+- Non-.json extensions rejected with 400
+
 ## API Endpoints
 
 **Health & Readiness**:
@@ -206,6 +259,7 @@ python -m app.services.pine --build ./scripts -q        # Quiet mode
 - `POST /ingest` - Generic document ingestion
 - `POST /sources/youtube/ingest` - YouTube transcript ingestion
 - `POST /sources/pdf/ingest` - PDF file upload ingestion (multipart form)
+- `POST /sources/pine/ingest` - Pine Script registry ingestion (admin-only)
 - `POST /query` - Semantic search (modes: `retrieve` or `answer`)
 - `POST /reembed` - Migrate to new embedding model
 - `GET /jobs/{job_id}` - Async job status
