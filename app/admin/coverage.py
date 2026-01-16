@@ -1,10 +1,13 @@
 """Admin endpoints for coverage gap inspection."""
 
+import hashlib
+import json
 import os
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -884,4 +887,462 @@ async def coverage_cockpit_detail(
             "admin_token": admin_token,
             "selected_run_id": str(run_id),
         },
+    )
+
+
+# =============================================================================
+# Dev-Only Seed Endpoint
+# =============================================================================
+
+
+class SeedCoverageResponse(BaseModel):
+    """Response for POST /admin/coverage/seed."""
+
+    status: str = Field(..., description="success or error")
+    workspace_id: UUID = Field(..., description="Workspace used/created")
+    strategies_created: int = Field(..., description="Number of strategies seeded")
+    match_runs_created: int = Field(..., description="Number of match_runs seeded")
+    message: str = Field(..., description="Summary message")
+
+
+def _is_dev_mode() -> bool:
+    """Check if running in dev mode (allow seeding)."""
+    profile = os.environ.get("CONFIG_PROFILE", "development")
+    return profile.lower() in ("development", "dev", "local", "test")
+
+
+@router.post(
+    "/seed",
+    response_model=SeedCoverageResponse,
+    summary="Seed fixture data (dev only)",
+    description="Create deterministic strategies and match_runs for UI testing.",
+)
+async def seed_coverage_fixtures(
+    workspace_id: Optional[UUID] = Query(None, description="Workspace ID (creates if missing)"),
+    clear_existing: bool = Query(False, description="Delete existing seeded data first"),
+    _: bool = Depends(require_admin_token),
+) -> SeedCoverageResponse:
+    """
+    Seed deterministic fixture data for coverage cockpit testing.
+
+    **Dev-only**: Only available when CONFIG_PROFILE is development/dev/local/test.
+
+    Creates:
+    - 1 workspace (if not provided)
+    - 5 strategies with varied tags and backtest status
+    - 8 match_runs with varied reason codes, candidates, and triage status
+    - 1 match_run referencing a non-existent strategy (tests missing warning)
+
+    Use `clear_existing=true` to delete previous seed data before inserting.
+    """
+    if not _is_dev_mode():
+        raise HTTPException(
+            403,
+            "Seed endpoint only available in development mode. "
+            f"Current CONFIG_PROFILE: {os.environ.get('CONFIG_PROFILE', 'not set')}",
+        )
+
+    pool = _get_pool()
+
+    async with pool.acquire() as conn:
+        # Get or create workspace
+        if workspace_id:
+            ws_row = await conn.fetchrow(
+                "SELECT id FROM workspaces WHERE id = $1", workspace_id
+            )
+            if not ws_row:
+                raise HTTPException(404, f"Workspace {workspace_id} not found")
+        else:
+            # Try to get default, or create one
+            ws_row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
+            if ws_row:
+                workspace_id = ws_row["id"]
+            else:
+                # Create a dev workspace
+                ws_row = await conn.fetchrow(
+                    """
+                    INSERT INTO workspaces (name, slug, owner_id, is_active, ingestion_enabled)
+                    VALUES ('Dev Workspace', 'dev', 'seed-script', true, true)
+                    ON CONFLICT (slug) DO UPDATE SET name = 'Dev Workspace'
+                    RETURNING id
+                    """
+                )
+                workspace_id = ws_row["id"]
+                logger.info("seed_created_workspace", workspace_id=str(workspace_id))
+
+        # Clear existing seed data if requested
+        if clear_existing:
+            # Delete match_runs with seed marker in intent_signature
+            await conn.execute(
+                """
+                DELETE FROM match_runs
+                WHERE workspace_id = $1 AND intent_signature LIKE 'seed-%%'
+                """,
+                workspace_id,
+            )
+            # Delete seeded strategies
+            await conn.execute(
+                """
+                DELETE FROM strategies
+                WHERE workspace_id = $1 AND slug LIKE 'seed-%%'
+                """,
+                workspace_id,
+            )
+            logger.info("seed_cleared_existing", workspace_id=str(workspace_id))
+
+        # Seed strategies
+        strategies_created = 0
+        strategy_ids: list[UUID] = []
+
+        strategy_fixtures = [
+            {
+                "name": "52-Week Breakout Strategy",
+                "slug": "seed-breakout-52w",
+                "description": "Enters when price breaks 52-week high with volume confirmation",
+                "engine": "pine",
+                "status": "active",
+                "tags": {
+                    "strategy_archetypes": ["breakout", "momentum"],
+                    "indicators": ["volume", "atr", "ma"],
+                    "timeframe_buckets": ["swing"],
+                    "topics": ["stocks", "crypto"],
+                },
+                "backtest_summary": {
+                    "status": "validated",
+                    "best_oos_score": 1.45,
+                    "max_drawdown": 0.12,
+                    "num_trades": 156,
+                },
+            },
+            {
+                "name": "RSI Mean Reversion",
+                "slug": "seed-rsi-reversion",
+                "description": "Buy oversold RSI bounces with tight stops",
+                "engine": "pine",
+                "status": "active",
+                "tags": {
+                    "strategy_archetypes": ["mean_reversion", "oscillator"],
+                    "indicators": ["rsi", "bollinger"],
+                    "timeframe_buckets": ["intraday", "swing"],
+                    "topics": ["forex"],
+                },
+                "backtest_summary": {
+                    "status": "validated",
+                    "best_oos_score": 0.95,
+                    "max_drawdown": 0.18,
+                    "num_trades": 312,
+                },
+            },
+            {
+                "name": "MACD Trend Follow",
+                "slug": "seed-macd-trend",
+                "description": "Follow MACD crossovers with ATR trailing stops",
+                "engine": "python",
+                "status": "active",
+                "tags": {
+                    "strategy_archetypes": ["trend_following"],
+                    "indicators": ["macd", "atr", "ema"],
+                    "timeframe_buckets": ["swing", "position"],
+                    "topics": ["futures", "commodities"],
+                },
+                "backtest_summary": {
+                    "status": "complete",
+                    "best_oos_score": 1.12,
+                    "max_drawdown": 0.22,
+                    "num_trades": 89,
+                },
+            },
+            {
+                "name": "Bollinger Squeeze",
+                "slug": "seed-bb-squeeze",
+                "description": "Enter on Bollinger Band squeeze breakout",
+                "engine": "pine",
+                "status": "draft",
+                "tags": {
+                    "strategy_archetypes": ["breakout", "volatility"],
+                    "indicators": ["bollinger", "keltner", "volume"],
+                    "timeframe_buckets": ["intraday"],
+                    "topics": ["stocks"],
+                },
+                "backtest_summary": {
+                    "status": "never",
+                },
+            },
+            {
+                "name": "Volume Profile Scalp",
+                "slug": "seed-vp-scalp",
+                "description": "Scalp off volume profile POC levels",
+                "engine": "vectorbt",
+                "status": "active",
+                "tags": {
+                    "strategy_archetypes": ["scalping", "support_resistance"],
+                    "indicators": ["volume_profile", "vwap"],
+                    "timeframe_buckets": ["scalp", "intraday"],
+                    "topics": ["futures", "crypto"],
+                },
+                "backtest_summary": {
+                    "status": "validated",
+                    "best_oos_score": 0.78,
+                    "max_drawdown": 0.08,
+                    "num_trades": 1245,
+                },
+            },
+        ]
+
+        for strat in strategy_fixtures:
+            try:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO strategies (
+                        workspace_id, name, slug, description, engine, status,
+                        tags, backtest_summary
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (workspace_id, slug) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        description = EXCLUDED.description,
+                        tags = EXCLUDED.tags,
+                        backtest_summary = EXCLUDED.backtest_summary,
+                        updated_at = NOW()
+                    RETURNING id
+                    """,
+                    workspace_id,
+                    strat["name"],
+                    strat["slug"],
+                    strat["description"],
+                    strat["engine"],
+                    strat["status"],
+                    json.dumps(strat["tags"]),
+                    json.dumps(strat["backtest_summary"]),
+                )
+                strategy_ids.append(row["id"])
+                strategies_created += 1
+            except Exception as e:
+                logger.warning("seed_strategy_insert_failed", slug=strat["slug"], error=str(e))
+
+        # Create a fake "missing" strategy ID that won't exist
+        missing_strategy_id = uuid4()
+
+        # Seed match_runs
+        match_runs_created = 0
+        now = datetime.now(timezone.utc)
+
+        match_run_fixtures = [
+            # High priority: NO_MATCHES, recent, no candidates
+            {
+                "intent_signature": "seed-001-no-matches",
+                "query_used": "I need a strategy for trading Fibonacci retracements on 4-hour charts with strict risk management",
+                "intent_json": {
+                    "strategy_archetypes": ["fibonacci", "retracement"],
+                    "indicators": ["fibonacci"],
+                    "timeframe_buckets": ["swing"],
+                    "topics": ["forex"],
+                },
+                "reason_codes": ["NO_MATCHES"],
+                "best_score": None,
+                "num_above_threshold": 0,
+                "candidate_strategy_ids": [],
+                "coverage_status": "open",
+                "created_at": now - timedelta(hours=2),
+                "video_id": "abc123xyz",
+            },
+            # Medium priority: NO_STRONG_MATCHES, has candidates
+            {
+                "intent_signature": "seed-002-weak-matches",
+                "query_used": "Looking for momentum breakout strategy for crypto with volume confirmation",
+                "intent_json": {
+                    "strategy_archetypes": ["breakout", "momentum"],
+                    "indicators": ["volume"],
+                    "timeframe_buckets": ["swing"],
+                    "topics": ["crypto"],
+                },
+                "reason_codes": ["NO_STRONG_MATCHES"],
+                "best_score": 0.38,
+                "num_above_threshold": 1,
+                "candidate_strategy_ids": [strategy_ids[0], strategy_ids[2]] if len(strategy_ids) >= 3 else [],
+                "candidate_scores": {
+                    str(strategy_ids[0]): {"score": 0.38, "matched_tags": ["breakout", "momentum", "volume"]},
+                    str(strategy_ids[2]): {"score": 0.25, "matched_tags": ["momentum"]},
+                } if len(strategy_ids) >= 3 else {},
+                "coverage_status": "open",
+                "created_at": now - timedelta(hours=6),
+                "video_id": "def456uvw",
+            },
+            # Acknowledged item
+            {
+                "intent_signature": "seed-003-acknowledged",
+                "query_used": "Need RSI divergence strategy for swing trading stocks",
+                "intent_json": {
+                    "strategy_archetypes": ["divergence", "oscillator"],
+                    "indicators": ["rsi"],
+                    "timeframe_buckets": ["swing"],
+                    "topics": ["stocks"],
+                },
+                "reason_codes": ["NO_STRONG_MATCHES", "LOW_SIGNAL_INPUT"],
+                "best_score": 0.42,
+                "num_above_threshold": 2,
+                "candidate_strategy_ids": [strategy_ids[1]] if len(strategy_ids) >= 2 else [],
+                "candidate_scores": {
+                    str(strategy_ids[1]): {"score": 0.42, "matched_tags": ["rsi", "swing"]},
+                } if len(strategy_ids) >= 2 else {},
+                "coverage_status": "acknowledged",
+                "created_at": now - timedelta(days=1),
+            },
+            # Resolved item
+            {
+                "intent_signature": "seed-004-resolved",
+                "query_used": "MACD crossover strategy for commodities with position sizing",
+                "intent_json": {
+                    "strategy_archetypes": ["trend_following"],
+                    "indicators": ["macd"],
+                    "timeframe_buckets": ["position"],
+                    "topics": ["commodities"],
+                },
+                "reason_codes": ["NO_STRONG_MATCHES"],
+                "best_score": 0.55,
+                "num_above_threshold": 3,
+                "candidate_strategy_ids": [strategy_ids[2]] if len(strategy_ids) >= 3 else [],
+                "coverage_status": "resolved",
+                "resolution_note": "Added MACD Trend Follow strategy",
+                "created_at": now - timedelta(days=3),
+            },
+            # Item with MISSING strategy ID (tests warning UI)
+            {
+                "intent_signature": "seed-005-missing-strategy",
+                "query_used": "Scalping strategy for ES futures using volume profile",
+                "intent_json": {
+                    "strategy_archetypes": ["scalping"],
+                    "indicators": ["volume_profile", "vwap"],
+                    "timeframe_buckets": ["scalp"],
+                    "topics": ["futures"],
+                },
+                "reason_codes": ["NO_STRONG_MATCHES"],
+                "best_score": 0.35,
+                "num_above_threshold": 1,
+                "candidate_strategy_ids": [strategy_ids[4], missing_strategy_id] if len(strategy_ids) >= 5 else [missing_strategy_id],
+                "candidate_scores": {
+                    str(strategy_ids[4]): {"score": 0.35, "matched_tags": ["scalping", "volume_profile"]},
+                    str(missing_strategy_id): {"score": 0.30, "matched_tags": ["scalping"]},
+                } if len(strategy_ids) >= 5 else {
+                    str(missing_strategy_id): {"score": 0.30, "matched_tags": ["scalping"]},
+                },
+                "coverage_status": "open",
+                "created_at": now - timedelta(hours=12),
+            },
+            # Low score, multiple candidates
+            {
+                "intent_signature": "seed-006-low-score",
+                "query_used": "Bollinger band breakout for intraday stocks with squeeze detection",
+                "intent_json": {
+                    "strategy_archetypes": ["breakout", "volatility"],
+                    "indicators": ["bollinger"],
+                    "timeframe_buckets": ["intraday"],
+                    "topics": ["stocks"],
+                },
+                "reason_codes": ["LOW_SIGNAL_INPUT"],
+                "best_score": 0.28,
+                "num_above_threshold": 0,
+                "candidate_strategy_ids": [strategy_ids[0], strategy_ids[3]] if len(strategy_ids) >= 4 else [],
+                "candidate_scores": {
+                    str(strategy_ids[0]): {"score": 0.28, "matched_tags": ["breakout"]},
+                    str(strategy_ids[3]): {"score": 0.22, "matched_tags": ["bollinger", "breakout"]},
+                } if len(strategy_ids) >= 4 else {},
+                "coverage_status": "open",
+                "created_at": now - timedelta(days=2),
+            },
+            # Older acknowledged
+            {
+                "intent_signature": "seed-007-old-acknowledged",
+                "query_used": "Mean reversion strategy using RSI and Bollinger for forex",
+                "intent_json": {
+                    "strategy_archetypes": ["mean_reversion"],
+                    "indicators": ["rsi", "bollinger"],
+                    "timeframe_buckets": ["swing"],
+                    "topics": ["forex"],
+                },
+                "reason_codes": ["NO_STRONG_MATCHES"],
+                "best_score": 0.48,
+                "num_above_threshold": 2,
+                "candidate_strategy_ids": [strategy_ids[1]] if len(strategy_ids) >= 2 else [],
+                "coverage_status": "acknowledged",
+                "created_at": now - timedelta(days=5),
+            },
+            # Recent high-priority
+            {
+                "intent_signature": "seed-008-recent-high",
+                "query_used": "Elliott wave strategy for crypto with Fibonacci targets",
+                "intent_json": {
+                    "strategy_archetypes": ["elliott_wave", "fibonacci"],
+                    "indicators": ["fibonacci"],
+                    "timeframe_buckets": ["position"],
+                    "topics": ["crypto"],
+                },
+                "reason_codes": ["NO_MATCHES", "LOW_SIGNAL_INPUT"],
+                "best_score": None,
+                "num_above_threshold": 0,
+                "candidate_strategy_ids": [],
+                "coverage_status": "open",
+                "created_at": now - timedelta(minutes=30),
+            },
+        ]
+
+        for run in match_run_fixtures:
+            try:
+                candidate_scores_json = json.dumps(run.get("candidate_scores")) if run.get("candidate_scores") else None
+
+                await conn.execute(
+                    """
+                    INSERT INTO match_runs (
+                        workspace_id, source_type, video_id,
+                        intent_signature, intent_json, query_used, filters_applied,
+                        top_k, total_searched, best_score, avg_top_k_score,
+                        num_above_threshold, weak_coverage, reason_codes,
+                        candidate_strategy_ids, candidate_scores,
+                        coverage_status, created_at, resolution_note
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                        $17::coverage_status, $18, $19
+                    )
+                    ON CONFLICT DO NOTHING
+                    """,
+                    workspace_id,
+                    "youtube",
+                    run.get("video_id"),
+                    run["intent_signature"],
+                    json.dumps(run["intent_json"]),
+                    run["query_used"],
+                    json.dumps({"script_type": "strategy"}),
+                    10,  # top_k
+                    100,  # total_searched
+                    run["best_score"],
+                    run["best_score"],  # avg = best for simplicity
+                    run["num_above_threshold"],
+                    True,  # weak_coverage
+                    run["reason_codes"],
+                    run["candidate_strategy_ids"],
+                    candidate_scores_json,
+                    run["coverage_status"],
+                    run["created_at"],
+                    run.get("resolution_note"),
+                )
+                match_runs_created += 1
+            except Exception as e:
+                logger.warning(
+                    "seed_match_run_insert_failed",
+                    signature=run["intent_signature"],
+                    error=str(e),
+                )
+
+    logger.info(
+        "seed_coverage_complete",
+        workspace_id=str(workspace_id),
+        strategies_created=strategies_created,
+        match_runs_created=match_runs_created,
+    )
+
+    return SeedCoverageResponse(
+        status="success",
+        workspace_id=workspace_id,
+        strategies_created=strategies_created,
+        match_runs_created=match_runs_created,
+        message=f"Seeded {strategies_created} strategies and {match_runs_created} match_runs for testing",
     )

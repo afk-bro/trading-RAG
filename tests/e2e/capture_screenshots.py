@@ -41,7 +41,7 @@ def capture_cockpit_screenshots():
         page.wait_for_load_state("networkidle")
 
         # Check if there are any queue items
-        queue_items = page.locator("[data-testid='queue-item']")
+        queue_items = page.locator(".queue-item")
         if queue_items.count() > 0:
             print(f"Found {queue_items.count()} queue items")
 
@@ -53,23 +53,23 @@ def capture_cockpit_screenshots():
 
             # 5. Capture triage controls section
             print("Capturing: Triage controls...")
-            triage_section = page.locator("[data-testid='triage-controls']")
+            triage_section = page.locator(".triage-section, .triage-controls")
             if triage_section.count() > 0:
-                triage_section.scroll_into_view_if_needed()
+                triage_section.first.scroll_into_view_if_needed()
                 page.screenshot(path=OUTPUT_DIR / "04_triage_controls.png", full_page=True)
 
             # 6. Capture candidates section
             print("Capturing: Candidates section...")
-            candidates = page.locator("[data-testid='candidate-row']")
+            candidates = page.locator(".candidate-row, .strategy-candidate")
             if candidates.count() > 0:
                 candidates.first.scroll_into_view_if_needed()
                 page.screenshot(path=OUTPUT_DIR / "05_candidates.png", full_page=True)
 
                 # 7. Try explain button
                 print("Capturing: Explanation feature...")
-                explain_btn = page.locator("[data-testid='explain-button']").first
+                explain_btn = page.locator("button:has-text('Explain')")
                 if explain_btn.count() > 0:
-                    explain_btn.click()
+                    explain_btn.first.click()
                     page.wait_for_timeout(2000)  # Wait for LLM response (may timeout)
                     page.screenshot(path=OUTPUT_DIR / "06_explanation.png", full_page=True)
         else:
