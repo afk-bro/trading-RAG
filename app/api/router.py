@@ -18,6 +18,7 @@ from app.routers import (
     query,
     reembed,
     sources,
+    strategies,
     testing,
     youtube,
     youtube_pine,
@@ -60,6 +61,11 @@ api_router.include_router(execution.router)  # Paper execution endpoints
 api_router.include_router(
     testing.router
 )  # Testing endpoints (run plan generation/execution)
+
+# Strategy Registry
+api_router.include_router(
+    strategies.router, prefix="/strategies", tags=["Strategies"]
+)
 
 # Admin
 api_router.include_router(admin_router)  # Admin UI (not in OpenAPI docs)

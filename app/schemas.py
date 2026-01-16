@@ -1654,6 +1654,13 @@ class CoverageResponse(BaseModel):
     suggestions: list[str] = Field(
         default_factory=list, description="Actionable suggestions"
     )
+    # Strategy registry integration
+    intent_signature: Optional[str] = Field(
+        None, description="SHA256 hash for candidates endpoint"
+    )
+    candidate_strategies: Optional[list] = Field(
+        None, description="Strategies with tag overlap (when weak=true)"
+    )
 
 
 class YouTubeMatchPineResponse(BaseModel):
@@ -1809,3 +1816,191 @@ class SourceDetailResponse(BaseModel):
     chunks: Optional[list[dict]] = Field(None, description="Chunk content")
     chunks_total: int = Field(default=0, description="Total chunks")
     chunks_has_more: bool = Field(default=False, description="More chunks available")
+
+
+# =============================================================================
+# Strategy Registry
+# =============================================================================
+
+
+class StrategyEngine(str, Enum):
+    """Supported execution engines for strategies."""
+
+    PINE = "pine"
+    PYTHON = "python"
+    VECTORBT = "vectorbt"
+    BACKTESTING_PY = "backtesting_py"
+
+
+class StrategyStatus(str, Enum):
+    """Strategy lifecycle status."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class StrategyReviewStatus(str, Enum):
+    """Strategy human review status."""
+
+    UNREVIEWED = "unreviewed"
+    REVIEWED = "reviewed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class StrategyRiskLevel(str, Enum):
+    """Strategy risk classification."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class BacktestSummaryStatus(str, Enum):
+    """Backtest summary status."""
+
+    NEVER = "never"
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class StrategyTags(BaseModel):
+    """Tags mirroring MatchIntent for coverage overlap computation."""
+
+    strategy_archetypes: list[str] = Field(default_factory=list)
+    indicators: list[str] = Field(default_factory=list)
+    timeframe_buckets: list[str] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)
+    risk_terms: list[str] = Field(default_factory=list)
+
+
+class BacktestSummary(BaseModel):
+    """Backtest summary stored as JSONB on strategies."""
+
+    status: BacktestSummaryStatus = Field(
+        default=BacktestSummaryStatus.NEVER, description="Backtest status"
+    )
+    last_backtest_at: Optional[datetime] = Field(None, description="Last run timestamp")
+    best_oos_score: Optional[float] = Field(None, description="Best OOS score")
+    max_drawdown: Optional[float] = Field(None, description="Max drawdown percentage")
+    num_trades: Optional[int] = Field(None, description="Number of trades")
+    dataset_coverage: Optional[dict] = Field(
+        None, description="Symbols and time ranges tested"
+    )
+    rigor: Optional[dict] = Field(
+        None, description="Fees, slippage, walk-forward settings"
+    )
+    notes: Optional[str] = Field(None, description="Human notes")
+
+
+class StrategySourceRef(BaseModel):
+    """Engine-specific source reference."""
+
+    # Common
+    store: Optional[str] = Field(None, description="local, github, tradingview")
+    path: Optional[str] = Field(None, description="File path or script path")
+    doc_id: Optional[UUID] = Field(None, description="Reference to documents table")
+
+    # Pine-specific
+    repo: Optional[str] = Field(None, description="GitHub repo (org/repo)")
+    ref: Optional[str] = Field(None, description="Git ref (branch/tag/sha)")
+
+    # Python-specific
+    module: Optional[str] = Field(None, description="Python module path")
+    entrypoint: Optional[str] = Field(None, description="Function entrypoint")
+    params_schema: Optional[dict] = Field(None, description="JSON Schema for params")
+
+
+class StrategyCreateRequest(BaseModel):
+    """Request for POST /strategies."""
+
+    workspace_id: UUID = Field(..., description="Workspace ID")
+    name: str = Field(..., min_length=1, max_length=200, description="Strategy name")
+    description: Optional[str] = Field(None, description="Strategy description")
+    engine: StrategyEngine = Field(
+        default=StrategyEngine.PINE, description="Execution engine"
+    )
+    source_ref: Optional[StrategySourceRef] = Field(
+        None, description="Engine-specific source"
+    )
+    status: StrategyStatus = Field(
+        default=StrategyStatus.DRAFT, description="Initial status"
+    )
+    risk_level: Optional[StrategyRiskLevel] = Field(None, description="Risk level")
+    tags: Optional[StrategyTags] = Field(None, description="Intent-compatible tags")
+
+
+class StrategyUpdateRequest(BaseModel):
+    """Request for PATCH /strategies/{id}."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None)
+    status: Optional[StrategyStatus] = Field(None)
+    review_status: Optional[StrategyReviewStatus] = Field(None)
+    risk_level: Optional[StrategyRiskLevel] = Field(None)
+    source_ref: Optional[StrategySourceRef] = Field(None)
+    tags: Optional[StrategyTags] = Field(None)
+    backtest_summary: Optional[BacktestSummary] = Field(None)
+
+
+class StrategyListItem(BaseModel):
+    """Single item in strategy list response."""
+
+    id: UUID = Field(..., description="Strategy ID")
+    name: str = Field(..., description="Strategy name")
+    slug: str = Field(..., description="URL-safe slug")
+    engine: StrategyEngine = Field(..., description="Execution engine")
+    status: StrategyStatus = Field(..., description="Lifecycle status")
+    review_status: StrategyReviewStatus = Field(..., description="Review status")
+    risk_level: Optional[StrategyRiskLevel] = Field(None, description="Risk level")
+    tags: StrategyTags = Field(default_factory=StrategyTags, description="Tags")
+    backtest_summary: Optional[BacktestSummary] = Field(
+        None, description="Latest backtest summary"
+    )
+    created_at: datetime = Field(..., description="Created timestamp")
+    updated_at: datetime = Field(..., description="Updated timestamp")
+
+
+class StrategyListResponse(BaseModel):
+    """Response for GET /strategies."""
+
+    items: list[StrategyListItem] = Field(..., description="Strategies")
+    total: int = Field(..., description="Total count")
+    limit: int = Field(..., description="Page size")
+    offset: int = Field(..., description="Page offset")
+    has_more: bool = Field(..., description="More results available")
+
+
+class StrategyDetailResponse(BaseModel):
+    """Response for GET /strategies/{id}."""
+
+    id: UUID = Field(..., description="Strategy ID")
+    workspace_id: UUID = Field(..., description="Workspace ID")
+    name: str = Field(..., description="Strategy name")
+    slug: str = Field(..., description="URL-safe slug")
+    description: Optional[str] = Field(None, description="Description")
+    engine: StrategyEngine = Field(..., description="Execution engine")
+    source_ref: Optional[StrategySourceRef] = Field(
+        None, description="Engine-specific source"
+    )
+    status: StrategyStatus = Field(..., description="Lifecycle status")
+    review_status: StrategyReviewStatus = Field(..., description="Review status")
+    risk_level: Optional[StrategyRiskLevel] = Field(None, description="Risk level")
+    tags: StrategyTags = Field(default_factory=StrategyTags, description="Tags")
+    backtest_summary: Optional[BacktestSummary] = Field(
+        None, description="Latest backtest summary"
+    )
+    created_at: datetime = Field(..., description="Created timestamp")
+    updated_at: datetime = Field(..., description="Updated timestamp")
+
+
+class CandidateStrategy(BaseModel):
+    """Candidate strategy in coverage response."""
+
+    strategy_id: UUID = Field(..., description="Strategy ID")
+    name: str = Field(..., description="Strategy name")
+    score: float = Field(..., description="Tag overlap score")
+    matched_tags: list[str] = Field(..., description="Tags that matched")

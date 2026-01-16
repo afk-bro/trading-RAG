@@ -254,6 +254,41 @@ async def youtube_match_pine(
     # Assess coverage
     scores = [r.final_score for r in ranked[: request.top_k]]
     coverage_assessment = assess_coverage(scores, intent, top_k=request.top_k)
+    intent_sig = compute_intent_signature(intent)
+
+    # Find candidate strategies when coverage is weak
+    from app.routers.ingest import _db_pool
+
+    candidate_strategies = None
+    if coverage_assessment.weak and _db_pool is not None:
+        try:
+            from app.services.strategy import StrategyRepository
+
+            strategy_repo = StrategyRepository(_db_pool)
+            intent_tags = {
+                "strategy_archetypes": intent.strategy_archetypes,
+                "indicators": intent.indicators,
+                "timeframe_buckets": intent.timeframe_buckets,
+                "topics": intent.topics,
+                "risk_terms": intent.risk_terms,
+            }
+            candidates = await strategy_repo.find_candidates_by_tags(
+                workspace_id=request.workspace_id,
+                intent_tags=intent_tags,
+                limit=5,
+            )
+            if candidates:
+                candidate_strategies = [
+                    {
+                        "strategy_id": str(c["strategy_id"]),
+                        "name": c["name"],
+                        "score": c["score"],
+                        "matched_tags": c["matched_tags"],
+                    }
+                    for c in candidates
+                ]
+        except Exception as e:
+            log.warning("candidate_strategy_lookup_failed", error=str(e))
 
     coverage = CoverageResponse(
         weak=coverage_assessment.weak,
@@ -263,6 +298,8 @@ async def youtube_match_pine(
         threshold=coverage_assessment.threshold,
         reason_codes=coverage_assessment.reason_codes,
         suggestions=coverage_assessment.suggestions,
+        intent_signature=intent_sig,
+        candidate_strategies=candidate_strategies,
     )
 
     log.info(
@@ -271,18 +308,17 @@ async def youtube_match_pine(
         best_score=coverage_assessment.best_score,
         num_above_threshold=coverage_assessment.num_above_threshold,
         reason_codes=coverage_assessment.reason_codes,
+        candidate_count=len(candidate_strategies) if candidate_strategies else 0,
     )
 
     # Record match run for analytics (async, don't block response)
-    from app.routers.ingest import _db_pool
-
     if _db_pool is not None:
         try:
             match_run_repo = MatchRunRepository(_db_pool)
             await match_run_repo.record_match_run(
                 workspace_id=request.workspace_id,
                 source_type="youtube",
-                intent_signature=compute_intent_signature(intent),
+                intent_signature=intent_sig,
                 query_used=query_string,
                 filters_applied=filters.model_dump(),
                 top_k=request.top_k,

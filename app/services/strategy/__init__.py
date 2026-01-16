@@ -1,7 +1,8 @@
 """
 Strategy runner package.
 
-Provides models and runtime for executing trading strategies.
+Provides models and runtime for executing trading strategies,
+plus the strategy registry for multi-engine strategy catalog.
 
 Models:
 - OHLCVBar: Single candlestick data
@@ -12,6 +13,10 @@ Models:
 
 Runner:
 - StrategyRunner: Main evaluation engine
+
+Registry:
+- StrategyRepository: Multi-engine strategy catalog
+- slugify: URL-safe slug generation
 """
 
 from app.services.strategy.models import (
@@ -24,8 +29,10 @@ from app.services.strategy.models import (
     StrategyEvaluation,
 )
 from app.services.strategy.runner import StrategyRunner
+from app.services.strategy.repository import StrategyRepository, slugify
 
 __all__ = [
+    # Models
     "OHLCVBar",
     "MarketSnapshot",
     "EntryConfig",
@@ -33,5 +40,9 @@ __all__ = [
     "RiskConfig",
     "ExecutionSpec",
     "StrategyEvaluation",
+    # Runner
     "StrategyRunner",
+    # Registry
+    "StrategyRepository",
+    "slugify",
 ]
