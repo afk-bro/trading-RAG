@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
-from app.routers.ingest import _db_pool
 from app.routers.pine import match_pine_scripts
 from app.routers.youtube import (
     fetch_transcript,
@@ -40,15 +39,17 @@ MAX_EXTRACTION_CHARS = 50_000
 async def check_kb_for_video(
     workspace_id: UUID,
     video_id: str,
-) -> tuple[bool, Optional[str], Optional[list[str]]]:
+) -> tuple[bool, Optional[UUID], Optional[str], Optional[list[str]]]:
     """
     Check if video is already in knowledge base.
 
     Returns:
-        (in_kb, title, chunk_texts)
+        (in_kb, doc_id, title, chunk_texts)
     """
+    from app.routers.ingest import _db_pool
+
     if _db_pool is None:
-        return False, None, None
+        return False, None, None, None
 
     async with _db_pool.acquire() as conn:
         # Check for document
@@ -66,7 +67,9 @@ async def check_kb_for_video(
         )
 
         if not doc:
-            return False, None, None
+            return False, None, None, None
+
+        doc_id = doc["id"]
 
         # Load top chunks
         rows = await conn.fetch(
@@ -77,11 +80,11 @@ async def check_kb_for_video(
             ORDER BY chunk_index
             LIMIT 20
             """,
-            doc["id"],
+            doc_id,
         )
 
         chunk_texts = [r["content"] for r in rows]
-        return True, doc["title"], chunk_texts
+        return True, doc_id, doc["title"], chunk_texts
 
 
 @router.post(
@@ -130,7 +133,7 @@ async def youtube_match_pine(
         raise HTTPException(422, "Invalid YouTube URL: could not extract video ID")
 
     # Check KB
-    in_kb, kb_title, kb_chunks = await check_kb_for_video(
+    in_kb, kb_doc_id, kb_title, kb_chunks = await check_kb_for_video(
         request.workspace_id, video_id
     )
 
@@ -138,6 +141,7 @@ async def youtube_match_pine(
     transcript_text: str = ""
     title: Optional[str] = None
     channel: Optional[str] = None
+    source_id: Optional[UUID] = kb_doc_id if in_kb else None
     transcript_source: Literal["kb", "transient"] = "transient"
 
     if in_kb and not request.force_transient and kb_chunks:
@@ -247,6 +251,7 @@ async def youtube_match_pine(
         title=title,
         channel=channel,
         in_knowledge_base=in_kb,
+        source_id=source_id,
         transcript_source=transcript_source,
         transcript_chars_used=len(transcript_text),
         match_intent=intent.model_dump(),

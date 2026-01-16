@@ -1,6 +1,7 @@
 """API routers for Trading RAG Pipeline."""
 
 from app.routers import (
+    backtests,
     health,
     ingest,
     jobs,
@@ -10,20 +11,21 @@ from app.routers import (
     pine,
     query,
     reembed,
+    sources,
     youtube,
-    backtests,
 )
 
 __all__ = [
+    "backtests",
     "health",
     "ingest",
+    "jobs",
+    "kb",
+    "metrics",
     "pdf",
     "pine",
-    "youtube",
     "query",
     "reembed",
-    "jobs",
-    "metrics",
-    "kb",
-    "backtests",
+    "sources",
+    "youtube",
 ]
