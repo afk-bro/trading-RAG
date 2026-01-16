@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports `skip_lint_errors` to filter scripts with lint errors
   - `update_existing` controls upsert behavior for changed scripts (sha256-based)
 
+- **Cockpit Data Plumbing** - Admin endpoints for coverage gap inspection
+  - `GET /admin/coverage/weak` - List weak coverage runs shaped for cockpit UI
+    - Returns: `run_id`, `created_at`, `intent_signature`, `script_type`
+    - Coverage data: `weak_reason_codes[]`, `best_score`, `num_above_threshold`
+    - Candidates: `candidate_strategy_ids[]`, `candidate_scores`
+    - Display helpers: `query_preview` (120 chars), `source_ref` (youtube:ID or doc:UUID)
+  - Candidate persistence at match time (point-in-time snapshots):
+    - `candidate_strategy_ids UUID[]` - Strategy IDs with tag overlap
+    - `candidate_scores JSONB` - Detailed scores per strategy
+  - Partial indexes for efficient weak coverage queries
+  - Migration: `050_match_runs_candidates.sql`
+
 - **Strategy Registry v1** - Multi-engine strategy catalog with coverage integration
   - Supports engines: `pine`, `python`, `vectorbt`, `backtesting_py`
   - JSONB columns for flexible schema: `source_ref`, `tags`, `backtest_summary`
