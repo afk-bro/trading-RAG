@@ -187,6 +187,7 @@ async def get_source(
     source_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
     include_chunks: bool = Query(False, description="Include chunk content"),
+    include_health: bool = Query(False, description="Include health status"),
     chunk_limit: int = Query(50, ge=1, le=200, description="Chunks per page"),
     chunk_offset: int = Query(0, ge=0, description="Chunk pagination offset"),
     _: bool = Depends(require_admin_token),
@@ -261,6 +262,27 @@ async def get_source(
     else:
         pine_metadata = raw_metadata
 
+    # Get health status if requested
+    health = None
+    if include_health:
+        from app.schemas import SourceHealth, SourceHealthCheck
+        from app.services.ingest import get_source_health_summary
+
+        health_data = await get_source_health_summary(_db_pool, workspace_id, source_id)
+        health = SourceHealth(
+            status=health_data["status"],
+            chunk_count_ok=health_data["chunk_count_ok"],
+            embeddings_ok=health_data["embeddings_ok"],
+            checks=[
+                SourceHealthCheck(
+                    name=c["name"],
+                    passed=c["passed"],
+                    message=c["message"],
+                )
+                for c in health_data["checks"]
+            ],
+        )
+
     return SourceDetailResponse(
         id=doc["id"],
         source_type=doc["source_type"],
@@ -281,6 +303,7 @@ async def get_source(
         created_at=doc["created_at"],
         updated_at=doc["updated_at"],
         last_indexed_at=doc.get("last_indexed_at"),
+        health=health,
         pine_metadata=pine_metadata,
         chunks=chunks,
         chunks_total=chunks_total,

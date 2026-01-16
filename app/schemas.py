@@ -26,6 +26,7 @@ class DocumentStatus(str, Enum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     DELETED = "deleted"
+    FAILED = "failed"  # Health validation failed (no chunks or missing embeddings)
 
 
 class VectorStatus(str, Enum):
@@ -1730,6 +1731,27 @@ class SourceChunkItem(BaseModel):
     topics: list[str] = Field(default_factory=list, description="Topics")
 
 
+class SourceHealthCheck(BaseModel):
+    """Single health check result."""
+
+    name: str = Field(..., description="Check name")
+    passed: bool = Field(..., description="Whether check passed")
+    message: str = Field(..., description="Check result message")
+
+
+class SourceHealth(BaseModel):
+    """Health status for a source."""
+
+    status: Literal["ok", "degraded", "failed"] = Field(
+        ..., description="Health status"
+    )
+    chunk_count_ok: bool = Field(..., description="Chunks exist")
+    embeddings_ok: bool = Field(..., description="Embeddings match chunks")
+    checks: list[SourceHealthCheck] = Field(
+        default_factory=list, description="Individual check results"
+    )
+
+
 class SourceDetailResponse(BaseModel):
     """Response for source detail endpoint."""
 
@@ -1759,6 +1781,9 @@ class SourceDetailResponse(BaseModel):
     last_indexed_at: Optional[datetime] = Field(
         None, description="Last indexed timestamp"
     )
+
+    # Health (optional)
+    health: Optional[SourceHealth] = Field(None, description="Source health status")
 
     # Optional extras
     pine_metadata: Optional[dict] = Field(None, description="Pine script metadata")

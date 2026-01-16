@@ -411,6 +411,41 @@ async def ingest_pipeline(
     # Update document last_indexed_at
     await doc_repo.update_last_indexed(doc_id)
 
+    # Validate source health (chunk_count > 0, embeddings == chunks)
+    from app.schemas import DocumentStatus
+    from app.services.ingest import HealthStatus, validate_source_health
+
+    health_result = await validate_source_health(
+        _db_pool,
+        workspace_id,
+        doc_id,
+        expected_chunk_count=len(chunk_ids),
+        expected_vector_count=len(qdrant_points),
+        require_embeddings=True,
+    )
+
+    if health_result.status == HealthStatus.FAILED:
+        # Mark document as failed
+        await doc_repo.update_status(doc_id, DocumentStatus.FAILED)
+        logger.error(
+            "Health validation failed",
+            doc_id=str(doc_id),
+            error_code=health_result.error_code,
+            error_message=health_result.error_message,
+            checks=[
+                {"name": c.name, "passed": c.passed, "message": c.message}
+                for c in health_result.checks
+            ],
+        )
+        return IngestResponse(
+            doc_id=doc_id,
+            chunks_created=len(chunk_ids),
+            vectors_created=len(qdrant_points),
+            status="failed",
+            version=doc_version,
+            superseded_doc_id=superseded_doc_id,
+        )
+
     # Clean up old vectors from Qdrant if this was an update
     if old_chunk_ids:
         try:
