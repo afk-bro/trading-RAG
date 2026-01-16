@@ -164,7 +164,10 @@ class MatchIntent(BaseModel):
         default=None, description="Inferred Pine script type"
     )
     script_type_confidence: float = Field(
-        default=0.0, ge=0.0, le=1.0, description="Confidence in script type (Laplace smoothed)"
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in script type (Laplace smoothed)",
     )
     overall_confidence: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Overall extraction confidence"
