@@ -483,6 +483,21 @@ Match Run (weak_coverage=true)
 - `strategy_cards_by_id` - Hydrated candidate strategy cards
 - `missing_strategy_ids` - IDs of deleted/archived strategies
 
+**Resolution Guard**:
+Cannot mark a run as `resolved` without at least one of:
+- `candidate_strategy_ids` present (strategies were recommended)
+- `resolution_note` provided (explains why resolved)
+
+Returns 400 if guard fails. Prevents silent "resolved but nothing changed" states.
+
+**Auto-Resolve on Success**:
+When `/youtube/match-pine` produces `weak_coverage=false`:
+1. Find all `open`/`acknowledged` runs with same `intent_signature`
+2. Auto-resolve them with `resolved_by='system'`
+3. Set `resolution_note='Auto-resolved by successful match'`
+
+This closes coverage gaps automatically when a matching strategy is added.
+
 ## Strategy Runner
 
 The strategy runner generates TradeIntents from strategy configuration, market data, and current portfolio state. It bridges the gap between backtest research and live execution.
