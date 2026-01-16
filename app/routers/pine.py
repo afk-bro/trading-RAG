@@ -21,6 +21,7 @@ from app.schemas import (
     PineScriptDetailResponse,
     PineScriptListItem,
     PineScriptListResponse,
+    PineScriptLookupResponse,
 )
 from app.services.pine import PineIngestService, load_registry
 
@@ -493,6 +494,75 @@ async def list_pine_scripts(
         offset=offset,
         has_more=has_more,
         next_offset=next_offset,
+    )
+
+
+@router.get(
+    "/scripts/lookup",
+    response_model=PineScriptLookupResponse,
+    responses={
+        200: {"description": "Script found"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Admin token required"},
+        403: {"description": "Invalid admin token"},
+        404: {"description": "Script not found"},
+    },
+    summary="Lookup Pine script by rel_path (admin)",
+    description="Find a Pine script by its relative file path. Useful for linking from filesystem.",
+)
+async def lookup_pine_script(
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    rel_path: str = Query(..., description="Relative file path (e.g., 'macd_mean_reversion.pine')"),
+    _: bool = Depends(require_admin_token),
+) -> PineScriptLookupResponse:
+    """Lookup a Pine script by its relative path."""
+    import json
+
+    from app.routers.ingest import _db_pool
+
+    if _db_pool is None:
+        raise HTTPException(503, "Database connection not available")
+
+    async with _db_pool.acquire() as conn:
+        # Try matching pine_metadata->>'rel_path' or canonical_url ending
+        doc = await conn.fetchrow(
+            """
+            SELECT id, canonical_url, title, status, pine_metadata
+            FROM documents
+            WHERE workspace_id = $1
+              AND source_type = 'pine_script'
+              AND (
+                  pine_metadata->>'rel_path' = $2
+                  OR canonical_url LIKE '%/' || $2
+                  OR canonical_url = 'pine://local/' || $2
+              )
+            LIMIT 1
+            """,
+            workspace_id,
+            rel_path,
+        )
+
+    if not doc:
+        raise HTTPException(404, f"Pine script not found: {rel_path}")
+
+    doc_dict = dict(doc)
+    raw_metadata = doc_dict.get("pine_metadata")
+    if isinstance(raw_metadata, str):
+        metadata = json.loads(raw_metadata)
+    else:
+        metadata = raw_metadata or {}
+
+    actual_rel_path = metadata.get("rel_path") or _extract_rel_path(doc_dict["canonical_url"])
+    title = doc_dict.get("title") or Path(actual_rel_path).name
+
+    return PineScriptLookupResponse(
+        id=doc_dict["id"],
+        canonical_url=doc_dict["canonical_url"],
+        rel_path=actual_rel_path,
+        title=title,
+        status=doc_dict["status"],
+        script_type=metadata.get("script_type"),
+        pine_version=metadata.get("pine_version"),
     )
 
 

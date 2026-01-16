@@ -1490,3 +1490,15 @@ class PineScriptDetailResponse(BaseModel):
     chunk_next_offset: Optional[int] = Field(
         None, description="Next chunk offset for pagination"
     )
+
+
+class PineScriptLookupResponse(BaseModel):
+    """Response for Pine script lookup by rel_path."""
+
+    id: UUID = Field(..., description="Document ID")
+    canonical_url: str = Field(..., description="Canonical URL")
+    rel_path: str = Field(..., description="Relative file path")
+    title: str = Field(..., description="Script title")
+    status: PineDocStatus = Field(default="active", description="Document status")
+    script_type: Optional[PineScriptType] = Field(None, description="Script type")
+    pine_version: Optional[PineVersionType] = Field(None, description="Pine version")
