@@ -12,6 +12,7 @@ from app.services.intent.query_builder import (
     MatchFiltersApplied,
     HIGH_SIGNAL_TOPICS,
 )
+from app.services.intent.reranker import rerank, RankedResult
 
 __all__ = [
     "MatchIntent",
@@ -22,4 +23,6 @@ __all__ = [
     "build_filters",
     "MatchFiltersApplied",
     "HIGH_SIGNAL_TOPICS",
+    "rerank",
+    "RankedResult",
 ]
