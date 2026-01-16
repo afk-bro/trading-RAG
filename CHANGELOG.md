@@ -58,13 +58,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET /strategies/cards?ids=uuid,uuid,...` - Bulk fetch strategy cards by IDs
     - Returns `{uuid: StrategyCard}` map for efficient lookups
     - Max 100 IDs per request, missing IDs silently omitted
-  - `GET /admin/coverage/weak?include_candidate_cards=true` - Hydrate candidates
+  - `GET /admin/coverage/weak?include_candidate_cards=true` - Hydrate candidates (default: true)
     - Collects all candidate IDs across items in one query
     - Returns `strategy_cards_by_id` alongside items
     - Single call for weak items + all candidate cards
+    - Hydration capped at 300 unique IDs to prevent payload bloat
+    - Returns `missing_strategy_ids[]` for deleted/archived strategies
   - `StrategyCard` schema (lightweight for UI):
     - `id`, `name`, `slug`, `engine`, `status`, `tags`
     - `backtest_status`, `last_backtest_at`, `best_oos_score`, `max_drawdown`
+
+- **Coverage Triage Workflow** - Actionable coverage gap management
+  - `PATCH /admin/coverage/weak/{run_id}` - Update coverage status
+    - Status transitions: `open` → `acknowledged` → `resolved`
+    - Tracks `acknowledged_at/by`, `resolved_at/by`, `resolution_note`
+  - Status filter: `?status=open|acknowledged|resolved|all` (default: open)
+  - Priority scoring for triage ranking (higher = more urgent):
+    - Base: `(0.5 - best_score)` clamped to [0, 0.5]
+    - +0.2 if `num_above_threshold == 0`
+    - +0.15 for `NO_MATCHES` reason code
+    - +0.1 for `NO_STRONG_MATCHES` reason code
+    - +0.05 recency bonus (last 24h)
+  - Results sorted by `priority_score` descending (most actionable first)
+  - Migration: `051_match_runs_triage.sql`
 
 - **Strategy Registry v1** - Multi-engine strategy catalog with coverage integration
   - Supports engines: `pine`, `python`, `vectorbt`, `backtesting_py`
