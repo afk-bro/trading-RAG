@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Requires `X-Admin-Token` header for authentication
   - Supports `skip_lint_errors` to filter scripts with lint errors
   - `update_existing` controls upsert behavior for changed scripts (sha256-based)
+
 - **Cross-Encoder Reranking with Neighbor Expansion**
   - Optional two-stage retrieval: vector search → cross-encoder rerank
   - BGE-reranker-v2-m3 model (local inference, no external API)
@@ -75,6 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `mode=retrieve` (semantic search) always works
   - `mode=answer` returns retrieved chunks with helpful message when LLM not configured
   - Enables graceful degradation and avoids vendor lock-in
+
+### Fixed
+- **Pine Script router registration** - Router was missing from `app/routers/__init__.py` exports
+- **JSONB string serialization** - Handle asyncpg returning JSONB columns as strings instead of dicts
+- **Source type constraint** - Add `pine_script` to `documents.source_type` check constraint (migration 047)
 
 ### Added
 - `LLMNotConfiguredError` exception for clear error handling when LLM is not available
