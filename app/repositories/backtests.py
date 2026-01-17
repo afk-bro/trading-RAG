@@ -1215,7 +1215,9 @@ class TuneRepository:
                    tr.started_at, tr.finished_at, tr.created_at
             FROM backtest_tune_runs tr
             WHERE {where_clause}
-            ORDER BY COALESCE(tr.objective_score, tr.score_oos, tr.score) DESC NULLS LAST, tr.trial_index ASC  # noqa: E501
+            ORDER BY
+                COALESCE(tr.objective_score, tr.score_oos, tr.score) DESC NULLS LAST,
+                tr.trial_index ASC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
         params.extend([limit, offset])
