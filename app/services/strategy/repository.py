@@ -246,7 +246,9 @@ class StrategyRepository:
                 param_idx += 1
             elif field in ("source_ref", "tags", "backtest_summary"):
                 set_parts.append(f"{field} = ${param_idx}")
-                params.append(json.dumps(value, default=_json_serial) if value else None)
+                params.append(
+                    json.dumps(value, default=_json_serial) if value else None
+                )
                 param_idx += 1
             elif field in (
                 "description",
@@ -425,7 +427,7 @@ class StrategyRepository:
                 tags = raw_tags
             else:
                 tags = {}
-            strategy_tags = set()
+            strategy_tags: set[str] = set()
             for field in [
                 "strategy_archetypes",
                 "indicators",

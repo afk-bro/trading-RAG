@@ -1,7 +1,7 @@
 """LLM-powered explanation service for strategy recommendations."""
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
@@ -201,7 +201,9 @@ def compute_confidence_qualifier(
     # Build reasoning
     reasons = []
     if matched_tags:
-        reasons.append(f"{len(matched_tags)} matching tag{'s' if len(matched_tags) > 1 else ''}")
+        reasons.append(
+            f"{len(matched_tags)} matching tag{'s' if len(matched_tags) > 1 else ''}"
+        )
     elif match_score and match_score > 0.5:
         reasons.append("semantic similarity")
     if backtest_validated:
@@ -305,7 +307,7 @@ async def generate_strategy_explanation(
     # Compute confidence qualifier (deterministic)
     has_backtest = backtest is not None
     backtest_validated = (
-        has_backtest and backtest.get("status") == "validated"
+        has_backtest and backtest is not None and backtest.get("status") == "validated"
     )
     confidence_qualifier = compute_confidence_qualifier(
         matched_tags=matched_tags,

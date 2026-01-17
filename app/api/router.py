@@ -63,9 +63,7 @@ api_router.include_router(
 )  # Testing endpoints (run plan generation/execution)
 
 # Strategy Registry
-api_router.include_router(
-    strategies.router, prefix="/strategies", tags=["Strategies"]
-)
+api_router.include_router(strategies.router, prefix="/strategies", tags=["Strategies"])
 
 # Admin
 api_router.include_router(admin_router)  # Admin UI (not in OpenAPI docs)

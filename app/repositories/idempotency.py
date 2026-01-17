@@ -6,7 +6,7 @@ Provides atomic claim semantics for idempotency keys to prevent duplicate operat
 import asyncio
 import json
 import time
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 import structlog
@@ -58,7 +58,8 @@ class IdempotencyRepository:
             result = await conn.fetchrow(
                 """
                 INSERT INTO idempotency_keys
-                    (workspace_id, idempotency_key, request_hash, endpoint, http_method, api_version)
+                    (workspace_id, idempotency_key, request_hash,
+                     endpoint, http_method, api_version)
                 VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (workspace_id, endpoint, idempotency_key) DO NOTHING
                 RETURNING id, workspace_id, idempotency_key, request_hash, endpoint,
@@ -172,7 +173,9 @@ class IdempotencyRepository:
                         await self.mark_failed(
                             row["id"],
                             error_code="stale_pending",
-                            error_json={"reason": f"Pending for {age_minutes:.1f} minutes"},
+                            error_json={
+                                "reason": f"Pending for {age_minutes:.1f} minutes"
+                            },
                         )
                         # Re-fetch the updated record
                         updated = await conn.fetchrow(
@@ -181,7 +184,11 @@ class IdempotencyRepository:
                             """,
                             row["id"],
                         )
-                        return IdempotencyRecord.from_row(dict(updated)) if updated else None
+                        return (
+                            IdempotencyRecord.from_row(dict(updated))
+                            if updated
+                            else None
+                        )
 
                 await asyncio.sleep(poll_interval)
 

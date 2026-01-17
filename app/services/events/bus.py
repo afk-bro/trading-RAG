@@ -28,20 +28,25 @@ class EventBus(ABC):
     """
 
     @abstractmethod
-    async def subscribe(
+    def subscribe(
         self,
         subscriber_id: str,
         workspace_ids: Set[UUID],
         topics: Set[str],
+        last_event_id: str | None = None,
     ) -> AsyncIterator[AdminEvent]:
         """
-        Subscribe to events.
+        Subscribe to events (async generator).
+
+        Note: Abstract method declared without `async` for correct type annotation.
+        Implementations use `async def` with `yield` to return AsyncIterator.
 
         Args:
             subscriber_id: Unique identifier for this subscriber (for cleanup)
             workspace_ids: Set of workspace IDs to filter events
             topics: Set of topic patterns to subscribe to
                     (e.g., {"coverage", "backtests"} or specific topics)
+            last_event_id: Optional event ID for reconnection replay
 
         Yields:
             AdminEvent objects matching the filters.
@@ -179,7 +184,9 @@ class InMemoryEventBus(EventBus):
         try:
             # Replay missed events if reconnecting
             if last_event_id:
-                async for event in self._replay_from(last_event_id, workspace_ids, expanded_topics):
+                async for event in self._replay_from(
+                    last_event_id, workspace_ids, expanded_topics
+                ):
                     yield event
 
             # Stream new events

@@ -1,12 +1,11 @@
 """Admin endpoints for coverage gap inspection."""
 
-import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
 import structlog
@@ -433,11 +432,12 @@ async def explain_strategy_match(
         raise HTTPException(404, "Strategy not found")
 
     strategy_updated_at = strategy.get("updated_at")
-    strategy_updated_at_str = (
-        strategy_updated_at.isoformat()
-        if hasattr(strategy_updated_at, "isoformat")
-        else str(strategy_updated_at) if strategy_updated_at else None
-    )
+    if strategy_updated_at is not None and hasattr(strategy_updated_at, "isoformat"):
+        strategy_updated_at_str: Optional[str] = strategy_updated_at.isoformat()
+    elif strategy_updated_at is not None:
+        strategy_updated_at_str = str(strategy_updated_at)
+    else:
+        strategy_updated_at_str = None
 
     # Build cache key: strategy_id:verbosity
     cache_key = f"{strategy_id_str}:{request.verbosity}"
@@ -919,8 +919,12 @@ def _is_dev_mode() -> bool:
 )
 async def seed_coverage_fixtures(
     request: Request,
-    workspace_id: Optional[UUID] = Query(None, description="Workspace ID (creates if missing)"),
-    clear_existing: bool = Query(False, description="Delete existing seeded data first"),
+    workspace_id: Optional[UUID] = Query(
+        None, description="Workspace ID (creates if missing)"
+    ),
+    clear_existing: bool = Query(
+        False, description="Delete existing seeded data first"
+    ),
     _: bool = Depends(require_admin_token),
 ) -> SeedCoverageResponse:
     """
@@ -1127,7 +1131,9 @@ async def seed_coverage_fixtures(
                 strategy_ids.append(row["id"])
                 strategies_created += 1
             except Exception as e:
-                logger.warning("seed_strategy_insert_failed", slug=strat["slug"], error=str(e))
+                logger.warning(
+                    "seed_strategy_insert_failed", slug=strat["slug"], error=str(e)
+                )
 
         # Create a fake "missing" strategy ID that won't exist
         missing_strategy_id = uuid4()
@@ -1136,11 +1142,14 @@ async def seed_coverage_fixtures(
         match_runs_created = 0
         now = datetime.now(timezone.utc)
 
-        match_run_fixtures = [
+        match_run_fixtures: list[dict[str, Any]] = [
             # High priority: NO_MATCHES, recent, no candidates
             {
                 "intent_signature": "seed-001-no-matches",
-                "query_used": "I need a strategy for trading Fibonacci retracements on 4-hour charts with strict risk management",
+                "query_used": (
+                    "I need a strategy for trading Fibonacci retracements "
+                    "on 4-hour charts with strict risk management"
+                ),
                 "intent_json": {
                     "strategy_archetypes": ["fibonacci", "retracement"],
                     "indicators": ["fibonacci"],
@@ -1158,7 +1167,10 @@ async def seed_coverage_fixtures(
             # Medium priority: NO_STRONG_MATCHES, has candidates
             {
                 "intent_signature": "seed-002-weak-matches",
-                "query_used": "Looking for momentum breakout strategy for crypto with volume confirmation",
+                "query_used": (
+                    "Looking for momentum breakout strategy for crypto "
+                    "with volume confirmation"
+                ),
                 "intent_json": {
                     "strategy_archetypes": ["breakout", "momentum"],
                     "indicators": ["volume"],
@@ -1168,11 +1180,23 @@ async def seed_coverage_fixtures(
                 "reason_codes": ["NO_STRONG_MATCHES"],
                 "best_score": 0.38,
                 "num_above_threshold": 1,
-                "candidate_strategy_ids": [strategy_ids[0], strategy_ids[2]] if len(strategy_ids) >= 3 else [],
-                "candidate_scores": {
-                    str(strategy_ids[0]): {"score": 0.38, "matched_tags": ["breakout", "momentum", "volume"]},
-                    str(strategy_ids[2]): {"score": 0.25, "matched_tags": ["momentum"]},
-                } if len(strategy_ids) >= 3 else {},
+                "candidate_strategy_ids": (
+                    [strategy_ids[0], strategy_ids[2]] if len(strategy_ids) >= 3 else []
+                ),
+                "candidate_scores": (
+                    {
+                        str(strategy_ids[0]): {
+                            "score": 0.38,
+                            "matched_tags": ["breakout", "momentum", "volume"],
+                        },
+                        str(strategy_ids[2]): {
+                            "score": 0.25,
+                            "matched_tags": ["momentum"],
+                        },
+                    }
+                    if len(strategy_ids) >= 3
+                    else {}
+                ),
                 "coverage_status": "open",
                 "created_at": now - timedelta(hours=6),
                 "video_id": "def456uvw",
@@ -1190,10 +1214,19 @@ async def seed_coverage_fixtures(
                 "reason_codes": ["NO_STRONG_MATCHES", "LOW_SIGNAL_INPUT"],
                 "best_score": 0.42,
                 "num_above_threshold": 2,
-                "candidate_strategy_ids": [strategy_ids[1]] if len(strategy_ids) >= 2 else [],
-                "candidate_scores": {
-                    str(strategy_ids[1]): {"score": 0.42, "matched_tags": ["rsi", "swing"]},
-                } if len(strategy_ids) >= 2 else {},
+                "candidate_strategy_ids": (
+                    [strategy_ids[1]] if len(strategy_ids) >= 2 else []
+                ),
+                "candidate_scores": (
+                    {
+                        str(strategy_ids[1]): {
+                            "score": 0.42,
+                            "matched_tags": ["rsi", "swing"],
+                        },
+                    }
+                    if len(strategy_ids) >= 2
+                    else {}
+                ),
                 "coverage_status": "acknowledged",
                 "created_at": now - timedelta(days=1),
             },
@@ -1210,7 +1243,9 @@ async def seed_coverage_fixtures(
                 "reason_codes": ["NO_STRONG_MATCHES"],
                 "best_score": 0.55,
                 "num_above_threshold": 3,
-                "candidate_strategy_ids": [strategy_ids[2]] if len(strategy_ids) >= 3 else [],
+                "candidate_strategy_ids": (
+                    [strategy_ids[2]] if len(strategy_ids) >= 3 else []
+                ),
                 "coverage_status": "resolved",
                 "resolution_note": "Added MACD Trend Follow strategy",
                 "created_at": now - timedelta(days=3),
@@ -1228,13 +1263,30 @@ async def seed_coverage_fixtures(
                 "reason_codes": ["NO_STRONG_MATCHES"],
                 "best_score": 0.35,
                 "num_above_threshold": 1,
-                "candidate_strategy_ids": [strategy_ids[4], missing_strategy_id] if len(strategy_ids) >= 5 else [missing_strategy_id],
-                "candidate_scores": {
-                    str(strategy_ids[4]): {"score": 0.35, "matched_tags": ["scalping", "volume_profile"]},
-                    str(missing_strategy_id): {"score": 0.30, "matched_tags": ["scalping"]},
-                } if len(strategy_ids) >= 5 else {
-                    str(missing_strategy_id): {"score": 0.30, "matched_tags": ["scalping"]},
-                },
+                "candidate_strategy_ids": (
+                    [strategy_ids[4], missing_strategy_id]
+                    if len(strategy_ids) >= 5
+                    else [missing_strategy_id]
+                ),
+                "candidate_scores": (
+                    {
+                        str(strategy_ids[4]): {
+                            "score": 0.35,
+                            "matched_tags": ["scalping", "volume_profile"],
+                        },
+                        str(missing_strategy_id): {
+                            "score": 0.30,
+                            "matched_tags": ["scalping"],
+                        },
+                    }
+                    if len(strategy_ids) >= 5
+                    else {
+                        str(missing_strategy_id): {
+                            "score": 0.30,
+                            "matched_tags": ["scalping"],
+                        },
+                    }
+                ),
                 "coverage_status": "open",
                 "created_at": now - timedelta(hours=12),
             },
@@ -1251,11 +1303,23 @@ async def seed_coverage_fixtures(
                 "reason_codes": ["LOW_SIGNAL_INPUT"],
                 "best_score": 0.28,
                 "num_above_threshold": 0,
-                "candidate_strategy_ids": [strategy_ids[0], strategy_ids[3]] if len(strategy_ids) >= 4 else [],
-                "candidate_scores": {
-                    str(strategy_ids[0]): {"score": 0.28, "matched_tags": ["breakout"]},
-                    str(strategy_ids[3]): {"score": 0.22, "matched_tags": ["bollinger", "breakout"]},
-                } if len(strategy_ids) >= 4 else {},
+                "candidate_strategy_ids": (
+                    [strategy_ids[0], strategy_ids[3]] if len(strategy_ids) >= 4 else []
+                ),
+                "candidate_scores": (
+                    {
+                        str(strategy_ids[0]): {
+                            "score": 0.28,
+                            "matched_tags": ["breakout"],
+                        },
+                        str(strategy_ids[3]): {
+                            "score": 0.22,
+                            "matched_tags": ["bollinger", "breakout"],
+                        },
+                    }
+                    if len(strategy_ids) >= 4
+                    else {}
+                ),
                 "coverage_status": "open",
                 "created_at": now - timedelta(days=2),
             },
@@ -1272,7 +1336,9 @@ async def seed_coverage_fixtures(
                 "reason_codes": ["NO_STRONG_MATCHES"],
                 "best_score": 0.48,
                 "num_above_threshold": 2,
-                "candidate_strategy_ids": [strategy_ids[1]] if len(strategy_ids) >= 2 else [],
+                "candidate_strategy_ids": (
+                    [strategy_ids[1]] if len(strategy_ids) >= 2 else []
+                ),
                 "coverage_status": "acknowledged",
                 "created_at": now - timedelta(days=5),
             },
@@ -1297,7 +1363,11 @@ async def seed_coverage_fixtures(
 
         for run in match_run_fixtures:
             try:
-                candidate_scores_json = json.dumps(run.get("candidate_scores")) if run.get("candidate_scores") else None
+                candidate_scores_json = (
+                    json.dumps(run.get("candidate_scores"))
+                    if run.get("candidate_scores")
+                    else None
+                )
 
                 await conn.execute(
                     """
@@ -1354,5 +1424,8 @@ async def seed_coverage_fixtures(
         workspace_id=workspace_id,
         strategies_created=strategies_created,
         match_runs_created=match_runs_created,
-        message=f"Seeded {strategies_created} strategies and {match_runs_created} match_runs for testing",
+        message=(
+            f"Seeded {strategies_created} strategies and "
+            f"{match_runs_created} match_runs for testing"
+        ),
     )

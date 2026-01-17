@@ -40,13 +40,17 @@ class AdminEvent(BaseModel):
     """
 
     id: str = Field(..., description="Monotonic event ID for reconnection")
-    topic: EventTopic = Field(..., description="Event topic (e.g., 'coverage.weak_run.updated')")
+    topic: EventTopic = Field(
+        ..., description="Event topic (e.g., 'coverage.weak_run.updated')"
+    )
     workspace_id: UUID = Field(..., description="Workspace scope for filtering")
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Event timestamp (UTC)",
     )
-    payload: dict[str, Any] = Field(default_factory=dict, description="Event-specific data")
+    payload: dict[str, Any] = Field(
+        default_factory=dict, description="Event-specific data"
+    )
 
     def to_sse(self) -> str:
         """

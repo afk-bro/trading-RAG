@@ -171,6 +171,7 @@ class TestVerifyHashMatch:
     def test_matching_hash_passes(self):
         """Matching hash should not raise."""
         from uuid import uuid4
+
         record = IdempotencyRecord(
             id=uuid4(),
             workspace_id=uuid4(),
@@ -191,6 +192,7 @@ class TestVerifyHashMatch:
     def test_mismatched_hash_raises(self):
         """Mismatched hash should raise IdempotencyKeyReusedError."""
         from uuid import uuid4
+
         record = IdempotencyRecord(
             id=uuid4(),
             workspace_id=uuid4(),
@@ -310,7 +312,9 @@ class TestEdgeCases:
         """Float precision edge cases should be handled."""
         # Very small floats
         payload = {"tiny": 0.00000000001}
-        result = compute_request_hash(payload, float_fields=["tiny"], float_precision=10)
+        result = compute_request_hash(
+            payload, float_fields=["tiny"], float_precision=10
+        )
         assert len(result) == 64
 
         # Very large floats

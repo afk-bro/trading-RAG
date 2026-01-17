@@ -13,7 +13,7 @@ from fastapi import APIRouter, Cookie, Depends, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.admin.sse_ticket import create_sse_ticket, get_sse_auth, SSETicketClaims
+from app.admin.sse_ticket import create_sse_ticket, get_sse_auth
 from app.deps.security import require_admin_token
 from app.services.events import get_event_bus
 
@@ -168,6 +168,7 @@ async def event_stream(
 
     # Generate unique subscriber ID
     from uuid import uuid4
+
     subscriber_id = f"sse-{uuid4()}"
 
     logger.info(

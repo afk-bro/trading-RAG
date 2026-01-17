@@ -1,6 +1,6 @@
 """Strategy registry API endpoints."""
 
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
@@ -148,8 +148,7 @@ async def get_strategy_cards(
 
     # Convert to schema
     return {
-        uuid_str: _card_dict_to_schema(card)
-        for uuid_str, card in cards_dict.items()
+        uuid_str: _card_dict_to_schema(card) for uuid_str, card in cards_dict.items()
     }
 
 
@@ -274,7 +273,7 @@ async def update_strategy(
         raise HTTPException(404, "Strategy not found")
 
     # Build updates dict
-    updates = {}
+    updates: dict[str, Any] = {}
     if request.name is not None:
         updates["name"] = request.name
     if request.description is not None:
@@ -293,6 +292,8 @@ async def update_strategy(
         updates["backtest_summary"] = request.backtest_summary.model_dump()
 
     row = await repo.update(strategy_id, workspace_id, **updates)
+    if row is None:
+        raise HTTPException(404, "Strategy not found after update")
 
     logger.info(
         "strategy_updated_via_api",

@@ -135,7 +135,9 @@ class TestCoverageCockpitQueuePanel:
         admin_page.goto(f"{base_url}/admin/coverage/cockpit")
 
         # Check for refresh button (has SVG icon)
-        refresh_btn = admin_page.locator(".header-actions button[onclick='refreshQueue()']")
+        refresh_btn = admin_page.locator(
+            ".header-actions button[onclick='refreshQueue()']"
+        )
         expect(refresh_btn).to_be_visible()
 
     def test_queue_count_displayed(self, admin_page: Page, base_url: str):
@@ -235,7 +237,9 @@ class TestCoverageCockpitDetailPanel:
         if items.count() > 0:
             # Check for Coverage Snapshot section
             expect(
-                admin_page.locator(".detail-section-title:has-text('Coverage Snapshot')")
+                admin_page.locator(
+                    ".detail-section-title:has-text('Coverage Snapshot')"
+                )
             ).to_be_visible()
 
     def test_detail_shows_stats_grid(self, admin_page: Page, base_url: str):
@@ -248,7 +252,9 @@ class TestCoverageCockpitDetailPanel:
             expect(stats_grid).to_be_visible()
 
             # Check for expected stats
-            expect(stats_grid.locator(".stat-label:has-text('Best Score')")).to_be_visible()
+            expect(
+                stats_grid.locator(".stat-label:has-text('Best Score')")
+            ).to_be_visible()
             expect(
                 stats_grid.locator(".stat-label:has-text('Above Threshold')")
             ).to_be_visible()
@@ -315,7 +321,9 @@ class TestCoverageCockpitTriageControls:
             expect(
                 admin_page.locator(".triage-btn:has-text('Acknowledge')")
             ).to_be_visible()
-            expect(admin_page.locator(".triage-btn:has-text('Resolve')")).to_be_visible()
+            expect(
+                admin_page.locator(".triage-btn:has-text('Resolve')")
+            ).to_be_visible()
             expect(admin_page.locator(".triage-btn:has-text('Reopen')")).to_be_visible()
 
     def test_note_input_present(self, admin_page: Page, base_url: str):
@@ -697,9 +705,9 @@ class TestCoverageCockpitPopulatedState:
 
         # Verify we have the expected count
         items = page.locator(".queue-item")
-        assert items.count() == seed_data["match_runs_created"], (
-            f"Expected {seed_data['match_runs_created']} items, got {items.count()}"
-        )
+        assert (
+            items.count() == seed_data["match_runs_created"]
+        ), f"Expected {seed_data['match_runs_created']} items, got {items.count()}"
 
     def test_open_tab_count_matches_fixture(self, seeded_cockpit, base_url: str):
         """Open tab shows only open status items (6 seeded as open)."""
@@ -718,7 +726,9 @@ class TestCoverageCockpitPopulatedState:
         items = page.locator(".queue-item")
         assert items.count() == 6, f"Expected 6 open items, got {items.count()}"
 
-    def test_acknowledged_tab_count_matches_fixture(self, seeded_cockpit, base_url: str):
+    def test_acknowledged_tab_count_matches_fixture(
+        self, seeded_cockpit, base_url: str
+    ):
         """Acknowledged tab shows only acknowledged items (1 seeded)."""
         page = seeded_cockpit["page"]
 
@@ -791,7 +801,9 @@ class TestCoverageCockpitPopulatedState:
                 expect(missing_warning).to_contain_text("missing")
                 break
 
-        assert found_warning, "Expected to find a match_run with missing strategy warning"
+        assert (
+            found_warning
+        ), "Expected to find a match_run with missing strategy warning"
 
     def test_triage_moves_item_between_tabs(self, seeded_cockpit, base_url: str):
         """Triaging an item moves it to the appropriate tab."""
@@ -870,7 +882,9 @@ class TestCoverageCockpitPopulatedState:
                 expect(first_candidate.locator(".explain-btn")).to_be_visible()
                 break
 
-        assert found_candidates, "Expected to find at least one item with candidate strategies"
+        assert (
+            found_candidates
+        ), "Expected to find at least one item with candidate strategies"
 
     def test_priority_badges_show_correct_levels(self, seeded_cockpit):
         """Priority badges reflect the computed priority scores."""
@@ -889,6 +903,6 @@ class TestCoverageCockpitPopulatedState:
 
         # With varied fixture data, we should have multiple priority levels
         unique_badges = set(badge_texts)
-        assert len(unique_badges) >= 2, (
-            f"Expected at least 2 different priority levels, got: {unique_badges}"
-        )
+        assert (
+            len(unique_badges) >= 2
+        ), f"Expected at least 2 different priority levels, got: {unique_badges}"

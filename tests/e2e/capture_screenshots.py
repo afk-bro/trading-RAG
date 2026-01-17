@@ -103,7 +103,9 @@ def capture_cockpit_screenshots():
             if triage_section.count() > 0:
                 triage_section.first.scroll_into_view_if_needed()
                 page.wait_for_timeout(200)
-                page.screenshot(path=OUTPUT_DIR / "06_triage_controls.png", full_page=True)
+                page.screenshot(
+                    path=OUTPUT_DIR / "06_triage_controls.png", full_page=True
+                )
 
             # 07. Candidate strategies section
             print("Capturing: 07_candidates.png")

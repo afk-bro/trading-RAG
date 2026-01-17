@@ -81,6 +81,7 @@ def _get_expiry_seconds() -> int:
     """Get ticket expiry from settings."""
     try:
         from app.config import get_settings
+
         return get_settings().sse_ticket_expiry_seconds
     except Exception:
         return DEFAULT_TICKET_EXPIRY_SECONDS
@@ -230,6 +231,7 @@ def get_sse_auth(
     # 2. Fallback to admin token header
     if admin_header:
         from app.deps.security import verify_admin_token
+
         if verify_admin_token(admin_header):
             return SSETicketClaims(
                 workspace_id=None,  # Admin has access to all

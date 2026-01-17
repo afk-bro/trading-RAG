@@ -46,11 +46,15 @@ class PruneResult(BaseModel):
     """Result from a retention prune operation."""
 
     job_name: str = Field(..., description="Name of the retention job")
-    deleted_count: int = Field(..., description="Number of rows deleted (or would be deleted if dry_run)")
+    deleted_count: int = Field(
+        ..., description="Number of rows deleted (or would be deleted if dry_run)"
+    )
     job_log_id: UUID = Field(..., description="ID of the job log entry")
     dry_run: bool = Field(..., description="Whether this was a dry run")
     cutoff_days: int = Field(..., description="Cutoff period in days")
-    duration_ms: Optional[int] = Field(None, description="Execution duration in milliseconds")
+    duration_ms: Optional[int] = Field(
+        None, description="Execution duration in milliseconds"
+    )
 
 
 class RetentionLogEntry(BaseModel):
@@ -79,8 +83,12 @@ class RetentionLogsResponse(BaseModel):
 class RetentionStatusResponse(BaseModel):
     """Overall retention system status."""
 
-    pg_cron_available: bool = Field(..., description="Whether pg_cron extension is installed")
-    scheduled_jobs: list[dict] = Field(default_factory=list, description="List of scheduled pg_cron jobs")
+    pg_cron_available: bool = Field(
+        ..., description="Whether pg_cron extension is installed"
+    )
+    scheduled_jobs: list[dict] = Field(
+        default_factory=list, description="List of scheduled pg_cron jobs"
+    )
     last_runs: dict[str, Optional[RetentionLogEntry]] = Field(
         default_factory=dict, description="Most recent run per job type"
     )
@@ -102,8 +110,12 @@ class RetentionStatusResponse(BaseModel):
 )
 async def prune_trade_events(
     cutoff_days: int = Query(default=90, ge=1, le=365, description="Days to retain"),
-    batch_size: int = Query(default=10000, ge=100, le=100000, description="Rows per batch"),
-    dry_run: bool = Query(default=True, description="If true, count only without deleting"),
+    batch_size: int = Query(
+        default=10000, ge=100, le=100000, description="Rows per batch"
+    ),
+    dry_run: bool = Query(
+        default=True, description="If true, count only without deleting"
+    ),
 ):
     """
     Prune old RUN_* trade events older than cutoff.
@@ -155,8 +167,12 @@ async def prune_trade_events(
 )
 async def prune_job_runs(
     cutoff_days: int = Query(default=30, ge=1, le=365, description="Days to retain"),
-    batch_size: int = Query(default=10000, ge=100, le=100000, description="Rows per batch"),
-    dry_run: bool = Query(default=True, description="If true, count only without deleting"),
+    batch_size: int = Query(
+        default=10000, ge=100, le=100000, description="Rows per batch"
+    ),
+    dry_run: bool = Query(
+        default=True, description="If true, count only without deleting"
+    ),
 ):
     """
     Prune old job_runs records older than cutoff.
@@ -205,8 +221,12 @@ async def prune_job_runs(
 )
 async def prune_match_runs(
     cutoff_days: int = Query(default=180, ge=1, le=730, description="Days to retain"),
-    batch_size: int = Query(default=10000, ge=100, le=100000, description="Rows per batch"),
-    dry_run: bool = Query(default=True, description="If true, count only without deleting"),
+    batch_size: int = Query(
+        default=10000, ge=100, le=100000, description="Rows per batch"
+    ),
+    dry_run: bool = Query(
+        default=True, description="If true, count only without deleting"
+    ),
 ):
     """
     Prune old RESOLVED match_runs records older than cutoff.
@@ -256,8 +276,12 @@ async def prune_match_runs(
     summary="Prune expired idempotency keys",
 )
 async def prune_idempotency_keys(
-    batch_size: int = Query(default=10000, ge=100, le=100000, description="Rows per batch"),
-    dry_run: bool = Query(default=True, description="If true, count only without deleting"),
+    batch_size: int = Query(
+        default=10000, ge=100, le=100000, description="Rows per batch"
+    ),
+    dry_run: bool = Query(
+        default=True, description="If true, count only without deleting"
+    ),
 ):
     """
     Prune expired idempotency keys (keys with expires_at < NOW()).

@@ -7,7 +7,6 @@ import pytest
 
 from app.services.coverage_gap.explanation import (
     CachedExplanation,
-    ExplanationError,
     StrategyExplanation,
     compute_confidence_qualifier,
     generate_strategy_explanation,
@@ -15,8 +14,6 @@ from app.services.coverage_gap.explanation import (
     USER_SAFE_ERRORS,
 )
 from app.services.llm_base import (
-    LLMResponse,
-    LLMError,
     LLMTimeoutError,
     LLMRateLimitError,
     LLMAPIError,
@@ -199,13 +196,17 @@ class TestGenerateStrategyExplanation:
         assert "1.25" in user_prompt  # best_oos_score
 
     @pytest.mark.asyncio
-    async def test_handles_llm_error_with_fallback(self, mock_llm, sample_intent, sample_strategy):
+    async def test_handles_llm_error_with_fallback(
+        self, mock_llm, sample_intent, sample_strategy
+    ):
         """Returns fallback on LLM errors instead of raising."""
-        mock_llm.generate = AsyncMock(side_effect=LLMAPIError(
-            message="Internal server error",
-            provider="openai",
-            status_code=500,
-        ))
+        mock_llm.generate = AsyncMock(
+            side_effect=LLMAPIError(
+                message="Internal server error",
+                provider="openai",
+                status_code=500,
+            )
+        )
 
         with patch(
             "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
@@ -314,9 +315,7 @@ class TestGenerateStrategyExplanation:
         assert "T" in result.generated_at  # ISO format
 
     @pytest.mark.asyncio
-    async def test_returns_fallback_on_timeout(
-        self, sample_intent, sample_strategy
-    ):
+    async def test_returns_fallback_on_timeout(self, sample_intent, sample_strategy):
         """Returns fallback when LLM request times out."""
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(side_effect=asyncio.TimeoutError())
@@ -336,9 +335,7 @@ class TestGenerateStrategyExplanation:
         assert result.error == USER_SAFE_ERRORS["llm_timeout"]
 
     @pytest.mark.asyncio
-    async def test_returns_fallback_on_rate_limit(
-        self, sample_intent, sample_strategy
-    ):
+    async def test_returns_fallback_on_rate_limit(self, sample_intent, sample_strategy):
         """Returns fallback when rate limited."""
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(
@@ -394,7 +391,9 @@ class TestGenerateStrategyExplanation:
     ):
         """Returns fallback on unexpected exception (never exposes raw error)."""
         mock_llm = MagicMock()
-        mock_llm.generate = AsyncMock(side_effect=ValueError("Unexpected internal error"))
+        mock_llm.generate = AsyncMock(
+            side_effect=ValueError("Unexpected internal error")
+        )
 
         with patch(
             "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
@@ -583,7 +582,10 @@ class TestCachedExplanation:
         result = cached.to_dict()
 
         assert result["explanation"] == "Test explanation"
-        assert result["confidence_qualifier"] == "Confidence: High — based on 3 matching tags."
+        assert (
+            result["confidence_qualifier"]
+            == "Confidence: High — based on 3 matching tags."
+        )
         assert result["model"] == "claude-3-haiku"
         assert result["provider"] == "anthropic"
         assert result["verbosity"] == "short"
