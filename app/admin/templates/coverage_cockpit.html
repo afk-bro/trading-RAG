@@ -750,6 +750,65 @@
     background: rgba(139, 148, 158, 0.15);
     color: var(--text-muted);
 }
+
+/* SSE Real-Time Updates */
+.flash-update {
+    animation: flash-highlight 1s ease-out;
+}
+
+@keyframes flash-highlight {
+    0% { background-color: rgba(63, 185, 80, 0.3); }
+    100% { background-color: transparent; }
+}
+
+.sse-status {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.sse-status.connected {
+    background-color: var(--success);
+}
+
+.sse-status.disconnected {
+    background-color: var(--text-muted);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
+.new-items-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(63, 185, 80, 0.15);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--success);
+}
+
+.new-items-notice button {
+    padding: 4px 8px;
+    font-size: 12px;
+    background: var(--success);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.new-items-notice button:hover {
+    opacity: 0.9;
+}
 </style>
 
 <script>
@@ -1219,6 +1278,178 @@ function updateRelativeTimes() {
             el.textContent = formatRelativeTime(date);
         }
     });
+}
+
+// ===========================================
+// SSE Real-Time Updates
+// ===========================================
+
+class CoverageSSEClient {
+    constructor(workspaceId) {
+        this.workspaceId = workspaceId;
+        this.evtSource = null;
+        this.reconnectDelay = 1000;
+        this.maxReconnectDelay = 30000;
+        this.isConnected = false;
+        this.ticketPromise = null;
+    }
+
+    async connect() {
+        // Get SSE ticket first
+        try {
+            const ticket = await this.getTicket();
+            if (!ticket) {
+                console.warn('SSE: Could not get ticket, live updates disabled');
+                return;
+            }
+
+            // Set ticket as cookie for SSE connection
+            document.cookie = `sse_ticket=${ticket}; path=/admin; max-age=300; SameSite=Strict`;
+
+            const url = `/admin/events/stream?workspace_id=${this.workspaceId}&topics=coverage`;
+            this.evtSource = new EventSource(url);
+
+            this.evtSource.addEventListener('coverage.weak_run.updated', (e) => {
+                this.handleRunUpdated(JSON.parse(e.data));
+            });
+
+            this.evtSource.addEventListener('coverage.weak_run.created', (e) => {
+                this.handleRunCreated(JSON.parse(e.data));
+            });
+
+            this.evtSource.onerror = () => {
+                this.handleError();
+            };
+
+            this.evtSource.onopen = () => {
+                this.handleOpen();
+            };
+
+        } catch (error) {
+            console.error('SSE: Connection failed', error);
+        }
+    }
+
+    async getTicket() {
+        // Use admin token from page load to get ticket
+        const adminToken = document.querySelector('meta[name="admin-token"]')?.content;
+        if (!adminToken) {
+            // Try to get from session/cookie
+            return null;
+        }
+
+        try {
+            const response = await fetch(`/admin/events/ticket?workspace_id=${this.workspaceId}`, {
+                method: 'POST',
+                headers: {
+                    'X-Admin-Token': adminToken,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                return data.ticket;
+            }
+        } catch (error) {
+            console.error('SSE: Failed to get ticket', error);
+        }
+        return null;
+    }
+
+    handleOpen() {
+        console.log('SSE: Connected');
+        this.isConnected = true;
+        this.reconnectDelay = 1000;
+        this.updateConnectionStatus(true);
+    }
+
+    handleError() {
+        console.warn('SSE: Connection error, reconnecting...');
+        this.isConnected = false;
+        this.updateConnectionStatus(false);
+
+        if (this.evtSource) {
+            this.evtSource.close();
+        }
+
+        // Exponential backoff reconnection
+        setTimeout(() => this.connect(), this.reconnectDelay);
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
+    }
+
+    handleRunUpdated(data) {
+        console.log('SSE: Run updated', data);
+        const payload = data.payload;
+        const runId = payload.run_id;
+
+        const row = document.querySelector(`[data-run-id="${runId}"]`);
+        if (row) {
+            // Flash animation
+            row.classList.add('flash-update');
+            setTimeout(() => row.classList.remove('flash-update'), 1000);
+
+            // Update status dot
+            const statusDot = row.querySelector('.status-dot');
+            if (statusDot) {
+                statusDot.className = `status-dot status-${payload.status}`;
+            }
+
+            // If status changed to resolved and we're on "open" filter, hide it
+            const urlParams = new URLSearchParams(window.location.search);
+            const currentFilter = urlParams.get('status') || 'open';
+            if (payload.status === 'resolved' && currentFilter === 'open') {
+                row.style.opacity = '0.5';
+                setTimeout(() => row.remove(), 500);
+            }
+        }
+    }
+
+    handleRunCreated(data) {
+        console.log('SSE: Run created', data);
+        // Show notification that new item is available
+        this.showNewItemNotification();
+    }
+
+    showNewItemNotification() {
+        // Add a subtle notification to refresh
+        const toolbar = document.querySelector('.queue-toolbar');
+        if (toolbar && !toolbar.querySelector('.new-items-notice')) {
+            const notice = document.createElement('div');
+            notice.className = 'new-items-notice';
+            notice.innerHTML = `
+                <span>New items available</span>
+                <button onclick="refreshQueue(); this.parentElement.remove();">Refresh</button>
+            `;
+            toolbar.prepend(notice);
+        }
+    }
+
+    updateConnectionStatus(connected) {
+        const indicator = document.querySelector('.sse-status');
+        if (indicator) {
+            indicator.className = `sse-status ${connected ? 'connected' : 'disconnected'}`;
+            indicator.title = connected ? 'Live updates active' : 'Reconnecting...';
+        }
+    }
+
+    disconnect() {
+        if (this.evtSource) {
+            this.evtSource.close();
+            this.evtSource = null;
+        }
+        this.isConnected = false;
+    }
+}
+
+// Initialize SSE on page load (if workspace_id available)
+let sseClient = null;
+const workspaceId = '{{ workspace_id }}';
+if (workspaceId) {
+    sseClient = new CoverageSSEClient(workspaceId);
+    // Only connect if we have a way to authenticate
+    // For now, SSE is opt-in via admin token meta tag
+    // sseClient.connect();
 }
 </script>
 {% endblock %}

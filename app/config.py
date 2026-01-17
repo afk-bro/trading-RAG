@@ -216,6 +216,18 @@ class Settings(BaseSettings):
         description="Maximum position size as percentage of equity (0.20 = 20%)",
     )
 
+    # SSE (Server-Sent Events) Configuration
+    sse_ticket_secret: Optional[str] = Field(
+        default=None,
+        description="Secret for signing SSE tickets (auto-generated if not set)",
+    )
+    sse_ticket_expiry_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+        description="SSE ticket expiry in seconds (default 5 minutes)",
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""

@@ -48,6 +48,8 @@ from app.schemas import KBEntityType, KBClaimType  # noqa: E402
 from app.admin import analytics as analytics_router  # noqa: E402
 from app.admin import alerts as alerts_router  # noqa: E402
 from app.admin import coverage as coverage_router  # noqa: E402
+from app.admin import retention as retention_router  # noqa: E402
+from app.admin import events as events_router  # noqa: E402
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
@@ -60,6 +62,12 @@ router.include_router(alerts_router.router)
 
 # Include coverage sub-router
 router.include_router(coverage_router.router)
+
+# Include retention sub-router
+router.include_router(retention_router.router)
+
+# Include events (SSE) sub-router
+router.include_router(events_router.router)
 
 # Setup Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
@@ -79,6 +87,8 @@ def set_db_pool(pool):
     alerts_router.set_db_pool(pool)
     # Also set pool for coverage router
     coverage_router.set_db_pool(pool)
+    # Also set pool for retention router
+    retention_router.set_db_pool(pool)
 
 
 def _get_kb_repo():

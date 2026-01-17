@@ -1,5 +1,6 @@
 """Unit tests for strategy explanation generation."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,6 +11,15 @@ from app.services.coverage_gap.explanation import (
     StrategyExplanation,
     compute_confidence_qualifier,
     generate_strategy_explanation,
+    _make_fallback_explanation,
+    USER_SAFE_ERRORS,
+)
+from app.services.llm_base import (
+    LLMResponse,
+    LLMError,
+    LLMTimeoutError,
+    LLMRateLimitError,
+    LLMAPIError,
 )
 
 
@@ -86,10 +96,10 @@ class TestGenerateStrategyExplanation:
         assert result.latency_ms == 250.0
 
     @pytest.mark.asyncio
-    async def test_raises_error_when_llm_not_configured(
+    async def test_returns_fallback_when_llm_not_configured(
         self, sample_intent, sample_strategy
     ):
-        """Raises ExplanationError when LLM is not configured."""
+        """Returns fallback when LLM is not configured."""
         mock_status = MagicMock(enabled=False, provider_config="auto")
         with patch(
             "app.services.coverage_gap.explanation.get_llm", return_value=None
@@ -97,14 +107,17 @@ class TestGenerateStrategyExplanation:
             "app.services.coverage_gap.explanation.get_llm_status",
             return_value=mock_status,
         ):
-            with pytest.raises(ExplanationError) as exc_info:
-                await generate_strategy_explanation(
-                    intent_json=sample_intent,
-                    strategy=sample_strategy,
-                    matched_tags=["breakout"],
-                )
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=["breakout"],
+            )
 
-            assert "LLM not configured" in str(exc_info.value)
+        assert result.degraded is True
+        assert result.reason_code == "llm_unconfigured"
+        assert result.error == USER_SAFE_ERRORS["llm_unconfigured"]
+        assert result.model == "fallback"
+        assert result.provider == "fallback"
 
     @pytest.mark.asyncio
     async def test_handles_empty_intent(self, mock_llm, sample_strategy):
@@ -186,22 +199,26 @@ class TestGenerateStrategyExplanation:
         assert "1.25" in user_prompt  # best_oos_score
 
     @pytest.mark.asyncio
-    async def test_handles_llm_error(self, mock_llm, sample_intent, sample_strategy):
-        """Wraps LLM errors in ExplanationError."""
-        mock_llm.generate = AsyncMock(side_effect=Exception("LLM API timeout"))
+    async def test_handles_llm_error_with_fallback(self, mock_llm, sample_intent, sample_strategy):
+        """Returns fallback on LLM errors instead of raising."""
+        mock_llm.generate = AsyncMock(side_effect=LLMAPIError(
+            message="Internal server error",
+            provider="openai",
+            status_code=500,
+        ))
 
         with patch(
             "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
         ):
-            with pytest.raises(ExplanationError) as exc_info:
-                await generate_strategy_explanation(
-                    intent_json=sample_intent,
-                    strategy=sample_strategy,
-                    matched_tags=[],
-                )
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=[],
+            )
 
-            assert "Failed to generate explanation" in str(exc_info.value)
-            assert "LLM API timeout" in str(exc_info.value)
+        assert result.degraded is True
+        assert result.reason_code == "llm_error"
+        assert result.error == USER_SAFE_ERRORS["llm_error"]
 
     @pytest.mark.asyncio
     async def test_no_matched_tags_uses_semantic_message(
@@ -295,6 +312,191 @@ class TestGenerateStrategyExplanation:
 
         assert result.generated_at
         assert "T" in result.generated_at  # ISO format
+
+    @pytest.mark.asyncio
+    async def test_returns_fallback_on_timeout(
+        self, sample_intent, sample_strategy
+    ):
+        """Returns fallback when LLM request times out."""
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        with patch(
+            "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
+        ):
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=["breakout"],
+                timeout_seconds=0.1,
+            )
+
+        assert result.degraded is True
+        assert result.reason_code == "llm_timeout"
+        assert result.error == USER_SAFE_ERRORS["llm_timeout"]
+
+    @pytest.mark.asyncio
+    async def test_returns_fallback_on_rate_limit(
+        self, sample_intent, sample_strategy
+    ):
+        """Returns fallback when rate limited."""
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(
+            side_effect=LLMRateLimitError(
+                message="Rate limit exceeded",
+                provider="openai",
+                retry_after_seconds=60,
+            )
+        )
+
+        with patch(
+            "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
+        ):
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=["breakout"],
+            )
+
+        assert result.degraded is True
+        assert result.reason_code == "llm_rate_limit"
+        assert result.error == USER_SAFE_ERRORS["llm_rate_limit"]
+
+    @pytest.mark.asyncio
+    async def test_returns_fallback_on_llm_timeout_error(
+        self, sample_intent, sample_strategy
+    ):
+        """Returns fallback on LLMTimeoutError from provider."""
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(
+            side_effect=LLMTimeoutError(
+                message="Provider timeout",
+                provider="openai",
+                timeout_seconds=30.0,
+            )
+        )
+
+        with patch(
+            "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
+        ):
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=["breakout"],
+            )
+
+        assert result.degraded is True
+        assert result.reason_code == "llm_error"  # Mapped to generic llm_error
+
+    @pytest.mark.asyncio
+    async def test_returns_fallback_on_unexpected_error(
+        self, sample_intent, sample_strategy
+    ):
+        """Returns fallback on unexpected exception (never exposes raw error)."""
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(side_effect=ValueError("Unexpected internal error"))
+
+        with patch(
+            "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
+        ):
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=["breakout"],
+            )
+
+        assert result.degraded is True
+        assert result.reason_code == "llm_error"
+        # User never sees raw exception message
+        assert result.error == USER_SAFE_ERRORS["llm_error"]
+        assert "Unexpected" not in result.error
+
+    @pytest.mark.asyncio
+    async def test_fallback_still_computes_confidence(
+        self, sample_intent, sample_strategy
+    ):
+        """Fallback responses still have deterministic confidence qualifier."""
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        with patch(
+            "app.services.coverage_gap.explanation.get_llm", return_value=mock_llm
+        ):
+            result = await generate_strategy_explanation(
+                intent_json=sample_intent,
+                strategy=sample_strategy,
+                matched_tags=["breakout", "volume", "swing"],
+                match_score=0.8,
+            )
+
+        # Confidence qualifier should be computed despite degraded mode
+        assert "Confidence:" in result.confidence_qualifier
+        assert result.degraded is True
+
+
+class TestMakeFallbackExplanation:
+    """Tests for _make_fallback_explanation helper function."""
+
+    def test_fallback_with_matched_tags(self):
+        """Fallback explanation includes tag information."""
+        result = _make_fallback_explanation(
+            strategy_id="strat-123",
+            strategy_name="Test Strategy",
+            reason_code="llm_timeout",
+            matched_tags=["momentum", "RSI", "daily"],
+            match_score=0.8,
+            verbosity="short",
+        )
+
+        assert result.degraded is True
+        assert result.reason_code == "llm_timeout"
+        assert result.error == USER_SAFE_ERRORS["llm_timeout"]
+        assert result.model == "fallback"
+        assert result.provider == "fallback"
+        assert "3 overlapping tag" in result.explanation
+        assert "momentum" in result.explanation
+
+    def test_fallback_with_match_score_only(self):
+        """Fallback shows match score when no tags."""
+        result = _make_fallback_explanation(
+            strategy_id="strat-123",
+            strategy_name="Test Strategy",
+            reason_code="llm_rate_limit",
+            matched_tags=[],
+            match_score=0.75,
+            verbosity="short",
+        )
+
+        assert result.degraded is True
+        assert "75%" in result.explanation
+
+    def test_fallback_generic_when_no_data(self):
+        """Generic fallback when no tags or score."""
+        result = _make_fallback_explanation(
+            strategy_id="strat-123",
+            strategy_name="Test Strategy",
+            reason_code="llm_unconfigured",
+            matched_tags=[],
+            match_score=None,
+            verbosity="short",
+        )
+
+        assert result.degraded is True
+        assert "potential match" in result.explanation
+
+    def test_fallback_truncates_many_tags(self):
+        """Fallback truncates when more than 3 tags."""
+        result = _make_fallback_explanation(
+            strategy_id="strat-123",
+            strategy_name="Test Strategy",
+            reason_code="llm_error",
+            matched_tags=["tag1", "tag2", "tag3", "tag4", "tag5"],
+            match_score=0.9,
+            verbosity="short",
+        )
+
+        assert "5 overlapping tag" in result.explanation
+        assert "..." in result.explanation  # Truncation indicator
 
 
 class TestComputeConfidenceQualifier:

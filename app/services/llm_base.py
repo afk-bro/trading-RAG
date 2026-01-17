@@ -41,9 +41,14 @@ class RankedChunk:
     original_index: int  # For stable tiebreaker
 
 
-# Errors
+# ===========================================
+# Errors - Provider-agnostic exception hierarchy
+# Providers should map their errors to these in their adapters
+# ===========================================
+
+
 class LLMError(Exception):
-    """Error from LLM provider."""
+    """Base error from LLM provider."""
 
     def __init__(self, message: str, provider: str, model: str | None = None):
         self.provider = provider
@@ -53,6 +58,48 @@ class LLMError(Exception):
 
 class LLMNotConfiguredError(Exception):
     """Raised when LLM generation is requested but no provider is configured."""
+
+
+class LLMTimeoutError(LLMError):
+    """Request timed out waiting for LLM response."""
+
+    def __init__(
+        self,
+        message: str = "LLM request timed out",
+        provider: str = "unknown",
+        model: str | None = None,
+        timeout_seconds: float | None = None,
+    ):
+        self.timeout_seconds = timeout_seconds
+        super().__init__(message, provider, model)
+
+
+class LLMRateLimitError(LLMError):
+    """Rate limited by LLM provider."""
+
+    def __init__(
+        self,
+        message: str = "Rate limited by LLM provider",
+        provider: str = "unknown",
+        model: str | None = None,
+        retry_after_seconds: int | None = None,
+    ):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(message, provider, model)
+
+
+class LLMAPIError(LLMError):
+    """General API error from LLM provider (non-rate-limit)."""
+
+    def __init__(
+        self,
+        message: str = "LLM provider API error",
+        provider: str = "unknown",
+        model: str | None = None,
+        status_code: int | None = None,
+    ):
+        self.status_code = status_code
+        super().__init__(message, provider, model)
 
 
 # Base client

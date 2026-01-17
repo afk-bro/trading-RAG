@@ -1,18 +1,44 @@
 """LLM-powered explanation service for strategy recommendations."""
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 import structlog
 
-from app.services.llm_base import LLMResponse
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None  # type: ignore
+
+from app.services.llm_base import (
+    LLMResponse,
+    LLMError,
+    LLMTimeoutError,
+    LLMRateLimitError,
+    LLMAPIError,
+)
 from app.services.llm_factory import get_llm, get_llm_status
 
 logger = structlog.get_logger(__name__)
 
 # Verbosity types
 Verbosity = Literal["short", "detailed"]
+
+# LLM request timeout (seconds)
+LLM_EXPLANATION_TIMEOUT = 15.0
+
+# User-safe error messages (don't expose internal details)
+USER_SAFE_ERRORS = {
+    "llm_timeout": "LLM request timed out",
+    "llm_rate_limit": "LLM rate limited, please retry",
+    "llm_error": "LLM provider error",
+    "llm_unconfigured": "LLM not configured",
+}
+
+# Reason codes for degraded responses
+ReasonCode = Literal["llm_timeout", "llm_rate_limit", "llm_error", "llm_unconfigured"]
 
 
 @dataclass
@@ -29,6 +55,10 @@ class StrategyExplanation:
     latency_ms: Optional[float] = None
     cache_hit: bool = False
     generated_at: Optional[str] = None
+    # Degraded mode fields
+    degraded: bool = False
+    reason_code: Optional[ReasonCode] = None
+    error: Optional[str] = None
 
 
 @dataclass
@@ -74,6 +104,64 @@ class CachedExplanation:
 
 class ExplanationError(Exception):
     """Error generating explanation."""
+
+
+def _make_fallback_explanation(
+    strategy_id: str,
+    strategy_name: str,
+    reason_code: ReasonCode,
+    matched_tags: list[str],
+    match_score: Optional[float] = None,
+    verbosity: Verbosity = "short",
+) -> StrategyExplanation:
+    """
+    Create a fallback explanation when LLM is unavailable.
+
+    Returns a degraded response with deterministic confidence qualifier
+    but fallback explanation text.
+    """
+    # Still compute confidence qualifier (it's deterministic, no LLM needed)
+    confidence_qualifier = compute_confidence_qualifier(
+        matched_tags=matched_tags,
+        match_score=match_score,
+        has_backtest=False,  # Conservative: assume no backtest info
+        backtest_validated=False,
+    )
+
+    # Build fallback explanation based on available data
+    if matched_tags:
+        explanation = (
+            f"This strategy matches your search based on {len(matched_tags)} "
+            f"overlapping tag{'s' if len(matched_tags) > 1 else ''}: "
+            f"{', '.join(matched_tags[:3])}{'...' if len(matched_tags) > 3 else ''}. "
+            "Review the strategy details to assess fit for your trading approach."
+        )
+    elif match_score and match_score > 0.5:
+        explanation = (
+            f"This strategy has {match_score:.0%} semantic similarity to your search. "
+            "Review the strategy details to assess fit for your trading approach."
+        )
+    else:
+        explanation = (
+            "This strategy was identified as a potential match. "
+            "Review the strategy details to assess fit for your trading approach."
+        )
+
+    return StrategyExplanation(
+        strategy_id=strategy_id,
+        strategy_name=strategy_name,
+        explanation=explanation,
+        confidence_qualifier=confidence_qualifier,
+        model="fallback",
+        provider="fallback",
+        verbosity=verbosity,
+        latency_ms=None,
+        cache_hit=False,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        degraded=True,
+        reason_code=reason_code,
+        error=USER_SAFE_ERRORS.get(reason_code, "LLM unavailable"),
+    )
 
 
 def compute_confidence_qualifier(
@@ -133,9 +221,16 @@ async def generate_strategy_explanation(
     matched_tags: list[str],
     match_score: Optional[float] = None,
     verbosity: Verbosity = "short",
+    timeout_seconds: float = LLM_EXPLANATION_TIMEOUT,
 ) -> StrategyExplanation:
     """
     Generate an LLM-powered explanation of why a strategy matches a user's intent.
+
+    This function gracefully degrades to fallback templates when:
+    - LLM is not configured
+    - LLM request times out
+    - LLM is rate limited
+    - Any other LLM error occurs
 
     Args:
         intent_json: The MatchIntent data (archetypes, indicators, timeframes, etc.)
@@ -143,19 +238,52 @@ async def generate_strategy_explanation(
         matched_tags: List of tags that overlap between intent and strategy
         match_score: Optional similarity score (0-1)
         verbosity: "short" (2-4 sentences) or "detailed" (2-3 paragraphs)
+        timeout_seconds: Timeout for LLM request (default 15s)
 
     Returns:
-        StrategyExplanation with generated text and confidence qualifier
-
-    Raises:
-        ExplanationError: If LLM is not configured or generation fails
+        StrategyExplanation with generated text and confidence qualifier.
+        If LLM fails, returns degraded=True with fallback text.
     """
+    # Extract strategy info for fallback
+    strategy_name = strategy.get("name", "Unknown Strategy")
+    strategy_id = str(strategy.get("id", ""))
+
+    # Helper to log and optionally report to Sentry
+    def _log_and_capture(
+        reason_code: ReasonCode,
+        error: Exception,
+        log_level: str = "warning",
+    ) -> None:
+        log_fn = getattr(logger, log_level, logger.warning)
+        log_fn(
+            "explanation_fallback",
+            reason_code=reason_code,
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            error=str(error),
+            exc_info=True,
+        )
+        if sentry_sdk:
+            sentry_sdk.set_tag("llm_failure", reason_code)
+            sentry_sdk.capture_exception(error)
+
+    # Check LLM availability
     llm = get_llm()
     if not llm:
         status = get_llm_status()
-        raise ExplanationError(
-            f"LLM not configured (enabled={status.enabled}, "
-            f"provider={status.provider_config})"
+        logger.warning(
+            "explanation_fallback",
+            reason_code="llm_unconfigured",
+            enabled=status.enabled,
+            provider_config=status.provider_config,
+        )
+        return _make_fallback_explanation(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            reason_code="llm_unconfigured",
+            matched_tags=matched_tags,
+            match_score=match_score,
+            verbosity=verbosity,
         )
 
     # Extract intent components
@@ -293,12 +421,16 @@ OVERLAP:
     log.info("generating_strategy_explanation")
 
     try:
-        response: LLMResponse = await llm.generate(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=max_tokens,
+        # Wrap LLM call with timeout
+        response: LLMResponse = await asyncio.wait_for(
+            llm.generate(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=max_tokens,
+            ),
+            timeout=timeout_seconds,
         )
 
         log.info(
@@ -321,6 +453,50 @@ OVERLAP:
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
+    except asyncio.TimeoutError as e:
+        _log_and_capture("llm_timeout", e, log_level="warning")
+        return _make_fallback_explanation(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            reason_code="llm_timeout",
+            matched_tags=matched_tags,
+            match_score=match_score,
+            verbosity=verbosity,
+        )
+
+    except LLMRateLimitError as e:
+        _log_and_capture("llm_rate_limit", e, log_level="warning")
+        return _make_fallback_explanation(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            reason_code="llm_rate_limit",
+            matched_tags=matched_tags,
+            match_score=match_score,
+            verbosity=verbosity,
+        )
+
+    except (LLMTimeoutError, LLMAPIError, LLMError) as e:
+        _log_and_capture("llm_error", e, log_level="error")
+        return _make_fallback_explanation(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            reason_code="llm_error",
+            matched_tags=matched_tags,
+            match_score=match_score,
+            verbosity=verbosity,
+        )
+
     except Exception as e:
-        log.error("explanation_generation_failed", error=str(e))
-        raise ExplanationError(f"Failed to generate explanation: {e}") from e
+        # Unexpected errors - still fallback, but log as error
+        log.exception("explanation_unexpected_error", error=str(e))
+        if sentry_sdk:
+            sentry_sdk.set_tag("llm_failure", "unexpected")
+            sentry_sdk.capture_exception(e)
+        return _make_fallback_explanation(
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
+            reason_code="llm_error",
+            matched_tags=matched_tags,
+            match_score=match_score,
+            verbosity=verbosity,
+        )

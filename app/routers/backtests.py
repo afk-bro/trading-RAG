@@ -10,11 +10,13 @@ from fastapi import (
     APIRouter,
     File,
     Form,
+    Header,
     HTTPException,
     Query,
     UploadFile,
     status,
 )
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 
@@ -46,6 +48,18 @@ def _get_repos():
         BacktestRepository(_db_pool),
         TuneRepository(_db_pool),
     )
+
+
+def _get_idempotency_repo():
+    """Get idempotency repository instance."""
+    from app.repositories.idempotency import IdempotencyRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return IdempotencyRepository(_db_pool)
 
 
 # ===========================================
@@ -580,6 +594,9 @@ async def delete_backtest_run(run_id: UUID):
     responses={
         200: {"description": "Tuning completed successfully"},
         404: {"description": "Strategy spec not found"},
+        409: {
+            "description": "Idempotency key conflict (different payload or in progress)"
+        },
         422: {"description": "Invalid parameters", "model": BacktestError},
         503: {"description": "Database unavailable"},
     },
@@ -624,6 +641,11 @@ async def create_tune(
     ),
     date_from: Optional[str] = Form(default=None),
     date_to: Optional[str] = Form(default=None),
+    x_idempotency_key: Optional[str] = Header(
+        default=None,
+        alias="X-Idempotency-Key",
+        description="Idempotency key for preventing duplicate tunes (max 200 chars)",
+    ),
 ):
     """
     Run parameter tuning session.
@@ -767,6 +789,148 @@ async def create_tune(
             },
         )
 
+    # ===========================================
+    # Idempotency handling
+    # ===========================================
+    idempotency_record = None
+    idempotency_repo = None
+
+    if x_idempotency_key:
+        import hashlib
+
+        from app.services.idempotency import (
+            IdempotencyKeyInProgressError,
+            IdempotencyKeyReusedError,
+            IdempotencyKeyTooLongError,
+            compute_request_hash,
+            validate_idempotency_key,
+            verify_hash_match,
+        )
+
+        idempotency_repo = _get_idempotency_repo()
+
+        # Validate key length
+        try:
+            validate_idempotency_key(x_idempotency_key)
+        except IdempotencyKeyTooLongError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "detail": str(e),
+                    "code": "IDEMPOTENCY_KEY_TOO_LONG",
+                },
+            )
+
+        # Compute content hash for file (separate from request hash for efficiency)
+        file_content_hash = hashlib.sha256(file_content).hexdigest()
+
+        # Build canonical payload for hash computation
+        # Include all parameters that define the tune outcome
+        canonical_payload = {
+            "strategy_entity_id": str(strategy_entity_id),
+            "search_type": search_type,
+            "n_trials": n_trials,
+            "seed": seed,
+            "param_space": parsed_param_space,
+            "initial_cash": initial_cash,
+            "commission_bps": commission_bps,
+            "slippage_bps": slippage_bps,
+            "objective_metric": objective_metric,
+            "objective_type": objective_type,
+            "objective_params": parsed_objective_params,
+            "min_trades": min_trades,
+            "oos_ratio": oos_ratio,
+            "date_from": date_from,
+            "date_to": date_to,
+            "file_content_hash": file_content_hash,
+        }
+
+        # Compute request hash with float normalization for known fields
+        request_hash = compute_request_hash(
+            canonical_payload,
+            float_fields=[
+                "initial_cash",
+                "commission_bps",
+                "slippage_bps",
+                "oos_ratio",
+            ],
+        )
+
+        # Try to claim the idempotency key
+        is_new, existing_record = await idempotency_repo.claim_or_get(
+            workspace_id=workspace_id,
+            idempotency_key=x_idempotency_key,
+            request_hash=request_hash,
+            endpoint="backtests.tune",
+            http_method="POST",
+        )
+
+        if not is_new:
+            # Key already exists - handle based on status
+            if existing_record.status == "pending":
+                # Wait for original request to complete
+                completed = await idempotency_repo.wait_for_completion_or_timeout(
+                    workspace_id=workspace_id,
+                    endpoint="backtests.tune",
+                    idempotency_key=x_idempotency_key,
+                    max_wait_seconds=5.0,
+                )
+                if completed:
+                    existing_record = completed
+                else:
+                    # Still pending after timeout
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "detail": "Idempotency key in progress, retry after 5s",
+                            "code": "IDEMPOTENCY_IN_PROGRESS",
+                            "retry_after_seconds": 5,
+                        },
+                    )
+
+            # Verify hash matches (detect key reuse with different payload)
+            try:
+                verify_hash_match(existing_record, request_hash)
+            except IdempotencyKeyReusedError:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "detail": "Idempotency key reused with different payload",
+                        "code": "IDEMPOTENCY_KEY_REUSED",
+                    },
+                )
+
+            # Replay response based on status
+            if existing_record.status == "completed":
+                logger.info(
+                    "idempotency_replay",
+                    idempotency_key=x_idempotency_key,
+                    tune_id=str(existing_record.resource_id),
+                )
+                # Return cached response with 200 status
+                return JSONResponse(
+                    content=existing_record.response_json,
+                    status_code=200,
+                )
+            elif existing_record.status == "failed":
+                logger.info(
+                    "idempotency_replay_failed",
+                    idempotency_key=x_idempotency_key,
+                    error_code=existing_record.error_code,
+                )
+                # Replay the original error
+                error_json = existing_record.error_json or {}
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "detail": error_json.get("detail", "Tuning failed"),
+                        "code": existing_record.error_code or "TUNE_FAILED",
+                    },
+                )
+
+        # New claim - store the record for completion tracking
+        idempotency_record = existing_record
+
     logger.info(
         "Creating parameter tune",
         strategy_entity_id=str(strategy_entity_id),
@@ -775,6 +939,7 @@ async def create_tune(
         n_trials=n_trials,
         seed=seed,
         param_space=parsed_param_space,
+        idempotency_key=x_idempotency_key,
     )
 
     # Build gates snapshot (audit trail for gate policy at tune creation)
@@ -830,6 +995,15 @@ async def create_tune(
         )
     except Exception as e:
         logger.error("Tuning failed", tune_id=str(tune_id), error=str(e))
+
+        # Mark idempotency record as failed if present
+        if idempotency_record and idempotency_repo:
+            await idempotency_repo.mark_failed(
+                idempotency_id=idempotency_record.id,
+                error_code="TUNE_FAILED",
+                error_json={"detail": f"Tuning failed: {e}"},
+            )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"detail": f"Tuning failed: {e}", "code": "TUNE_FAILED"},
@@ -849,7 +1023,7 @@ async def create_tune(
             )
         )
 
-    return TuneResponse(
+    response = TuneResponse(
         tune_id=str(result.tune_id),
         status=result.status,
         search_type=search_type,
@@ -861,6 +1035,16 @@ async def create_tune(
         leaderboard=leaderboard,
         warnings=result.warnings,
     )
+
+    # Mark idempotency record as completed with response for replay
+    if idempotency_record and idempotency_repo:
+        await idempotency_repo.complete(
+            idempotency_id=idempotency_record.id,
+            resource_id=result.tune_id,
+            response_json=response.model_dump(mode="json"),
+        )
+
+    return response
 
 
 @router.get(

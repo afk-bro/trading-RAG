@@ -471,6 +471,25 @@ class MatchRunRepository:
                 status=status,
                 updated_by=updated_by,
             )
+
+            # Emit SSE event for real-time updates
+            try:
+                await self._emit_coverage_updated(
+                    workspace_id=workspace_id,
+                    run_id=run_id,
+                    status=status,
+                    priority_score=None,  # Could fetch if needed
+                    acknowledged_by=updated_by if status == "acknowledged" else None,
+                    resolved_by=updated_by if status == "resolved" else None,
+                )
+            except Exception as e:
+                # Don't fail the update if event emission fails
+                logger.warning(
+                    "coverage_event_emission_failed",
+                    run_id=str(run_id),
+                    error=str(e),
+                )
+
             return dict(row)
 
         return None
@@ -535,3 +554,38 @@ class MatchRunRepository:
             )
 
         return count
+
+    # ===========================================
+    # SSE Event Helpers
+    # ===========================================
+
+    async def _emit_coverage_updated(
+        self,
+        workspace_id: UUID,
+        run_id: UUID,
+        status: str,
+        priority_score: Optional[float] = None,
+        acknowledged_by: Optional[str] = None,
+        resolved_by: Optional[str] = None,
+    ) -> None:
+        """
+        Emit SSE event for coverage status update.
+
+        This is fire-and-forget - failures are logged but don't
+        affect the update operation.
+        """
+        from app.services.events import get_event_bus
+        from app.services.events.schemas import coverage_run_updated
+
+        bus = get_event_bus()
+        event = coverage_run_updated(
+            event_id="",  # Will be assigned by bus
+            workspace_id=workspace_id,
+            run_id=run_id,
+            status=status,
+            priority_score=priority_score,
+            acknowledged_by=acknowledged_by,
+            resolved_by=resolved_by,
+        )
+
+        await bus.publish(event)
