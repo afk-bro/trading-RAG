@@ -51,12 +51,19 @@ logger = structlog.get_logger(__name__)
 
 # Global connection pool (set during app startup)
 _db_pool = None
+_qdrant_client = None
 
 
 def set_db_pool(pool):
     """Set the database pool for this router."""
     global _db_pool
     _db_pool = pool
+
+
+def set_qdrant_client(client):
+    """Set the Qdrant client for this router."""
+    global _qdrant_client
+    _qdrant_client = client
 
 
 # =============================================================================
@@ -669,12 +676,12 @@ def _get_repository():
     """Get KB trial repository."""
     from app.repositories.kb_trials import KBTrialRepository
 
-    if _db_pool is None:
+    if _qdrant_client is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
+            detail="Qdrant client not available",
         )
-    return KBTrialRepository(_db_pool)
+    return KBTrialRepository(_qdrant_client)
 
 
 async def _get_recommender():

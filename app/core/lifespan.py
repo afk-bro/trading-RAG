@@ -24,6 +24,7 @@ from app.routers import (
     testing,
 )
 from app.admin import set_db_pool as set_admin_db_pool
+from app.admin import set_qdrant_client as set_admin_qdrant_client
 
 logger = structlog.get_logger(__name__)
 
@@ -60,6 +61,8 @@ async def _init_qdrant(settings) -> Optional[AsyncQdrantClient]:
         ingest.set_qdrant_client(client)
         query.set_qdrant_client(client)
         reembed.set_qdrant_client(client)
+        kb_trials.set_qdrant_client(client)
+        set_admin_qdrant_client(client)
 
         return client
     except Exception as e:

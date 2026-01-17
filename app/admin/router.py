@@ -79,6 +79,7 @@ templates = Jinja2Templates(directory=str(templates_dir))
 
 # Global connection pool (set during app startup)
 _db_pool = None
+_qdrant_client = None
 
 
 def set_db_pool(pool):
@@ -95,6 +96,12 @@ def set_db_pool(pool):
     retention_router.set_db_pool(pool)
     # Also set pool for system health router
     system_health_router.set_db_pool(pool)
+
+
+def set_qdrant_client(client):
+    """Set the Qdrant client for admin routes."""
+    global _qdrant_client
+    _qdrant_client = client
 
 
 def _get_kb_repo():
@@ -1679,12 +1686,12 @@ def _get_kb_trial_repo():
     """Get KBTrialRepository instance."""
     from app.repositories.kb_trials import KBTrialRepository
 
-    if _db_pool is None:
+    if _qdrant_client is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
+            detail="Qdrant client not available",
         )
-    return KBTrialRepository(_db_pool)
+    return KBTrialRepository(_qdrant_client)
 
 
 @router.get("/kb/trials/stats")
