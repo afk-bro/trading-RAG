@@ -1,7 +1,5 @@
 """Unit tests for Pine Script strategy spec generator."""
 
-import pytest
-
 from app.services.pine.models import InputType, PineInput
 from app.services.pine.spec_generator import (
     ParamSpec,
