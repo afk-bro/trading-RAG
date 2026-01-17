@@ -770,6 +770,48 @@ This system is evolving from a trading-focused RAG to a general-purpose rag-core
 - PDF backend is swappable (pymupdf now, MinerU/StudyG later for OCR/tables)
 - Workspace config enables per-tenant customization without code changes
 
+## v1.0.0 - Operational Hardening (Jan 2026)
+
+Tagged release implementing four phases of operational safety for production readiness.
+
+### Phase 1: Idempotency
+- `X-Idempotency-Key` header for `/backtests/tune` endpoint
+- Prevents duplicate tunes on client retries (corrupts leaderboards)
+- Atomic claim pattern with `INSERT ON CONFLICT DO NOTHING`
+- Pending request polling with configurable timeout
+
+**Migration required**: `053_idempotency_keys.sql`
+
+### Phase 2: Retention
+- SQL functions for batch deletes: `retention_prune_trade_events()`, `retention_prune_job_runs()`, `retention_prune_match_runs()`
+- pg_cron scheduling at 3:15/3:20/3:25 AM (when available)
+- Admin endpoints with `dry_run` support for preview
+- Retention job logging in `retention_job_log` table
+
+**Migration required**: `054_retention_functions.sql`, `055_retention_pgcron_schedule.sql`
+
+### Phase 3: LLM Fallback
+- Graceful degradation when LLM times out or errors
+- `StrategyExplanation` response includes `degraded`, `reason_code`, `model`, `provider`
+- Reason codes: `llm_timeout`, `llm_unconfigured`, `llm_error`, `llm_rate_limit`
+- Full stack traces logged internally, user-safe messages returned
+
+### Phase 4: SSE (Server-Sent Events)
+- Real-time updates for admin coverage cockpit at `/admin/events/stream`
+- `InMemoryEventBus` with abstract `EventBus` interface for future Redis/PgNotify
+- Topic-based filtering: `coverage`, `backtests`
+- Workspace-scoped event delivery
+- `Last-Event-ID` reconnection support with event buffer
+
+### Canary Tests
+Located in `tests/integration/test_operational_hardening.py`:
+- `TestIdempotencyConcurrentRetry` - Same key returns same tune_id
+- `TestRetentionDryRun` - Dry run returns count without deletion
+- `TestLLMTimeoutFallback` - Timeout triggers fallback response
+- `TestSSEEventDelivery` - Event publish/subscribe verification
+
+**Note**: DB tests gracefully skip if migrations not applied.
+
 ## Follow-ups / Tech Debt
 
 ### Post-merge follow-ups: Results Persistence
