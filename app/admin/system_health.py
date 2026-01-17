@@ -101,6 +101,16 @@ class SSEHealth(ComponentHealth):
     buffer_size: int = 0
 
 
+class IdempotencyHealth(ComponentHealth):
+    """Idempotency key hygiene status."""
+
+    total_keys: int = 0
+    expired_pending: int = 0
+    pending_requests: int = 0
+    oldest_pending_age_minutes: Optional[float] = None
+    oldest_expired_age_hours: Optional[float] = None
+
+
 class RetentionHealth(ComponentHealth):
     """Retention job health."""
 
@@ -110,6 +120,7 @@ class RetentionHealth(ComponentHealth):
     rows_deleted_last: int = 0
     consecutive_failures: int = 0
     pg_cron_available: bool = False
+    jobs_24h: dict = Field(default_factory=dict)  # Per-job stats
 
 
 class TuneHealth(ComponentHealth):
@@ -136,6 +147,7 @@ class SystemHealthSnapshot(BaseModel):
     ingestion: IngestionHealth
     sse: SSEHealth
     retention: RetentionHealth
+    idempotency: IdempotencyHealth
     tunes: TuneHealth
 
     # Summary
@@ -468,6 +480,76 @@ async def _check_tunes() -> TuneHealth:
         return TuneHealth(status="error", error=str(e)[:200])
 
 
+async def _check_idempotency() -> IdempotencyHealth:
+    """Check idempotency key table hygiene."""
+    if _db_pool is None:
+        return IdempotencyHealth(status="unknown", error="Pool not initialized")
+
+    try:
+        async with _db_pool.acquire() as conn:
+            # Get idempotency key stats
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) as total_keys,
+                    COUNT(*) FILTER (WHERE expires_at < NOW()) as expired_pending,
+                    COUNT(*) FILTER (
+                        WHERE status = 'pending' AND expires_at >= NOW()
+                    ) as pending_requests,
+                    EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))::FLOAT / 60.0
+                        FILTER (WHERE status = 'pending' AND expires_at >= NOW())
+                        as oldest_pending_age_minutes,
+                    EXTRACT(EPOCH FROM (NOW() - MIN(expires_at)))::FLOAT / 3600.0
+                        FILTER (WHERE expires_at < NOW())
+                        as oldest_expired_age_hours
+                FROM idempotency_keys
+            """
+            )
+
+            if not stats:
+                return IdempotencyHealth(status="ok", total_keys=0)
+
+            total = stats["total_keys"] or 0
+            expired = stats["expired_pending"] or 0
+            pending = stats["pending_requests"] or 0
+            oldest_pending = stats["oldest_pending_age_minutes"]
+            oldest_expired = stats["oldest_expired_age_hours"]
+
+            # Determine status based on hygiene thresholds
+            status = "ok"
+
+            # Expired keys not being pruned is a warning
+            if expired > 100:
+                status = "degraded"
+            if expired > 1000:
+                status = "error"
+
+            # Very old expired keys indicate pg_cron failure
+            if oldest_expired and oldest_expired > 48:  # > 48 hours old
+                status = "error"
+
+            # Stuck pending requests (> 30 min) indicate issues
+            if oldest_pending and oldest_pending > 30:
+                status = "degraded"
+
+            return IdempotencyHealth(
+                status=status,
+                total_keys=total,
+                expired_pending=expired,
+                pending_requests=pending,
+                oldest_pending_age_minutes=oldest_pending,
+                oldest_expired_age_hours=oldest_expired,
+            )
+    except Exception as e:
+        # Table might not exist yet
+        if "does not exist" in str(e):
+            return IdempotencyHealth(
+                status="ok",
+                details={"message": "Idempotency not configured (table missing)"},
+            )
+        return IdempotencyHealth(status="error", error=str(e)[:200])
+
+
 async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     """
     Collect complete system health snapshot.
@@ -477,13 +559,23 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     from app import __version__
 
     # Run all checks concurrently
-    db, qdrant, llm, ingestion, sse, retention, tunes = await asyncio.gather(
+    (
+        db,
+        qdrant,
+        llm,
+        ingestion,
+        sse,
+        retention,
+        idempotency,
+        tunes,
+    ) = await asyncio.gather(
         _check_database(),
         _check_qdrant(settings),
         _check_llm(),
         _check_ingestion(),
         _check_sse(),
         _check_retention(),
+        _check_idempotency(),
         _check_tunes(),
         return_exceptions=True,
     )
@@ -500,10 +592,11 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     ingestion = safe_result(ingestion, IngestionHealth)
     sse = safe_result(sse, SSEHealth)
     retention = safe_result(retention, RetentionHealth)
+    idempotency = safe_result(idempotency, IdempotencyHealth)
     tunes = safe_result(tunes, TuneHealth)
 
     # Calculate overall status
-    components = [db, qdrant, llm, sse, retention, tunes]
+    components = [db, qdrant, llm, sse, retention, idempotency, tunes]
     statuses = [c.status for c in components]
 
     ok_count = statuses.count("ok")
@@ -531,6 +624,10 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         issues.append(f"SSE: {sse.error or sse.status}")
     if retention.status != "ok":
         issues.append(f"Retention: {retention.error or 'failing'}")
+    if idempotency.status != "ok":
+        issues.append(
+            f"Idempotency: {idempotency.expired_pending} expired keys pending"
+        )
     if tunes.status != "ok":
         issues.append(f"Tunes: {tunes.error or tunes.status}")
 
@@ -544,6 +641,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         ingestion=ingestion,
         sse=sse,
         retention=retention,
+        idempotency=idempotency,
         tunes=tunes,
         components_ok=ok_count,
         components_degraded=degraded_count,
@@ -761,6 +859,27 @@ async def system_health_html(
     html += metric("Last Job", ret.last_run_job or "-")
     html += metric("Rows Deleted", f"{ret.rows_deleted_last:,}")
     html += metric("Consecutive Fails", str(ret.consecutive_failures))
+    html += "</div>"
+
+    # Idempotency card
+    idem = snapshot.idempotency
+    html += '<div class="card">'
+    html += card_header("Idempotency", idem.status)
+    html += metric("Total Keys", f"{idem.total_keys:,}")
+    html += metric(
+        "Expired Pending", str(idem.expired_pending), error=idem.expired_pending > 100
+    )
+    html += metric("Pending Requests", str(idem.pending_requests))
+    if idem.oldest_pending_age_minutes:
+        html += metric("Oldest Pending", f"{idem.oldest_pending_age_minutes:.1f} min")
+    if idem.oldest_expired_age_hours:
+        html += metric(
+            "Oldest Expired",
+            f"{idem.oldest_expired_age_hours:.1f} hrs",
+            error=idem.oldest_expired_age_hours > 48,
+        )
+    if idem.error:
+        html += metric("Error", idem.error, error=True)
     html += "</div>"
 
     # Tunes card
