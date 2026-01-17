@@ -50,6 +50,7 @@ from app.admin import alerts as alerts_router  # noqa: E402
 from app.admin import coverage as coverage_router  # noqa: E402
 from app.admin import retention as retention_router  # noqa: E402
 from app.admin import events as events_router  # noqa: E402
+from app.admin import system_health as system_health_router  # noqa: E402
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
@@ -68,6 +69,9 @@ router.include_router(retention_router.router)
 
 # Include events (SSE) sub-router
 router.include_router(events_router.router)
+
+# Include system health sub-router
+router.include_router(system_health_router.router)
 
 # Setup Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
@@ -89,6 +93,8 @@ def set_db_pool(pool):
     coverage_router.set_db_pool(pool)
     # Also set pool for retention router
     retention_router.set_db_pool(pool)
+    # Also set pool for system health router
+    system_health_router.set_db_pool(pool)
 
 
 def _get_kb_repo():

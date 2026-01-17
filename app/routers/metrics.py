@@ -83,6 +83,129 @@ QDRANT_VECTORS_COUNT = Gauge(
 )
 
 # =============================================================================
+# A2: Decision-grade metrics for observability
+# =============================================================================
+
+# HTTP metrics with route label (standardized naming)
+HTTP_REQUESTS = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["route", "method", "status"],
+)
+
+HTTP_REQUEST_DURATION = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request duration in seconds",
+    ["route", "method"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+# Database pool metrics
+DB_POOL_ACQUIRE_DURATION = Histogram(
+    "db_pool_acquire_seconds",
+    "Time to acquire a database connection from pool",
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+
+# Qdrant operation metrics
+QDRANT_REQUEST_DURATION = Histogram(
+    "qdrant_request_duration_seconds",
+    "Qdrant request duration in seconds",
+    ["op"],  # search, upsert, delete, etc.
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+)
+
+QDRANT_ERRORS = Counter(
+    "qdrant_errors_total",
+    "Total Qdrant errors",
+    ["op"],
+)
+
+# Embedding metrics (standardized)
+EMBEDDING_REQUESTS = Counter(
+    "embedding_requests_total",
+    "Total embedding requests",
+    ["provider", "status"],  # status: success, error
+)
+
+EMBEDDING_DURATION = Histogram(
+    "embedding_duration_seconds",
+    "Embedding request duration in seconds",
+    ["provider"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+# LLM metrics
+LLM_REQUESTS = Counter(
+    "llm_requests_total",
+    "Total LLM requests",
+    ["provider", "status", "reason_code"],  # reason_code for failures
+)
+
+LLM_DEGRADED = Counter(
+    "llm_degraded_total",
+    "LLM degraded fallback events",
+    ["reason_code"],  # llm_timeout, llm_error, llm_rate_limit, llm_unconfigured
+)
+
+LLM_DURATION = Histogram(
+    "llm_request_duration_seconds",
+    "LLM request duration in seconds",
+    ["provider"],
+    buckets=[0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0],
+)
+
+# Tune/Backtest metrics
+TUNE_RUNS = Counter(
+    "tune_runs_total",
+    "Total tune runs",
+    ["status"],  # started, completed, failed, cancelled
+)
+
+TUNE_RUN_DURATION = Histogram(
+    "tune_run_duration_seconds",
+    "Tune run duration in seconds",
+    buckets=[10, 30, 60, 120, 300, 600, 1800, 3600],
+)
+
+TUNE_TRIALS = Counter(
+    "tune_trials_total",
+    "Total tune trials",
+    ["status"],  # completed, failed
+)
+
+# Retention metrics
+RETENTION_ROWS_DELETED = Counter(
+    "retention_rows_deleted_total",
+    "Total rows deleted by retention jobs",
+    ["table"],  # trade_events, job_runs, match_runs
+)
+
+RETENTION_JOB_RUNS = Counter(
+    "retention_job_runs_total",
+    "Total retention job runs",
+    ["job_name", "status"],  # status: success, failure
+)
+
+# SSE metrics
+SSE_SUBSCRIBERS = Gauge(
+    "sse_subscribers",
+    "Current SSE subscribers",
+    ["topic"],  # coverage, backtests
+)
+
+SSE_EVENTS_PUBLISHED = Counter(
+    "sse_events_published_total",
+    "Total SSE events published",
+    ["topic"],
+)
+
+SSE_QUEUE_DROPS = Counter(
+    "sse_queue_drops_total",
+    "Total SSE events dropped due to full queue",
+)
+
+# =============================================================================
 # Trading KB Metrics
 # =============================================================================
 
@@ -230,6 +353,91 @@ def record_kb_embed_error():
 def record_kb_qdrant_error():
     """Record KB Qdrant query error."""
     KB_QDRANT_ERRORS.inc()
+
+
+# =============================================================================
+# A2: Recording Functions for Decision-Grade Metrics
+# =============================================================================
+
+
+def record_http_request(route: str, method: str, status: int, duration: float):
+    """Record HTTP request metrics (standardized naming)."""
+    HTTP_REQUESTS.labels(route=route, method=method, status=str(status)).inc()
+    HTTP_REQUEST_DURATION.labels(route=route, method=method).observe(duration)
+
+
+def record_db_pool_acquire(duration: float):
+    """Record database pool connection acquire time."""
+    DB_POOL_ACQUIRE_DURATION.observe(duration)
+
+
+def record_qdrant_request(op: str, duration: float, success: bool = True):
+    """Record Qdrant operation metrics."""
+    QDRANT_REQUEST_DURATION.labels(op=op).observe(duration)
+    if not success:
+        QDRANT_ERRORS.labels(op=op).inc()
+
+
+def record_embedding_request(provider: str, duration: float, success: bool = True):
+    """Record embedding request metrics."""
+    status = "success" if success else "error"
+    EMBEDDING_REQUESTS.labels(provider=provider, status=status).inc()
+    EMBEDDING_DURATION.labels(provider=provider).observe(duration)
+
+
+def record_llm_request(
+    provider: str,
+    duration: float,
+    success: bool = True,
+    reason_code: str = "",
+):
+    """Record LLM request metrics."""
+    status = "success" if success else "error"
+    LLM_REQUESTS.labels(provider=provider, status=status, reason_code=reason_code).inc()
+    LLM_DURATION.labels(provider=provider).observe(duration)
+
+
+def record_llm_degraded(reason_code: str):
+    """Record LLM degraded fallback event."""
+    LLM_DEGRADED.labels(reason_code=reason_code).inc()
+
+
+def record_tune_run(status: str, duration: float | None = None):
+    """Record tune run metrics."""
+    TUNE_RUNS.labels(status=status).inc()
+    if duration is not None and status in ("completed", "failed"):
+        TUNE_RUN_DURATION.observe(duration)
+
+
+def record_tune_trial(status: str):
+    """Record tune trial completion."""
+    TUNE_TRIALS.labels(status=status).inc()
+
+
+def record_retention_deleted(table: str, count: int):
+    """Record retention job row deletions."""
+    RETENTION_ROWS_DELETED.labels(table=table).inc(count)
+
+
+def record_retention_job(job_name: str, success: bool):
+    """Record retention job run."""
+    status = "success" if success else "failure"
+    RETENTION_JOB_RUNS.labels(job_name=job_name, status=status).inc()
+
+
+def set_sse_subscribers(topic: str, count: int):
+    """Set current SSE subscriber count."""
+    SSE_SUBSCRIBERS.labels(topic=topic).set(count)
+
+
+def record_sse_event_published(topic: str):
+    """Record SSE event publication."""
+    SSE_EVENTS_PUBLISHED.labels(topic=topic).inc()
+
+
+def record_sse_queue_drop():
+    """Record SSE queue drop."""
+    SSE_QUEUE_DROPS.inc()
 
 
 @router.get("/metrics", include_in_schema=False)
