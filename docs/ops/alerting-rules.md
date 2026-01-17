@@ -2,6 +2,170 @@
 
 Minimum viable alerts for Trading RAG service monitoring.
 
+## Prometheus Alerting Rules
+
+Prometheus alerting rules for Grafana Alerting or Alertmanager. Copy to your Prometheus rules directory or configure via Grafana UI.
+
+### Critical Alerts
+
+```yaml
+groups:
+  - name: trading-rag-critical
+    rules:
+      # High 5xx error rate indicates service degradation
+      - alert: TradingRAG_HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate ({{ $value | humanizePercentage }})"
+          description: "Error rate exceeds 5% for 2+ minutes"
+          runbook_url: "/docs/ops/runbooks.md#high-error-rate"
+
+      # Service not responding
+      - alert: TradingRAG_ServiceDown
+        expr: up{job="trading-rag"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Trading RAG service is down"
+          description: "Prometheus cannot scrape /metrics endpoint"
+
+      # Database connection pool exhausted
+      - alert: TradingRAG_DBPoolExhausted
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(db_pool_acquire_seconds_bucket[5m]))) > 1
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DB pool acquire P95 > 1s ({{ $value | humanizeDuration }})"
+          description: "Connection pool may be exhausted"
+
+      # Qdrant errors sustained
+      - alert: TradingRAG_QdrantErrors
+        expr: increase(qdrant_errors_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Qdrant error rate ({{ $value }} in 5m)"
+          description: "Vector database may be unavailable"
+```
+
+### Warning Alerts
+
+```yaml
+      # High latency indicates performance degradation
+      - alert: TradingRAG_HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (route) (rate(http_request_duration_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High P95 latency on {{ $labels.route }} ({{ $value | humanizeDuration }})"
+          description: "Response time degraded for 5+ minutes"
+
+      # LLM fallback rate elevated
+      - alert: TradingRAG_LLMDegradedHigh
+        expr: |
+          sum(rate(llm_degraded_total[5m])) / sum(rate(llm_requests_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM fallback rate > 10% ({{ $value | humanizePercentage }})"
+          description: "LLM provider may be rate-limited or unavailable"
+
+      # KB recommend quality degraded
+      - alert: TradingRAG_KBWeakCoverageHigh
+        expr: |
+          sum(rate(kb_recommend_requests_total{status="none"}[15m]))
+          / sum(rate(kb_recommend_requests_total[15m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KB weak coverage rate > 20% ({{ $value | humanizePercentage }})"
+          description: "High percentage of requests returning no recommendations"
+
+      # Tune failure rate elevated
+      - alert: TradingRAG_TuneFailureRateHigh
+        expr: |
+          increase(tune_runs_total{status="failed"}[1h])
+          / increase(tune_runs_total{status=~"completed|failed"}[1h]) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tune failure rate > 20% ({{ $value | humanizePercentage }})"
+          description: "Backtest tuning may have systemic issues"
+
+      # Embedding errors
+      - alert: TradingRAG_EmbeddingErrors
+        expr: increase(kb_embed_errors_total[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Embedding errors detected ({{ $value }} in 15m)"
+          description: "Check embedding provider availability"
+
+      # SSE queue drops
+      - alert: TradingRAG_SSEQueueDrops
+        expr: increase(sse_queue_drops_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SSE events being dropped"
+          description: "Client queues may be full, check subscriber health"
+
+      # Retention job failures
+      - alert: TradingRAG_RetentionJobFailed
+        expr: increase(retention_job_runs_total{status="failure"}[24h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Retention job failed"
+          description: "Check pg_cron logs and retention_job_log table"
+```
+
+### Info Alerts
+
+```yaml
+      # Low confidence recommendations
+      - alert: TradingRAG_KBLowConfidence
+        expr: |
+          sum(rate(kb_recommend_requests_total{confidence_bucket=~"low|none"}[15m]))
+          / sum(rate(kb_recommend_requests_total[15m])) > 0.4
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "High rate of low-confidence recommendations"
+          description: "Consider expanding KB coverage or adjusting thresholds"
+
+      # High tune duration
+      - alert: TradingRAG_TuneDurationHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(tune_run_duration_seconds_bucket[1h]))) > 1800
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Tune duration P95 > 30min"
+          description: "Tunes taking longer than expected"
+```
+
+---
+
 ## Sentry Alerts
 
 ### Critical Alerts (PagerDuty / On-call)
