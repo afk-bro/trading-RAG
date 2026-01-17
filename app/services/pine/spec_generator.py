@@ -246,13 +246,13 @@ def _is_sweepable(input: PineInput) -> bool:
     return False
 
 
-def _generate_sweep_config(params: list[ParamSpec]) -> dict:
+def _generate_sweep_config(params: list[ParamSpec]) -> dict[str, list[Any]]:
     """
     Generate default sweep configuration for sweepable parameters.
 
     Returns dict mapping param names to sweep values.
     """
-    config = {}
+    config: dict[str, list[Any]] = {}
 
     for p in params:
         if not p.sweepable:
@@ -264,16 +264,16 @@ def _generate_sweep_config(params: list[ParamSpec]) -> dict:
             config[p.name] = p.options
         elif p.type == "int" and p.min_value is not None and p.max_value is not None:
             # Generate 5 evenly-spaced integers
-            min_v = int(p.min_value)
-            max_v = int(p.max_value)
-            step = max(1, (max_v - min_v) // 4)
-            config[p.name] = list(range(min_v, max_v + 1, step))[:5]
+            int_min = int(p.min_value)
+            int_max = int(p.max_value)
+            int_step = max(1, (int_max - int_min) // 4)
+            config[p.name] = list(range(int_min, int_max + 1, int_step))[:5]
         elif p.type == "float" and p.min_value is not None and p.max_value is not None:
             # Generate 5 evenly-spaced floats
-            min_v = p.min_value
-            max_v = p.max_value
-            step = (max_v - min_v) / 4
-            config[p.name] = [round(min_v + i * step, 4) for i in range(5)]
+            float_min = p.min_value
+            float_max = p.max_value
+            float_step = (float_max - float_min) / 4
+            config[p.name] = [round(float_min + i * float_step, 4) for i in range(5)]
 
     return config
 
