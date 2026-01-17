@@ -47,8 +47,9 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
 - **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
 - **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard
+- **Idempotency Hygiene**: Auto-prune via pg_cron, health page monitoring, Prometheus metrics
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
-- **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules
+- **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules (28 alerts across 10 subsystems)
 
 ### Query Modes
 

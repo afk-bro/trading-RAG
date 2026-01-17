@@ -744,6 +744,9 @@ Single-page operational health view for "what's broken?" diagnostics (`app/admin
 - **Qdrant**: Vector count, segment count, collection status, last error
 - **LLM**: Provider configured, degraded count (1h), error count (1h), last success/error
 - **SSE**: Subscriber count, events published (1h), queue drops (1h)
+- **Retention**: pg_cron availability, last run time/status, rows deleted, consecutive failures
+- **Idempotency**: Total keys, expired pending prune, pending requests, oldest ages
+- **Tunes**: Active tunes, completed/failed (24h), avg duration
 - **Ingestion**: Last success/failure per source type (YouTube, PDF, Pine), pending jobs
 
 **Status Values**: `ok`, `degraded`, `error`, `unknown`
@@ -780,6 +783,12 @@ BUILD_TIME=2025-01-09T12:00:00Z # Set by CI/CD
 **Operational Docs** (`docs/ops/`):
 - `alerting-rules.md` - Sentry alert configuration
 - `runbooks.md` - Qdrant rebuild, model rotation, status handling
+
+**Prometheus Alerting** (`ops/prometheus/`):
+- `rules/rag_core_alerts.yml` - 28 production-ready alerts across 10 subsystems
+- `README.md` - Required metrics, threshold tuning, loading instructions
+
+Alert subsystems: `platform`, `db`, `qdrant`, `llm`, `kb`, `backtests`, `retention`, `idempotency`, `sse`, `ingestion`
 
 ## Testing Notes
 

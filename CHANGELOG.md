@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Idempotency Hygiene Monitoring** - Full observability for idempotency key lifecycle
+  - Health page card: total keys, expired pending, pending requests, oldest ages
+  - Prometheus metrics: `idempotency_keys_total`, `idempotency_expired_pending_total`, etc.
+  - Alert rules: ExpiredPending (warn >100), ExpiredCritical (crit >1000), PruneStale (>48h)
+  - Thresholds match between health page and Prometheus for consistency
+  - Metrics updated during health checks via `set_idempotency_metrics()`
+
 - **System Health Dashboard** - Single-page operational health view (`/admin/system/health`)
   - HTML dashboard with status cards answering "what's broken?" without opening logs
   - JSON endpoint (`/admin/system/health.json`) for machine-readable status
