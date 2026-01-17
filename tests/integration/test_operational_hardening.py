@@ -81,9 +81,7 @@ class TestIdempotencyConcurrentRetry:
         # Skip if migrations not applied (500 = likely missing table/function)
         # These tests require idempotency_keys table from migrations
         if resp1.status_code == 500:
-            pytest.skip(
-                "idempotency_keys migration not applied (run migrations first)"
-            )
+            pytest.skip("idempotency_keys migration not applied (run migrations first)")
 
         # Second request with same key (simulates retry)
         with open(fixture_path, "rb") as f:
@@ -104,9 +102,9 @@ class TestIdempotencyConcurrentRetry:
         # Both should return same tune_id
         tune_id_1 = resp1.json()["tune_id"]
         tune_id_2 = resp2.json()["tune_id"]
-        assert tune_id_1 == tune_id_2, (
-            f"Idempotency failed: got different tune_ids {tune_id_1} vs {tune_id_2}"
-        )
+        assert (
+            tune_id_1 == tune_id_2
+        ), f"Idempotency failed: got different tune_ids {tune_id_1} vs {tune_id_2}"
 
 
 # =============================================================================
@@ -232,15 +230,15 @@ class TestLLMTimeoutFallback:
         # Should return fallback, not raise
         assert result is not None, "Expected fallback response, got None"
         assert result.degraded is True, "Expected degraded=True"
-        assert result.reason_code == "llm_timeout", (
-            f"Expected reason_code='llm_timeout', got '{result.reason_code}'"
-        )
-        assert result.model == "fallback", (
-            f"Expected model='fallback', got '{result.model}'"
-        )
-        assert result.provider == "fallback", (
-            f"Expected provider='fallback', got '{result.provider}'"
-        )
+        assert (
+            result.reason_code == "llm_timeout"
+        ), f"Expected reason_code='llm_timeout', got '{result.reason_code}'"
+        assert (
+            result.model == "fallback"
+        ), f"Expected model='fallback', got '{result.model}'"
+        assert (
+            result.provider == "fallback"
+        ), f"Expected provider='fallback', got '{result.provider}'"
 
 
 # =============================================================================
@@ -303,9 +301,9 @@ class TestSSEEventDelivery:
 
         # Verify
         assert delivered >= 1, f"Expected event to be delivered, got {delivered}"
-        assert len(received_events) == 1, (
-            f"Expected 1 event, got {len(received_events)}"
-        )
+        assert (
+            len(received_events) == 1
+        ), f"Expected 1 event, got {len(received_events)}"
 
         received = received_events[0]
         assert received.topic == "coverage.weak_run.updated"
