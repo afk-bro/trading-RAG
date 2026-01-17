@@ -780,7 +780,7 @@ class TestEvaluateAlertsJobEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", MagicMock()), patch(
+        with patch("app.admin.jobs._db_pool", MagicMock()), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -819,7 +819,7 @@ class TestEvaluateAlertsJobEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", MagicMock()), patch(
+        with patch("app.admin.jobs._db_pool", MagicMock()), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -862,7 +862,7 @@ class TestEvaluateAlertsJobEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", MagicMock()), patch(
+        with patch("app.admin.jobs._db_pool", MagicMock()), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -954,7 +954,7 @@ class TestAlertEdgeCases:
         """Test that missing DB pool returns 503."""
         workspace_id = uuid4()
 
-        with patch("app.admin.router._db_pool", None):
+        with patch("app.admin.jobs._db_pool", None):
             response = client.post(
                 f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}",
                 headers=admin_headers,
