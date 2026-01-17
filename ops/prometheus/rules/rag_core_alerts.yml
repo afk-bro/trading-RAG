@@ -1,0 +1,348 @@
+# RAG Core Alerting Rules
+# PrometheusRule-compatible YAML for rag-core service monitoring.
+#
+# Load via: prometheus.yml -> rule_files: ["/path/to/rag_core_alerts.yml"]
+# Or: Prometheus Operator -> PrometheusRule CRD
+# Or: Grafana Alerting import
+#
+# See README.md for required metrics, label assumptions, and threshold tuning.
+
+groups:
+  # ===========================================================================
+  # Platform Rules - HTTP/service-level health
+  # ===========================================================================
+  - name: rag_core.platform
+    rules:
+      - alert: RAGCore_ServiceDown
+        expr: up{job="rag-core"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          subsystem: platform
+        annotations:
+          summary: "RAG Core service is down"
+          description: "Prometheus cannot scrape /metrics endpoint for {{ $labels.instance }}"
+          runbook_url: "docs/ops/runbooks.md#service-down"
+
+      - alert: RAGCore_HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="rag-core", status=~"5.."}[5m]))
+            / sum(rate(http_requests_total{job="rag-core"}[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          subsystem: platform
+        annotations:
+          summary: "High 5xx error rate ({{ $value | humanizePercentage }})"
+          description: "Error rate exceeds 5% for 2+ minutes. Check logs for root cause."
+          runbook_url: "docs/ops/runbooks.md#high-error-rate"
+
+      - alert: RAGCore_HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (route, le) (rate(http_request_duration_seconds_bucket{job="rag-core"}[5m]))
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: platform
+        annotations:
+          summary: "High P95 latency on {{ $labels.route }} ({{ $value | humanizeDuration }})"
+          description: "Response time degraded for 5+ minutes. Check downstream dependencies."
+          runbook_url: "docs/ops/runbooks.md#high-latency"
+
+      - alert: RAGCore_ReadinessUnhealthy
+        expr: |
+          probe_success{job="rag-core-readiness"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          subsystem: platform
+        annotations:
+          summary: "RAG Core /ready endpoint failing"
+          description: "Readiness probe returning non-200 for 3+ minutes. Service may be degraded."
+
+  # ===========================================================================
+  # Database Rules - Connection pool and query health
+  # ===========================================================================
+  - name: rag_core.db
+    rules:
+      - alert: RAGCore_DBPoolExhausted
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(db_pool_acquire_seconds_bucket{job="rag-core"}[5m]))
+          ) > 1
+        for: 3m
+        labels:
+          severity: critical
+          subsystem: db
+        annotations:
+          summary: "DB pool acquire P95 > 1s ({{ $value | humanizeDuration }})"
+          description: "Connection pool may be exhausted. Check active connections and pool size."
+          runbook_url: "docs/ops/runbooks.md#db-pool-exhausted"
+
+      - alert: RAGCore_DBConnectionErrors
+        expr: increase(db_connection_errors_total{job="rag-core"}[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          subsystem: db
+        annotations:
+          summary: "Database connection errors ({{ $value }} in 5m)"
+          description: "Multiple DB connection failures. Check PostgreSQL health."
+
+  # ===========================================================================
+  # Qdrant Rules - Vector database health
+  # ===========================================================================
+  - name: rag_core.qdrant
+    rules:
+      - alert: RAGCore_QdrantErrors
+        expr: increase(qdrant_errors_total{job="rag-core"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+          subsystem: qdrant
+        annotations:
+          summary: "High Qdrant error rate ({{ $value }} in 5m)"
+          description: "Vector database may be unavailable. Check Qdrant health and disk space."
+          runbook_url: "docs/ops/runbooks.md#qdrant-errors"
+
+      - alert: RAGCore_QdrantLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, op) (rate(qdrant_request_duration_seconds_bucket{job="rag-core"}[5m]))
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: qdrant
+        annotations:
+          summary: "Qdrant P95 latency high for {{ $labels.op }} ({{ $value | humanizeDuration }})"
+          description: "Vector search performance degraded. Check Qdrant optimizer status."
+
+  # ===========================================================================
+  # LLM Rules - Language model provider health
+  # ===========================================================================
+  - name: rag_core.llm
+    rules:
+      - alert: RAGCore_LLMDegradedHigh
+        expr: |
+          (
+            sum(rate(llm_degraded_total{job="rag-core"}[5m]))
+            / sum(rate(llm_requests_total{job="rag-core"}[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: llm
+        annotations:
+          summary: "LLM fallback rate > 10% ({{ $value | humanizePercentage }})"
+          description: "LLM provider may be rate-limited or unavailable. Responses using fallbacks."
+          runbook_url: "docs/ops/runbooks.md#llm-degraded"
+
+      - alert: RAGCore_LLMErrorsHigh
+        expr: increase(llm_errors_total{job="rag-core"}[5m]) > 10
+        for: 3m
+        labels:
+          severity: warning
+          subsystem: llm
+        annotations:
+          summary: "High LLM error rate ({{ $value }} in 5m)"
+          description: "Check LLM provider status and API key validity."
+
+      - alert: RAGCore_LLMTimeoutsHigh
+        expr: increase(llm_timeout_total{job="rag-core"}[5m]) > 5
+        for: 3m
+        labels:
+          severity: warning
+          subsystem: llm
+        annotations:
+          summary: "LLM timeout rate elevated ({{ $value }} in 5m)"
+          description: "LLM requests timing out. Provider may be overloaded."
+
+  # ===========================================================================
+  # KB Recommend Rules - Knowledge base recommendation quality
+  # ===========================================================================
+  - name: rag_core.kb
+    rules:
+      - alert: RAGCore_KBWeakCoverageHigh
+        expr: |
+          (
+            sum(rate(kb_recommend_requests_total{job="rag-core", status="none"}[15m]))
+            / sum(rate(kb_recommend_requests_total{job="rag-core"}[15m]))
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: kb
+        annotations:
+          summary: "KB weak coverage rate > 20% ({{ $value | humanizePercentage }})"
+          description: "High percentage of requests returning no recommendations. Check coverage cockpit."
+          runbook_url: "docs/ops/runbooks.md#kb-weak-coverage"
+
+      - alert: RAGCore_KBLowConfidence
+        expr: |
+          (
+            sum(rate(kb_recommend_requests_total{job="rag-core", confidence_bucket=~"low|none"}[15m]))
+            / sum(rate(kb_recommend_requests_total{job="rag-core"}[15m]))
+          ) > 0.4
+        for: 15m
+        labels:
+          severity: info
+          subsystem: kb
+        annotations:
+          summary: "High rate of low-confidence recommendations ({{ $value | humanizePercentage }})"
+          description: "Consider expanding KB coverage or adjusting thresholds."
+
+      - alert: RAGCore_KBEmbedErrors
+        expr: increase(kb_embed_errors_total{job="rag-core"}[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: kb
+        annotations:
+          summary: "Embedding errors detected ({{ $value }} in 15m)"
+          description: "Check embedding provider (Ollama) availability."
+
+      - alert: RAGCore_KBRecommendTimeout
+        expr: increase(kb_recommend_timeout_total{job="rag-core"}[5m]) > 3
+        for: 2m
+        labels:
+          severity: critical
+          subsystem: kb
+        annotations:
+          summary: "KB recommend timeouts ({{ $value }} in 5m)"
+          description: "Recommendation requests timing out. Check Qdrant and embedding service."
+
+  # ===========================================================================
+  # Backtest Rules - Tuning job health
+  # ===========================================================================
+  - name: rag_core.backtests
+    rules:
+      - alert: RAGCore_TuneFailureRateHigh
+        expr: |
+          (
+            increase(tune_runs_total{job="rag-core", status="failed"}[1h])
+            / increase(tune_runs_total{job="rag-core", status=~"completed|failed"}[1h])
+          ) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+          subsystem: backtests
+        annotations:
+          summary: "Tune failure rate > 20% ({{ $value | humanizePercentage }})"
+          description: "Backtest tuning may have systemic issues. Check tune logs."
+          runbook_url: "docs/ops/runbooks.md#tune-failures"
+
+      - alert: RAGCore_TuneDurationHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(tune_run_duration_seconds_bucket{job="rag-core"}[1h]))
+          ) > 1800
+        for: 30m
+        labels:
+          severity: info
+          subsystem: backtests
+        annotations:
+          summary: "Tune duration P95 > 30min ({{ $value | humanizeDuration }})"
+          description: "Tunes taking longer than expected. May need resource scaling."
+
+      - alert: RAGCore_RunPlanFailures
+        expr: increase(run_plan_failures_total{job="rag-core"}[1h]) > 5
+        for: 15m
+        labels:
+          severity: warning
+          subsystem: backtests
+        annotations:
+          summary: "Run plan failures elevated ({{ $value }} in 1h)"
+          description: "Multiple run plan executions failing. Check strategy runner logs."
+
+  # ===========================================================================
+  # Retention Rules - Data cleanup job health
+  # ===========================================================================
+  - name: rag_core.retention
+    rules:
+      - alert: RAGCore_RetentionJobFailed
+        expr: increase(retention_job_runs_total{job="rag-core", status="failure"}[24h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: retention
+        annotations:
+          summary: "Retention job failed"
+          description: "Check pg_cron logs and retention_job_log table."
+          runbook_url: "docs/ops/runbooks.md#retention-job-failed"
+
+      - alert: RAGCore_RetentionJobNotRunning
+        expr: |
+          time() - max(retention_job_last_run_timestamp{job="rag-core"}) > 172800
+        for: 1h
+        labels:
+          severity: warning
+          subsystem: retention
+        annotations:
+          summary: "Retention job not running (>48h since last run)"
+          description: "Retention job may not be scheduled. Check pg_cron configuration."
+
+      - alert: RAGCore_DataGrowthHigh
+        expr: |
+          predict_linear(pg_table_size_bytes{job="rag-core", table="trade_events"}[7d], 86400 * 30) > 10e9
+        for: 1d
+        labels:
+          severity: info
+          subsystem: retention
+        annotations:
+          summary: "trade_events table projected to exceed 10GB in 30 days"
+          description: "Consider adjusting retention policy or archival strategy."
+
+  # ===========================================================================
+  # SSE Rules - Server-Sent Events health
+  # ===========================================================================
+  - name: rag_core.sse
+    rules:
+      - alert: RAGCore_SSEQueueDrops
+        expr: increase(sse_queue_drops_total{job="rag-core"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          subsystem: sse
+        annotations:
+          summary: "SSE events being dropped"
+          description: "Client queues may be full. Check subscriber health and network."
+
+      - alert: RAGCore_SSESubscribersHigh
+        expr: sse_subscribers_count{job="rag-core"} > 100
+        for: 5m
+        labels:
+          severity: info
+          subsystem: sse
+        annotations:
+          summary: "High SSE subscriber count ({{ $value }})"
+          description: "Many active SSE connections. Monitor memory usage."
+
+  # ===========================================================================
+  # Ingestion Rules - Document/content ingestion health
+  # ===========================================================================
+  - name: rag_core.ingestion
+    rules:
+      - alert: RAGCore_IngestionFailures
+        expr: increase(ingest_failures_total{job="rag-core"}[1h]) > 10
+        for: 15m
+        labels:
+          severity: warning
+          subsystem: ingestion
+        annotations:
+          summary: "Ingestion failures elevated ({{ $value }} in 1h)"
+          description: "Document ingestion failing. Check source {{ $labels.source_type }}."
+
+      - alert: RAGCore_IngestionQueueBacklog
+        expr: ingest_queue_pending_count{job="rag-core"} > 100
+        for: 30m
+        labels:
+          severity: warning
+          subsystem: ingestion
+        annotations:
+          summary: "Ingestion queue backlog ({{ $value }} pending)"
+          description: "Ingestion not keeping up. May need scaling or investigation."
