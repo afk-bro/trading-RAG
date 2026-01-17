@@ -38,7 +38,7 @@ class TestGetRunPlan:
         mock_run_plans_repo.get_run_plan.return_value = None
 
         with patch(
-            "app.admin.router._get_run_plans_repo", return_value=mock_run_plans_repo
+            "app.admin.run_plans._get_run_plans_repo", return_value=mock_run_plans_repo
         ):
             response = client.get(
                 f"/admin/run-plans/{plan_id}",
@@ -59,7 +59,7 @@ class TestGetRunPlan:
         }
 
         with patch(
-            "app.admin.router._get_run_plans_repo", return_value=mock_run_plans_repo
+            "app.admin.run_plans._get_run_plans_repo", return_value=mock_run_plans_repo
         ):
             response = client.get(
                 f"/admin/run-plans/{plan_id}",
@@ -81,7 +81,7 @@ class TestGetRunPlanRuns:
         mock_run_plans_repo.get_run_plan.return_value = None
 
         with patch(
-            "app.admin.router._get_run_plans_repo", return_value=mock_run_plans_repo
+            "app.admin.run_plans._get_run_plans_repo", return_value=mock_run_plans_repo
         ):
             response = client.get(
                 f"/admin/run-plans/{plan_id}/runs",
@@ -112,7 +112,7 @@ class TestGetRunPlanRuns:
         )
 
         with patch(
-            "app.admin.router._get_run_plans_repo", return_value=mock_run_plans_repo
+            "app.admin.run_plans._get_run_plans_repo", return_value=mock_run_plans_repo
         ):
             response = client.get(
                 f"/admin/run-plans/{plan_id}/runs",

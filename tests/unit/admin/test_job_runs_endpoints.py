@@ -61,7 +61,7 @@ class TestListJobRunsEndpoint:
         )
         mock_repo.count_runs = AsyncMock(return_value=1)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.repositories.job_runs.JobRunsRepository", return_value=mock_repo
         ):
             response = client.get(
@@ -84,7 +84,7 @@ class TestListJobRunsEndpoint:
         mock_repo.list_runs = AsyncMock(return_value=[])
         mock_repo.count_runs = AsyncMock(return_value=0)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.repositories.job_runs.JobRunsRepository", return_value=mock_repo
         ):
             url = (
@@ -138,7 +138,7 @@ class TestGetJobRunEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.repositories.job_runs.JobRunsRepository", return_value=mock_repo
         ):
             response = client.get(
@@ -158,7 +158,7 @@ class TestGetJobRunEndpoint:
         mock_repo = MagicMock()
         mock_repo.get_run = AsyncMock(return_value=None)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.repositories.job_runs.JobRunsRepository", return_value=mock_repo
         ):
             response = client.get(

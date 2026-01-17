@@ -87,7 +87,7 @@ class TestRollupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=mock_job_result_completed)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -109,7 +109,7 @@ class TestRollupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=mock_job_result_already_running)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -129,7 +129,7 @@ class TestRollupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=mock_job_result_completed)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -166,7 +166,7 @@ class TestRollupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=dry_run_result)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -188,7 +188,7 @@ class TestRollupEndpoint:
             side_effect=RuntimeError("Database connection lost")
         )
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -240,7 +240,7 @@ class TestCleanupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=cleanup_result)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -262,7 +262,7 @@ class TestCleanupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=mock_job_result_already_running)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -295,7 +295,7 @@ class TestCleanupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=dry_run_result)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -316,7 +316,7 @@ class TestCleanupEndpoint:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(side_effect=RuntimeError("Disk full"))
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -350,7 +350,7 @@ class TestJobConcurrency:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=lock_not_acquired_result)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -380,7 +380,7 @@ class TestJobConcurrency:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=lock_not_acquired_result)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -403,7 +403,7 @@ class TestJobTriggeredBy:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=mock_job_result_completed)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(
@@ -434,7 +434,7 @@ class TestJobTriggeredBy:
         mock_runner = MagicMock()
         mock_runner.run = AsyncMock(return_value=cleanup_result)
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.jobs.JobRunner", return_value=mock_runner
         ):
             response = client.post(

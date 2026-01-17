@@ -827,7 +827,7 @@ class TestAlertJobEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -866,7 +866,7 @@ class TestAlertJobEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -904,7 +904,7 @@ class TestAlertJobEndpoint:
             }
         )
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -924,7 +924,7 @@ class TestAlertJobEndpoint:
         mock_job = MagicMock()
         mock_job.run = AsyncMock(side_effect=Exception("Database connection failed"))
 
-        with patch("app.admin.router._db_pool", mock_db_pool), patch(
+        with patch("app.admin.jobs._db_pool", mock_db_pool), patch(
             "app.services.alerts.job.AlertEvaluatorJob", return_value=mock_job
         ):
             response = client.post(
@@ -941,7 +941,7 @@ class TestAlertJobEndpoint:
         """Returns 503 when DB pool not available."""
         workspace_id = uuid4()
 
-        with patch("app.admin.router._db_pool", None):
+        with patch("app.admin.jobs._db_pool", None):
             response = client.post(
                 f"/admin/jobs/evaluate-alerts?workspace_id={workspace_id}",
                 headers={"X-Admin-Token": "test-token"},

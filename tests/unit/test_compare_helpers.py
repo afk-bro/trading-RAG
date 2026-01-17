@@ -1,6 +1,6 @@
 """Unit tests for tune compare helper functions."""
 
-from app.admin.router import _normalize_compare_value, _values_differ, _overfit_class
+from app.admin.backtests import _normalize_compare_value, _values_differ, _overfit_class
 
 
 class TestNormalizeCompareValue:
