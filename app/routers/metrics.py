@@ -205,6 +205,32 @@ SSE_QUEUE_DROPS = Counter(
     "Total SSE events dropped due to full queue",
 )
 
+# Idempotency metrics
+IDEMPOTENCY_KEYS_TOTAL = Gauge(
+    "idempotency_keys_total",
+    "Total idempotency keys in table",
+)
+
+IDEMPOTENCY_EXPIRED_PENDING = Gauge(
+    "idempotency_expired_pending_total",
+    "Expired idempotency keys pending prune",
+)
+
+IDEMPOTENCY_PENDING_REQUESTS = Gauge(
+    "idempotency_pending_requests_total",
+    "Active pending idempotency requests",
+)
+
+IDEMPOTENCY_OLDEST_PENDING_AGE = Gauge(
+    "idempotency_oldest_pending_age_minutes",
+    "Age of oldest pending idempotency request in minutes",
+)
+
+IDEMPOTENCY_OLDEST_EXPIRED_AGE = Gauge(
+    "idempotency_oldest_expired_age_hours",
+    "Age of oldest expired idempotency key in hours (indicates pg_cron health)",
+)
+
 # =============================================================================
 # Trading KB Metrics
 # =============================================================================
@@ -438,6 +464,25 @@ def record_sse_event_published(topic: str):
 def record_sse_queue_drop():
     """Record SSE queue drop."""
     SSE_QUEUE_DROPS.inc()
+
+
+def set_idempotency_metrics(
+    total_keys: int,
+    expired_pending: int,
+    pending_requests: int,
+    oldest_pending_age_minutes: float | None,
+    oldest_expired_age_hours: float | None,
+):
+    """Set idempotency hygiene metrics.
+
+    Called by system_health._check_idempotency() during health checks.
+    Enables Prometheus/Grafana alerting on the same values as health page.
+    """
+    IDEMPOTENCY_KEYS_TOTAL.set(total_keys)
+    IDEMPOTENCY_EXPIRED_PENDING.set(expired_pending)
+    IDEMPOTENCY_PENDING_REQUESTS.set(pending_requests)
+    IDEMPOTENCY_OLDEST_PENDING_AGE.set(oldest_pending_age_minutes or 0)
+    IDEMPOTENCY_OLDEST_EXPIRED_AGE.set(oldest_expired_age_hours or 0)
 
 
 @router.get("/metrics", include_in_schema=False)

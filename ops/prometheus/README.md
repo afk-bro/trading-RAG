@@ -75,6 +75,16 @@ The alerts expect these metrics to be exposed at `/metrics`:
 | `retention_job_last_run_timestamp` | Gauge | - | Last successful run time |
 | `pg_table_size_bytes` | Gauge | `table` | PostgreSQL table sizes |
 
+### Idempotency Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `idempotency_keys_total` | Gauge | - | Total idempotency keys in table |
+| `idempotency_expired_pending_total` | Gauge | - | Expired keys pending prune |
+| `idempotency_pending_requests_total` | Gauge | - | Active pending requests |
+| `idempotency_oldest_pending_age_minutes` | Gauge | - | Age of oldest pending request |
+| `idempotency_oldest_expired_age_hours` | Gauge | - | Age of oldest expired key (pg_cron health) |
+
 ### SSE Metrics
 
 | Metric | Type | Labels | Description |
@@ -112,6 +122,8 @@ These are starting defaults - tune based on your traffic patterns:
 | `KBWeakCoverageHigh` | >20% for 10m | Lower for mature KB |
 | `TuneFailureRateHigh` | >20% for 30m | Lower for stable strategies |
 | `RetentionJobNotRunning` | >48h | Match your cron schedule |
+| `IdempotencyExpiredPending` | >100 for 30m | Lower if strict hygiene required |
+| `IdempotencyPruneStale` | >48h | Match pg_cron schedule (daily) |
 
 ## Loading Rules
 
@@ -209,6 +221,7 @@ Each alert has a `subsystem` label for filtering:
 | `kb` | Knowledge base recommendations |
 | `backtests` | Tune/run plan execution |
 | `retention` | Data cleanup jobs |
+| `idempotency` | Idempotency key hygiene |
 | `sse` | Server-Sent Events |
 | `ingestion` | Document ingestion |
 

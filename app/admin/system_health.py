@@ -482,6 +482,8 @@ async def _check_tunes() -> TuneHealth:
 
 async def _check_idempotency() -> IdempotencyHealth:
     """Check idempotency key table hygiene."""
+    from app.routers.metrics import set_idempotency_metrics
+
     if _db_pool is None:
         return IdempotencyHealth(status="unknown", error="Pool not initialized")
 
@@ -507,6 +509,7 @@ async def _check_idempotency() -> IdempotencyHealth:
             )
 
             if not stats:
+                set_idempotency_metrics(0, 0, 0, None, None)
                 return IdempotencyHealth(status="ok", total_keys=0)
 
             total = stats["total_keys"] or 0
@@ -514,6 +517,11 @@ async def _check_idempotency() -> IdempotencyHealth:
             pending = stats["pending_requests"] or 0
             oldest_pending = stats["oldest_pending_age_minutes"]
             oldest_expired = stats["oldest_expired_age_hours"]
+
+            # Update Prometheus metrics
+            set_idempotency_metrics(
+                total, expired, pending, oldest_pending, oldest_expired
+            )
 
             # Determine status based on hygiene thresholds
             status = "ok"

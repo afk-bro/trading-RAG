@@ -298,6 +298,54 @@ groups:
           description: "Consider adjusting retention policy or archival strategy."
 
   # ===========================================================================
+  # Idempotency Rules - Idempotency key hygiene
+  # ===========================================================================
+  - name: rag_core.idempotency
+    rules:
+      - alert: RAGCore_IdempotencyExpiredPending
+        expr: idempotency_expired_pending_total{job="rag-core"} > 100
+        for: 30m
+        labels:
+          severity: warning
+          subsystem: idempotency
+        annotations:
+          summary: "Expired idempotency keys pending prune ({{ $value }})"
+          description: "pg_cron prune job may not be running. Check cron.job table and retention_job_log."
+          runbook_url: "docs/ops/runbooks.md#idempotency-prune-stalled"
+
+      - alert: RAGCore_IdempotencyExpiredCritical
+        expr: idempotency_expired_pending_total{job="rag-core"} > 1000
+        for: 1h
+        labels:
+          severity: critical
+          subsystem: idempotency
+        annotations:
+          summary: "Critical: Expired idempotency keys accumulating ({{ $value }})"
+          description: "pg_cron prune job failing. Table growing unbounded. Immediate action required."
+          runbook_url: "docs/ops/runbooks.md#idempotency-prune-stalled"
+
+      - alert: RAGCore_IdempotencyPruneStale
+        expr: idempotency_oldest_expired_age_hours{job="rag-core"} > 48
+        for: 1h
+        labels:
+          severity: critical
+          subsystem: idempotency
+        annotations:
+          summary: "Idempotency keys > 48h old not pruned"
+          description: "pg_cron retention job not running for 2+ days. Check pg_cron extension and scheduling."
+          runbook_url: "docs/ops/runbooks.md#idempotency-prune-stalled"
+
+      - alert: RAGCore_IdempotencyPendingStuck
+        expr: idempotency_oldest_pending_age_minutes{job="rag-core"} > 30
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: idempotency
+        annotations:
+          summary: "Pending idempotency requests stuck (oldest: {{ $value | printf \"%.1f\" }} min)"
+          description: "Requests not completing. May indicate hung requests or processing issues."
+
+  # ===========================================================================
   # SSE Rules - Server-Sent Events health
   # ===========================================================================
   - name: rag_core.sse
