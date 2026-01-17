@@ -319,6 +319,42 @@ GET /sources/pine/scripts/<uuid>?workspace_id=<uuid>&include_chunks=true&include
 
 **Authentication**: Both endpoints require `X-Admin-Token` header.
 
+## Auto-Strategy Discovery
+
+Automatic parameter spec generation from Pine Script inputs for backtesting automation (`app/services/pine/spec_generator.py`).
+
+**Pipeline**:
+```
+Pine Script → Parser → PineInput[] → SpecGenerator → StrategySpec
+```
+
+**Key Components**:
+- `ParamSpec` - Parameter specification with bounds, step, options, sweepable flag, priority
+- `StrategySpec` - Complete strategy spec with params list and auto-generated sweep config
+- `pine_input_to_param_spec()` - Converts parsed Pine inputs to ParamSpec
+- `generate_strategy_spec()` - Generates full StrategySpec from PineScriptEntry
+
+**Sweepable Detection**:
+- Bool inputs: Always sweepable (true/false)
+- Int/Float with bounds: Sweepable if `min_value` and `max_value` defined
+- Options array: Sweepable if `options` length > 1
+- Source/color/session: Generally not sweepable
+
+**Priority Scoring** (higher = more likely to affect strategy):
+- Base priority by type: int/float = 10, bool = 5
+- Keywords boost: `length`, `period`, `threshold`, `atr`, `rsi` = +10
+- Keywords penalty: `color`, `style`, `display`, `show` = -10
+- Bounds present: +15 (indicates optimization intent)
+
+**Usage**:
+```python
+from app.services.pine.spec_generator import generate_strategy_spec
+
+spec = generate_strategy_spec(pine_entry)
+sweepable = spec.sweepable_params  # Only params suitable for optimization
+sweep_config = spec.sweep_config   # Auto-generated grid for tuning
+```
+
 ## API Endpoints
 
 **Health & Readiness**:
@@ -352,6 +388,8 @@ GET /sources/pine/scripts/<uuid>?workspace_id=<uuid>&include_chunks=true&include
 
 **Admin** (requires `X-Admin-Token` header):
 - `GET /admin/ops/snapshot` - Operational health snapshot for go-live
+- `GET /admin/system/health` - System health dashboard (HTML)
+- `GET /admin/system/health.json` - System health status (JSON)
 - `GET /admin/kb/*` - KB inspection and curation endpoints
 - `GET /admin/backtests/*` - Backtest admin UI
 - `GET /admin/coverage/weak` - List weak coverage runs for triage
@@ -656,6 +694,65 @@ POST /kb/trials/recommend
     "min_trades": 5
 }
 ```
+
+## Regime Fingerprints
+
+Materialized regime fingerprints for instant similarity queries (Migration 056).
+
+**Problem**: Regime similarity queries were recomputing vectors on every request.
+
+**Solution**: Precompute and store regime hashes + vectors at tune time for O(1) lookup.
+
+**Schema** (`regime_fingerprints` table):
+- `fingerprint` (BYTEA) - 32-byte SHA256 hash for exact matching
+- `regime_vector` (FLOAT8[]) - 6-dim vector: [atr_norm, rsi, bb_width, efficiency, trend_strength, zscore]
+- `trend_tag`, `vol_tag`, `efficiency_tag` - Denormalized tags for SQL filtering
+- `regime_schema_version` - Schema version for compatibility (default: `regime_v1_1`)
+
+**SQL Functions**:
+- `compute_regime_fingerprint(FLOAT8[])` - Compute SHA256 from vector (rounds to 4 decimals)
+- `regime_distance(FLOAT8[], FLOAT8[])` - Euclidean distance between vectors
+
+**Indexes**:
+- Hash index on `fingerprint` for O(1) exact matching
+- B-tree on `tune_id` for tune-based lookups
+- Composite index on tags for SQL filtering
+- GIN on `regime_vector` for array operators
+
+**Usage**:
+```sql
+-- Find all trials with exact same regime
+SELECT * FROM regime_fingerprints
+WHERE fingerprint = compute_regime_fingerprint(ARRAY[0.014, 45.2, 0.023, 0.65, 0.78, -0.52]);
+
+-- Find similar regimes by distance
+SELECT *, regime_distance(regime_vector, ARRAY[...]) as dist
+FROM regime_fingerprints
+ORDER BY dist LIMIT 10;
+```
+
+## System Health Dashboard
+
+Single-page operational health view for "what's broken?" diagnostics (`app/admin/system_health.py`).
+
+**Endpoints**:
+- `GET /admin/system/health` - HTML dashboard with status cards
+- `GET /admin/system/health.json` - Machine-readable JSON
+
+**Component Health Checks**:
+- **Database**: Pool size, available connections, acquire latency P95, connection errors (5m)
+- **Qdrant**: Vector count, segment count, collection status, last error
+- **LLM**: Provider configured, degraded count (1h), error count (1h), last success/error
+- **SSE**: Subscriber count, events published (1h), queue drops (1h)
+- **Ingestion**: Last success/failure per source type (YouTube, PDF, Pine), pending jobs
+
+**Status Values**: `ok`, `degraded`, `error`, `unknown`
+
+**Design Decisions**:
+- No external dependencies (queries internal state only)
+- Decision-grade metrics (actionable, not just informational)
+- Sub-second response time (cached where appropriate)
+- Answers "should I wake someone up?" without log access
 
 ## Security & Operations
 

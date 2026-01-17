@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **System Health Dashboard** - Single-page operational health view (`/admin/system/health`)
+  - HTML dashboard with status cards answering "what's broken?" without opening logs
+  - JSON endpoint (`/admin/system/health.json`) for machine-readable status
+  - Component health checks: Database pool, Qdrant vectors, LLM providers, SSE bus
+  - Decision-grade metrics: pool acquire latency, connection errors, degraded counts
+  - Ingestion pipeline status: YouTube, PDF, Pine last success/failure times
+
+- **Regime Fingerprint Materialization** - Instant regime similarity queries (Migration 056)
+  - `regime_fingerprints` table stores precomputed regime vectors per tune run
+  - SHA256 fingerprint for O(1) exact regime matching via hash index
+  - Raw 6-dim vectors: [atr_norm, rsi, bb_width, efficiency, trend_strength, zscore]
+  - SQL functions: `compute_regime_fingerprint()`, `regime_distance()`
+  - Denormalized tags (trend, vol, efficiency) for SQL filtering
+  - Eliminates per-request regime computation overhead
+
+- **Auto-Strategy Discovery from Pine Scripts** - Parameter spec generation
+  - `spec_generator.py` converts Pine Script inputs to `StrategySpec`
+  - Identifies sweepable parameters (has min/max bounds or options)
+  - Priority scoring based on keywords (length, period, threshold = high; color, style = low)
+  - Generates `sweep_config` for automated parameter sweeps
+  - `ParamSpec` dataclass with full metadata (bounds, step, tooltip, group)
+
+- **Prometheus Alerting Rules** - Ready-to-deploy alert configuration
+  - Critical alerts: 5xx error rate, service down, DB pool exhausted, Qdrant errors
+  - Warning alerts: P95 latency, LLM degraded rate, KB weak coverage, tune failures
+  - Info alerts: Low confidence recommendations, high tune duration
+  - Runbook URLs linked in annotations
+  - Sentry tag/measurement reference for dashboards
+
+- **Operational Hardening Canary Tests** - Integration tests for Q1 2026 safety features
+  - Phase 1: Idempotency concurrent retry test (same key = same tune_id)
+  - Phase 2: Retention dry-run test (prune without delete)
+  - Phase 3: LLM timeout fallback test (graceful degradation)
+  - Phase 4: SSE event delivery test (publish/subscribe verification)
+  - Marked with `@pytest.mark.integration` and `@pytest.mark.requires_db`
+
 - **LLM-Powered Strategy Explanation** - Generate explanations of why strategies match user intent
   - `POST /admin/coverage/explain` - API endpoint for on-demand explanations
     - Takes `run_id` + `strategy_id` + `verbosity` (short/detailed)

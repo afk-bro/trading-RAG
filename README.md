@@ -41,10 +41,14 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Model Migration**: Re-embed support for model upgrades
 - **Backtest Parameter Tuning**: Grid/random search, IS/OOS splits, overfit detection
 - **Trading KB Recommend**: Strategy parameter recommendations with confidence scoring
+- **Regime Fingerprints**: Materialized regime vectors for instant similarity queries
 - **Pine Script Registry**: Parse, lint, and catalog Pine Script files with CLI tooling
-- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, CSV/JSON exports
+- **Auto-Strategy Discovery**: Generate parameter specs from Pine Script inputs for backtesting
+- **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
+- **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
+- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
-- **Production Monitoring**: Sentry integration, structured logging, alerting rules
+- **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules
 
 ### Query Modes
 
@@ -212,6 +216,10 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/backtests/leaderboard` | Global ranking (CSV export) |
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
 | `/admin/ops/snapshot` | Go-live verification (release, config, health) |
+| `/admin/system/health` | System health dashboard (status cards) |
+| `/admin/system/health.json` | System health (machine-readable) |
+| `/admin/coverage/cockpit` | Coverage triage cockpit UI |
+| `/admin/coverage/cockpit/{run_id}` | Deep link to specific run |
 
 ### Pine Script Registry CLI
 
