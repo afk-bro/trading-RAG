@@ -372,3 +372,530 @@ class TestWFOResult:
 
         assert len(result.candidates) == 1
         assert result.best_candidate == candidate
+
+
+class TestFoldLeaderboardEntry:
+    """Tests for FoldLeaderboardEntry dataclass."""
+
+    def test_create_entry(self):
+        """Should create valid leaderboard entry."""
+        from app.services.backtest.wfo import FoldLeaderboardEntry
+
+        entry = FoldLeaderboardEntry(
+            fold_index=0,
+            params={"lookback": 20},
+            params_hash="abc123",
+            oos_score=1.5,
+            is_score=1.8,
+            regime_tags=["high_vol"],
+        )
+
+        assert entry.fold_index == 0
+        assert entry.params == {"lookback": 20}
+        assert entry.oos_score == 1.5
+        assert entry.is_score == 1.8
+        assert entry.regime_tags == ["high_vol"]
+
+    def test_default_values(self):
+        """Should have sensible defaults."""
+        from app.services.backtest.wfo import FoldLeaderboardEntry
+
+        entry = FoldLeaderboardEntry(
+            fold_index=1,
+            params={},
+            params_hash="def456",
+            oos_score=0.5,
+        )
+
+        assert entry.is_score is None
+        assert entry.regime_tags == []
+
+
+class TestFoldResult:
+    """Tests for FoldResult dataclass."""
+
+    def test_create_result(self):
+        """Should create valid fold result."""
+        from app.services.backtest.wfo import FoldResult, FoldLeaderboardEntry
+
+        leaderboard = [
+            FoldLeaderboardEntry(
+                fold_index=0,
+                params={"lookback": 20},
+                params_hash="abc123",
+                oos_score=1.5,
+            )
+        ]
+        result = FoldResult(
+            fold_index=0,
+            tune_id=uuid4(),
+            status="succeeded",
+            leaderboard=leaderboard,
+        )
+
+        assert result.fold_index == 0
+        assert result.status == "succeeded"
+        assert len(result.leaderboard) == 1
+        assert result.error is None
+
+    def test_failed_result(self):
+        """Should store error for failed fold."""
+        from app.services.backtest.wfo import FoldResult
+
+        result = FoldResult(
+            fold_index=2,
+            tune_id=uuid4(),
+            status="failed",
+            error="Timeout during backtest",
+        )
+
+        assert result.status == "failed"
+        assert result.error == "Timeout during backtest"
+        assert result.leaderboard == []
+
+
+class TestComputeSelectionScore:
+    """Tests for compute_selection_score function."""
+
+    def test_basic_score(self):
+        """Should compute basic score from mean OOS."""
+        from app.services.backtest.wfo import (
+            WFOCandidateMetrics,
+            compute_selection_score,
+        )
+
+        candidate = WFOCandidateMetrics(
+            params={"lookback": 20},
+            params_hash="abc123",
+            mean_oos=1.5,
+            median_oos=1.4,
+            worst_fold_oos=0.8,
+            stddev_oos=0.0,  # No variance penalty
+            pct_top_k=1.0,
+            fold_count=5,
+            total_folds=5,
+        )
+
+        score = compute_selection_score(candidate)
+        # score = 1.5 - 0.5*0.0 - 0.3*max(0, 0.0-0.8) * 1.0 = 1.5
+        assert score == pytest.approx(1.5, rel=0.01)
+
+    def test_variance_penalty(self):
+        """Should penalize high variance."""
+        from app.services.backtest.wfo import (
+            WFOCandidateMetrics,
+            compute_selection_score,
+        )
+
+        candidate = WFOCandidateMetrics(
+            params={"lookback": 20},
+            params_hash="abc123",
+            mean_oos=1.5,
+            median_oos=1.4,
+            worst_fold_oos=0.8,
+            stddev_oos=0.4,  # High variance
+            pct_top_k=1.0,
+            fold_count=5,
+            total_folds=5,
+        )
+
+        score = compute_selection_score(candidate)
+        # score = (1.5 - 0.5*0.4 - 0.3*0) * 1.0 = 1.3
+        assert score == pytest.approx(1.3, rel=0.01)
+
+    def test_coverage_scaling(self):
+        """Should scale score by coverage."""
+        from app.services.backtest.wfo import (
+            WFOCandidateMetrics,
+            compute_selection_score,
+        )
+
+        candidate = WFOCandidateMetrics(
+            params={"lookback": 20},
+            params_hash="abc123",
+            mean_oos=1.5,
+            median_oos=1.4,
+            worst_fold_oos=0.8,
+            stddev_oos=0.0,
+            pct_top_k=0.6,
+            fold_count=3,
+            total_folds=5,
+        )
+
+        score = compute_selection_score(candidate)
+        # score = 1.5 * 0.6 = 0.9
+        assert score == pytest.approx(0.9, rel=0.01)
+
+    def test_worst_fold_penalty(self):
+        """Should penalize poor worst-fold performance."""
+        from app.services.backtest.wfo import (
+            WFOCandidateMetrics,
+            compute_selection_score,
+        )
+
+        candidate = WFOCandidateMetrics(
+            params={"lookback": 20},
+            params_hash="abc123",
+            mean_oos=1.5,
+            median_oos=1.4,
+            worst_fold_oos=-0.5,  # Below threshold of 0.0
+            stddev_oos=0.0,
+            pct_top_k=1.0,
+            fold_count=5,
+            total_folds=5,
+        )
+
+        score = compute_selection_score(candidate)
+        # penalty = 0.3 * max(0, 0.0 - (-0.5)) = 0.15
+        # score = (1.5 - 0.15) * 1.0 = 1.35
+        assert score == pytest.approx(1.35, rel=0.01)
+
+
+class TestAggregateWfoCandidates:
+    """Tests for aggregate_wfo_candidates function."""
+
+    def test_aggregates_across_folds(self):
+        """Should aggregate same params across folds."""
+        from app.services.backtest.wfo import (
+            FoldResult,
+            FoldLeaderboardEntry,
+            aggregate_wfo_candidates,
+            compute_params_hash,
+        )
+
+        params = {"lookback": 20}
+        params_hash = compute_params_hash(params)
+
+        fold_results = [
+            FoldResult(
+                fold_index=0,
+                tune_id=uuid4(),
+                status="succeeded",
+                leaderboard=[
+                    FoldLeaderboardEntry(
+                        fold_index=0,
+                        params=params,
+                        params_hash=params_hash,
+                        oos_score=1.2,
+                    )
+                ],
+            ),
+            FoldResult(
+                fold_index=1,
+                tune_id=uuid4(),
+                status="succeeded",
+                leaderboard=[
+                    FoldLeaderboardEntry(
+                        fold_index=1,
+                        params=params,
+                        params_hash=params_hash,
+                        oos_score=1.4,
+                    )
+                ],
+            ),
+            FoldResult(
+                fold_index=2,
+                tune_id=uuid4(),
+                status="succeeded",
+                leaderboard=[
+                    FoldLeaderboardEntry(
+                        fold_index=2,
+                        params=params,
+                        params_hash=params_hash,
+                        oos_score=1.6,
+                    )
+                ],
+            ),
+        ]
+
+        candidates = aggregate_wfo_candidates(fold_results)
+
+        # Should have exactly one candidate (same params across all folds)
+        assert len(candidates) == 1
+        c = candidates[0]
+        assert c.params == params
+        assert c.fold_count == 3
+        assert c.total_folds == 3
+        assert c.coverage == 1.0
+        assert c.mean_oos == pytest.approx(1.4, rel=0.01)
+        assert c.worst_fold_oos == 1.2
+
+    def test_filters_by_coverage(self):
+        """Should filter out candidates below coverage threshold."""
+        from app.services.backtest.wfo import (
+            FoldResult,
+            FoldLeaderboardEntry,
+            aggregate_wfo_candidates,
+            compute_params_hash,
+        )
+
+        params_good = {"lookback": 20}
+        params_bad = {"lookback": 30}
+        hash_good = compute_params_hash(params_good)
+        hash_bad = compute_params_hash(params_bad)
+
+        # 5 folds, params_good appears in 4, params_bad appears in 2
+        fold_results = []
+        for i in range(5):
+            leaderboard = [
+                FoldLeaderboardEntry(
+                    fold_index=i,
+                    params=params_good,
+                    params_hash=hash_good,
+                    oos_score=1.0,
+                )
+            ]
+            if i < 2:  # Only in first 2 folds
+                leaderboard.append(
+                    FoldLeaderboardEntry(
+                        fold_index=i,
+                        params=params_bad,
+                        params_hash=hash_bad,
+                        oos_score=0.8,
+                    )
+                )
+            if i == 4:  # Skip fold 4 for params_good to test edge case
+                leaderboard = leaderboard[1:] if len(leaderboard) > 1 else []
+                leaderboard = [
+                    FoldLeaderboardEntry(
+                        fold_index=i,
+                        params=params_good,
+                        params_hash=hash_good,
+                        oos_score=1.0,
+                    )
+                ]
+
+            fold_results.append(
+                FoldResult(
+                    fold_index=i,
+                    tune_id=uuid4(),
+                    status="succeeded",
+                    leaderboard=leaderboard,
+                )
+            )
+
+        candidates = aggregate_wfo_candidates(fold_results)
+
+        # params_good: 5/5 = 100% coverage > 60%
+        # params_bad: 2/5 = 40% coverage < 60%
+        assert len(candidates) == 1
+        assert candidates[0].params == params_good
+
+    def test_ranks_by_selection_score(self):
+        """Should rank candidates by selection score descending."""
+        from app.services.backtest.wfo import (
+            FoldResult,
+            FoldLeaderboardEntry,
+            aggregate_wfo_candidates,
+            compute_params_hash,
+        )
+
+        params_a = {"lookback": 10}
+        params_b = {"lookback": 20}
+        hash_a = compute_params_hash(params_a)
+        hash_b = compute_params_hash(params_b)
+
+        # Both appear in all folds, but B has higher scores
+        fold_results = []
+        for i in range(5):
+            fold_results.append(
+                FoldResult(
+                    fold_index=i,
+                    tune_id=uuid4(),
+                    status="succeeded",
+                    leaderboard=[
+                        FoldLeaderboardEntry(
+                            fold_index=i,
+                            params=params_a,
+                            params_hash=hash_a,
+                            oos_score=1.0,
+                        ),
+                        FoldLeaderboardEntry(
+                            fold_index=i,
+                            params=params_b,
+                            params_hash=hash_b,
+                            oos_score=2.0,
+                        ),
+                    ],
+                )
+            )
+
+        candidates = aggregate_wfo_candidates(fold_results)
+
+        # B should rank higher (higher mean_oos)
+        assert len(candidates) == 2
+        assert candidates[0].params == params_b
+        assert candidates[1].params == params_a
+
+    def test_skips_failed_folds(self):
+        """Should only aggregate from succeeded folds."""
+        from app.services.backtest.wfo import (
+            FoldResult,
+            FoldLeaderboardEntry,
+            aggregate_wfo_candidates,
+            compute_params_hash,
+        )
+
+        params = {"lookback": 20}
+        params_hash = compute_params_hash(params)
+
+        fold_results = [
+            FoldResult(
+                fold_index=0,
+                tune_id=uuid4(),
+                status="succeeded",
+                leaderboard=[
+                    FoldLeaderboardEntry(
+                        fold_index=0,
+                        params=params,
+                        params_hash=params_hash,
+                        oos_score=1.5,
+                    )
+                ],
+            ),
+            FoldResult(
+                fold_index=1,
+                tune_id=uuid4(),
+                status="failed",
+                error="Backtest error",
+            ),
+            FoldResult(
+                fold_index=2,
+                tune_id=uuid4(),
+                status="succeeded",
+                leaderboard=[
+                    FoldLeaderboardEntry(
+                        fold_index=2,
+                        params=params,
+                        params_hash=params_hash,
+                        oos_score=1.5,
+                    )
+                ],
+            ),
+        ]
+
+        candidates = aggregate_wfo_candidates(fold_results)
+
+        # Only 2 succeeded folds, params appears in both = 100% coverage
+        assert len(candidates) == 1
+        assert candidates[0].total_folds == 2
+
+    def test_empty_results(self):
+        """Should return empty list when no successful folds."""
+        from app.services.backtest.wfo import (
+            FoldResult,
+            aggregate_wfo_candidates,
+        )
+
+        fold_results = [
+            FoldResult(
+                fold_index=0,
+                tune_id=uuid4(),
+                status="failed",
+                error="Error 1",
+            ),
+            FoldResult(
+                fold_index=1,
+                tune_id=uuid4(),
+                status="failed",
+                error="Error 2",
+            ),
+        ]
+
+        candidates = aggregate_wfo_candidates(fold_results)
+        assert candidates == []
+
+
+class TestExtractLeaderboardFromTuneResult:
+    """Tests for extract_leaderboard_from_tune_result function."""
+
+    def test_extracts_top_k(self):
+        """Should extract top-K entries from tune result."""
+        from app.services.backtest.wfo import extract_leaderboard_from_tune_result
+
+        tune_result = {
+            "leaderboard": [
+                {"params": {"lookback": 10}, "score_oos": 2.0, "score_is": 2.5},
+                {"params": {"lookback": 20}, "score_oos": 1.8, "score_is": 2.2},
+                {"params": {"lookback": 30}, "score_oos": 1.5, "score_is": 1.8},
+                {"params": {"lookback": 40}, "score_oos": 1.2, "score_is": 1.5},
+            ]
+        }
+
+        entries = extract_leaderboard_from_tune_result(
+            fold_index=0,
+            tune_result=tune_result,
+            top_k=3,
+        )
+
+        assert len(entries) == 3
+        assert entries[0].oos_score == 2.0
+        assert entries[0].is_score == 2.5
+        assert entries[0].fold_index == 0
+        assert entries[2].params == {"lookback": 30}
+
+    def test_computes_params_hash(self):
+        """Should compute deterministic params hash."""
+        from app.services.backtest.wfo import (
+            extract_leaderboard_from_tune_result,
+            compute_params_hash,
+        )
+
+        tune_result = {
+            "leaderboard": [
+                {"params": {"lookback": 10}, "score_oos": 2.0},
+            ]
+        }
+
+        entries = extract_leaderboard_from_tune_result(0, tune_result)
+
+        expected_hash = compute_params_hash({"lookback": 10})
+        assert entries[0].params_hash == expected_hash
+
+    def test_handles_empty_leaderboard(self):
+        """Should handle empty leaderboard."""
+        from app.services.backtest.wfo import extract_leaderboard_from_tune_result
+
+        tune_result = {"leaderboard": []}
+        entries = extract_leaderboard_from_tune_result(0, tune_result)
+        assert entries == []
+
+    def test_handles_missing_leaderboard(self):
+        """Should handle missing leaderboard key."""
+        from app.services.backtest.wfo import extract_leaderboard_from_tune_result
+
+        tune_result = {}
+        entries = extract_leaderboard_from_tune_result(0, tune_result)
+        assert entries == []
+
+    def test_extracts_regime_tags(self):
+        """Should extract regime tags from entries."""
+        from app.services.backtest.wfo import extract_leaderboard_from_tune_result
+
+        tune_result = {
+            "leaderboard": [
+                {
+                    "params": {"lookback": 10},
+                    "score_oos": 2.0,
+                    "regime_tags": ["high_vol", "bull"],
+                },
+            ]
+        }
+
+        entries = extract_leaderboard_from_tune_result(0, tune_result)
+
+        assert entries[0].regime_tags == ["high_vol", "bull"]
+
+    def test_fallback_to_score_field(self):
+        """Should fallback to 'score' if 'score_oos' missing."""
+        from app.services.backtest.wfo import extract_leaderboard_from_tune_result
+
+        tune_result = {
+            "leaderboard": [
+                {"params": {"lookback": 10}, "score": 1.5},
+            ]
+        }
+
+        entries = extract_leaderboard_from_tune_result(0, tune_result)
+
+        assert entries[0].oos_score == 1.5

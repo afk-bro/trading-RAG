@@ -277,3 +277,200 @@ def compute_params_hash(params: dict[str, Any]) -> str:
     # Canonical JSON with sorted keys
     canonical = json.dumps(params, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+@dataclass
+class FoldLeaderboardEntry:
+    """Entry from a fold's leaderboard (top-K results)."""
+
+    fold_index: int
+    params: dict[str, Any]
+    params_hash: str
+    oos_score: float
+    is_score: Optional[float] = None
+    regime_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FoldResult:
+    """Result of a single fold's tune job.
+
+    Attributes:
+        fold_index: Index of this fold
+        tune_id: UUID of the child tune job
+        status: Job status (succeeded, failed, etc.)
+        leaderboard: Top-K results from this fold
+        error: Error message if failed
+    """
+
+    fold_index: int
+    tune_id: UUID
+    status: str
+    leaderboard: list[FoldLeaderboardEntry] = field(default_factory=list)
+    error: Optional[str] = None
+
+
+# Penalty threshold for worst-fold OOS score
+WORST_FOLD_THRESHOLD = 0.0
+
+
+def compute_selection_score(candidate: WFOCandidateMetrics) -> float:
+    """Compute selection score for WFO candidate ranking.
+
+    Score formula:
+        score = (mean_oos - 0.5 * stddev_oos
+                 - 0.3 * max(0, threshold - worst_fold_oos)) * coverage
+
+    Higher is better. Penalizes:
+    - High variance (via stddev)
+    - Poor worst-case performance (via worst_fold penalty)
+    - Low coverage (multiplicative factor)
+
+    Args:
+        candidate: Candidate metrics to score
+
+    Returns:
+        Selection score (higher = better)
+    """
+    # Base score from mean OOS
+    score = candidate.mean_oos
+
+    # Penalty for variance (consistency matters)
+    score -= 0.5 * candidate.stddev_oos
+
+    # Penalty for poor worst-fold performance
+    worst_fold_penalty = max(0, WORST_FOLD_THRESHOLD - candidate.worst_fold_oos)
+    score -= 0.3 * worst_fold_penalty
+
+    # Scale by coverage (must appear in enough folds)
+    score *= candidate.coverage
+
+    return score
+
+
+def aggregate_wfo_candidates(
+    fold_results: list[FoldResult],
+    top_k: int = 10,
+) -> list[WFOCandidateMetrics]:
+    """Aggregate fold results into WFO candidate metrics.
+
+    Collects leaderboard entries from all folds, groups by params_hash,
+    computes aggregate metrics, filters by coverage, and ranks by selection score.
+
+    Args:
+        fold_results: Results from all fold tune jobs
+        top_k: Number of top candidates per fold that were extracted
+
+    Returns:
+        List of WFOCandidateMetrics sorted by selection_score descending
+    """
+    import statistics
+
+    # Only consider successful folds
+    successful_folds = [f for f in fold_results if f.status == "succeeded"]
+    total_folds = len(successful_folds)
+
+    if total_folds == 0:
+        logger.warning("No successful folds to aggregate")
+        return []
+
+    # Collect all leaderboard entries, grouped by params_hash
+    entries_by_hash: dict[str, list[FoldLeaderboardEntry]] = {}
+    params_by_hash: dict[str, dict[str, Any]] = {}
+
+    for fold in successful_folds:
+        for entry in fold.leaderboard:
+            h = entry.params_hash
+            if h not in entries_by_hash:
+                entries_by_hash[h] = []
+                params_by_hash[h] = entry.params
+            entries_by_hash[h].append(entry)
+
+    # Compute metrics for each unique param set
+    candidates: list[WFOCandidateMetrics] = []
+
+    for params_hash, entries in entries_by_hash.items():
+        oos_scores = [e.oos_score for e in entries]
+        fold_count = len(entries)
+
+        # Compute aggregate metrics
+        mean_oos = statistics.mean(oos_scores)
+        median_oos = statistics.median(oos_scores)
+        worst_fold_oos = min(oos_scores)
+        stddev_oos = statistics.stdev(oos_scores) if len(oos_scores) > 1 else 0.0
+
+        # Coverage = fraction of folds where this param appeared in top-K
+        pct_top_k = fold_count / total_folds
+
+        # Collect regime tags (union of all folds)
+        all_regime_tags: set[str] = set()
+        for entry in entries:
+            all_regime_tags.update(entry.regime_tags)
+
+        # Collect fold scores for diagnostics
+        fold_scores = [(e.fold_index, e.oos_score) for e in entries]
+
+        candidate = WFOCandidateMetrics(
+            params=params_by_hash[params_hash],
+            params_hash=params_hash,
+            mean_oos=mean_oos,
+            median_oos=median_oos,
+            worst_fold_oos=worst_fold_oos,
+            stddev_oos=stddev_oos,
+            pct_top_k=pct_top_k,
+            fold_count=fold_count,
+            total_folds=total_folds,
+            regime_tags=sorted(all_regime_tags),
+            fold_scores=fold_scores,
+        )
+        candidates.append(candidate)
+
+    # Filter by coverage threshold
+    eligible_candidates = [c for c in candidates if c.meets_coverage_threshold]
+
+    logger.info(
+        "WFO aggregation complete",
+        total_unique_params=len(candidates),
+        eligible_candidates=len(eligible_candidates),
+        total_folds=total_folds,
+        coverage_threshold=MIN_COVERAGE_RATIO,
+    )
+
+    # Sort by selection score (descending)
+    eligible_candidates.sort(key=compute_selection_score, reverse=True)
+
+    return eligible_candidates
+
+
+def extract_leaderboard_from_tune_result(
+    fold_index: int,
+    tune_result: dict[str, Any],
+    top_k: int = 10,
+) -> list[FoldLeaderboardEntry]:
+    """Extract top-K leaderboard entries from a tune result.
+
+    Args:
+        fold_index: Index of the fold
+        tune_result: Result dict from TuneJob
+        top_k: Number of top entries to extract
+
+    Returns:
+        List of FoldLeaderboardEntry objects
+    """
+    leaderboard = tune_result.get("leaderboard", [])
+    entries: list[FoldLeaderboardEntry] = []
+
+    for item in leaderboard[:top_k]:
+        params = item.get("params", {})
+        entries.append(
+            FoldLeaderboardEntry(
+                fold_index=fold_index,
+                params=params,
+                params_hash=compute_params_hash(params),
+                oos_score=item.get("score_oos") or item.get("score", 0.0),
+                is_score=item.get("score_is"),
+                regime_tags=item.get("regime_tags", []),
+            )
+        )
+
+    return entries
