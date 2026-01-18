@@ -260,6 +260,63 @@ groups:
           description: "Multiple run plan executions failing. Check strategy runner logs."
 
   # ===========================================================================
+  # WFO Rules - Walk-Forward Optimization health
+  # ===========================================================================
+  - name: rag_core.wfo
+    rules:
+      - alert: RAGCore_WFOFailureRateHigh
+        expr: |
+          (
+            increase(wfo_runs_total{job="rag-core", status="failed"}[3h])
+            / increase(wfo_runs_total{job="rag-core", status=~"completed|partial|failed"}[3h])
+          ) > 0.3
+        for: 30m
+        labels:
+          severity: warning
+          subsystem: wfo
+        annotations:
+          summary: "WFO failure rate > 30% ({{ $value | humanizePercentage }})"
+          description: "Walk-forward optimization jobs failing at elevated rate. Check child tune jobs."
+          runbook_url: "docs/ops/runbooks.md#wfo-failures"
+
+      - alert: RAGCore_WFODurationHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(wfo_run_duration_seconds_bucket{job="rag-core"}[6h]))
+          ) > 7200
+        for: 1h
+        labels:
+          severity: info
+          subsystem: wfo
+        annotations:
+          summary: "WFO duration P95 > 2h ({{ $value | humanizeDuration }})"
+          description: "WFO runs taking longer than expected. May need resource scaling or reduced fold count."
+
+      - alert: RAGCore_WFOFoldFailuresHigh
+        expr: |
+          (
+            increase(wfo_folds_total{job="rag-core", status="failed"}[3h])
+            / increase(wfo_folds_total{job="rag-core"}[3h])
+          ) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+          subsystem: wfo
+        annotations:
+          summary: "WFO fold failure rate > 20% ({{ $value | humanizePercentage }})"
+          description: "Many WFO folds failing. Check underlying tune job issues."
+
+      - alert: RAGCore_WFONoEligibleCandidates
+        expr: wfo_candidates_eligible{job="rag-core"} == 0
+        for: 15m
+        labels:
+          severity: info
+          subsystem: wfo
+        annotations:
+          summary: "WFO produced no eligible candidates"
+          description: "Last completed WFO had zero candidates meeting coverage threshold. May indicate overfitting or parameter space issues."
+
+  # ===========================================================================
   # Retention Rules - Data cleanup job health
   # ===========================================================================
   - name: rag_core.retention
