@@ -20,14 +20,21 @@ from app.routers.metrics import record_pine_discovery_run
 router = APIRouter(prefix="/pine", tags=["admin-pine"])
 logger = structlog.get_logger(__name__)
 
-# Global connection pool (set during app startup via set_db_pool)
+# Global connection pool and clients (set during app startup)
 _db_pool = None
+_qdrant_client = None
 
 
 def set_db_pool(pool):
     """Set the database pool for this router."""
     global _db_pool
     _db_pool = pool
+
+
+def set_qdrant_client(client):
+    """Set the Qdrant client for this router."""
+    global _qdrant_client
+    _qdrant_client = client
 
 
 def _get_pool():
@@ -57,6 +64,10 @@ class DiscoverRequest(BaseModel):
     generate_specs: bool = Field(
         default=True,
         description="Whether to generate StrategySpec for strategy scripts",
+    )
+    auto_ingest: bool = Field(
+        default=True,
+        description="Whether to auto-ingest new/changed scripts to KB",
     )
     dry_run: bool = Field(
         default=False,
@@ -89,6 +100,15 @@ class DiscoverResponse(BaseModel):
     scripts_unchanged: int = Field(..., description="Scripts with no content changes")
     specs_generated: int = Field(
         ..., description="Strategy specs generated (strategies only)"
+    )
+    scripts_ingested: int = Field(
+        default=0, description="Scripts ingested to KB"
+    )
+    scripts_ingest_failed: int = Field(
+        default=0, description="Scripts that failed ingest"
+    )
+    chunks_created: int = Field(
+        default=0, description="Total chunks created during ingest"
     )
     errors: list[str] = Field(
         default_factory=list, description="Non-fatal errors during discovery"
@@ -253,6 +273,7 @@ async def discover_pine_scripts(
         "discovery_request_received",
         scan_paths=scan_paths,
         generate_specs=request.generate_specs,
+        auto_ingest=request.auto_ingest,
     )
 
     start_time = time.monotonic()
@@ -261,13 +282,14 @@ async def discover_pine_scripts(
         # Import discovery service
         from app.services.pine.discovery import PineDiscoveryService
 
-        service = PineDiscoveryService(pool, settings)
+        service = PineDiscoveryService(pool, settings, qdrant_client=_qdrant_client)
 
         # Run discovery
         result = await service.discover(
             workspace_id=request.workspace_id,
             scan_paths=scan_paths,
             generate_specs=request.generate_specs,
+            auto_ingest=request.auto_ingest,
             dry_run=request.dry_run,
             discovery_run_id=discovery_run_id,
         )
@@ -278,7 +300,7 @@ async def discover_pine_scripts(
         # Determine status
         if request.dry_run:
             op_status = "dry_run"
-        elif result.errors:
+        elif result.errors or result.scripts_ingest_failed > 0:
             op_status = "partial"
         else:
             op_status = "success"
@@ -291,6 +313,9 @@ async def discover_pine_scripts(
                 scripts_scanned=result.scripts_scanned,
                 scripts_new=result.scripts_new,
                 specs_generated=result.specs_generated,
+                scripts_ingested=result.scripts_ingested,
+                scripts_ingest_failed=result.scripts_ingest_failed,
+                chunks_created=result.chunks_created,
                 errors_count=len(result.errors),
             )
 
@@ -301,6 +326,9 @@ async def discover_pine_scripts(
             scripts_new=result.scripts_new,
             scripts_updated=result.scripts_updated,
             specs_generated=result.specs_generated,
+            scripts_ingested=result.scripts_ingested,
+            scripts_ingest_failed=result.scripts_ingest_failed,
+            chunks_created=result.chunks_created,
             errors_count=len(result.errors),
             duration_seconds=round(duration, 3),
         )
@@ -313,6 +341,9 @@ async def discover_pine_scripts(
             scripts_updated=result.scripts_updated,
             scripts_unchanged=result.scripts_unchanged,
             specs_generated=result.specs_generated,
+            scripts_ingested=result.scripts_ingested,
+            scripts_ingest_failed=result.scripts_ingest_failed,
+            chunks_created=result.chunks_created,
             errors=result.errors,
         )
 

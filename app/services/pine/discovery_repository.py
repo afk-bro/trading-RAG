@@ -31,12 +31,26 @@ class StrategyScript:
     last_seen_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Ingest tracking fields
+    doc_id: Optional[UUID] = None
+    last_ingested_at: Optional[datetime] = None
+    last_ingested_sha: Optional[str] = None
+    ingest_status: Optional[str] = None  # 'ok', 'error', or None
+    ingest_error: Optional[str] = None
 
     def canonical_url(self) -> str:
         """Derive canonical URL from source type and path."""
         normalized = self.rel_path.replace("\\", "/").lstrip("/")
         normalized = "/".join(p for p in normalized.split("/") if p not in (".", ".."))
         return f"pine://{self.source_type}/{normalized}"
+
+    def needs_ingest(self) -> bool:
+        """Check if script needs (re-)ingestion based on content hash."""
+        if self.ingest_status is None:
+            return True  # Never ingested
+        if self.last_ingested_sha != self.sha256:
+            return True  # Content changed
+        return False
 
 
 @dataclass
@@ -498,6 +512,58 @@ class StrategyScriptRepository:
 
             return scripts, total or 0
 
+    async def update_ingest_status(
+        self,
+        script_id: UUID,
+        doc_id: Optional[UUID],
+        status: str,
+        error: Optional[str] = None,
+    ) -> Optional[StrategyScript]:
+        """
+        Update ingest tracking fields after ingest attempt.
+
+        Args:
+            script_id: Script ID to update
+            doc_id: Document ID from ingest (None if failed)
+            status: 'ok' or 'error'
+            error: Error message if status='error' (truncated to 500 chars)
+
+        Returns:
+            Updated StrategyScript or None if not found
+        """
+        # Truncate error message
+        if error and len(error) > 500:
+            error = error[:497] + "..."
+
+        query = """
+            UPDATE strategy_scripts SET
+                doc_id = $1,
+                last_ingested_at = $2,
+                last_ingested_sha = sha256,
+                ingest_status = $3,
+                ingest_error = $4
+            WHERE id = $5
+            RETURNING id, workspace_id, rel_path, source_type, sha256,
+                      pine_version, script_type, title, status,
+                      spec_json, spec_generated_at, lint_json,
+                      strategy_id, published_at, last_seen_at,
+                      created_at, updated_at,
+                      doc_id, last_ingested_at, last_ingested_sha,
+                      ingest_status, ingest_error
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                doc_id,
+                datetime.now(timezone.utc),
+                status,
+                error,
+                script_id,
+            )
+            if row:
+                return self._row_to_model(row)
+        return None
+
     def _row_to_model(self, row) -> StrategyScript:
         """Convert DB row to model."""
         import json
@@ -509,6 +575,13 @@ class StrategyScriptRepository:
         lint_json = row["lint_json"]
         if isinstance(lint_json, str):
             lint_json = json.loads(lint_json)
+
+        # Handle optional ingest fields (may not exist in older schemas)
+        doc_id = row.get("doc_id")
+        last_ingested_at = row.get("last_ingested_at")
+        last_ingested_sha = row.get("last_ingested_sha")
+        ingest_status = row.get("ingest_status")
+        ingest_error = row.get("ingest_error")
 
         return StrategyScript(
             id=row["id"],
@@ -528,4 +601,9 @@ class StrategyScriptRepository:
             last_seen_at=row["last_seen_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            doc_id=doc_id,
+            last_ingested_at=last_ingested_at,
+            last_ingested_sha=last_ingested_sha,
+            ingest_status=ingest_status,
+            ingest_error=ingest_error,
         )

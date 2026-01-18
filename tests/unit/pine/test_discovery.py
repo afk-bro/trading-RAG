@@ -855,3 +855,280 @@ class TestDiscoverWithArchiving:
             # Should NOT call mark_archived
             mock_archive.assert_not_called()
             assert result.scripts_archived == 0
+
+
+# =============================================================================
+# Auto-Ingest Tests
+# =============================================================================
+
+
+class TestAutoIngestModels:
+    """Tests for auto-ingest related fields on DiscoveryResult and StrategyScript."""
+
+    def test_discovery_result_has_ingest_fields(self):
+        """DiscoveryResult includes ingest tracking fields."""
+        result = DiscoveryResult()
+        assert hasattr(result, "scripts_ingested")
+        assert hasattr(result, "scripts_ingest_failed")
+        assert hasattr(result, "chunks_created")
+        assert result.scripts_ingested == 0
+        assert result.scripts_ingest_failed == 0
+        assert result.chunks_created == 0
+
+    def test_discovery_result_ingest_fields_can_be_set(self):
+        """DiscoveryResult ingest fields can be set."""
+        result = DiscoveryResult(
+            scripts_ingested=5,
+            scripts_ingest_failed=1,
+            chunks_created=25,
+        )
+        assert result.scripts_ingested == 5
+        assert result.scripts_ingest_failed == 1
+        assert result.chunks_created == 25
+
+    def test_strategy_script_has_ingest_fields(self):
+        """StrategyScript includes ingest tracking fields."""
+        script = StrategyScript(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rel_path="test.pine",
+            source_type="local",
+            sha256="abc123",
+            status="discovered",
+        )
+        assert hasattr(script, "doc_id")
+        assert hasattr(script, "last_ingested_at")
+        assert hasattr(script, "last_ingested_sha")
+        assert hasattr(script, "ingest_status")
+        assert hasattr(script, "ingest_error")
+
+    def test_strategy_script_needs_ingest_never_ingested(self):
+        """needs_ingest() returns True when never ingested."""
+        script = StrategyScript(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rel_path="test.pine",
+            source_type="local",
+            sha256="abc123",
+            status="discovered",
+            ingest_status=None,
+        )
+        assert script.needs_ingest() is True
+
+    def test_strategy_script_needs_ingest_sha_changed(self):
+        """needs_ingest() returns True when content sha changed."""
+        script = StrategyScript(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rel_path="test.pine",
+            source_type="local",
+            sha256="new_sha",
+            status="discovered",
+            ingest_status="ok",
+            last_ingested_sha="old_sha",
+        )
+        assert script.needs_ingest() is True
+
+    def test_strategy_script_needs_ingest_already_current(self):
+        """needs_ingest() returns False when already ingested with same sha."""
+        script = StrategyScript(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rel_path="test.pine",
+            source_type="local",
+            sha256="abc123",
+            status="discovered",
+            ingest_status="ok",
+            last_ingested_sha="abc123",
+        )
+        assert script.needs_ingest() is False
+
+
+class TestIngestEventSchema:
+    """Tests for pine.script.ingested event schema."""
+
+    def test_pine_script_ingested_in_topics(self):
+        """pine.script.ingested is included in PINE_TOPICS."""
+        from app.services.events.schemas import PINE_TOPICS
+
+        assert "pine.script.ingested" in PINE_TOPICS
+
+    def test_pine_script_ingested_event_factory(self):
+        """pine_script_ingested creates correct event."""
+        from app.services.events.schemas import pine_script_ingested
+
+        workspace_id = uuid4()
+        script_id = uuid4()
+        doc_id = uuid4()
+
+        event = pine_script_ingested(
+            event_id="",
+            workspace_id=workspace_id,
+            script_id=script_id,
+            doc_id=doc_id,
+            rel_path="strategies/breakout.pine",
+            content_sha="abc123def",
+            chunks_created=3,
+        )
+
+        assert event.topic == "pine.script.ingested"
+        assert event.workspace_id == workspace_id
+        assert event.payload["script_id"] == str(script_id)
+        assert event.payload["doc_id"] == str(doc_id)
+        assert event.payload["rel_path"] == "strategies/breakout.pine"
+        assert event.payload["content_sha"] == "abc123def"
+        assert event.payload["chunks_created"] == 3
+
+
+class TestIngestMetrics:
+    """Tests for Pine ingest Prometheus metrics."""
+
+    def test_ingest_metrics_defined(self):
+        """Pine ingest metrics are properly defined."""
+        from app.routers.metrics import (
+            PINE_SCRIPTS_INGESTED_TOTAL,
+            PINE_INGEST_CHUNKS_TOTAL,
+            PINE_INGEST_FAILED_TOTAL,
+        )
+
+        assert PINE_SCRIPTS_INGESTED_TOTAL is not None
+        assert PINE_INGEST_CHUNKS_TOTAL is not None
+        assert PINE_INGEST_FAILED_TOTAL is not None
+
+    def test_record_pine_discovery_run_with_ingest(self):
+        """record_pine_discovery_run records ingest metrics."""
+        from app.routers.metrics import record_pine_discovery_run
+
+        record_pine_discovery_run(
+            status="success",
+            duration=2.5,
+            scripts_scanned=10,
+            scripts_new=3,
+            specs_generated=2,
+            scripts_ingested=5,
+            scripts_ingest_failed=1,
+            chunks_created=15,
+            errors_count=0,
+        )
+
+        # Function should complete without error
+        assert True
+
+
+class TestFormattingModule:
+    """Tests for the formatting module."""
+
+    def test_build_canonical_url(self):
+        """build_canonical_url creates correct URL."""
+        from app.services.pine.formatting import build_canonical_url
+
+        url = build_canonical_url("local", "strategies/breakout.pine")
+        assert url == "pine://local/strategies/breakout.pine"
+
+    def test_build_canonical_url_normalizes(self):
+        """build_canonical_url normalizes paths (strips . and .. segments, not traversal)."""
+        from app.services.pine.formatting import build_canonical_url
+
+        # Leading slash and dot segments are stripped
+        url = build_canonical_url("local", "/./strategies/rsi.pine")
+        assert url == "pine://local/strategies/rsi.pine"
+
+        # Backslashes converted to forward slashes
+        url2 = build_canonical_url("local", "strategies\\breakout.pine")
+        assert url2 == "pine://local/strategies/breakout.pine"
+
+    def test_build_ingest_doc_id(self):
+        """build_ingest_doc_id creates stable ID."""
+        from app.services.pine.formatting import build_ingest_doc_id
+
+        doc_id = build_ingest_doc_id("local", "strategies/breakout.pine")
+        assert doc_id == "pine:local:strategies/breakout.pine"
+
+    def test_build_ingest_doc_id_stable(self):
+        """build_ingest_doc_id produces same ID for same input."""
+        from app.services.pine.formatting import build_ingest_doc_id
+
+        doc_id1 = build_ingest_doc_id("local", "strategies/breakout.pine")
+        doc_id2 = build_ingest_doc_id("local", "strategies/breakout.pine")
+        assert doc_id1 == doc_id2
+
+
+class TestDiscoverWithAutoIngest:
+    """Tests for discovery with auto-ingest integration."""
+
+    @pytest.fixture
+    def mock_pool(self):
+        """Create a mock database pool."""
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_settings(self):
+        """Create mock settings."""
+        settings = MagicMock()
+        settings.data_dir = "/data"
+        return settings
+
+    @pytest.fixture
+    def service(self, mock_pool, mock_settings):
+        """Create PineDiscoveryService with mocks."""
+        return PineDiscoveryService(mock_pool, mock_settings)
+
+    @pytest.mark.asyncio
+    async def test_discover_with_auto_ingest_disabled(self, service):
+        """discover() skips auto_ingest when auto_ingest=False."""
+        workspace_id = uuid4()
+
+        with patch.object(service, "_scan_and_parse") as mock_scan, \
+             patch.object(service, "_auto_ingest_scripts", new_callable=AsyncMock) as mock_ingest:
+
+            mock_scan.return_value = []
+
+            result = await service.discover(
+                workspace_id=workspace_id,
+                scan_paths=["/data/pine"],
+                auto_ingest=False,
+            )
+
+            # Should NOT call _auto_ingest_scripts
+            mock_ingest.assert_not_called()
+            assert result.scripts_ingested == 0
+
+    @pytest.mark.asyncio
+    async def test_discover_with_emit_events_disabled(self, service):
+        """discover() skips event emission when emit_events=False."""
+        workspace_id = uuid4()
+
+        with patch.object(service, "_scan_and_parse") as mock_scan, \
+             patch.object(service, "_emit_discovery_events", new_callable=AsyncMock) as mock_emit:
+
+            mock_scan.return_value = []
+
+            result = await service.discover(
+                workspace_id=workspace_id,
+                scan_paths=["/data/pine"],
+                emit_events=False,
+            )
+
+            # Should NOT call _emit_discovery_events
+            mock_emit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_discover_result_includes_ingest_counts(self, service):
+        """discover() result includes ingest counts when auto_ingest enabled."""
+        workspace_id = uuid4()
+
+        with patch.object(service, "_scan_and_parse") as mock_scan, \
+             patch.object(service, "_auto_ingest_scripts", new_callable=AsyncMock) as mock_ingest:
+
+            mock_scan.return_value = []
+            mock_ingest.return_value = {"ingested": 3, "failed": 1, "chunks": 15}
+
+            result = await service.discover(
+                workspace_id=workspace_id,
+                scan_paths=["/data/pine"],
+                auto_ingest=True,
+            )
+
+            assert result.scripts_ingested == 3
+            assert result.scripts_ingest_failed == 1
+            assert result.chunks_created == 15

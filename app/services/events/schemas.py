@@ -21,6 +21,7 @@ EventTopic = Literal[
     "pine.script.discovered",
     "pine.script.updated",
     "pine.script.spec_generated",
+    "pine.script.ingested",
     "pine.script.archived",
 ]
 
@@ -36,6 +37,7 @@ PINE_TOPICS = {
     "pine.script.discovered",
     "pine.script.updated",
     "pine.script.spec_generated",
+    "pine.script.ingested",
     "pine.script.archived",
 }
 
@@ -290,6 +292,30 @@ def pine_script_spec_generated(
             "script_id": str(script_id),
             "rel_path": rel_path,
             "sweepable_count": sweepable_count,
+        },
+    )
+
+
+def pine_script_ingested(
+    event_id: str,
+    workspace_id: UUID,
+    script_id: UUID,
+    doc_id: UUID,
+    rel_path: str,
+    content_sha: str,
+    chunks_created: int,
+) -> AdminEvent:
+    """Create a pine.script.ingested event."""
+    return AdminEvent(
+        id=event_id,
+        topic="pine.script.ingested",
+        workspace_id=workspace_id,
+        payload={
+            "script_id": str(script_id),
+            "doc_id": str(doc_id),
+            "rel_path": rel_path,
+            "content_sha": content_sha,
+            "chunks_created": chunks_created,
         },
     )
 

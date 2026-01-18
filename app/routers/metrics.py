@@ -315,6 +315,21 @@ PINE_SCRIPTS_ARCHIVED_TOTAL = Counter(
     "Total Pine scripts archived",
 )
 
+PINE_SCRIPTS_INGESTED_TOTAL = Counter(
+    "pine_scripts_ingested_total",
+    "Total Pine scripts ingested to KB",
+)
+
+PINE_INGEST_CHUNKS_TOTAL = Counter(
+    "pine_ingest_chunks_total",
+    "Total chunks created during Pine script ingest",
+)
+
+PINE_INGEST_FAILED_TOTAL = Counter(
+    "pine_ingest_failed_total",
+    "Total Pine script ingest failures",
+)
+
 PINE_ARCHIVE_RUNS_TOTAL = Counter(
     "pine_archive_runs_total",
     "Total Pine archive runs",
@@ -558,6 +573,9 @@ def record_pine_discovery_run(
     scripts_scanned: int = 0,
     scripts_new: int = 0,
     specs_generated: int = 0,
+    scripts_ingested: int = 0,
+    scripts_ingest_failed: int = 0,
+    chunks_created: int = 0,
     errors_count: int = 0,
 ):
     """Record Pine discovery run metrics.
@@ -568,6 +586,9 @@ def record_pine_discovery_run(
         scripts_scanned: Total scripts scanned
         scripts_new: New scripts discovered
         specs_generated: Specs generated for strategies
+        scripts_ingested: Scripts ingested to KB
+        scripts_ingest_failed: Scripts that failed ingest
+        chunks_created: Total chunks created during ingest
         errors_count: Number of errors encountered
     """
     PINE_DISCOVERY_RUNS_TOTAL.labels(status=status).inc()
@@ -576,6 +597,14 @@ def record_pine_discovery_run(
     # Increment specs counter
     if specs_generated > 0:
         PINE_SPECS_GENERATED_TOTAL.inc(specs_generated)
+
+    # Increment ingest counters
+    if scripts_ingested > 0:
+        PINE_SCRIPTS_INGESTED_TOTAL.inc(scripts_ingested)
+    if chunks_created > 0:
+        PINE_INGEST_CHUNKS_TOTAL.inc(chunks_created)
+    if scripts_ingest_failed > 0:
+        PINE_INGEST_FAILED_TOTAL.inc(scripts_ingest_failed)
 
     # Increment errors counter
     if errors_count > 0:

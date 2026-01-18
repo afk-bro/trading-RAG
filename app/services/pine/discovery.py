@@ -15,7 +15,6 @@ import structlog
 from app.services.pine.adapters.filesystem import SourceFile, scan_pine_files
 from app.services.pine.discovery_repository import (
     ArchiveResult,
-    ArchivedScript,
     StrategyScript,
     StrategyScriptRepository,
     UpsertResult,
@@ -35,6 +34,9 @@ class DiscoveryResult:
     scripts_updated: int = 0
     scripts_unchanged: int = 0
     specs_generated: int = 0
+    scripts_ingested: int = 0
+    scripts_ingest_failed: int = 0
+    chunks_created: int = 0
     scripts_archived: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -76,13 +78,15 @@ class PineDiscoveryService:
     3. Compare SHA256 against stored fingerprints
     4. Upsert new/changed scripts
     5. Generate specs for strategies
-    6. Emit SSE events
+    6. Auto-ingest to KB (optional)
+    7. Emit SSE events
     """
 
-    def __init__(self, pool, settings):
-        """Initialize with connection pool and settings."""
+    def __init__(self, pool, settings, qdrant_client=None):
+        """Initialize with connection pool, settings, and optional qdrant client."""
         self._pool = pool
         self._settings = settings
+        self._qdrant_client = qdrant_client
         self._repo = StrategyScriptRepository(pool)
 
     async def discover(
@@ -90,6 +94,8 @@ class PineDiscoveryService:
         workspace_id: UUID,
         scan_paths: Optional[list[str]] = None,
         generate_specs: bool = True,
+        auto_ingest: bool = True,
+        emit_events: bool = True,
         dry_run: bool = False,
         discovery_run_id: Optional[str] = None,
         archive_stale_days: Optional[int] = None,
@@ -101,6 +107,8 @@ class PineDiscoveryService:
             workspace_id: Workspace to associate scripts with
             scan_paths: Paths to scan (defaults to DATA_DIR/pine)
             generate_specs: Whether to generate specs for strategies
+            auto_ingest: Whether to auto-ingest new/changed scripts to KB
+            emit_events: Whether to emit SSE events
             dry_run: If True, don't persist or emit events
             discovery_run_id: Optional ID for log correlation
             archive_stale_days: If set, archive scripts not seen in N days
@@ -188,17 +196,29 @@ class PineDiscoveryService:
                 result.errors.append(f"Failed to upsert {script.rel_path}: {e}")
 
         # Phase 2 events: discovered/updated (AFTER commit)
-        await self._emit_discovery_events(changes, workspace_id, log)
+        if emit_events:
+            await self._emit_discovery_events(changes, workspace_id, log)
 
         # Phase 3: Generate specs for strategies
         if generate_specs:
-            specs_generated = await self._generate_specs(changes, workspace_id, log)
+            specs_generated = await self._generate_specs(
+                changes, workspace_id, log, emit_events
+            )
             result.specs_generated = specs_generated
 
-        # Phase 4: Archive stale scripts (if enabled)
+        # Phase 4: Auto-ingest new/changed scripts to KB
+        if auto_ingest:
+            ingest_result = await self._auto_ingest_scripts(
+                changes, workspace_id, scan_paths[0] if scan_paths else None, log, emit_events
+            )
+            result.scripts_ingested = ingest_result["ingested"]
+            result.scripts_ingest_failed = ingest_result["failed"]
+            result.chunks_created = ingest_result["chunks"]
+
+        # Phase 5: Archive stale scripts (if enabled)
         if archive_stale_days is not None:
             archive_result = await self._archive_stale(
-                workspace_id, archive_stale_days, log
+                workspace_id, archive_stale_days, log, emit_events
             )
             result.scripts_archived = archive_result.archived_count
 
@@ -209,6 +229,9 @@ class PineDiscoveryService:
             updated=result.scripts_updated,
             unchanged=result.scripts_unchanged,
             specs_generated=result.specs_generated,
+            ingested=result.scripts_ingested,
+            ingest_failed=result.scripts_ingest_failed,
+            chunks=result.chunks_created,
             archived=result.scripts_archived,
             errors=len(result.errors),
         )
@@ -350,13 +373,14 @@ class PineDiscoveryService:
         changes: list[ScriptChange],
         workspace_id: UUID,
         log,
+        emit_events: bool = True,
     ) -> int:
         """Generate specs for strategy scripts."""
         from app.services.events import get_event_bus
         from app.services.events.schemas import pine_script_spec_generated
         from app.services.pine.models import PineScriptEntry, PineVersion, LintSummary
 
-        bus = get_event_bus()
+        bus = get_event_bus() if emit_events else None
         count = 0
 
         for change in changes:
@@ -419,15 +443,16 @@ class PineDiscoveryService:
                     count += 1
 
                     # Emit spec_generated event
-                    sweepable_count = len(spec.sweepable_params)
-                    event = pine_script_spec_generated(
-                        event_id="",
-                        workspace_id=workspace_id,
-                        script_id=script.id,
-                        rel_path=script.rel_path,
-                        sweepable_count=sweepable_count,
-                    )
-                    await bus.publish(event)
+                    if bus:
+                        sweepable_count = len(spec.sweepable_params)
+                        event = pine_script_spec_generated(
+                            event_id="",
+                            workspace_id=workspace_id,
+                            script_id=script.id,
+                            rel_path=script.rel_path,
+                            sweepable_count=sweepable_count,
+                        )
+                        await bus.publish(event)
 
             except Exception as e:
                 log.warning(
@@ -439,11 +464,193 @@ class PineDiscoveryService:
 
         return count
 
+    async def _auto_ingest_scripts(
+        self,
+        changes: list[ScriptChange],
+        workspace_id: UUID,
+        source_root: Optional[str],
+        log,
+        emit_events: bool = True,
+    ) -> dict:
+        """
+        Auto-ingest new or changed scripts to the KB.
+
+        Only ingests scripts where:
+        - Script is new or updated (content changed)
+        - OR ingest_status is None (never ingested)
+        - OR sha256 != last_ingested_sha (content changed since last ingest)
+
+        Returns:
+            Dict with counts: {"ingested": int, "failed": int, "chunks": int}
+        """
+        from pathlib import Path
+
+        from app.routers.ingest import ingest_pipeline, set_db_pool, set_qdrant_client
+        from app.schemas import SourceType
+        from app.services.events import get_event_bus
+        from app.services.events.schemas import pine_script_ingested
+        from app.services.pine.formatting import (
+            build_canonical_url,
+            build_ingest_doc_id,
+            build_pine_metadata,
+            strategy_script_to_entry,
+        )
+        from app.services.pine.ingest import format_script_content
+
+        # Set up the ingest pipeline's globals
+        set_db_pool(self._pool)
+        if self._qdrant_client:
+            set_qdrant_client(self._qdrant_client)
+
+        result = {"ingested": 0, "failed": 0, "chunks": 0}
+        bus = get_event_bus() if emit_events else None
+
+        # Determine source root for reading files
+        root = None
+        if source_root:
+            root = Path(source_root)
+        elif self._settings and hasattr(self._settings, "data_dir"):
+            root = Path(self._settings.data_dir) / "pine"
+
+        for change in changes:
+            script = change.script
+
+            # Skip if unchanged and already ingested with same sha
+            if change.change_type == "unchanged":
+                # Check if needs re-ingest (sha changed since last ingest)
+                if not script.needs_ingest():
+                    continue
+
+            try:
+                # Read source content
+                source_content: Optional[str] = None
+                if root:
+                    source_path = root / script.rel_path
+                    if source_path.exists():
+                        try:
+                            source_content = source_path.read_text(encoding="utf-8")
+                        except Exception as e:
+                            log.warning(
+                                "source_read_error",
+                                rel_path=script.rel_path,
+                                error=str(e),
+                            )
+
+                # Convert to PineScriptEntry for formatting
+                entry = strategy_script_to_entry(
+                    script, source_content=source_content
+                )
+
+                # Format content for embedding
+                content = format_script_content(
+                    entry=entry,
+                    source_content=source_content,
+                    include_source=True,
+                    max_source_lines=100,
+                )
+
+                # Build canonical URL and metadata
+                canonical_url = build_canonical_url(script.source_type, script.rel_path)
+                pine_metadata = build_pine_metadata(script, entry)
+
+                # Use stable doc_id for replace-in-place
+                idempotency_key = build_ingest_doc_id(
+                    script.source_type, script.rel_path
+                )
+
+                # Call ingest pipeline
+                response = await ingest_pipeline(
+                    workspace_id=workspace_id,
+                    content=content,
+                    source_type=SourceType.PINE_SCRIPT,
+                    source_url=None,
+                    canonical_url=canonical_url,
+                    idempotency_key=idempotency_key,
+                    content_hash=script.sha256,
+                    title=script.title or script.rel_path,
+                    language="pine",
+                    settings=self._settings,
+                    update_existing=True,  # Replace-in-place on content change
+                    pine_metadata=pine_metadata,
+                )
+
+                # Update ingest tracking in DB
+                await self._repo.update_ingest_status(
+                    script_id=script.id,
+                    doc_id=response.doc_id,
+                    status="ok",
+                    error=None,
+                )
+
+                result["ingested"] += 1
+                result["chunks"] += response.chunks_created
+
+                # Emit event on success
+                if bus and response.status in ("created", "indexed"):
+                    try:
+                        event = pine_script_ingested(
+                            event_id="",
+                            workspace_id=workspace_id,
+                            script_id=script.id,
+                            doc_id=response.doc_id,
+                            rel_path=script.rel_path,
+                            content_sha=script.sha256,
+                            chunks_created=response.chunks_created,
+                        )
+                        await bus.publish(event)
+                    except Exception as e:
+                        log.warning(
+                            "ingest_event_emit_error",
+                            script_id=str(script.id),
+                            error=str(e),
+                        )
+
+                log.debug(
+                    "script_ingested",
+                    script_id=str(script.id),
+                    rel_path=script.rel_path,
+                    doc_id=str(response.doc_id),
+                    chunks=response.chunks_created,
+                )
+
+            except Exception as e:
+                result["failed"] += 1
+
+                # Update ingest tracking with error
+                error_msg = str(e)
+                try:
+                    await self._repo.update_ingest_status(
+                        script_id=script.id,
+                        doc_id=None,
+                        status="error",
+                        error=error_msg,
+                    )
+                except Exception:
+                    pass  # Best effort
+
+                log.warning(
+                    "script_ingest_error",
+                    script_id=str(script.id),
+                    rel_path=script.rel_path,
+                    error=error_msg,
+                )
+
+        if result["ingested"] > 0 or result["failed"] > 0:
+            log.info(
+                "auto_ingest_complete",
+                ingested=result["ingested"],
+                failed=result["failed"],
+                chunks=result["chunks"],
+            )
+
+        return result
+
     async def _archive_stale(
         self,
         workspace_id: UUID,
         older_than_days: int,
         log,
+        emit_events: bool = True,
     ) -> ArchiveResult:
         """Archive scripts not seen in N days and emit events."""
         from app.services.events import get_event_bus
@@ -462,27 +669,28 @@ class PineDiscoveryService:
                 )
 
                 # Emit archived events
-                bus = get_event_bus()
-                for script in archive_result.archived_scripts:
-                    try:
-                        last_seen_str = None
-                        if script.last_seen_at:
-                            last_seen_str = script.last_seen_at.isoformat()
+                if emit_events:
+                    bus = get_event_bus()
+                    for script in archive_result.archived_scripts:
+                        try:
+                            last_seen_str = None
+                            if script.last_seen_at:
+                                last_seen_str = script.last_seen_at.isoformat()
 
-                        event = pine_script_archived(
-                            event_id="",
-                            workspace_id=workspace_id,
-                            script_id=script.id,
-                            rel_path=script.rel_path,
-                            last_seen_at=last_seen_str,
-                        )
-                        await bus.publish(event)
-                    except Exception as e:
-                        log.warning(
-                            "archived_event_emit_error",
-                            script_id=str(script.id),
-                            error=str(e),
-                        )
+                            event = pine_script_archived(
+                                event_id="",
+                                workspace_id=workspace_id,
+                                script_id=script.id,
+                                rel_path=script.rel_path,
+                                last_seen_at=last_seen_str,
+                            )
+                            await bus.publish(event)
+                        except Exception as e:
+                            log.warning(
+                                "archived_event_emit_error",
+                                script_id=str(script.id),
+                                error=str(e),
+                            )
 
             return archive_result
 
