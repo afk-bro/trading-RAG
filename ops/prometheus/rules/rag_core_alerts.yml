@@ -394,3 +394,72 @@ groups:
         annotations:
           summary: "Ingestion queue backlog ({{ $value }} pending)"
           description: "Ingestion not keeping up. May need scaling or investigation."
+
+  # ===========================================================================
+  # Pine Discovery Rules - Script discovery and KB ingest health
+  # ===========================================================================
+  - name: rag_core.pine_discovery
+    rules:
+      # --- Degraded conditions ---
+      - alert: RAGCore_PineDiscoveryPendingHigh
+        expr: pine_scripts_pending_ingest{job="rag-core"} > 50
+        for: 15m
+        labels:
+          severity: warning
+          subsystem: pine_discovery
+        annotations:
+          summary: "Pine scripts pending ingest ({{ $value }})"
+          description: "Scripts discovered but not yet ingested to KB. May indicate ingest failures or backlog."
+          runbook_url: "docs/ops/runbooks.md#pine-discovery-backlog"
+
+      - alert: RAGCore_PineDiscoveryStale
+        expr: |
+          (
+            time() - pine_discovery_last_run_timestamp{job="rag-core"}
+          ) > 3600
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: pine_discovery
+        annotations:
+          summary: "Pine discovery not running (last run {{ $value | humanizeDuration }} ago)"
+          description: "Discovery hasn't run in 1+ hour. Check if discovery cron/trigger is working."
+          runbook_url: "docs/ops/runbooks.md#pine-discovery-stalled"
+
+      - alert: RAGCore_PineIngestErrors
+        expr: increase(pine_ingest_failed_total{job="rag-core"}[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: pine_discovery
+        annotations:
+          summary: "Pine ingest failures ({{ $value }} in 1h)"
+          description: "Some Pine scripts failing to ingest. Check logs for specific errors."
+
+      # --- Error conditions ---
+      - alert: RAGCore_PineIngestErrorsCritical
+        expr: increase(pine_ingest_failed_total{job="rag-core"}[1h]) > 10
+        for: 5m
+        labels:
+          severity: critical
+          subsystem: pine_discovery
+        annotations:
+          summary: "Critical: Pine ingest failures elevated ({{ $value }} in 1h)"
+          description: "Many Pine scripts failing to ingest. Investigate immediately."
+          runbook_url: "docs/ops/runbooks.md#pine-ingest-failures"
+
+      - alert: RAGCore_PineDiscoveryFailing
+        expr: |
+          (
+            time() - pine_discovery_last_success_timestamp{job="rag-core"}
+          ) > 7200
+          and
+          pine_discovery_last_run_timestamp{job="rag-core"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          subsystem: pine_discovery
+        annotations:
+          summary: "Pine discovery failing (no success in {{ $value | humanizeDuration }})"
+          description: "Discovery running but not succeeding. Check for DB errors or scan path issues."
+          runbook_url: "docs/ops/runbooks.md#pine-discovery-failures"

@@ -99,6 +99,17 @@ The alerts expect these metrics to be exposed at `/metrics`:
 | `ingest_failures_total` | Counter | `source_type` | Ingestion failures |
 | `ingest_queue_pending_count` | Gauge | - | Pending ingestion jobs |
 
+### Pine Discovery Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `pine_scripts_pending_ingest` | Gauge | - | Scripts needing ingest/re-ingest |
+| `pine_discovery_last_run_timestamp` | Gauge | - | Unix epoch of last discovery run |
+| `pine_discovery_last_success_timestamp` | Gauge | - | Unix epoch of last successful run |
+| `pine_ingest_failed_total` | Counter | - | Pine script ingest failures |
+| `pine_ingest_chunks_total` | Counter | - | Chunks created from Pine scripts |
+| `pine_scripts_total` | Gauge | `status` | Scripts by discovery status |
+
 ## Label Assumptions
 
 The rules assume these label conventions:
@@ -124,6 +135,9 @@ These are starting defaults - tune based on your traffic patterns:
 | `RetentionJobNotRunning` | >48h | Match your cron schedule |
 | `IdempotencyExpiredPending` | >100 for 30m | Lower if strict hygiene required |
 | `IdempotencyPruneStale` | >48h | Match pg_cron schedule (daily) |
+| `PineDiscoveryPendingHigh` | >50 for 15m | Lower if ingest should be immediate |
+| `PineDiscoveryStale` | >1h | Match your discovery cron schedule |
+| `PineIngestErrorsCritical` | >10/h | Lower if zero errors expected |
 
 ## Loading Rules
 
@@ -224,6 +238,7 @@ Each alert has a `subsystem` label for filtering:
 | `idempotency` | Idempotency key hygiene |
 | `sse` | Server-Sent Events |
 | `ingestion` | Document ingestion |
+| `pine_discovery` | Pine script discovery & KB ingest |
 
 ## Related Documentation
 
