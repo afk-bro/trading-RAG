@@ -153,13 +153,13 @@ class PineDiscoveryHealth(ComponentHealth):
     total_scripts: int = 0
     pending_ingest: int = 0
     stale_scripts: int = 0
-    stale_ratio: Optional[float] = None  # stale_scripts / active_total
+    stale_ratio: float = 0.0  # stale_scripts / active_total (0.0 when no scripts)
     stale_cutoff_days: int = 7  # Time anchor
     recent_ingest_errors: int = 0
     window_ingest_errors_hours: int = 24  # Time anchor
     last_discovery_at: Optional[datetime] = None
-    last_run_ts: Optional[float] = None  # Unix timestamp from gauge
-    last_success_ts: Optional[float] = None  # Unix timestamp from gauge
+    last_run_ts: Optional[int] = None  # Unix epoch seconds from gauge
+    last_success_ts: Optional[int] = None  # Unix epoch seconds from gauge
     notes: list[str] = Field(default_factory=list)  # Reasons for degraded/error
 
 
@@ -676,9 +676,9 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 or 0
             )
 
-            # Calculate stale ratio (handle total=0)
+            # Calculate stale ratio (0.0 when no active scripts)
             active_total = sum(c for s, c in status_counts.items() if s != "archived")
-            stale_ratio = stale_count / active_total if active_total > 0 else None
+            stale_ratio = stale_count / active_total if active_total > 0 else 0.0
 
             # Get recent ingest errors (last N hours)
             # Use last_ingested_at for accurate timing, status='error' (canonical)
@@ -731,13 +731,14 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 total_scripts=total,
                 pending_ingest=pending_ingest,
                 stale_scripts=stale_count,
-                stale_ratio=round(stale_ratio, 3) if stale_ratio is not None else None,
+                stale_ratio=round(stale_ratio, 3),
                 stale_cutoff_days=STALE_CUTOFF_DAYS,
                 recent_ingest_errors=recent_errors,
                 window_ingest_errors_hours=INGEST_ERROR_WINDOW_HOURS,
                 last_discovery_at=last_seen,
-                last_run_ts=last_run_ts if last_run_ts > 0 else None,
-                last_success_ts=last_success_ts if last_success_ts > 0 else None,
+                # Cast to int for cleaner dashboard/alerting (epoch seconds)
+                last_run_ts=int(last_run_ts) if last_run_ts > 0 else None,
+                last_success_ts=int(last_success_ts) if last_success_ts > 0 else None,
                 notes=notes,
             )
     except Exception as e:
@@ -1220,8 +1221,8 @@ async def system_health_html(
     html += metric(
         "Pending Ingest", f"{pd.pending_ingest:,}", error=pd.pending_ingest > 50
     )
-    stale_pct = f"{pd.stale_ratio:.1%}" if pd.stale_ratio is not None else "-"
-    stale_error = pd.stale_ratio is not None and pd.stale_ratio > 0.5
+    stale_pct = f"{pd.stale_ratio:.1%}"
+    stale_error = pd.stale_ratio > 0.5
     html += metric(
         f"Stale ({pd.stale_cutoff_days}d+)",
         f"{pd.stale_scripts:,} ({stale_pct})",
