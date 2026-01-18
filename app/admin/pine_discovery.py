@@ -296,6 +296,7 @@ async def discover_pine_scripts(
         duration = time.monotonic() - start_time
 
         # Determine status
+        op_status: Literal["success", "partial", "failed", "dry_run"]
         if request.dry_run:
             op_status = "dry_run"
         elif result.errors or result.scripts_ingest_failed > 0:

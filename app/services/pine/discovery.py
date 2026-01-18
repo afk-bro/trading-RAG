@@ -312,7 +312,9 @@ class PineDiscoveryService:
             status="discovered",
         )
 
-    def _classify_change(self, upsert_result: UpsertResult) -> str:
+    def _classify_change(
+        self, upsert_result: UpsertResult
+    ) -> Literal["new", "updated", "unchanged"]:
         """Classify the type of change from upsert result."""
         if upsert_result.is_new:
             return "new"
