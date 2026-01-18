@@ -280,6 +280,40 @@ class Settings(BaseSettings):
         description="Max backoff multiplier for failed scans (16x = 4h at 15min base)",
     )
 
+    # Job System Configuration
+    ccxt_rate_limit_ms: int = Field(
+        default=100,
+        ge=10,
+        le=1000,
+        description="Minimum milliseconds between CCXT API calls",
+    )
+    core_timeframes: list[str] = Field(
+        default=["1m", "5m", "15m", "1h", "1d"],
+        description="Default timeframes for core symbol sync",
+    )
+    job_poll_interval_s: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=10.0,
+        description="Job queue poll interval in seconds",
+    )
+    job_stale_timeout_minutes: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="Minutes before a running job is considered stale",
+    )
+    artifacts_dir: str = Field(
+        default="/data/artifacts",
+        description="Directory for storing job artifacts (tunes, WFO results)",
+    )
+    artifacts_retention_days: int = Field(
+        default=90,
+        ge=7,
+        le=365,
+        description="Days to retain unpinned artifacts",
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""
