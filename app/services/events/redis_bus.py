@@ -92,7 +92,7 @@ class RedisEventBus(EventBus):
 
             # Close Redis connection
             if self._redis:
-                await self._redis.close()
+                await self._redis.aclose()
                 self._redis = None
                 self._connected = False
                 logger.info("redis_event_bus_closed")

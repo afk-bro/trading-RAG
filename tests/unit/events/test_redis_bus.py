@@ -28,7 +28,7 @@ class TestRedisEventBusUnit:
         redis.xlen = AsyncMock(return_value=0)
         redis.xrevrange = AsyncMock(return_value=[])
         redis.keys = AsyncMock(return_value=[])
-        redis.close = AsyncMock()
+        redis.aclose = AsyncMock()
         return redis
 
     @pytest.fixture
@@ -191,7 +191,7 @@ class TestRedisEventBusUnit:
         assert len(redis_bus._subscriber_queues) == 0
         assert len(redis_bus._filters) == 0
         assert redis_bus._connected is False
-        mock_redis.close.assert_called_once()
+        mock_redis.aclose.assert_called_once()
 
 
 class TestRedisEventBusEventParsing:
