@@ -143,6 +143,17 @@ class TuneHealth(ComponentHealth):
     avg_duration_ms: Optional[float] = None
 
 
+class PineDiscoveryHealth(ComponentHealth):
+    """Pine script discovery health."""
+
+    scripts_by_status: dict = Field(default_factory=dict)  # {status: count}
+    total_scripts: int = 0
+    discovery_runs_24h: int = 0
+    failed_runs_24h: int = 0
+    last_discovery_at: Optional[datetime] = None
+    specs_generated_24h: int = 0
+
+
 class SystemHealthSnapshot(BaseModel):
     """Complete system health snapshot."""
 
@@ -161,6 +172,7 @@ class SystemHealthSnapshot(BaseModel):
     retention: RetentionHealth
     idempotency: IdempotencyHealth
     tunes: TuneHealth
+    pine_discovery: PineDiscoveryHealth
 
     # Summary
     components_ok: int = 0
@@ -564,6 +576,71 @@ async def _check_tunes() -> TuneHealth:
         return TuneHealth(status="error", error=str(e)[:200])
 
 
+async def _check_pine_discovery() -> PineDiscoveryHealth:
+    """Check Pine script discovery health and update Prometheus metrics."""
+    from app.routers.metrics import set_pine_scripts_metrics
+
+    if _db_pool is None:
+        return PineDiscoveryHealth(status="unknown", error="Pool not initialized")
+
+    try:
+        async with _db_pool.acquire() as conn:
+            # Get script counts by status
+            rows = await conn.fetch(
+                """
+                SELECT status, COUNT(*) as count
+                FROM strategy_scripts
+                GROUP BY status
+            """
+            )
+
+            status_counts = {row["status"]: row["count"] for row in rows}
+            total = sum(status_counts.values())
+
+            # Update Prometheus gauge
+            set_pine_scripts_metrics(status_counts)
+
+            # Get discovery run stats (from Prometheus or logs - for now estimate)
+            # In future, we could log discovery runs to a table for better tracking
+            last_seen = await conn.fetchval(
+                """
+                SELECT MAX(last_seen_at)
+                FROM strategy_scripts
+            """
+            )
+
+            # Determine health status
+            status = "ok"
+
+            # If we have scripts but many are stale (not seen in 7+ days), warn
+            if total > 0:
+                stale_count = await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM strategy_scripts
+                    WHERE status != 'archived'
+                      AND last_seen_at < NOW() - INTERVAL '7 days'
+                """
+                )
+                if stale_count and stale_count > total * 0.5:
+                    status = "degraded"
+
+            return PineDiscoveryHealth(
+                status=status,
+                scripts_by_status=status_counts,
+                total_scripts=total,
+                last_discovery_at=last_seen,
+            )
+    except Exception as e:
+        # Table might not exist yet
+        if "does not exist" in str(e):
+            return PineDiscoveryHealth(
+                status="ok",
+                details={"message": "Pine discovery not configured (table missing)"},
+            )
+        return PineDiscoveryHealth(status="error", error=str(e)[:200])
+
+
 async def _check_idempotency() -> IdempotencyHealth:
     """Check idempotency key table hygiene."""
     from app.routers.metrics import set_idempotency_metrics
@@ -661,6 +738,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         retention,
         idempotency,
         tunes,
+        pine_discovery,
     ) = await asyncio.gather(
         _check_database(),
         _check_qdrant(settings),
@@ -671,6 +749,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         _check_retention(),
         _check_idempotency(),
         _check_tunes(),
+        _check_pine_discovery(),
         return_exceptions=True,
     )
 
@@ -691,9 +770,10 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     retention = safe_result(retention, RetentionHealth)
     idempotency = safe_result(idempotency, IdempotencyHealth)
     tunes = safe_result(tunes, TuneHealth)
+    pine_discovery = safe_result(pine_discovery, PineDiscoveryHealth)
 
     # Calculate overall status (only include Redis if configured)
-    components = [db, qdrant, llm, sse, retention, idempotency, tunes]
+    components = [db, qdrant, llm, sse, retention, idempotency, tunes, pine_discovery]
     if redis is not None:
         components.append(redis)
     statuses = [c.status for c in components]
@@ -731,6 +811,8 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         )
     if tunes.status != "ok":
         issues.append(f"Tunes: {tunes.error or tunes.status}")
+    if pine_discovery.status != "ok":
+        issues.append(f"Pine Discovery: {pine_discovery.error or 'stale scripts'}")
 
     return SystemHealthSnapshot(
         overall_status=overall,
@@ -745,6 +827,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         retention=retention,
         idempotency=idempotency,
         tunes=tunes,
+        pine_discovery=pine_discovery,
         components_ok=ok_count,
         components_degraded=degraded_count,
         components_error=error_count,
@@ -1017,6 +1100,19 @@ async def system_health_html(
     html += metric("YouTube Last Fail", fmt_dt(ing.youtube_last_failure))
     html += metric("PDF Last OK", fmt_dt(ing.pdf_last_success))
     html += metric("Pine Last OK", fmt_dt(ing.pine_last_success))
+    html += "</div>"
+
+    # Pine Discovery card
+    pd = snapshot.pine_discovery
+    html += '<div class="card">'
+    html += card_header("Pine Discovery", pd.status)
+    html += metric("Total Scripts", f"{pd.total_scripts:,}")
+    # Show status breakdown
+    for status_name, count in pd.scripts_by_status.items():
+        html += metric(f"  {status_name}", str(count))
+    html += metric("Last Seen", fmt_dt(pd.last_discovery_at))
+    if pd.error:
+        html += metric("Error", pd.error, error=True)
     html += "</div>"
 
     html += "</div>"  # grid

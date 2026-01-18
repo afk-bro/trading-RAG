@@ -278,6 +278,38 @@ KB_QDRANT_ERRORS = Counter(
     "KB Qdrant query errors",
 )
 
+# =============================================================================
+# Pine Discovery Metrics
+# =============================================================================
+
+PINE_SCRIPTS_TOTAL = Gauge(
+    "pine_scripts_total",
+    "Total Pine scripts by status",
+    ["status"],  # discovered, spec_generated, published, archived
+)
+
+PINE_DISCOVERY_RUNS_TOTAL = Counter(
+    "pine_discovery_runs_total",
+    "Total Pine discovery runs",
+    ["status"],  # success, partial, failed
+)
+
+PINE_DISCOVERY_ERRORS_TOTAL = Counter(
+    "pine_discovery_errors_total",
+    "Total Pine discovery errors",
+)
+
+PINE_SPECS_GENERATED_TOTAL = Counter(
+    "pine_specs_generated_total",
+    "Total Pine strategy specs generated",
+)
+
+PINE_DISCOVERY_DURATION = Histogram(
+    "pine_discovery_duration_seconds",
+    "Pine discovery run duration in seconds",
+    buckets=[0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0],
+)
+
 
 def record_request(method: str, endpoint: str, status_code: int, duration: float):
     """Record request metrics."""
@@ -483,6 +515,64 @@ def set_idempotency_metrics(
     IDEMPOTENCY_PENDING_REQUESTS.set(pending_requests)
     IDEMPOTENCY_OLDEST_PENDING_AGE.set(oldest_pending_age_minutes or 0)
     IDEMPOTENCY_OLDEST_EXPIRED_AGE.set(oldest_expired_age_hours or 0)
+
+
+# =============================================================================
+# Pine Discovery Recording Functions
+# =============================================================================
+
+
+def set_pine_scripts_metrics(status_counts: dict[str, int]):
+    """Set Pine scripts gauge by status.
+
+    Called by system_health._check_pine_discovery() during health checks.
+
+    Args:
+        status_counts: Dict mapping status to count, e.g.
+            {"discovered": 10, "spec_generated": 5, "published": 2, "archived": 1}
+    """
+    for status, count in status_counts.items():
+        PINE_SCRIPTS_TOTAL.labels(status=status).set(count)
+
+
+def record_pine_discovery_run(
+    status: str,
+    duration: float,
+    scripts_scanned: int = 0,
+    scripts_new: int = 0,
+    specs_generated: int = 0,
+    errors_count: int = 0,
+):
+    """Record Pine discovery run metrics.
+
+    Args:
+        status: Run status (success, partial, failed)
+        duration: Run duration in seconds
+        scripts_scanned: Total scripts scanned
+        scripts_new: New scripts discovered
+        specs_generated: Specs generated for strategies
+        errors_count: Number of errors encountered
+    """
+    PINE_DISCOVERY_RUNS_TOTAL.labels(status=status).inc()
+    PINE_DISCOVERY_DURATION.observe(duration)
+
+    # Increment specs counter
+    if specs_generated > 0:
+        PINE_SPECS_GENERATED_TOTAL.inc(specs_generated)
+
+    # Increment errors counter
+    if errors_count > 0:
+        PINE_DISCOVERY_ERRORS_TOTAL.inc(errors_count)
+
+
+def record_pine_discovery_error():
+    """Record a single Pine discovery error."""
+    PINE_DISCOVERY_ERRORS_TOTAL.inc()
+
+
+def record_pine_spec_generated(count: int = 1):
+    """Record Pine spec generation."""
+    PINE_SPECS_GENERATED_TOTAL.inc(count)
 
 
 @router.get("/metrics", include_in_schema=False)

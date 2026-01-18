@@ -4,6 +4,7 @@ Provides API access to the Pine script auto-discovery service for
 scanning filesystem paths, parsing scripts, and generating specs.
 """
 
+import time
 from pathlib import Path
 from typing import Literal, Optional
 from uuid import UUID, uuid4
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
+from app.routers.metrics import record_pine_discovery_run
 
 router = APIRouter(prefix="/pine", tags=["admin-pine"])
 logger = structlog.get_logger(__name__)
@@ -195,6 +197,8 @@ async def discover_pine_scripts(
         generate_specs=request.generate_specs,
     )
 
+    start_time = time.monotonic()
+
     try:
         # Import discovery service
         from app.services.pine.discovery import PineDiscoveryService
@@ -210,6 +214,9 @@ async def discover_pine_scripts(
             discovery_run_id=discovery_run_id,
         )
 
+        # Calculate duration
+        duration = time.monotonic() - start_time
+
         # Determine status
         if request.dry_run:
             op_status = "dry_run"
@@ -217,6 +224,17 @@ async def discover_pine_scripts(
             op_status = "partial"
         else:
             op_status = "success"
+
+        # Record Prometheus metrics (skip dry_run - no side effects)
+        if not request.dry_run:
+            record_pine_discovery_run(
+                status=op_status,
+                duration=duration,
+                scripts_scanned=result.scripts_scanned,
+                scripts_new=result.scripts_new,
+                specs_generated=result.specs_generated,
+                errors_count=len(result.errors),
+            )
 
         log.info(
             "discovery_request_complete",
@@ -226,6 +244,7 @@ async def discover_pine_scripts(
             scripts_updated=result.scripts_updated,
             specs_generated=result.specs_generated,
             errors_count=len(result.errors),
+            duration_seconds=round(duration, 3),
         )
 
         return DiscoverResponse(
@@ -240,6 +259,14 @@ async def discover_pine_scripts(
         )
 
     except Exception as e:
+        # Record failed run metrics
+        duration = time.monotonic() - start_time
+        record_pine_discovery_run(
+            status="failed",
+            duration=duration,
+            errors_count=1,
+        )
+
         log.exception("discovery_request_failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
