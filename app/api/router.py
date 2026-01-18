@@ -24,6 +24,7 @@ from app.routers import (
     youtube_pine,
 )
 from app.admin import router as admin_router
+from app.admin.data import router as admin_data_router
 
 # Main API router
 api_router = APIRouter()
@@ -67,3 +68,4 @@ api_router.include_router(strategies.router, prefix="/strategies", tags=["Strate
 
 # Admin
 api_router.include_router(admin_router)  # Admin UI (not in OpenAPI docs)
+api_router.include_router(admin_data_router)  # Admin data management endpoints
