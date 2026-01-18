@@ -153,8 +153,10 @@ class PineDiscoveryHealth(ComponentHealth):
     total_scripts: int = 0
     pending_ingest: int = 0
     stale_scripts: int = 0  # Not seen in 7+ days
+    stale_ratio: Optional[float] = None  # stale_scripts / total_scripts
     last_discovery_at: Optional[datetime] = None
     recent_ingest_errors: int = 0  # Errors in last 24h
+    notes: list[str] = Field(default_factory=list)  # Reasons for degraded/error
 
 
 class SystemHealthSnapshot(BaseModel):
@@ -580,7 +582,11 @@ async def _check_tunes() -> TuneHealth:
 
 
 async def _check_pine_discovery() -> PineDiscoveryHealth:
-    """Check Pine script discovery health and update Prometheus metrics."""
+    """Check Pine script discovery health and update Prometheus metrics.
+
+    Gauge updates are guarded: only updated on successful DB query.
+    On failure, gauges retain last-known-good values.
+    """
     from app.routers.metrics import set_pine_pending_ingest, set_pine_scripts_metrics
 
     if _db_pool is None:
@@ -599,10 +605,7 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             status_counts = {row["status"]: row["count"] for row in rows}
             total = sum(status_counts.values())
 
-            # Update Prometheus gauge for discovery status
-            set_pine_scripts_metrics(status_counts)
-
-            # Get script counts by ingest status
+            # Get script counts by ingest status (NULL = pending)
             ingest_rows = await conn.fetch(
                 """
                 SELECT
@@ -617,21 +620,25 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 row["ingest_status"]: row["count"] for row in ingest_rows
             }
 
-            # Get pending ingest count (needs ingest or re-ingest)
+            # Get pending ingest count:
+            # - Never ingested (ingest_status IS NULL)
+            # - Content changed (sha256 != last_ingested_sha)
+            # - Failed and needs retry (ingest_status = 'failed')
             pending_ingest = (
                 await conn.fetchval(
                     """
                 SELECT COUNT(*)
                 FROM strategy_scripts
                 WHERE status != 'archived'
-                  AND (ingest_status IS NULL OR last_ingested_sha IS DISTINCT FROM sha256)
+                  AND (
+                    ingest_status IS NULL
+                    OR last_ingested_sha IS DISTINCT FROM sha256
+                    OR ingest_status = 'failed'
+                  )
             """
                 )
                 or 0
             )
-
-            # Update Prometheus gauge for pending ingest
-            set_pine_pending_ingest(pending_ingest)
 
             # Get last discovery timestamp
             last_seen = await conn.fetchval(
@@ -642,6 +649,7 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             )
 
             # Get stale script count (not seen in 7+ days)
+            # "seen" = last_seen_at updated on every discovery scan hit
             stale_count = (
                 await conn.fetchval(
                     """
@@ -654,35 +662,49 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 or 0
             )
 
-            # Get recent ingest errors (last 24h) - scripts with ingest_error set recently
+            # Calculate stale ratio (handle total=0)
+            active_total = sum(c for s, c in status_counts.items() if s != "archived")
+            stale_ratio = stale_count / active_total if active_total > 0 else None
+
+            # Get recent ingest errors (last 24h)
+            # Use last_ingested_at for accurate timing
             recent_errors = (
                 await conn.fetchval(
                     """
                 SELECT COUNT(*)
                 FROM strategy_scripts
                 WHERE ingest_status = 'failed'
-                  AND updated_at > NOW() - INTERVAL '24 hours'
+                  AND last_ingested_at >= NOW() - INTERVAL '24 hours'
             """
                 )
                 or 0
             )
 
-            # Determine health status
+            # --- DB queries succeeded, safe to update gauges ---
+            set_pine_scripts_metrics(status_counts)
+            set_pine_pending_ingest(pending_ingest)
+
+            # Determine health status with notes
             status = "ok"
+            notes: list[str] = []
 
-            # Degraded if many stale scripts
-            if total > 0 and stale_count > total * 0.5:
+            # Degraded if stale ratio > 50%
+            if stale_ratio is not None and stale_ratio > 0.5:
                 status = "degraded"
+                notes.append(f"stale_ratio={stale_ratio:.1%} > 50%")
 
-            # Degraded if pending ingest is growing (> 50 scripts waiting)
+            # Degraded if pending ingest > 50
             if pending_ingest > 50:
                 status = "degraded"
+                notes.append(f"pending_ingest={pending_ingest} > 50")
 
-            # Error if recent ingest failures
-            if recent_errors > 0:
-                status = "degraded"
+            # Degraded/error if recent ingest failures
             if recent_errors > 10:
                 status = "error"
+                notes.append(f"recent_ingest_errors={recent_errors} > 10")
+            elif recent_errors > 0:
+                status = "degraded"
+                notes.append(f"recent_ingest_errors={recent_errors} > 0")
 
             return PineDiscoveryHealth(
                 status=status,
@@ -691,8 +713,10 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 total_scripts=total,
                 pending_ingest=pending_ingest,
                 stale_scripts=stale_count,
+                stale_ratio=round(stale_ratio, 3) if stale_ratio is not None else None,
                 last_discovery_at=last_seen,
                 recent_ingest_errors=recent_errors,
+                notes=notes,
             )
     except Exception as e:
         # Table might not exist yet
@@ -701,6 +725,7 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 status="ok",
                 details={"message": "Pine discovery not configured (table missing)"},
             )
+        # On DB error, don't update gauges (leave last-known-good)
         return PineDiscoveryHealth(status="error", error=str(e)[:200])
 
 
@@ -1173,7 +1198,11 @@ async def system_health_html(
     html += metric(
         "Pending Ingest", f"{pd.pending_ingest:,}", error=pd.pending_ingest > 50
     )
-    html += metric("Stale (7d+)", f"{pd.stale_scripts:,}", error=pd.stale_scripts > 0)
+    stale_pct = f"{pd.stale_ratio:.1%}" if pd.stale_ratio is not None else "-"
+    stale_error = pd.stale_ratio is not None and pd.stale_ratio > 0.5
+    html += metric(
+        "Stale (7d+)", f"{pd.stale_scripts:,} ({stale_pct})", error=stale_error
+    )
     html += metric(
         "Ingest Errors (24h)",
         str(pd.recent_ingest_errors),
@@ -1184,6 +1213,9 @@ async def system_health_html(
     if pd.scripts_by_ingest_status:
         for ingest_status, count in pd.scripts_by_ingest_status.items():
             html += metric(f"  {ingest_status}", str(count))
+    # Show notes if any
+    if pd.notes:
+        html += metric("Notes", "; ".join(pd.notes), error=True)
     if pd.error:
         html += metric("Error", pd.error, error=True)
     html += "</div>"
