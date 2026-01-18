@@ -143,6 +143,16 @@ class TuneHealth(ComponentHealth):
     avg_duration_ms: Optional[float] = None
 
 
+class PineReposHealth(ComponentHealth):
+    """Pine repository registry health."""
+
+    repos_total: int = 0
+    repos_enabled: int = 0
+    repos_pull_failed: int = 0
+    repos_stale: int = 0  # Not scanned in 7+ days
+    oldest_scan_age_hours: Optional[float] = None
+
+
 class PineDiscoveryHealth(ComponentHealth):
     """Pine script discovery health."""
 
@@ -181,6 +191,7 @@ class SystemHealthSnapshot(BaseModel):
     retention: RetentionHealth
     idempotency: IdempotencyHealth
     tunes: TuneHealth
+    pine_repos: PineReposHealth
     pine_discovery: PineDiscoveryHealth
 
     # Summary
@@ -585,6 +596,80 @@ async def _check_tunes() -> TuneHealth:
         return TuneHealth(status="error", error=str(e)[:200])
 
 
+async def _check_pine_repos() -> PineReposHealth:
+    """Check Pine repository registry health."""
+    from app.routers.metrics import set_pine_repos_metrics
+
+    if _db_pool is None:
+        return PineReposHealth(status="unknown", error="Pool not initialized")
+
+    try:
+        async with _db_pool.acquire() as conn:
+            # Get repo health stats
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE enabled = TRUE) as enabled,
+                    COUNT(*) FILTER (WHERE last_pull_ok = FALSE) as pull_failed,
+                    COUNT(*) FILTER (
+                        WHERE last_scan_at IS NOT NULL
+                        AND last_scan_at < NOW() - INTERVAL '7 days'
+                    ) as stale,
+                    EXTRACT(EPOCH FROM (NOW() - MIN(last_scan_at))) / 3600.0 as oldest_scan_hours
+                FROM pine_repos
+            """
+            )
+
+            if not stats or stats["total"] == 0:
+                return PineReposHealth(
+                    status="ok",
+                    repos_total=0,
+                    details={"message": "No repos registered yet"},
+                )
+
+            total = stats["total"] or 0
+            enabled = stats["enabled"] or 0
+            pull_failed = stats["pull_failed"] or 0
+            stale = stats["stale"] or 0
+            oldest_hours = stats["oldest_scan_hours"]
+
+            # Determine status
+            status = "ok"
+
+            # Degraded if any repos have pull failures
+            if pull_failed > 0:
+                status = "degraded"
+
+            # Degraded if stale repos > 50% of enabled
+            if enabled > 0 and stale > enabled / 2:
+                status = "degraded"
+
+            # Error if all enabled repos have pull failures
+            if enabled > 0 and pull_failed == enabled:
+                status = "error"
+
+            # Update Prometheus metrics on successful DB query
+            set_pine_repos_metrics(total, enabled, pull_failed, stale, oldest_hours)
+
+            return PineReposHealth(
+                status=status,
+                repos_total=total,
+                repos_enabled=enabled,
+                repos_pull_failed=pull_failed,
+                repos_stale=stale,
+                oldest_scan_age_hours=oldest_hours,
+            )
+    except Exception as e:
+        # Table might not exist yet
+        if "does not exist" in str(e):
+            return PineReposHealth(
+                status="ok",
+                details={"message": "Pine repos not configured (table missing)"},
+            )
+        return PineReposHealth(status="error", error=str(e)[:200])
+
+
 async def _check_pine_discovery() -> PineDiscoveryHealth:
     """Check Pine script discovery health and update Prometheus metrics.
 
@@ -849,6 +934,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         retention,
         idempotency,
         tunes,
+        pine_repos,
         pine_discovery,
     ) = await asyncio.gather(
         _check_database(),
@@ -860,6 +946,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         _check_retention(),
         _check_idempotency(),
         _check_tunes(),
+        _check_pine_repos(),
         _check_pine_discovery(),
         return_exceptions=True,
     )
@@ -881,10 +968,21 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     retention = safe_result(retention, RetentionHealth)
     idempotency = safe_result(idempotency, IdempotencyHealth)
     tunes = safe_result(tunes, TuneHealth)
+    pine_repos = safe_result(pine_repos, PineReposHealth)
     pine_discovery = safe_result(pine_discovery, PineDiscoveryHealth)
 
     # Calculate overall status (only include Redis if configured)
-    components = [db, qdrant, llm, sse, retention, idempotency, tunes, pine_discovery]
+    components = [
+        db,
+        qdrant,
+        llm,
+        sse,
+        retention,
+        idempotency,
+        tunes,
+        pine_repos,
+        pine_discovery,
+    ]
     if redis is not None:
         components.append(redis)
     statuses = [c.status for c in components]
@@ -922,6 +1020,13 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         )
     if tunes.status != "ok":
         issues.append(f"Tunes: {tunes.error or tunes.status}")
+    if pine_repos.status != "ok":
+        msg = (
+            f"{pine_repos.repos_pull_failed} pull failures"
+            if pine_repos.repos_pull_failed
+            else pine_repos.status
+        )
+        issues.append(f"Pine Repos: {pine_repos.error or msg}")
     if pine_discovery.status != "ok":
         issues.append(f"Pine Discovery: {pine_discovery.error or 'stale scripts'}")
 
@@ -938,6 +1043,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         retention=retention,
         idempotency=idempotency,
         tunes=tunes,
+        pine_repos=pine_repos,
         pine_discovery=pine_discovery,
         components_ok=ok_count,
         components_degraded=degraded_count,
@@ -1211,6 +1317,22 @@ async def system_health_html(
     html += metric("YouTube Last Fail", fmt_dt(ing.youtube_last_failure))
     html += metric("PDF Last OK", fmt_dt(ing.pdf_last_success))
     html += metric("Pine Last OK", fmt_dt(ing.pine_last_success))
+    html += "</div>"
+
+    # Pine Repos card
+    pr = snapshot.pine_repos
+    html += '<div class="card">'
+    html += card_header("Pine Repos", pr.status)
+    html += metric("Total Repos", str(pr.repos_total))
+    html += metric("Enabled", str(pr.repos_enabled))
+    html += metric(
+        "Pull Failures", str(pr.repos_pull_failed), error=pr.repos_pull_failed > 0
+    )
+    html += metric("Stale (7d+)", str(pr.repos_stale), error=pr.repos_stale > 0)
+    if pr.oldest_scan_age_hours:
+        html += metric("Oldest Scan", f"{pr.oldest_scan_age_hours:.1f} hrs")
+    if pr.error:
+        html += metric("Error", pr.error, error=True)
     html += "</div>"
 
     # Pine Discovery card

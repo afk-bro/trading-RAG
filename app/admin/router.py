@@ -21,6 +21,7 @@ from app.admin import backtests as backtests_router
 from app.admin import run_plans as run_plans_router
 from app.admin import jobs as jobs_router
 from app.admin import pine_discovery as pine_discovery_router
+from app.admin import pine_repos as pine_repos_router
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
@@ -74,6 +75,9 @@ router.include_router(jobs_router.router)
 # Pine Discovery
 router.include_router(pine_discovery_router.router)
 
+# Pine Repos (GitHub repository management)
+router.include_router(pine_repos_router.router)
+
 # =============================================================================
 # Shared Resources
 # =============================================================================
@@ -104,8 +108,10 @@ def set_db_pool(pool):
     run_plans_router.set_db_pool(pool)
     jobs_router.set_db_pool(pool)
     pine_discovery_router.set_db_pool(pool)
+    pine_repos_router.set_db_pool(pool)
 
 
 def set_qdrant_client(client):
     """Set the Qdrant client for admin routes that need it."""
     kb_trials_router.set_qdrant_client(client)
+    pine_repos_router.set_qdrant_client(client)

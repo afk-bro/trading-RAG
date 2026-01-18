@@ -110,6 +110,19 @@ The alerts expect these metrics to be exposed at `/metrics`:
 | `pine_ingest_chunks_total` | Counter | - | Chunks created from Pine scripts |
 | `pine_scripts_total` | Gauge | `status` | Scripts by discovery status |
 
+### Pine Repos Metrics (GitHub Registry)
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `pine_repos_total` | Gauge | - | Total registered GitHub repos |
+| `pine_repos_enabled` | Gauge | - | Enabled repos (scanned) |
+| `pine_repos_pull_failed` | Gauge | - | Repos with git pull failures |
+| `pine_repos_stale` | Gauge | - | Repos not scanned in 7+ days |
+| `pine_repos_oldest_scan_age_hours` | Gauge | - | Age of oldest repo scan |
+| `pine_repo_scan_runs_total` | Counter | `status` | Repo scan run completions |
+| `pine_repo_scan_duration_seconds` | Histogram | - | Repo scan duration |
+| `pine_repo_scripts_discovered_total` | Counter | `change_type` | Scripts discovered (new/updated/deleted) |
+
 ## Label Assumptions
 
 The rules assume these label conventions:
@@ -138,6 +151,10 @@ These are starting defaults - tune based on your traffic patterns:
 | `PineDiscoveryPendingHigh` | >50 for 15m | Lower if ingest should be immediate |
 | `PineDiscoveryStale` | >1h | Match your discovery cron schedule |
 | `PineIngestErrorsCritical` | >10/h | Lower if zero errors expected |
+| `PineRepoPullFailed` | >0 for 5m | Immediate action on any failure |
+| `PineRepoStale` | >0 for 1h | Match your repo scan schedule |
+| `PineRepoOldestScanAged` | >168h (7d) | Lower for active repos |
+| `PineRepoScanErrors` | >3/h | Lower for strict error handling |
 
 ## Loading Rules
 

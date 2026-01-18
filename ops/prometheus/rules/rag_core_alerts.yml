@@ -463,3 +463,77 @@ groups:
           summary: "Pine discovery failing (no success in {{ $value | humanizeDuration }})"
           description: "Discovery running but not succeeding. Check for DB errors or scan path issues."
           runbook_url: "docs/ops/runbooks.md#pine-discovery-failures"
+
+  # ===========================================================================
+  # Pine Repos Rules - GitHub repository scanning health
+  # ===========================================================================
+  - name: rag_core.pine_repos
+    rules:
+      - alert: RAGCore_PineRepoPullFailed
+        expr: pine_repos_pull_failed{job="rag-core"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: pine_repos
+        annotations:
+          summary: "Pine repo pull failures ({{ $value }} repos)"
+          description: "One or more GitHub repositories failed to fetch. Check clone paths and network."
+          runbook_url: "docs/ops/runbooks.md#pine-repo-pull-failed"
+
+      - alert: RAGCore_PineRepoAllPullFailed
+        expr: |
+          pine_repos_pull_failed{job="rag-core"}
+          == pine_repos_enabled{job="rag-core"}
+          and pine_repos_enabled{job="rag-core"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          subsystem: pine_repos
+        annotations:
+          summary: "All enabled Pine repos failing to pull"
+          description: "All {{ $value }} enabled repos have pull failures. Check network/GitHub access."
+          runbook_url: "docs/ops/runbooks.md#pine-repo-pull-failed"
+
+      - alert: RAGCore_PineRepoStale
+        expr: pine_repos_stale{job="rag-core"} > 0
+        for: 1h
+        labels:
+          severity: warning
+          subsystem: pine_repos
+        annotations:
+          summary: "Stale Pine repos ({{ $value }} not scanned in 7+ days)"
+          description: "Some repositories have not been scanned recently. Check scanning triggers."
+          runbook_url: "docs/ops/runbooks.md#pine-repo-stale"
+
+      - alert: RAGCore_PineRepoOldestScanAged
+        expr: pine_repos_oldest_scan_age_hours{job="rag-core"} > 168
+        for: 30m
+        labels:
+          severity: warning
+          subsystem: pine_repos
+        annotations:
+          summary: "Oldest Pine repo scan > 7 days ({{ $value | printf \"%.0f\" }}h)"
+          description: "Oldest repo scan is very old. Check if scanning is working."
+
+      - alert: RAGCore_PineRepoScanErrors
+        expr: increase(pine_repo_scan_runs_total{job="rag-core", status="error"}[1h]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: pine_repos
+        annotations:
+          summary: "Pine repo scan errors elevated ({{ $value }} in 1h)"
+          description: "Multiple repo scans failing. Check logs for specific errors."
+
+      - alert: RAGCore_PineRepoScanDurationHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(pine_repo_scan_duration_seconds_bucket{job="rag-core"}[1h]))
+          ) > 300
+        for: 30m
+        labels:
+          severity: info
+          subsystem: pine_repos
+        annotations:
+          summary: "Pine repo scan duration P95 > 5min ({{ $value | humanizeDuration }})"
+          description: "Repo scans taking longer than expected. May indicate large repos or slow network."

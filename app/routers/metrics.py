@@ -689,6 +689,106 @@ def record_pine_discovery_timestamp(success: bool = True):
         PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP.set(now)
 
 
+# =============================================================================
+# Pine Repos Metrics (GitHub repository registry)
+# =============================================================================
+
+PINE_REPOS_TOTAL = Gauge(
+    "pine_repos_total",
+    "Total registered Pine repositories",
+)
+
+PINE_REPOS_ENABLED = Gauge(
+    "pine_repos_enabled",
+    "Enabled Pine repositories",
+)
+
+PINE_REPOS_PULL_FAILED = Gauge(
+    "pine_repos_pull_failed",
+    "Pine repositories with pull failures",
+)
+
+PINE_REPOS_STALE = Gauge(
+    "pine_repos_stale",
+    "Pine repositories not scanned in 7+ days",
+)
+
+PINE_REPOS_OLDEST_SCAN_AGE_HOURS = Gauge(
+    "pine_repos_oldest_scan_age_hours",
+    "Age of oldest Pine repo scan in hours",
+)
+
+PINE_REPO_SCAN_RUNS = Counter(
+    "pine_repo_scan_runs_total",
+    "Total Pine repo scan runs",
+    ["status"],  # success, partial, error
+)
+
+PINE_REPO_SCAN_DURATION = Histogram(
+    "pine_repo_scan_duration_seconds",
+    "Pine repo scan duration in seconds",
+    buckets=[1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0],
+)
+
+PINE_REPO_SCRIPTS_DISCOVERED = Counter(
+    "pine_repo_scripts_discovered_total",
+    "Total Pine scripts discovered from repos",
+    ["change_type"],  # new, updated, deleted
+)
+
+
+def set_pine_repos_metrics(
+    total: int,
+    enabled: int,
+    pull_failed: int,
+    stale: int,
+    oldest_scan_age_hours: float | None,
+):
+    """Set Pine repos gauge metrics.
+
+    Called by system_health._check_pine_repos() during health checks.
+
+    Args:
+        total: Total registered repos
+        enabled: Enabled repos
+        pull_failed: Repos with pull failures
+        stale: Repos not scanned in 7+ days
+        oldest_scan_age_hours: Age of oldest scan in hours
+    """
+    PINE_REPOS_TOTAL.set(total)
+    PINE_REPOS_ENABLED.set(enabled)
+    PINE_REPOS_PULL_FAILED.set(pull_failed)
+    PINE_REPOS_STALE.set(stale)
+    PINE_REPOS_OLDEST_SCAN_AGE_HOURS.set(oldest_scan_age_hours or 0)
+
+
+def record_pine_repo_scan(
+    status: str,
+    duration: float,
+    scripts_new: int = 0,
+    scripts_updated: int = 0,
+    scripts_deleted: int = 0,
+):
+    """Record Pine repo scan run metrics.
+
+    Args:
+        status: Run status (success, partial, error)
+        duration: Run duration in seconds
+        scripts_new: New scripts discovered
+        scripts_updated: Scripts updated
+        scripts_deleted: Scripts deleted
+    """
+    PINE_REPO_SCAN_RUNS.labels(status=status).inc()
+    PINE_REPO_SCAN_DURATION.observe(duration)
+
+    if scripts_new > 0:
+        PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="new").inc(scripts_new)
+    if scripts_updated > 0:
+        PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="updated").inc(scripts_updated)
+    if scripts_deleted > 0:
+        PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="deleted").inc(scripts_deleted)
+
+
 @router.get("/metrics", include_in_schema=False)
 async def metrics():
     """Prometheus metrics endpoint.

@@ -37,11 +37,29 @@ class StrategyScript:
     last_ingested_sha: Optional[str] = None
     ingest_status: Optional[str] = None  # 'ok', 'error', or None
     ingest_error: Optional[str] = None
+    # GitHub tracking fields
+    repo_id: Optional[UUID] = None
+    scan_commit: Optional[str] = None
+    source_url: Optional[str] = None
+    deleted_at: Optional[datetime] = None
 
-    def canonical_url(self) -> str:
-        """Derive canonical URL from source type and path."""
+    def canonical_url(self, repo_slug: Optional[str] = None) -> str:
+        """
+        Derive canonical URL from source type and path.
+
+        For GitHub sources, includes repo_slug in the URL.
+
+        Args:
+            repo_slug: Repository slug for GitHub sources (owner/repo)
+
+        Returns:
+            Canonical URL like pine://local/path or pine://github/owner/repo/path
+        """
         normalized = self.rel_path.replace("\\", "/").lstrip("/")
         normalized = "/".join(p for p in normalized.split("/") if p not in (".", ".."))
+
+        if self.source_type == "github" and repo_slug:
+            return f"pine://github/{repo_slug}/{normalized}"
         return f"pine://{self.source_type}/{normalized}"
 
     def needs_ingest(self) -> bool:
@@ -603,6 +621,12 @@ class StrategyScriptRepository:
         ingest_status = row.get("ingest_status")
         ingest_error = row.get("ingest_error")
 
+        # Handle optional GitHub fields (may not exist in older schemas)
+        repo_id = row.get("repo_id")
+        scan_commit = row.get("scan_commit")
+        source_url = row.get("source_url")
+        deleted_at = row.get("deleted_at")
+
         return StrategyScript(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -626,4 +650,214 @@ class StrategyScriptRepository:
             last_ingested_sha=last_ingested_sha,
             ingest_status=ingest_status,
             ingest_error=ingest_error,
+            repo_id=repo_id,
+            scan_commit=scan_commit,
+            source_url=source_url,
+            deleted_at=deleted_at,
         )
+
+    async def mark_deleted(
+        self,
+        script_id: UUID,
+        scan_commit: Optional[str] = None,
+    ) -> bool:
+        """
+        Mark a script as deleted (soft delete).
+
+        Sets deleted_at timestamp and optionally updates scan_commit.
+
+        Args:
+            script_id: Script ID to mark deleted
+            scan_commit: Commit SHA when deletion was detected
+
+        Returns:
+            True if script was found and updated, False otherwise
+        """
+        query = """
+            UPDATE strategy_scripts SET
+                deleted_at = $1,
+                scan_commit = COALESCE($2, scan_commit),
+                status = 'archived'
+            WHERE id = $3 AND deleted_at IS NULL
+        """
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                query,
+                datetime.now(timezone.utc),
+                scan_commit,
+                script_id,
+            )
+            count = int(result.split()[-1]) if result else 0
+            return count > 0
+
+    async def get_by_repo(
+        self,
+        repo_id: UUID,
+        include_deleted: bool = False,
+    ) -> list[StrategyScript]:
+        """
+        Get all scripts for a repository.
+
+        Args:
+            repo_id: Repository ID
+            include_deleted: Include soft-deleted scripts
+
+        Returns:
+            List of scripts for the repo
+        """
+        where_clause = "repo_id = $1"
+        if not include_deleted:
+            where_clause += " AND deleted_at IS NULL"
+
+        query = f"""
+            SELECT id, workspace_id, rel_path, source_type, sha256,
+                   pine_version, script_type, title, status,
+                   spec_json, spec_generated_at, lint_json,
+                   strategy_id, published_at, last_seen_at,
+                   created_at, updated_at,
+                   doc_id, last_ingested_at, last_ingested_sha,
+                   ingest_status, ingest_error,
+                   repo_id, scan_commit, source_url, deleted_at
+            FROM strategy_scripts
+            WHERE {where_clause}
+            ORDER BY rel_path
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, repo_id)
+            return [self._row_to_model(row) for row in rows]
+
+    async def upsert_github_script(
+        self,
+        script: StrategyScript,
+        repo_id: UUID,
+        scan_commit: str,
+        source_url: str,
+    ) -> UpsertResult:
+        """
+        Upsert a GitHub-sourced script with additional tracking fields.
+
+        Uses the same fetch-diff-upsert pattern as upsert(), but includes
+        repo_id, scan_commit, and source_url.
+
+        Args:
+            script: Script to upsert (source_type should be 'github')
+            repo_id: Repository ID
+            scan_commit: Commit SHA from scan
+            source_url: Commit-specific GitHub blob URL
+
+        Returns:
+            UpsertResult with script, is_new flag, and changed_fields
+        """
+        # Set GitHub fields on script
+        script.repo_id = repo_id
+        script.scan_commit = scan_commit
+        script.source_url = source_url
+        script.deleted_at = None  # Clear deleted_at on re-discovery
+
+        existing = await self.get_by_path(
+            script.workspace_id, script.source_type, script.rel_path
+        )
+
+        if existing is None:
+            return await self._insert_github(script)
+        else:
+            changed_fields = _compute_changed_fields(existing, script)
+            # Check if scan_commit or source_url changed
+            if existing.scan_commit != scan_commit:
+                changed_fields.append("scan_commit")
+            if existing.source_url != source_url:
+                changed_fields.append("source_url")
+            if existing.deleted_at is not None:
+                changed_fields.append("deleted_at")
+
+            if changed_fields:
+                return await self._update_github(existing.id, script, changed_fields)
+            else:
+                await self._touch_last_seen(existing.id)
+                existing.last_seen_at = datetime.now(timezone.utc)
+                return UpsertResult(script=existing, is_new=False, changed_fields=[])
+
+    async def _insert_github(self, script: StrategyScript) -> UpsertResult:
+        """Insert a new GitHub-sourced script."""
+        import json
+
+        query = """
+            INSERT INTO strategy_scripts (
+                id, workspace_id, rel_path, source_type, sha256,
+                pine_version, script_type, title, status,
+                spec_json, spec_generated_at, lint_json,
+                strategy_id, published_at, last_seen_at,
+                repo_id, scan_commit, source_url
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                $16, $17, $18
+            )
+            RETURNING id, created_at, updated_at, last_seen_at
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                script.id,
+                script.workspace_id,
+                script.rel_path,
+                script.source_type,
+                script.sha256,
+                script.pine_version,
+                script.script_type,
+                script.title,
+                script.status,
+                json.dumps(script.spec_json) if script.spec_json else None,
+                script.spec_generated_at,
+                json.dumps(script.lint_json) if script.lint_json else None,
+                script.strategy_id,
+                script.published_at,
+                datetime.now(timezone.utc),
+                script.repo_id,
+                script.scan_commit,
+                script.source_url,
+            )
+            script.id = row["id"]
+            script.created_at = row["created_at"]
+            script.updated_at = row["updated_at"]
+            script.last_seen_at = row["last_seen_at"]
+
+        return UpsertResult(script=script, is_new=True, changed_fields=[])
+
+    async def _update_github(
+        self, script_id: UUID, script: StrategyScript, changed_fields: list[str]
+    ) -> UpsertResult:
+        """Update an existing GitHub-sourced script."""
+        query = """
+            UPDATE strategy_scripts SET
+                sha256 = $1,
+                pine_version = $2,
+                script_type = $3,
+                title = $4,
+                last_seen_at = $5,
+                repo_id = $6,
+                scan_commit = $7,
+                source_url = $8,
+                deleted_at = NULL
+            WHERE id = $9
+            RETURNING id, created_at, updated_at, last_seen_at
+        """
+        now = datetime.now(timezone.utc)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                script.sha256,
+                script.pine_version,
+                script.script_type,
+                script.title,
+                now,
+                script.repo_id,
+                script.scan_commit,
+                script.source_url,
+                script_id,
+            )
+            script.id = row["id"]
+            script.created_at = row["created_at"]
+            script.updated_at = row["updated_at"]
+            script.last_seen_at = row["last_seen_at"]
+
+        return UpsertResult(script=script, is_new=False, changed_fields=changed_fields)
