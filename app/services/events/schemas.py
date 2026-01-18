@@ -17,6 +17,10 @@ EventTopic = Literal[
     "backtest.tune.progress",
     "backtest.tune.completed",
     "backtest.tune.failed",
+    # Pine script discovery events
+    "pine.script.discovered",
+    "pine.script.updated",
+    "pine.script.spec_generated",
 ]
 
 # Topic categories for filtering
@@ -26,6 +30,11 @@ BACKTEST_TOPICS = {
     "backtest.tune.progress",
     "backtest.tune.completed",
     "backtest.tune.failed",
+}
+PINE_TOPICS = {
+    "pine.script.discovered",
+    "pine.script.updated",
+    "pine.script.spec_generated",
 }
 
 
@@ -206,5 +215,78 @@ def tune_failed(
         payload={
             "tune_id": str(tune_id),
             "error": error,
+        },
+    )
+
+
+# Pine script discovery events
+
+
+def pine_script_discovered(
+    event_id: str,
+    workspace_id: UUID,
+    script_id: UUID,
+    rel_path: str,
+    sha256: str,
+    script_type: str,
+    title: str | None = None,
+    status: str = "discovered",
+) -> AdminEvent:
+    """Create a pine.script.discovered event."""
+    return AdminEvent(
+        id=event_id,
+        topic="pine.script.discovered",
+        workspace_id=workspace_id,
+        payload={
+            "script_id": str(script_id),
+            "rel_path": rel_path,
+            "sha256": sha256,
+            "script_type": script_type,
+            "title": title,
+            "status": status,
+        },
+    )
+
+
+def pine_script_updated(
+    event_id: str,
+    workspace_id: UUID,
+    script_id: UUID,
+    rel_path: str,
+    sha256: str,
+    status: str,
+    changes: list[str],
+) -> AdminEvent:
+    """Create a pine.script.updated event."""
+    return AdminEvent(
+        id=event_id,
+        topic="pine.script.updated",
+        workspace_id=workspace_id,
+        payload={
+            "script_id": str(script_id),
+            "rel_path": rel_path,
+            "sha256": sha256,
+            "status": status,
+            "changes": changes,
+        },
+    )
+
+
+def pine_script_spec_generated(
+    event_id: str,
+    workspace_id: UUID,
+    script_id: UUID,
+    rel_path: str,
+    sweepable_count: int,
+) -> AdminEvent:
+    """Create a pine.script.spec_generated event."""
+    return AdminEvent(
+        id=event_id,
+        topic="pine.script.spec_generated",
+        workspace_id=workspace_id,
+        payload={
+            "script_id": str(script_id),
+            "rel_path": rel_path,
+            "sweepable_count": sweepable_count,
         },
     )

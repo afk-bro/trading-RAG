@@ -20,6 +20,7 @@ from app.admin import kb_trials as kb_trials_router
 from app.admin import backtests as backtests_router
 from app.admin import run_plans as run_plans_router
 from app.admin import jobs as jobs_router
+from app.admin import pine_discovery as pine_discovery_router
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
@@ -70,6 +71,9 @@ router.include_router(run_plans_router.router)
 # Jobs
 router.include_router(jobs_router.router)
 
+# Pine Discovery
+router.include_router(pine_discovery_router.router)
+
 # =============================================================================
 # Shared Resources
 # =============================================================================
@@ -99,6 +103,7 @@ def set_db_pool(pool):
     backtests_router.set_db_pool(pool)
     run_plans_router.set_db_pool(pool)
     jobs_router.set_db_pool(pool)
+    pine_discovery_router.set_db_pool(pool)
 
 
 def set_qdrant_client(client):

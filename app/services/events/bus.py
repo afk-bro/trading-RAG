@@ -14,7 +14,12 @@ from uuid import UUID
 
 import structlog
 
-from app.services.events.schemas import AdminEvent, COVERAGE_TOPICS, BACKTEST_TOPICS
+from app.services.events.schemas import (
+    AdminEvent,
+    BACKTEST_TOPICS,
+    COVERAGE_TOPICS,
+    PINE_TOPICS,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -99,6 +104,8 @@ def _expand_topics(topics: Set[str]) -> Set[str]:
             result.update(COVERAGE_TOPICS)
         elif topic == "backtests":
             result.update(BACKTEST_TOPICS)
+        elif topic == "pine":
+            result.update(PINE_TOPICS)
         else:
             result.add(topic)
     return result

@@ -1,0 +1,383 @@
+"""Repository for strategy_scripts table operations."""
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional
+from uuid import UUID
+
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class StrategyScript:
+    """Model for strategy_scripts table row."""
+
+    id: UUID
+    workspace_id: UUID
+    rel_path: str
+    source_type: str
+    sha256: str
+    pine_version: Optional[str] = None
+    script_type: Optional[str] = None
+    title: Optional[str] = None
+    status: str = "discovered"
+    spec_json: Optional[dict] = None
+    spec_generated_at: Optional[datetime] = None
+    lint_json: Optional[dict] = None
+    strategy_id: Optional[UUID] = None
+    published_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def canonical_url(self) -> str:
+        """Derive canonical URL from source type and path."""
+        normalized = self.rel_path.replace("\\", "/").lstrip("/")
+        normalized = "/".join(p for p in normalized.split("/") if p not in (".", ".."))
+        return f"pine://{self.source_type}/{normalized}"
+
+
+@dataclass
+class UpsertResult:
+    """Result of an upsert operation."""
+
+    script: StrategyScript
+    is_new: bool
+    changed_fields: list[str] = field(default_factory=list)
+
+
+# Fields to compare for change detection
+CHANGE_DETECT_FIELDS = [
+    "sha256",
+    "pine_version",
+    "script_type",
+    "title",
+]
+
+
+def _compute_changed_fields(
+    existing: StrategyScript, incoming: StrategyScript
+) -> list[str]:
+    """Compute which fields changed between existing and incoming."""
+    changes = []
+    for field_name in CHANGE_DETECT_FIELDS:
+        old_val = getattr(existing, field_name)
+        new_val = getattr(incoming, field_name)
+        if old_val != new_val:
+            changes.append(field_name)
+    return changes
+
+
+class StrategyScriptRepository:
+    """Repository for strategy_scripts table."""
+
+    def __init__(self, pool):
+        """Initialize with connection pool."""
+        self._pool = pool
+
+    async def get_by_path(
+        self,
+        workspace_id: UUID,
+        source_type: str,
+        rel_path: str,
+    ) -> Optional[StrategyScript]:
+        """Get script by unique path key."""
+        query = """
+            SELECT id, workspace_id, rel_path, source_type, sha256,
+                   pine_version, script_type, title, status,
+                   spec_json, spec_generated_at, lint_json,
+                   strategy_id, published_at, last_seen_at,
+                   created_at, updated_at
+            FROM strategy_scripts
+            WHERE workspace_id = $1
+              AND source_type = $2
+              AND rel_path = $3
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(query, workspace_id, source_type, rel_path)
+            if row:
+                return self._row_to_model(row)
+        return None
+
+    async def get_by_id(self, script_id: UUID) -> Optional[StrategyScript]:
+        """Get script by ID."""
+        query = """
+            SELECT id, workspace_id, rel_path, source_type, sha256,
+                   pine_version, script_type, title, status,
+                   spec_json, spec_generated_at, lint_json,
+                   strategy_id, published_at, last_seen_at,
+                   created_at, updated_at
+            FROM strategy_scripts
+            WHERE id = $1
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(query, script_id)
+            if row:
+                return self._row_to_model(row)
+        return None
+
+    async def upsert(self, script: StrategyScript) -> UpsertResult:
+        """
+        Upsert a script using Pattern A (fetch-diff-upsert).
+
+        1. Fetch existing by (workspace_id, source_type, rel_path)
+        2. Compute changed_fields in Python
+        3. If new: INSERT
+        4. If changed: UPDATE only changed fields + updated_at
+        5. If unchanged: UPDATE last_seen_at only (no updated_at churn)
+
+        Returns (script, is_new, changed_fields)
+        """
+        existing = await self.get_by_path(
+            script.workspace_id, script.source_type, script.rel_path
+        )
+
+        if existing is None:
+            # New script - INSERT
+            return await self._insert(script)
+        else:
+            # Existing script - compare and update
+            changed_fields = _compute_changed_fields(existing, script)
+            if changed_fields:
+                # Fields changed - UPDATE all fields + updated_at
+                return await self._update(existing.id, script, changed_fields)
+            else:
+                # No changes - just update last_seen_at
+                await self._touch_last_seen(existing.id)
+                existing.last_seen_at = datetime.now(timezone.utc)
+                return UpsertResult(script=existing, is_new=False, changed_fields=[])
+
+    async def _insert(self, script: StrategyScript) -> UpsertResult:
+        """Insert a new script."""
+        import json
+
+        query = """
+            INSERT INTO strategy_scripts (
+                id, workspace_id, rel_path, source_type, sha256,
+                pine_version, script_type, title, status,
+                spec_json, spec_generated_at, lint_json,
+                strategy_id, published_at, last_seen_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+            )
+            RETURNING id, created_at, updated_at, last_seen_at
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                script.id,
+                script.workspace_id,
+                script.rel_path,
+                script.source_type,
+                script.sha256,
+                script.pine_version,
+                script.script_type,
+                script.title,
+                script.status,
+                json.dumps(script.spec_json) if script.spec_json else None,
+                script.spec_generated_at,
+                json.dumps(script.lint_json) if script.lint_json else None,
+                script.strategy_id,
+                script.published_at,
+                datetime.now(timezone.utc),
+            )
+            script.id = row["id"]
+            script.created_at = row["created_at"]
+            script.updated_at = row["updated_at"]
+            script.last_seen_at = row["last_seen_at"]
+
+        return UpsertResult(script=script, is_new=True, changed_fields=[])
+
+    async def _update(
+        self, script_id: UUID, script: StrategyScript, changed_fields: list[str]
+    ) -> UpsertResult:
+        """Update an existing script with changed fields."""
+        query = """
+            UPDATE strategy_scripts SET
+                sha256 = $1,
+                pine_version = $2,
+                script_type = $3,
+                title = $4,
+                last_seen_at = $5
+            WHERE id = $6
+            RETURNING id, created_at, updated_at, last_seen_at
+        """
+        now = datetime.now(timezone.utc)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                script.sha256,
+                script.pine_version,
+                script.script_type,
+                script.title,
+                now,
+                script_id,
+            )
+            script.id = row["id"]
+            script.created_at = row["created_at"]
+            script.updated_at = row["updated_at"]
+            script.last_seen_at = row["last_seen_at"]
+
+        return UpsertResult(script=script, is_new=False, changed_fields=changed_fields)
+
+    async def _touch_last_seen(self, script_id: UUID) -> None:
+        """Update only last_seen_at (no updated_at churn)."""
+        # Use raw SQL to avoid trigger updating updated_at
+        query = """
+            UPDATE strategy_scripts
+            SET last_seen_at = $1
+            WHERE id = $2
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(query, datetime.now(timezone.utc), script_id)
+
+    async def update_spec(
+        self,
+        script_id: UUID,
+        spec_json: dict,
+        lint_json: Optional[dict] = None,
+    ) -> Optional[StrategyScript]:
+        """
+        Update spec after generation.
+
+        Sets:
+        - status = 'spec_generated'
+        - spec_json = <spec>
+        - spec_generated_at = NOW()
+        - lint_json = <optional>
+        """
+        import json
+
+        query = """
+            UPDATE strategy_scripts SET
+                status = 'spec_generated',
+                spec_json = $1,
+                spec_generated_at = $2,
+                lint_json = $3
+            WHERE id = $4
+            RETURNING id, workspace_id, rel_path, source_type, sha256,
+                      pine_version, script_type, title, status,
+                      spec_json, spec_generated_at, lint_json,
+                      strategy_id, published_at, last_seen_at,
+                      created_at, updated_at
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                json.dumps(spec_json),
+                datetime.now(timezone.utc),
+                json.dumps(lint_json) if lint_json else None,
+                script_id,
+            )
+            if row:
+                return self._row_to_model(row)
+        return None
+
+    async def update_last_seen_batch(self, script_ids: list[UUID]) -> int:
+        """Update last_seen_at for multiple scripts."""
+        if not script_ids:
+            return 0
+
+        query = """
+            UPDATE strategy_scripts
+            SET last_seen_at = $1
+            WHERE id = ANY($2)
+        """
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(query, datetime.now(timezone.utc), script_ids)
+            # Parse "UPDATE N" to get count
+            count = int(result.split()[-1]) if result else 0
+            return count
+
+    async def list_by_status(
+        self,
+        workspace_id: UUID,
+        status: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[StrategyScript]:
+        """List scripts by status."""
+        query = """
+            SELECT id, workspace_id, rel_path, source_type, sha256,
+                   pine_version, script_type, title, status,
+                   spec_json, spec_generated_at, lint_json,
+                   strategy_id, published_at, last_seen_at,
+                   created_at, updated_at
+            FROM strategy_scripts
+            WHERE workspace_id = $1
+              AND status = $2
+            ORDER BY last_seen_at DESC
+            LIMIT $3 OFFSET $4
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, workspace_id, status, limit, offset)
+            return [self._row_to_model(row) for row in rows]
+
+    async def list_active(
+        self,
+        workspace_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[StrategyScript]:
+        """List non-archived scripts."""
+        query = """
+            SELECT id, workspace_id, rel_path, source_type, sha256,
+                   pine_version, script_type, title, status,
+                   spec_json, spec_generated_at, lint_json,
+                   strategy_id, published_at, last_seen_at,
+                   created_at, updated_at
+            FROM strategy_scripts
+            WHERE workspace_id = $1
+              AND status != 'archived'
+            ORDER BY last_seen_at DESC
+            LIMIT $2 OFFSET $3
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, workspace_id, limit, offset)
+            return [self._row_to_model(row) for row in rows]
+
+    async def count_by_status(self, workspace_id: UUID) -> dict[str, int]:
+        """Get counts per status."""
+        query = """
+            SELECT status, COUNT(*) as count
+            FROM strategy_scripts
+            WHERE workspace_id = $1
+            GROUP BY status
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, workspace_id)
+            return {row["status"]: row["count"] for row in rows}
+
+    def _row_to_model(self, row) -> StrategyScript:
+        """Convert DB row to model."""
+        import json
+
+        spec_json = row["spec_json"]
+        if isinstance(spec_json, str):
+            spec_json = json.loads(spec_json)
+
+        lint_json = row["lint_json"]
+        if isinstance(lint_json, str):
+            lint_json = json.loads(lint_json)
+
+        return StrategyScript(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            rel_path=row["rel_path"],
+            source_type=row["source_type"],
+            sha256=row["sha256"],
+            pine_version=row["pine_version"],
+            script_type=row["script_type"],
+            title=row["title"],
+            status=row["status"],
+            spec_json=spec_json,
+            spec_generated_at=row["spec_generated_at"],
+            lint_json=lint_json,
+            strategy_id=row["strategy_id"],
+            published_at=row["published_at"],
+            last_seen_at=row["last_seen_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
