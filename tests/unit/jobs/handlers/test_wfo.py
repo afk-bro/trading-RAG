@@ -144,11 +144,13 @@ class TestHandleWfo:
     def mock_ohlcv_repo(self):
         """Create mock OHLCV repository."""
         repo = MagicMock()
-        repo.get_available_range = AsyncMock(return_value={
-            "min_ts": datetime(2023, 1, 1, tzinfo=timezone.utc),
-            "max_ts": datetime(2024, 12, 31, tzinfo=timezone.utc),
-            "row_count": 17520,
-        })
+        repo.get_available_range = AsyncMock(
+            return_value={
+                "min_ts": datetime(2023, 1, 1, tzinfo=timezone.utc),
+                "max_ts": datetime(2024, 12, 31, tzinfo=timezone.utc),
+                "row_count": 17520,
+            }
+        )
         return repo
 
     @pytest.fixture
@@ -185,9 +187,7 @@ class TestHandleWfo:
         )
 
     @pytest.mark.asyncio
-    async def test_missing_workspace_id_raises(
-        self, mock_pool, mock_events_repo
-    ):
+    async def test_missing_workspace_id_raises(self, mock_pool, mock_events_repo):
         """Should raise ValueError if workspace_id missing."""
         job = Job(
             id=uuid4(),
@@ -201,9 +201,7 @@ class TestHandleWfo:
             await handle_wfo(job, ctx)
 
     @pytest.mark.asyncio
-    async def test_missing_wfo_id_raises(
-        self, mock_pool, mock_events_repo
-    ):
+    async def test_missing_wfo_id_raises(self, mock_pool, mock_events_repo):
         """Should raise ValueError if wfo_id missing."""
         job = Job(
             id=uuid4(),
@@ -217,9 +215,7 @@ class TestHandleWfo:
             await handle_wfo(job, ctx)
 
     @pytest.mark.asyncio
-    async def test_missing_data_source_raises(
-        self, mock_pool, mock_events_repo
-    ):
+    async def test_missing_data_source_raises(self, mock_pool, mock_events_repo):
         """Should raise ValueError if data_source missing."""
         job = Job(
             id=uuid4(),
@@ -249,11 +245,13 @@ class TestHandleWfo:
     ):
         """Should enqueue child tune jobs for each fold."""
         # Use shorter data range to reduce fold count
-        mock_ohlcv_repo.get_available_range = AsyncMock(return_value={
-            "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),  # ~180 days
-            "row_count": 4320,
-        })
+        mock_ohlcv_repo.get_available_range = AsyncMock(
+            return_value={
+                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),  # ~180 days
+                "row_count": 4320,
+            }
+        )
 
         # Setup: Return succeeded jobs when polling (3 folds)
         succeeded_jobs = [
@@ -268,6 +266,7 @@ class TestHandleWfo:
             return Job(
                 id=uuid4(), type=JobType.TUNE, status=JobStatus.PENDING, payload={}
             )
+
         mock_job_repo.enqueue = AsyncMock(side_effect=create_enqueued_job)
 
         ctx = {"pool": mock_pool, "events_repo": mock_events_repo}
@@ -298,11 +297,13 @@ class TestHandleWfo:
     ):
         """Should return failed status when all folds fail."""
         # Use shorter data range to reduce fold count
-        mock_ohlcv_repo.get_available_range = AsyncMock(return_value={
-            "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),
-            "row_count": 4320,
-        })
+        mock_ohlcv_repo.get_available_range = AsyncMock(
+            return_value={
+                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),
+                "row_count": 4320,
+            }
+        )
 
         # Setup: Return failed jobs when polling
         failed_jobs = [
@@ -316,6 +317,7 @@ class TestHandleWfo:
             return Job(
                 id=uuid4(), type=JobType.TUNE, status=JobStatus.PENDING, payload={}
             )
+
         mock_job_repo.enqueue = AsyncMock(side_effect=create_enqueued_job)
 
         ctx = {"pool": mock_pool, "events_repo": mock_events_repo}
@@ -343,11 +345,13 @@ class TestHandleWfo:
     ):
         """Should return partial status when some folds fail and allow_partial=True."""
         # Use shorter data range to reduce fold count
-        mock_ohlcv_repo.get_available_range = AsyncMock(return_value={
-            "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),
-            "row_count": 4320,
-        })
+        mock_ohlcv_repo.get_available_range = AsyncMock(
+            return_value={
+                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),
+                "row_count": 4320,
+            }
+        )
 
         # Create job with allow_partial=True
         job = Job(
@@ -386,6 +390,7 @@ class TestHandleWfo:
             return Job(
                 id=uuid4(), type=JobType.TUNE, status=JobStatus.PENDING, payload={}
             )
+
         mock_job_repo.enqueue = AsyncMock(side_effect=create_enqueued_job)
 
         ctx = {"pool": mock_pool, "events_repo": mock_events_repo}
@@ -412,11 +417,13 @@ class TestHandleWfo:
     ):
         """Should raise InsufficientDataError when data range too short."""
         # Setup: Return short data range
-        mock_ohlcv_repo.get_available_range = AsyncMock(return_value={
-            "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "max_ts": datetime(2024, 3, 1, tzinfo=timezone.utc),  # Only 60 days
-            "row_count": 1440,
-        })
+        mock_ohlcv_repo.get_available_range = AsyncMock(
+            return_value={
+                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                "max_ts": datetime(2024, 3, 1, tzinfo=timezone.utc),  # Only 60 days
+                "row_count": 1440,
+            }
+        )
 
         job = Job(
             id=uuid4(),
@@ -444,9 +451,7 @@ class TestHandleWfo:
 
         with patch(
             "app.jobs.handlers.wfo.OHLCVRepository", return_value=mock_ohlcv_repo
-        ), patch(
-            "app.jobs.handlers.wfo.JobRepository"
-        ), patch(
+        ), patch("app.jobs.handlers.wfo.JobRepository"), patch(
             "app.jobs.handlers.wfo.TuneRepository"
         ):
             from app.services.backtest.wfo import InsufficientDataError

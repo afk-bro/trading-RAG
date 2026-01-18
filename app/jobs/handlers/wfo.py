@@ -176,8 +176,7 @@ async def _wait_for_children(
     canceled = [j for j in children if j.status == JobStatus.CANCELED]
     # Treat pending/running as failed on timeout
     timed_out = [
-        j for j in children
-        if j.status in (JobStatus.PENDING, JobStatus.RUNNING)
+        j for j in children if j.status in (JobStatus.PENDING, JobStatus.RUNNING)
     ]
     return succeeded, failed + timed_out, canceled
 
@@ -434,9 +433,7 @@ async def handle_wfo(job: Job, ctx: dict[str, Any]) -> dict[str, Any]:
             warnings.append("All folds failed")
         else:
             status = "failed"
-            warnings.append(
-                f"{folds_failed} folds failed and allow_partial=False"
-            )
+            warnings.append(f"{folds_failed} folds failed and allow_partial=False")
     else:
         status = "completed"
 

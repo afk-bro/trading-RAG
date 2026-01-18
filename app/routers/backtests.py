@@ -1426,7 +1426,9 @@ class WFOConfigModel(BaseModel):
     train_days: int = Field(..., ge=1, description="Days in training window")
     test_days: int = Field(..., ge=1, description="Days in test window")
     step_days: int = Field(..., ge=1, description="Days to step forward between folds")
-    min_folds: int = Field(default=3, ge=1, description="Minimum number of folds required")
+    min_folds: int = Field(
+        default=3, ge=1, description="Minimum number of folds required"
+    )
     leaderboard_top_k: int = Field(
         default=10, ge=1, description="Top params per fold to track"
     )
@@ -1537,8 +1539,12 @@ async def create_wfo(
     test_days: int = Form(default=30, ge=1, description="Days in test window"),
     step_days: int = Form(default=30, ge=1, description="Days to step between folds"),
     min_folds: int = Form(default=3, ge=1, description="Minimum folds required"),
-    leaderboard_top_k: int = Form(default=10, ge=1, description="Top-K params per fold"),
-    allow_partial: bool = Form(default=False, description="Continue if some folds fail"),
+    leaderboard_top_k: int = Form(
+        default=10, ge=1, description="Top-K params per fold"
+    ),
+    allow_partial: bool = Form(
+        default=False, description="Continue if some folds fail"
+    ),
     param_space: Optional[str] = Form(
         default=None, description="Parameter space JSON (auto-derived if omitted)"
     ),
@@ -1728,7 +1734,9 @@ async def get_wfo(wfo_id: UUID):
             pct_top_k=bc.get("pct_top_k", 0),
             fold_count=bc.get("fold_count", 0),
             total_folds=bc.get("total_folds", 0),
-            coverage=bc.get("coverage", bc.get("fold_count", 0) / max(bc.get("total_folds", 1), 1)),
+            coverage=bc.get(
+                "coverage", bc.get("fold_count", 0) / max(bc.get("total_folds", 1), 1)
+            ),
             regime_tags=bc.get("regime_tags", []),
         )
 
