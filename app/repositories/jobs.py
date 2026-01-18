@@ -221,6 +221,122 @@ class JobRepository:
             logger.warning("stale_jobs_reaped", count=count)
         return count
 
+    async def list_jobs(
+        self,
+        status: Optional[str] = None,
+        job_type: Optional[str] = None,
+        workspace_id: Optional[UUID] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Job], int]:
+        """List jobs with filters and pagination.
+
+        Args:
+            status: Filter by status (pending, running, succeeded, failed, canceled)
+            job_type: Filter by job type (data_sync, data_fetch, tune, wfo)
+            workspace_id: Filter by workspace
+            limit: Max results (1-100)
+            offset: Pagination offset
+
+        Returns:
+            Tuple of (jobs list, total count)
+        """
+        # Build WHERE clause dynamically
+        conditions = []
+        params: list[Any] = []
+        param_idx = 1
+
+        if status:
+            conditions.append(f"status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        if job_type:
+            conditions.append(f"type = ${param_idx}")
+            params.append(job_type)
+            param_idx += 1
+
+        if workspace_id:
+            conditions.append(f"workspace_id = ${param_idx}")
+            params.append(workspace_id)
+            param_idx += 1
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Query for jobs
+        query = f"""
+            SELECT * FROM jobs
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        params.extend([limit, offset])
+
+        # Query for count
+        count_query = f"""
+            SELECT COUNT(*) as total FROM jobs
+            {where_clause}
+        """
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+            # For count, exclude limit/offset params
+            count_row = await conn.fetchrow(count_query, *params[:-2])
+
+        jobs = [self._row_to_job(row) for row in rows]
+        total = count_row["total"] if count_row else 0
+
+        return jobs, total
+
+    async def cancel_job_tree(self, job_id: UUID) -> tuple[Optional[Job], int]:
+        """Cancel a job and all its children.
+
+        Args:
+            job_id: The parent job ID to cancel
+
+        Returns:
+            Tuple of (canceled job or None if not found, count of children canceled)
+        """
+        async with self._pool.acquire() as conn:
+            # First check if job exists
+            row = await conn.fetchrow("SELECT * FROM jobs WHERE id = $1", job_id)
+            if not row:
+                return None, 0
+
+            # Cancel the parent job
+            parent_query = """
+                UPDATE jobs SET
+                    status = 'canceled',
+                    completed_at = now()
+                WHERE id = $1
+                RETURNING *
+            """
+            parent_row = await conn.fetchrow(parent_query, job_id)
+
+            # Cancel all children that are not already in terminal status
+            children_query = """
+                UPDATE jobs SET
+                    status = 'canceled',
+                    completed_at = now()
+                WHERE parent_job_id = $1
+                  AND status NOT IN ('succeeded', 'failed', 'canceled')
+                RETURNING id
+            """
+            children_rows = await conn.fetch(children_query, job_id)
+
+        canceled_job = self._row_to_job(parent_row) if parent_row else None
+        children_count = len(children_rows)
+
+        logger.info(
+            "job_tree_canceled",
+            job_id=str(job_id),
+            children_canceled=children_count,
+        )
+
+        return canceled_job, children_count
+
     def _row_to_job(self, row) -> Job:
         """Convert a database row to a Job model."""
         return Job(
