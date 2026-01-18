@@ -147,11 +147,14 @@ class PineDiscoveryHealth(ComponentHealth):
     """Pine script discovery health."""
 
     scripts_by_status: dict = Field(default_factory=dict)  # {status: count}
+    scripts_by_ingest_status: dict = Field(
+        default_factory=dict
+    )  # {ingest_status: count}
     total_scripts: int = 0
-    discovery_runs_24h: int = 0
-    failed_runs_24h: int = 0
+    pending_ingest: int = 0
+    stale_scripts: int = 0  # Not seen in 7+ days
     last_discovery_at: Optional[datetime] = None
-    specs_generated_24h: int = 0
+    recent_ingest_errors: int = 0  # Errors in last 24h
 
 
 class SystemHealthSnapshot(BaseModel):
@@ -578,14 +581,14 @@ async def _check_tunes() -> TuneHealth:
 
 async def _check_pine_discovery() -> PineDiscoveryHealth:
     """Check Pine script discovery health and update Prometheus metrics."""
-    from app.routers.metrics import set_pine_scripts_metrics
+    from app.routers.metrics import set_pine_pending_ingest, set_pine_scripts_metrics
 
     if _db_pool is None:
         return PineDiscoveryHealth(status="unknown", error="Pool not initialized")
 
     try:
         async with _db_pool.acquire() as conn:
-            # Get script counts by status
+            # Get script counts by discovery status
             rows = await conn.fetch(
                 """
                 SELECT status, COUNT(*) as count
@@ -593,15 +596,44 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 GROUP BY status
             """
             )
-
             status_counts = {row["status"]: row["count"] for row in rows}
             total = sum(status_counts.values())
 
-            # Update Prometheus gauge
+            # Update Prometheus gauge for discovery status
             set_pine_scripts_metrics(status_counts)
 
-            # Get discovery run stats (from Prometheus or logs - for now estimate)
-            # In future, we could log discovery runs to a table for better tracking
+            # Get script counts by ingest status
+            ingest_rows = await conn.fetch(
+                """
+                SELECT
+                    COALESCE(ingest_status, 'pending') as ingest_status,
+                    COUNT(*) as count
+                FROM strategy_scripts
+                WHERE status != 'archived'
+                GROUP BY ingest_status
+            """
+            )
+            ingest_status_counts = {
+                row["ingest_status"]: row["count"] for row in ingest_rows
+            }
+
+            # Get pending ingest count (needs ingest or re-ingest)
+            pending_ingest = (
+                await conn.fetchval(
+                    """
+                SELECT COUNT(*)
+                FROM strategy_scripts
+                WHERE status != 'archived'
+                  AND (ingest_status IS NULL OR last_ingested_sha IS DISTINCT FROM sha256)
+            """
+                )
+                or 0
+            )
+
+            # Update Prometheus gauge for pending ingest
+            set_pine_pending_ingest(pending_ingest)
+
+            # Get last discovery timestamp
             last_seen = await conn.fetchval(
                 """
                 SELECT MAX(last_seen_at)
@@ -609,27 +641,58 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             """
             )
 
+            # Get stale script count (not seen in 7+ days)
+            stale_count = (
+                await conn.fetchval(
+                    """
+                SELECT COUNT(*)
+                FROM strategy_scripts
+                WHERE status != 'archived'
+                  AND last_seen_at < NOW() - INTERVAL '7 days'
+            """
+                )
+                or 0
+            )
+
+            # Get recent ingest errors (last 24h) - scripts with ingest_error set recently
+            recent_errors = (
+                await conn.fetchval(
+                    """
+                SELECT COUNT(*)
+                FROM strategy_scripts
+                WHERE ingest_status = 'failed'
+                  AND updated_at > NOW() - INTERVAL '24 hours'
+            """
+                )
+                or 0
+            )
+
             # Determine health status
             status = "ok"
 
-            # If we have scripts but many are stale (not seen in 7+ days), warn
-            if total > 0:
-                stale_count = await conn.fetchval(
-                    """
-                    SELECT COUNT(*)
-                    FROM strategy_scripts
-                    WHERE status != 'archived'
-                      AND last_seen_at < NOW() - INTERVAL '7 days'
-                """
-                )
-                if stale_count and stale_count > total * 0.5:
-                    status = "degraded"
+            # Degraded if many stale scripts
+            if total > 0 and stale_count > total * 0.5:
+                status = "degraded"
+
+            # Degraded if pending ingest is growing (> 50 scripts waiting)
+            if pending_ingest > 50:
+                status = "degraded"
+
+            # Error if recent ingest failures
+            if recent_errors > 0:
+                status = "degraded"
+            if recent_errors > 10:
+                status = "error"
 
             return PineDiscoveryHealth(
                 status=status,
                 scripts_by_status=status_counts,
+                scripts_by_ingest_status=ingest_status_counts,
                 total_scripts=total,
+                pending_ingest=pending_ingest,
+                stale_scripts=stale_count,
                 last_discovery_at=last_seen,
+                recent_ingest_errors=recent_errors,
             )
     except Exception as e:
         # Table might not exist yet
@@ -1107,10 +1170,20 @@ async def system_health_html(
     html += '<div class="card">'
     html += card_header("Pine Discovery", pd.status)
     html += metric("Total Scripts", f"{pd.total_scripts:,}")
-    # Show status breakdown
-    for status_name, count in pd.scripts_by_status.items():
-        html += metric(f"  {status_name}", str(count))
+    html += metric(
+        "Pending Ingest", f"{pd.pending_ingest:,}", error=pd.pending_ingest > 50
+    )
+    html += metric("Stale (7d+)", f"{pd.stale_scripts:,}", error=pd.stale_scripts > 0)
+    html += metric(
+        "Ingest Errors (24h)",
+        str(pd.recent_ingest_errors),
+        error=pd.recent_ingest_errors > 0,
+    )
     html += metric("Last Seen", fmt_dt(pd.last_discovery_at))
+    # Show ingest status breakdown
+    if pd.scripts_by_ingest_status:
+        for ingest_status, count in pd.scripts_by_ingest_status.items():
+            html += metric(f"  {ingest_status}", str(count))
     if pd.error:
         html += metric("Error", pd.error, error=True)
     html += "</div>"
