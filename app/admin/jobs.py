@@ -1,14 +1,15 @@
-"""Jobs admin endpoints (Retention Job Endpoints, Job Runs, Jobs Admin UI)."""
+"""Jobs admin endpoints (Retention Job Endpoints, Job Runs, Jobs Admin UI, Job Queue)."""
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 
@@ -463,3 +464,226 @@ async def job_run_detail_page(
             "run": run,
         },
     )
+
+
+# ===========================================
+# Job Queue Management Endpoints
+# ===========================================
+
+
+def _job_to_dict(job) -> dict[str, Any]:
+    """Convert a Job model to a JSON-serializable dict."""
+    return {
+        "id": str(job.id),
+        "type": job.type.value,
+        "status": job.status.value,
+        "payload": job.payload,
+        "attempt": job.attempt,
+        "max_attempts": job.max_attempts,
+        "run_after": job.run_after.isoformat() if job.run_after else None,
+        "locked_at": job.locked_at.isoformat() if job.locked_at else None,
+        "locked_by": job.locked_by,
+        "parent_job_id": str(job.parent_job_id) if job.parent_job_id else None,
+        "workspace_id": str(job.workspace_id) if job.workspace_id else None,
+        "dedupe_key": job.dedupe_key,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "result": job.result,
+        "priority": job.priority,
+    }
+
+
+def _job_event_to_dict(event) -> dict[str, Any]:
+    """Convert a JobEvent model to a JSON-serializable dict."""
+    return {
+        "id": event.id,
+        "job_id": str(event.job_id),
+        "ts": event.ts.isoformat() if event.ts else None,
+        "level": event.level,
+        "message": event.message,
+        "meta": event.meta,
+    }
+
+
+class TriggerSyncRequest(BaseModel):
+    """Request body for triggering a data sync job."""
+
+    exchange_id: Optional[str] = Field(
+        default=None,
+        description="Exchange ID to sync (optional, syncs all if not provided)",
+    )
+    mode: Literal["incremental", "full"] = Field(
+        default="incremental",
+        description="Sync mode: incremental (since last data) or full (history window)",
+    )
+
+
+@router.get("/jobs/queue")
+async def list_jobs_queue(
+    status_filter: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by status (pending, running, succeeded, failed, canceled)",
+    ),
+    type_filter: Optional[str] = Query(
+        None,
+        alias="type",
+        description="Filter by job type (data_sync, data_fetch, tune, wfo)",
+    ),
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    List jobs from the job queue with filters.
+
+    Returns paginated list of queued jobs with filters for status,
+    job type, and workspace.
+    """
+    from app.repositories.jobs import JobRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    repo = JobRepository(_db_pool)
+    jobs, total = await repo.list_jobs(
+        status=status_filter,
+        job_type=type_filter,
+        workspace_id=workspace_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "items": [_job_to_dict(job) for job in jobs],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/jobs/queue/{job_id}")
+async def get_job_queue_detail(
+    job_id: UUID,
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Get full job details including events and children.
+
+    Returns the job with its associated events (last 50) and
+    any child jobs created by this job.
+    """
+    from app.repositories.jobs import JobRepository
+    from app.repositories.job_events import JobEventsRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    job_repo = JobRepository(_db_pool)
+    events_repo = JobEventsRepository(_db_pool)
+
+    job = await job_repo.get(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+
+    # Get events and children
+    events = await events_repo.list_for_job(job_id, limit=50)
+    children = await job_repo.list_by_parent(job_id)
+
+    return {
+        "job": _job_to_dict(job),
+        "events": [_job_event_to_dict(e) for e in events],
+        "children": [_job_to_dict(c) for c in children],
+    }
+
+
+@router.post("/jobs/queue/{job_id}/cancel")
+async def cancel_job_queue(
+    job_id: UUID,
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Cancel a job and all its children.
+
+    Cancels the specified job and any child jobs that are not
+    already in a terminal state (succeeded, failed, canceled).
+    """
+    from app.repositories.jobs import JobRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    repo = JobRepository(_db_pool)
+    job, children_count = await repo.cancel_job_tree(job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+
+    return {
+        "job": _job_to_dict(job),
+        "children_canceled": children_count,
+    }
+
+
+@router.post("/jobs/sync/trigger")
+async def trigger_data_sync(
+    request: TriggerSyncRequest = TriggerSyncRequest(),
+    _: bool = Depends(require_admin_token),
+):
+    """
+    Manually trigger a data sync job.
+
+    Creates a DATA_SYNC job that will expand core symbols and
+    enqueue DATA_FETCH jobs for each symbol/timeframe combination.
+    """
+    from app.repositories.jobs import JobRepository
+    from app.jobs.types import JobType
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    repo = JobRepository(_db_pool)
+
+    # Build payload
+    payload: dict[str, Any] = {
+        "mode": request.mode,
+    }
+    if request.exchange_id:
+        payload["exchange_id"] = request.exchange_id
+
+    job = await repo.create(
+        job_type=JobType.DATA_SYNC,
+        payload=payload,
+    )
+
+    logger.info(
+        "data_sync_triggered",
+        job_id=str(job.id),
+        exchange_id=request.exchange_id or "all",
+        mode=request.mode,
+    )
+
+    return {
+        "job_id": str(job.id),
+        "status": job.status.value,
+    }

@@ -174,6 +174,35 @@ TUNE_TRIALS = Counter(
     ["status"],  # completed, failed
 )
 
+# WFO (Walk-Forward Optimization) metrics
+WFO_RUNS = Counter(
+    "wfo_runs_total",
+    "Total WFO runs",
+    ["status"],  # started, completed, partial, failed, cancelled
+)
+
+WFO_RUN_DURATION = Histogram(
+    "wfo_run_duration_seconds",
+    "WFO run duration in seconds",
+    buckets=[60, 120, 300, 600, 1800, 3600, 7200, 14400],  # 1m to 4h
+)
+
+WFO_FOLDS_TOTAL = Counter(
+    "wfo_folds_total",
+    "Total WFO folds processed",
+    ["status"],  # completed, failed, cancelled
+)
+
+WFO_CANDIDATES_ELIGIBLE = Gauge(
+    "wfo_candidates_eligible",
+    "Number of eligible candidates in last completed WFO",
+)
+
+WFO_BEST_SCORE = Gauge(
+    "wfo_best_score",
+    "Selection score of best candidate in last completed WFO",
+)
+
 # Retention metrics
 RETENTION_ROWS_DELETED = Counter(
     "retention_rows_deleted_total",
@@ -518,6 +547,49 @@ def record_tune_run(status: str, duration: float | None = None):
 def record_tune_trial(status: str):
     """Record tune trial completion."""
     TUNE_TRIALS.labels(status=status).inc()
+
+
+def record_wfo_run(status: str, duration: float | None = None):
+    """Record WFO run metrics.
+
+    Args:
+        status: Run status (started, completed, partial, failed, cancelled)
+        duration: Run duration in seconds (for completed/partial/failed)
+    """
+    WFO_RUNS.labels(status=status).inc()
+    if duration is not None and status in ("completed", "partial", "failed"):
+        WFO_RUN_DURATION.observe(duration)
+
+
+def record_wfo_folds(completed: int = 0, failed: int = 0, cancelled: int = 0):
+    """Record WFO fold completion counts.
+
+    Args:
+        completed: Number of folds that completed successfully
+        failed: Number of folds that failed
+        cancelled: Number of folds that were cancelled
+    """
+    if completed > 0:
+        WFO_FOLDS_TOTAL.labels(status="completed").inc(completed)
+    if failed > 0:
+        WFO_FOLDS_TOTAL.labels(status="failed").inc(failed)
+    if cancelled > 0:
+        WFO_FOLDS_TOTAL.labels(status="cancelled").inc(cancelled)
+
+
+def set_wfo_result_metrics(
+    eligible_candidates: int,
+    best_score: float | None = None,
+):
+    """Set WFO result gauges from last completed run.
+
+    Args:
+        eligible_candidates: Number of candidates meeting coverage threshold
+        best_score: Selection score of best candidate (if any)
+    """
+    WFO_CANDIDATES_ELIGIBLE.set(eligible_candidates)
+    if best_score is not None:
+        WFO_BEST_SCORE.set(best_score)
 
 
 def record_retention_deleted(table: str, count: int):
