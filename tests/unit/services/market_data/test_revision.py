@@ -1,4 +1,5 @@
 """Tests for data revision computation."""
+
 from datetime import datetime, timezone
 
 from app.services.market_data.revision import compute_checksum

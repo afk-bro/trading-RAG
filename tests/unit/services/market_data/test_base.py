@@ -1,4 +1,5 @@
 """Tests for market data provider interface."""
+
 from datetime import datetime, timezone
 
 from app.services.market_data.base import (

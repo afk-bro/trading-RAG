@@ -1,4 +1,5 @@
 """Tests for job worker."""
+
 import socket
 import os
 from unittest.mock import MagicMock

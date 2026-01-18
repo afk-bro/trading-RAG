@@ -1,4 +1,5 @@
 """Repository for job event logging."""
+
 from typing import Any, Optional
 from uuid import UUID
 

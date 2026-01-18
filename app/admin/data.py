@@ -1,4 +1,5 @@
 """Admin endpoints for data management."""
+
 from typing import Literal, Optional
 
 import structlog

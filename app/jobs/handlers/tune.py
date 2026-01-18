@@ -190,52 +190,56 @@ def _generate_trials_csv(runs: list[dict[str, Any]]) -> bytes:
     writer = csv.writer(output)
 
     # Write header
-    writer.writerow([
-        "trial_index",
-        "run_id",
-        "params_json",
-        "score",
-        "score_is",
-        "score_oos",
-        "objective_score",
-        "status",
-        "skip_reason",
-        "failed_reason",
-        "return_pct_is",
-        "sharpe_is",
-        "max_drawdown_pct_is",
-        "num_trades_is",
-        "return_pct_oos",
-        "sharpe_oos",
-        "max_drawdown_pct_oos",
-        "num_trades_oos",
-    ])
+    writer.writerow(
+        [
+            "trial_index",
+            "run_id",
+            "params_json",
+            "score",
+            "score_is",
+            "score_oos",
+            "objective_score",
+            "status",
+            "skip_reason",
+            "failed_reason",
+            "return_pct_is",
+            "sharpe_is",
+            "max_drawdown_pct_is",
+            "num_trades_is",
+            "return_pct_oos",
+            "sharpe_oos",
+            "max_drawdown_pct_oos",
+            "num_trades_oos",
+        ]
+    )
 
     # Write data rows
     for run in runs:
         metrics_is = run.get("metrics_is") or {}
         metrics_oos = run.get("metrics_oos") or {}
 
-        writer.writerow([
-            run.get("trial_index"),
-            str(run.get("run_id")) if run.get("run_id") else "",
-            json.dumps(run.get("params", {})),
-            run.get("score"),
-            run.get("score_is"),
-            run.get("score_oos"),
-            run.get("objective_score"),
-            run.get("status"),
-            run.get("skip_reason", ""),
-            run.get("failed_reason", ""),
-            metrics_is.get("return_pct"),
-            metrics_is.get("sharpe"),
-            metrics_is.get("max_drawdown_pct"),
-            metrics_is.get("num_trades"),
-            metrics_oos.get("return_pct"),
-            metrics_oos.get("sharpe"),
-            metrics_oos.get("max_drawdown_pct"),
-            metrics_oos.get("num_trades"),
-        ])
+        writer.writerow(
+            [
+                run.get("trial_index"),
+                str(run.get("run_id")) if run.get("run_id") else "",
+                json.dumps(run.get("params", {})),
+                run.get("score"),
+                run.get("score_is"),
+                run.get("score_oos"),
+                run.get("objective_score"),
+                run.get("status"),
+                run.get("skip_reason", ""),
+                run.get("failed_reason", ""),
+                metrics_is.get("return_pct"),
+                metrics_is.get("sharpe"),
+                metrics_is.get("max_drawdown_pct"),
+                metrics_is.get("num_trades"),
+                metrics_oos.get("return_pct"),
+                metrics_oos.get("sharpe"),
+                metrics_oos.get("max_drawdown_pct"),
+                metrics_oos.get("num_trades"),
+            ]
+        )
 
     return output.getvalue().encode("utf-8")
 

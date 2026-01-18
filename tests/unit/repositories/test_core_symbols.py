@@ -1,4 +1,5 @@
 """Tests for core symbols repository."""
+
 from unittest.mock import MagicMock
 
 from app.repositories.core_symbols import CoreSymbolsRepository, CoreSymbol

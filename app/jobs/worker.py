@@ -1,4 +1,5 @@
 """Job worker - claims and executes jobs from the queue."""
+
 import asyncio
 import os
 import socket
@@ -54,7 +55,9 @@ class WorkerRunner:
             "worker_started",
             worker_id=self._worker_id,
             version=__version__,
-            job_types=[jt.value for jt in self._job_types] if self._job_types else "all",
+            job_types=(
+                [jt.value for jt in self._job_types] if self._job_types else "all"
+            ),
         )
 
         # Register heartbeat

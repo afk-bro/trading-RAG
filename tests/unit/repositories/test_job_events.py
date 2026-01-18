@@ -1,4 +1,5 @@
 """Tests for job events repository."""
+
 from unittest.mock import MagicMock
 
 from app.repositories.job_events import JobEventsRepository

@@ -195,10 +195,16 @@ class TestGenerateTrialsCsv:
                 "skip_reason": None,
                 "failed_reason": None,
                 "metrics_is": {
-                    "return_pct": 15.5, "sharpe": 1.4, "max_drawdown_pct": 8.2, "num_trades": 25
+                    "return_pct": 15.5,
+                    "sharpe": 1.4,
+                    "max_drawdown_pct": 8.2,
+                    "num_trades": 25,
                 },
                 "metrics_oos": {
-                    "return_pct": 10.0, "sharpe": 1.0, "max_drawdown_pct": 10.1, "num_trades": 12
+                    "return_pct": 10.0,
+                    "sharpe": 1.0,
+                    "max_drawdown_pct": 10.1,
+                    "num_trades": 12,
                 },
             },
             {

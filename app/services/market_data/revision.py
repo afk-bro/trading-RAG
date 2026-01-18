@@ -1,4 +1,5 @@
 """Data revision computation for drift detection."""
+
 import hashlib
 from typing import Sequence
 

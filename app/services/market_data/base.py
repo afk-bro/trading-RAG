@@ -1,4 +1,5 @@
 """Base interface for market data providers."""
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
