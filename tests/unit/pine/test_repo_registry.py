@@ -67,6 +67,8 @@ def sample_row(repo_id, workspace_id):
         "pull_error": None,
         "enabled": True,
         "scan_globs": ["**/*.pine", "scripts/*.txt"],
+        "next_scan_at": now,
+        "failure_count": 0,
         "created_at": now,
         "updated_at": now,
     }
@@ -662,6 +664,8 @@ class TestRowToModel:
         assert result.pull_error == sample_row["pull_error"]
         assert result.enabled == sample_row["enabled"]
         assert result.scan_globs == sample_row["scan_globs"]
+        assert result.next_scan_at == sample_row["next_scan_at"]
+        assert result.failure_count == sample_row["failure_count"]
         assert result.created_at == sample_row["created_at"]
         assert result.updated_at == sample_row["updated_at"]
 
@@ -692,6 +696,8 @@ class TestRowToModel:
             "pull_error": None,
             "enabled": True,
             "scan_globs": None,
+            "next_scan_at": None,
+            "failure_count": 0,
             "created_at": None,
             "updated_at": None,
         }
@@ -704,6 +710,8 @@ class TestRowToModel:
         assert result.last_seen_commit is None
         assert result.scripts_count == 0
         assert result.scan_globs == ["**/*.pine"]
+        assert result.next_scan_at is None
+        assert result.failure_count == 0
 
 
 class TestErrorTruncation:
@@ -738,3 +746,177 @@ class TestErrorTruncation:
 
         assert len(truncated) == ERROR_TRUNCATE_LEN
         assert truncated.endswith("...")
+
+
+# =============================================================================
+# Polling Methods Tests
+# =============================================================================
+
+
+class TestListDueForPoll:
+    """Tests for list_due_for_poll method."""
+
+    @pytest.mark.asyncio
+    async def test_list_due_for_poll_returns_repos(
+        self, mock_pool, mock_conn, sample_row
+    ):
+        """Test listing repos due for polling."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetch.return_value = [sample_row]
+
+        repo_registry = PineRepoRepository(mock_pool)
+        repos = await repo_registry.list_due_for_poll(limit=10)
+
+        assert len(repos) == 1
+        assert repos[0].id == sample_row["id"]
+
+        # Verify query includes enabled filter and ordering
+        query = mock_conn.fetch.call_args[0][0]
+        assert "enabled = true" in query
+        assert "next_scan_at" in query
+        assert "LIMIT $1" in query
+
+    @pytest.mark.asyncio
+    async def test_list_due_for_poll_with_workspace(
+        self, mock_pool, mock_conn, sample_row, workspace_id
+    ):
+        """Test listing repos due for polling filtered by workspace."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetch.return_value = [sample_row]
+
+        repo_registry = PineRepoRepository(mock_pool)
+        repos = await repo_registry.list_due_for_poll(
+            workspace_id=workspace_id, limit=5
+        )
+
+        assert len(repos) == 1
+
+        # Verify workspace filter is present
+        query = mock_conn.fetch.call_args[0][0]
+        assert "workspace_id = $1" in query
+
+    @pytest.mark.asyncio
+    async def test_list_due_for_poll_empty(self, mock_pool, mock_conn):
+        """Test listing repos when none are due."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetch.return_value = []
+
+        repo_registry = PineRepoRepository(mock_pool)
+        repos = await repo_registry.list_due_for_poll()
+
+        assert repos == []
+
+
+class TestCountDueForPoll:
+    """Tests for count_due_for_poll method."""
+
+    @pytest.mark.asyncio
+    async def test_count_due_for_poll(self, mock_pool, mock_conn):
+        """Test counting repos due for polling."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchval.return_value = 5
+
+        repo_registry = PineRepoRepository(mock_pool)
+        count = await repo_registry.count_due_for_poll()
+
+        assert count == 5
+
+    @pytest.mark.asyncio
+    async def test_count_due_for_poll_with_workspace(
+        self, mock_pool, mock_conn, workspace_id
+    ):
+        """Test counting repos due for polling filtered by workspace."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchval.return_value = 3
+
+        repo_registry = PineRepoRepository(mock_pool)
+        count = await repo_registry.count_due_for_poll(workspace_id=workspace_id)
+
+        assert count == 3
+
+        # Verify workspace filter
+        query = mock_conn.fetchval.call_args[0][0]
+        assert "workspace_id = $1" in query
+
+    @pytest.mark.asyncio
+    async def test_count_due_for_poll_null_returns_zero(self, mock_pool, mock_conn):
+        """Test counting returns 0 when fetchval returns None."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchval.return_value = None
+
+        repo_registry = PineRepoRepository(mock_pool)
+        count = await repo_registry.count_due_for_poll()
+
+        assert count == 0
+
+
+class TestUpdatePollSuccess:
+    """Tests for update_poll_success method."""
+
+    @pytest.mark.asyncio
+    async def test_update_poll_success(self, mock_pool, mock_conn, repo_id):
+        """Test updating poll state after successful scan."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        repo_registry = PineRepoRepository(mock_pool)
+        await repo_registry.update_poll_success(repo_id, interval_minutes=15)
+
+        # Verify SQL structure
+        query = mock_conn.execute.call_args[0][0]
+        assert "failure_count = 0" in query
+        assert "next_scan_at" in query
+        assert "WHERE id = $2" in query  # repo_id is $2 (next_scan_at is $1)
+
+    @pytest.mark.asyncio
+    async def test_update_poll_success_with_jitter(self, mock_pool, mock_conn, repo_id):
+        """Test jitter is applied to next_scan_at."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        repo_registry = PineRepoRepository(mock_pool)
+        await repo_registry.update_poll_success(
+            repo_id, interval_minutes=15, jitter_pct=0.2
+        )
+
+        # Verify execute was called (jitter is applied in code)
+        mock_conn.execute.assert_called_once()
+
+
+class TestUpdatePollFailure:
+    """Tests for update_poll_failure method."""
+
+    @pytest.mark.asyncio
+    async def test_update_poll_failure(self, mock_pool, mock_conn, repo_id):
+        """Test updating poll state after failed scan."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        repo_registry = PineRepoRepository(mock_pool)
+        await repo_registry.update_poll_failure(
+            repo_id, base_interval_minutes=15, max_backoff_multiplier=16
+        )
+
+        # Verify SQL structure
+        query = mock_conn.execute.call_args[0][0]
+        assert "failure_count = failure_count + 1" in query
+        assert "next_scan_at" in query
+        assert "WHERE id = $3" in query  # repo_id is $3 (max_backoff=$1, interval=$2)
+
+    @pytest.mark.asyncio
+    async def test_update_poll_failure_backoff_calculation(
+        self, mock_pool, mock_conn, repo_id
+    ):
+        """Test exponential backoff is capped correctly."""
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.execute.return_value = "UPDATE 1"
+
+        repo_registry = PineRepoRepository(mock_pool)
+        await repo_registry.update_poll_failure(
+            repo_id, base_interval_minutes=15, max_backoff_multiplier=8
+        )
+
+        # Verify LEAST() is used for capping
+        query = mock_conn.execute.call_args[0][0]
+        assert "LEAST" in query
+        assert "power(2, failure_count)" in query.lower() or "POW" in query

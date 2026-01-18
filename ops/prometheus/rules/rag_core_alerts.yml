@@ -537,3 +537,63 @@ groups:
         annotations:
           summary: "Pine repo scan duration P95 > 5min ({{ $value | humanizeDuration }})"
           description: "Repo scans taking longer than expected. May indicate large repos or slow network."
+
+  # ===========================================================================
+  # Pine Poller Rules - Background polling service health
+  # ===========================================================================
+  - name: rag_core.pine_poller
+    rules:
+      - alert: RAGCore_PinePollerDueQueueHigh
+        expr: |
+          pine_repo_poll_due_count{job="rag-core"} > 10
+          and pine_repo_poll_enabled{job="rag-core"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: pine_poller
+        annotations:
+          summary: "Pine poller queue building up ({{ $value }} repos due)"
+          description: "Many repos are due for polling but not being processed. Check if poller is running."
+          runbook_url: "docs/ops/runbooks.md#pine-poller-queue"
+
+      - alert: RAGCore_PinePollerStalled
+        expr: |
+          (
+            time() - pine_repo_poll_last_run_timestamp{job="rag-core"}
+          ) > 300
+          and pine_repo_poll_due_count{job="rag-core"} > 0
+          and pine_repo_poll_enabled{job="rag-core"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          subsystem: pine_poller
+        annotations:
+          summary: "Pine poller stalled (no runs in {{ $value | humanizeDuration }})"
+          description: "Poller has repos due but hasn't run. Check if poller task is alive."
+          runbook_url: "docs/ops/runbooks.md#pine-poller-stalled"
+
+      - alert: RAGCore_PinePollerNoRuns
+        expr: |
+          (
+            time() - pine_repo_poll_last_run_timestamp{job="rag-core"}
+          ) > 3600
+          and pine_repo_poll_enabled{job="rag-core"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: pine_poller
+        annotations:
+          summary: "Pine poller inactive (no runs in {{ $value | humanizeDuration }})"
+          description: "Poller hasn't run in 1+ hour. May be disabled or crashed."
+
+      - alert: RAGCore_PinePollerFailuresHigh
+        expr: |
+          increase(pine_repo_poll_repos_scanned_total{job="rag-core", status="failure"}[1h]) > 5
+          and pine_repo_poll_enabled{job="rag-core"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: pine_poller
+        annotations:
+          summary: "Pine poller scan failures elevated ({{ $value }} in 1h)"
+          description: "Multiple repo scans failing during polling. Check repo configs and network."

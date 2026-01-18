@@ -173,6 +173,20 @@ class PineDiscoveryHealth(ComponentHealth):
     notes: list[str] = Field(default_factory=list)  # Reasons for degraded/error
 
 
+class PinePollerHealth(ComponentHealth):
+    """Pine repository polling background service health."""
+
+    enabled: bool = False
+    running: bool = False
+    last_run_at: Optional[datetime] = None
+    last_run_repos_scanned: int = 0
+    last_run_errors: int = 0
+    repos_due_count: int = 0
+    poll_interval_minutes: int = 15
+    poll_max_concurrency: int = 2
+    poll_tick_seconds: int = 60
+
+
 class SystemHealthSnapshot(BaseModel):
     """Complete system health snapshot."""
 
@@ -193,6 +207,7 @@ class SystemHealthSnapshot(BaseModel):
     tunes: TuneHealth
     pine_repos: PineReposHealth
     pine_discovery: PineDiscoveryHealth
+    pine_poller: PinePollerHealth
 
     # Summary
     components_ok: int = 0
@@ -670,6 +685,67 @@ async def _check_pine_repos() -> PineReposHealth:
         return PineReposHealth(status="error", error=str(e)[:200])
 
 
+async def _check_pine_poller(settings: Settings) -> PinePollerHealth:
+    """Check Pine repository poller health."""
+    from app.services.pine.poller import get_poller
+
+    poller = get_poller()
+
+    if not settings.pine_repo_poll_enabled:
+        return PinePollerHealth(
+            status="ok",
+            enabled=False,
+            running=False,
+            details={"message": "Polling disabled (PINE_REPO_POLL_ENABLED=false)"},
+        )
+
+    if poller is None:
+        return PinePollerHealth(
+            status="error",
+            enabled=True,
+            running=False,
+            error="Poller not initialized",
+        )
+
+    try:
+        health = await poller.get_health()
+
+        # Determine status
+        status = "ok"
+
+        # Degraded if poller should be running but isn't
+        if health.enabled and not health.running:
+            status = "error"
+
+        # Degraded if repos are due but no recent runs
+        if health.repos_due_count > 5:
+            status = "degraded"
+
+        # Degraded if last run had errors
+        if health.last_run_errors > 0:
+            status = "degraded"
+
+        return PinePollerHealth(
+            status=status,
+            enabled=health.enabled,
+            running=health.running,
+            last_run_at=health.last_run_at,
+            last_run_repos_scanned=health.last_run_repos_scanned,
+            last_run_errors=health.last_run_errors,
+            repos_due_count=health.repos_due_count,
+            poll_interval_minutes=health.poll_interval_minutes,
+            poll_max_concurrency=health.poll_max_concurrency,
+            poll_tick_seconds=health.poll_tick_seconds,
+        )
+
+    except Exception as e:
+        return PinePollerHealth(
+            status="error",
+            enabled=settings.pine_repo_poll_enabled,
+            error=str(e)[:200],
+        )
+
+
 async def _check_pine_discovery() -> PineDiscoveryHealth:
     """Check Pine script discovery health and update Prometheus metrics.
 
@@ -936,6 +1012,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         tunes,
         pine_repos,
         pine_discovery,
+        pine_poller,
     ) = await asyncio.gather(
         _check_database(),
         _check_qdrant(settings),
@@ -948,6 +1025,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         _check_tunes(),
         _check_pine_repos(),
         _check_pine_discovery(),
+        _check_pine_poller(settings),
         return_exceptions=True,
     )
 
@@ -970,8 +1048,10 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     tunes = safe_result(tunes, TuneHealth)
     pine_repos = safe_result(pine_repos, PineReposHealth)
     pine_discovery = safe_result(pine_discovery, PineDiscoveryHealth)
+    pine_poller = safe_result(pine_poller, PinePollerHealth)
 
     # Calculate overall status (only include Redis if configured)
+    # Note: pine_poller only counts towards status if enabled
     components = [
         db,
         qdrant,
@@ -983,6 +1063,8 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         pine_repos,
         pine_discovery,
     ]
+    if pine_poller.enabled:
+        components.append(pine_poller)
     if redis is not None:
         components.append(redis)
     statuses = [c.status for c in components]
@@ -1029,6 +1111,10 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         issues.append(f"Pine Repos: {pine_repos.error or msg}")
     if pine_discovery.status != "ok":
         issues.append(f"Pine Discovery: {pine_discovery.error or 'stale scripts'}")
+    if pine_poller.enabled and pine_poller.status != "ok":
+        issues.append(
+            f"Pine Poller: {pine_poller.error or f'{pine_poller.repos_due_count} repos due'}"
+        )
 
     return SystemHealthSnapshot(
         overall_status=overall,
@@ -1045,6 +1131,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         tunes=tunes,
         pine_repos=pine_repos,
         pine_discovery=pine_discovery,
+        pine_poller=pine_poller,
         components_ok=ok_count,
         components_degraded=degraded_count,
         components_error=error_count,

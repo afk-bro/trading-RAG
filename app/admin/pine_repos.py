@@ -581,3 +581,152 @@ async def disable_repo(
     logger.info("repo_disabled", repo_id=str(repo_id), repo_slug=repo.repo_slug)
 
     return _repo_to_response(repo)
+
+
+# ===========================================
+# Poll Management Endpoints
+# ===========================================
+
+
+class PollRunResponse(BaseModel):
+    """Response from a manual poll run."""
+
+    status: Literal["success", "partial", "error", "disabled"]
+    repos_scanned: int
+    repos_succeeded: int
+    repos_failed: int
+    repos_skipped: int
+    errors: list[str]
+    duration_ms: int
+
+
+class PollerHealthResponse(BaseModel):
+    """Poller health status."""
+
+    enabled: bool
+    running: bool
+    last_run_at: Optional[str] = None
+    last_run_repos_scanned: int = 0
+    last_run_errors: int = 0
+    repos_due_count: int = 0
+    poll_interval_minutes: int
+    poll_max_concurrency: int
+    poll_tick_seconds: int
+
+
+@router.post(
+    "/poll-run",
+    response_model=PollRunResponse,
+    summary="Trigger manual poll run",
+    description="""
+Manually trigger a single poll cycle.
+
+This scans repos that are due for polling (next_scan_at <= now or NULL)
+up to the configured max_repos_per_tick limit.
+
+Useful for:
+- Testing polling setup without waiting for tick
+- Forcing immediate scan after configuration changes
+- Recovery from stuck state
+
+Note: This does not affect the background poller schedule.
+""",
+)
+async def trigger_poll_run(
+    settings: Settings = Depends(get_settings),
+    _: str = Depends(require_admin_token),
+):
+    """Trigger a manual poll run."""
+    from app.services.pine.poller import get_poller, PineRepoPoller
+
+    pool = _get_pool()
+    log = logger.bind(endpoint="poll-run")
+
+    # Check if poller exists and can run
+    poller = get_poller()
+
+    if poller is None:
+        # Create a temporary poller for manual run
+        log.info("Creating temporary poller for manual run")
+        poller = PineRepoPoller(pool, settings, _qdrant_client)
+
+    try:
+        result = await poller.run_once()
+
+        # Determine status
+        status_val: Literal["success", "partial", "error", "disabled"]
+        if result.repos_scanned == 0:
+            status_val = "success"  # No repos due is still success
+        elif result.repos_failed == 0:
+            status_val = "success"
+        elif result.repos_succeeded > 0:
+            status_val = "partial"
+        else:
+            status_val = "error"
+
+        log.info(
+            "poll_run_complete",
+            status=status_val,
+            repos_scanned=result.repos_scanned,
+            repos_succeeded=result.repos_succeeded,
+            repos_failed=result.repos_failed,
+            duration_ms=result.duration_ms,
+        )
+
+        return PollRunResponse(
+            status=status_val,
+            repos_scanned=result.repos_scanned,
+            repos_succeeded=result.repos_succeeded,
+            repos_failed=result.repos_failed,
+            repos_skipped=result.repos_skipped,
+            errors=result.errors[:10],  # Limit to first 10 errors
+            duration_ms=result.duration_ms,
+        )
+
+    except Exception as e:
+        log.exception("poll_run_error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Poll run failed: {e}",
+        )
+
+
+@router.get(
+    "/poll-status",
+    response_model=PollerHealthResponse,
+    summary="Get poller status",
+    description="Get the current status of the background poller.",
+)
+async def get_poller_status(
+    settings: Settings = Depends(get_settings),
+    _: str = Depends(require_admin_token),
+):
+    """Get poller status."""
+    from app.services.pine.poller import get_poller
+
+    poller = get_poller()
+
+    if poller is None:
+        # Return disabled status if poller not running
+        return PollerHealthResponse(
+            enabled=settings.pine_repo_poll_enabled,
+            running=False,
+            repos_due_count=0,
+            poll_interval_minutes=settings.pine_repo_poll_interval_minutes,
+            poll_max_concurrency=settings.pine_repo_poll_max_concurrency,
+            poll_tick_seconds=settings.pine_repo_poll_tick_seconds,
+        )
+
+    health = await poller.get_health()
+
+    return PollerHealthResponse(
+        enabled=health.enabled,
+        running=health.running,
+        last_run_at=health.last_run_at.isoformat() if health.last_run_at else None,
+        last_run_repos_scanned=health.last_run_repos_scanned,
+        last_run_errors=health.last_run_errors,
+        repos_due_count=health.repos_due_count,
+        poll_interval_minutes=health.poll_interval_minutes,
+        poll_max_concurrency=health.poll_max_concurrency,
+        poll_tick_seconds=health.poll_tick_seconds,
+    )

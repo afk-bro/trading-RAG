@@ -25,12 +25,14 @@ from app.routers import (
 )
 from app.admin import set_db_pool as set_admin_db_pool
 from app.admin import set_qdrant_client as set_admin_qdrant_client
+from app.services.pine.poller import PineRepoPoller, set_poller
 
 logger = structlog.get_logger(__name__)
 
 # Global clients - accessed by other modules
 _db_pool: Optional[asyncpg.Pool] = None
 _qdrant_client: Optional[AsyncQdrantClient] = None
+_pine_poller: Optional[PineRepoPoller] = None
 
 
 def get_db_pool() -> Optional[asyncpg.Pool]:
@@ -41,6 +43,11 @@ def get_db_pool() -> Optional[asyncpg.Pool]:
 def get_qdrant_client() -> Optional[AsyncQdrantClient]:
     """Get the Qdrant client."""
     return _qdrant_client
+
+
+def get_pine_poller() -> Optional[PineRepoPoller]:
+    """Get the Pine repo poller instance."""
+    return _pine_poller
 
 
 async def _init_qdrant(settings) -> Optional[AsyncQdrantClient]:
@@ -283,7 +290,7 @@ async def _shutdown_reranker() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
-    global _db_pool, _qdrant_client
+    global _db_pool, _qdrant_client, _pine_poller
 
     settings = get_settings()
     logger.info(
@@ -317,10 +324,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Optional reranker warmup
     await _warmup_reranker(settings)
 
+    # Start Pine repo poller (if enabled and DB available)
+    if _db_pool and settings.pine_repo_poll_enabled:
+        _pine_poller = PineRepoPoller(_db_pool, settings, _qdrant_client)
+        set_poller(_pine_poller)
+        await _pine_poller.start()
+    elif not settings.pine_repo_poll_enabled:
+        logger.info("Pine repo polling disabled (PINE_REPO_POLL_ENABLED=false)")
+
     yield
 
     # Cleanup on shutdown
     logger.info("Shutting down Trading RAG Service")
+
+    # Stop Pine repo poller first (before DB pool closes)
+    if _pine_poller:
+        await _pine_poller.stop()
+        set_poller(None)
+        logger.info("Pine repo poller stopped")
 
     await _shutdown_reranker()
 

@@ -244,6 +244,42 @@ class Settings(BaseSettings):
         description="Maximum events to buffer per workspace stream for reconnection",
     )
 
+    # Pine Repo Polling Configuration
+    pine_repo_poll_enabled: bool = Field(
+        default=False,
+        description="Enable automatic polling of GitHub repositories for Pine scripts",
+    )
+    pine_repo_poll_interval_minutes: int = Field(
+        default=15,
+        ge=5,
+        le=1440,
+        description="Interval between poll scans in minutes (5 min to 24h)",
+    )
+    pine_repo_poll_tick_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+        description="Frequency of checking for due repos in seconds",
+    )
+    pine_repo_poll_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description="Max concurrent repo scans during polling",
+    )
+    pine_repo_poll_max_repos_per_tick: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Max repos to scan per tick (prevent spikes)",
+    )
+    pine_repo_poll_backoff_max_multiplier: int = Field(
+        default=16,
+        ge=2,
+        le=64,
+        description="Max backoff multiplier for failed scans (16x = 4h at 15min base)",
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""

@@ -1,7 +1,8 @@
 """Repository for pine_repos table operations."""
 
+import random
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -42,6 +43,9 @@ class PineRepo:
     pull_error: Optional[str] = None
     enabled: bool = True
     scan_globs: list[str] = field(default_factory=lambda: ["**/*.pine"])
+    # Polling fields (added in migration 061)
+    next_scan_at: Optional[datetime] = None
+    failure_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -106,7 +110,8 @@ class PineRepoRepository:
             RETURNING id, workspace_id, repo_url, repo_slug, clone_path,
                       branch, last_seen_commit, last_scan_at, last_scan_ok,
                       last_scan_error, scripts_count, last_pull_at, last_pull_ok,
-                      pull_error, enabled, scan_globs, created_at, updated_at
+                      pull_error, enabled, scan_globs, next_scan_at, failure_count,
+                      created_at, updated_at
         """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -125,7 +130,8 @@ class PineRepoRepository:
             SELECT id, workspace_id, repo_url, repo_slug, clone_path,
                    branch, last_seen_commit, last_scan_at, last_scan_ok,
                    last_scan_error, scripts_count, last_pull_at, last_pull_ok,
-                   pull_error, enabled, scan_globs, created_at, updated_at
+                   pull_error, enabled, scan_globs, next_scan_at, failure_count,
+                   created_at, updated_at
             FROM pine_repos
             WHERE id = $1
         """
@@ -145,7 +151,8 @@ class PineRepoRepository:
             SELECT id, workspace_id, repo_url, repo_slug, clone_path,
                    branch, last_seen_commit, last_scan_at, last_scan_ok,
                    last_scan_error, scripts_count, last_pull_at, last_pull_ok,
-                   pull_error, enabled, scan_globs, created_at, updated_at
+                   pull_error, enabled, scan_globs, next_scan_at, failure_count,
+                   created_at, updated_at
             FROM pine_repos
             WHERE workspace_id = $1 AND repo_slug = $2
         """
@@ -185,7 +192,8 @@ class PineRepoRepository:
             SELECT id, workspace_id, repo_url, repo_slug, clone_path,
                    branch, last_seen_commit, last_scan_at, last_scan_ok,
                    last_scan_error, scripts_count, last_pull_at, last_pull_ok,
-                   pull_error, enabled, scan_globs, created_at, updated_at
+                   pull_error, enabled, scan_globs, next_scan_at, failure_count,
+                   created_at, updated_at
             FROM pine_repos
             WHERE {where_clause}
             ORDER BY repo_slug
@@ -204,7 +212,8 @@ class PineRepoRepository:
             SELECT id, workspace_id, repo_url, repo_slug, clone_path,
                    branch, last_seen_commit, last_scan_at, last_scan_ok,
                    last_scan_error, scripts_count, last_pull_at, last_pull_ok,
-                   pull_error, enabled, scan_globs, created_at, updated_at
+                   pull_error, enabled, scan_globs, next_scan_at, failure_count,
+                   created_at, updated_at
             FROM pine_repos
             WHERE workspace_id = $1 AND enabled = TRUE
             ORDER BY repo_slug
@@ -323,6 +332,148 @@ class PineRepoRepository:
         async with self._pool.acquire() as conn:
             await conn.execute(query, enabled, repo_id)
 
+    # =========================================================================
+    # Polling Methods
+    # =========================================================================
+
+    async def list_due_for_poll(
+        self,
+        workspace_id: Optional[UUID] = None,
+        limit: int = 10,
+    ) -> list[PineRepo]:
+        """
+        List repos due for polling scan.
+
+        Selection criteria:
+        - enabled = true
+        - next_scan_at IS NULL OR next_scan_at <= now()
+
+        Order: next_scan_at NULLS FIRST (never scanned), then by last_scan_at ASC
+
+        Args:
+            workspace_id: Optional filter by workspace (None = all workspaces)
+            limit: Max repos to return (default 10, to cap per tick)
+
+        Returns:
+            List of repos due for scanning
+        """
+        where_clause = (
+            "enabled = true AND (next_scan_at IS NULL OR next_scan_at <= NOW())"
+        )
+        params: list = []
+
+        if workspace_id:
+            where_clause += " AND workspace_id = $1"
+            params = [workspace_id]
+
+        query = f"""
+            SELECT id, workspace_id, repo_url, repo_slug, clone_path,
+                   branch, last_seen_commit, last_scan_at, last_scan_ok,
+                   last_scan_error, scripts_count, last_pull_at, last_pull_ok,
+                   pull_error, enabled, scan_globs, next_scan_at, failure_count,
+                   created_at, updated_at
+            FROM pine_repos
+            WHERE {where_clause}
+            ORDER BY next_scan_at NULLS FIRST, last_scan_at ASC
+            LIMIT ${len(params) + 1}
+        """
+        params.append(limit)
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+            return [self._row_to_model(row) for row in rows]
+
+    async def update_poll_success(
+        self,
+        repo_id: UUID,
+        interval_minutes: int = 15,
+        jitter_pct: float = 0.1,
+    ) -> None:
+        """
+        Update repo after successful poll scan.
+
+        Sets:
+        - failure_count = 0
+        - next_scan_at = now + interval (with jitter)
+
+        Args:
+            repo_id: Repo to update
+            interval_minutes: Base interval for next scan
+            jitter_pct: Random jitter percentage (±10% default)
+        """
+        # Apply jitter: ± jitter_pct
+        jitter = random.uniform(-jitter_pct, jitter_pct)
+        interval_with_jitter = interval_minutes * (1 + jitter)
+        next_scan = datetime.now(timezone.utc) + timedelta(minutes=interval_with_jitter)
+
+        query = """
+            UPDATE pine_repos SET
+                failure_count = 0,
+                next_scan_at = $1
+            WHERE id = $2
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(query, next_scan, repo_id)
+
+    async def update_poll_failure(
+        self,
+        repo_id: UUID,
+        base_interval_minutes: int = 15,
+        max_backoff_multiplier: int = 16,
+    ) -> None:
+        """
+        Update repo after failed poll scan.
+
+        Sets:
+        - failure_count += 1
+        - next_scan_at = now + (min(2^failure_count, max_multiplier) * base_interval)
+
+        Args:
+            repo_id: Repo to update
+            base_interval_minutes: Base interval for backoff
+            max_backoff_multiplier: Cap on backoff multiplier (default 16x = 4h at 15min base)
+        """
+        # First increment failure count and get new value
+        query = """
+            UPDATE pine_repos SET
+                failure_count = failure_count + 1,
+                next_scan_at = NOW() + (
+                    LEAST(POWER(2, failure_count + 1), $1) * $2 * INTERVAL '1 minute'
+                )
+            WHERE id = $3
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                query,
+                max_backoff_multiplier,
+                base_interval_minutes,
+                repo_id,
+            )
+
+    async def count_due_for_poll(self, workspace_id: Optional[UUID] = None) -> int:
+        """
+        Count repos currently due for polling.
+
+        Args:
+            workspace_id: Optional filter by workspace
+
+        Returns:
+            Number of repos due for scan
+        """
+        where_clause = (
+            "enabled = true AND (next_scan_at IS NULL OR next_scan_at <= NOW())"
+        )
+        params: list = []
+
+        if workspace_id:
+            where_clause += " AND workspace_id = $1"
+            params = [workspace_id]
+
+        query = f"SELECT COUNT(*) FROM pine_repos WHERE {where_clause}"
+
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(query, *params) or 0
+
     async def delete(self, repo_id: UUID) -> bool:
         """
         Delete a repo registration.
@@ -397,6 +548,8 @@ class PineRepoRepository:
             pull_error=row["pull_error"],
             enabled=row["enabled"],
             scan_globs=row["scan_globs"] or ["**/*.pine"],
+            next_scan_at=row["next_scan_at"],
+            failure_count=row["failure_count"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

@@ -467,3 +467,159 @@ class TestRedisSSEEventDelivery:
         """
         result = await redis_bus.ping()
         assert result is True, "Expected ping to succeed with running Redis"
+
+
+# =============================================================================
+# Phase B3.2: Polling - Repository Polling Tests
+# =============================================================================
+
+
+class TestPineRepoPollerUnit:
+    """Unit-level integration tests for the polling service."""
+
+    @pytest.fixture
+    def mock_settings(self):
+        """Create mock settings for polling tests."""
+        from unittest.mock import MagicMock
+
+        settings = MagicMock()
+        settings.pine_repo_poll_enabled = True
+        settings.pine_repo_poll_interval_minutes = 15
+        settings.pine_repo_poll_tick_seconds = 60
+        settings.pine_repo_poll_max_concurrency = 2
+        settings.pine_repo_poll_max_repos_per_tick = 10
+        settings.pine_repo_poll_backoff_max_multiplier = 16
+        return settings
+
+    @pytest.mark.asyncio
+    async def test_poller_start_stop_lifecycle(self, mock_settings):
+        """
+        Test poller start/stop lifecycle:
+        - Start sets running=True
+        - Stop sets running=False gracefully
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.pine.poller import PineRepoPoller
+
+        mock_pool = MagicMock()
+        poller = PineRepoPoller(mock_pool, mock_settings, None)
+
+        # Patch the poll loop to just wait for stop
+        async def mock_poll_loop():
+            await poller._stop_event.wait()
+
+        with patch.object(poller, "_poll_loop", side_effect=mock_poll_loop):
+            # Start
+            await poller.start()
+            assert poller.is_running is True
+
+            # Stop
+            await poller.stop(timeout=5.0)
+            assert poller.is_running is False
+
+    @pytest.mark.asyncio
+    async def test_poller_run_once_empty(self, mock_settings):
+        """
+        Test run_once when no repos are due:
+        - Should return result with repos_scanned=0
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.pine.poller import PineRepoPoller
+
+        mock_pool = MagicMock()
+        poller = PineRepoPoller(mock_pool, mock_settings, None)
+
+        # Mock the repo registry to return no repos
+        poller._repo_registry.list_due_for_poll = AsyncMock(return_value=[])
+        poller._repo_registry.count_due_for_poll = AsyncMock(return_value=0)
+
+        result = await poller.run_once()
+
+        assert result.repos_scanned == 0
+        assert result.repos_succeeded == 0
+        assert result.repos_failed == 0
+        assert result.duration_ms >= 0
+
+    @pytest.mark.asyncio
+    async def test_poller_get_health(self, mock_settings):
+        """
+        Test get_health returns correct structure.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.pine.poller import PineRepoPoller, PollerHealth
+
+        mock_pool = MagicMock()
+        poller = PineRepoPoller(mock_pool, mock_settings, None)
+        poller._repo_registry.count_due_for_poll = AsyncMock(return_value=3)
+
+        health = await poller.get_health()
+
+        assert isinstance(health, PollerHealth)
+        assert health.enabled is True
+        assert health.running is False
+        assert health.repos_due_count == 3
+        assert health.poll_interval_minutes == 15
+
+
+@pytest.mark.skipif(
+    not os.getenv("DATABASE_URL") and not os.getenv("SUPABASE_URL"),
+    reason="Requires DATABASE_URL or SUPABASE_URL",
+)
+@pytest.mark.requires_db
+class TestPineRepoPollerWithDB:
+    """Integration tests for polling that require database."""
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
+
+    def test_poll_status_endpoint(self, client):
+        """
+        GET /admin/pine/repos/poll-status should return poller health.
+        """
+        # Get admin token (or skip if not configured)
+        admin_token = os.getenv("ADMIN_TOKEN")
+        if not admin_token:
+            pytest.skip("ADMIN_TOKEN not configured")
+
+        resp = client.get(
+            "/admin/pine/repos/poll-status",
+            headers={"X-Admin-Token": admin_token},
+        )
+
+        # Should succeed even if poller is not started
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enabled" in data
+        assert "running" in data
+        assert "repos_due_count" in data
+
+    def test_poll_run_endpoint(self, client):
+        """
+        POST /admin/pine/repos/poll-run should trigger manual poll.
+        """
+        admin_token = os.getenv("ADMIN_TOKEN")
+        if not admin_token:
+            pytest.skip("ADMIN_TOKEN not configured")
+
+        resp = client.post(
+            "/admin/pine/repos/poll-run",
+            headers={"X-Admin-Token": admin_token},
+        )
+
+        # Should succeed
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "status" in data
+        assert "repos_scanned" in data
+        assert "repos_succeeded" in data
+        assert "repos_failed" in data
+        assert "duration_ms" in data
