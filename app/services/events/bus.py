@@ -300,21 +300,68 @@ def get_event_bus() -> EventBus:
     """
     Get the singleton event bus instance.
 
-    Returns InMemoryEventBus by default.
-    Future: swap implementation for multi-worker support.
+    Uses config to determine implementation:
+    - memory: InMemoryEventBus (single worker, default)
+    - redis: RedisEventBus (multi-worker, requires REDIS_URL)
+
+    Returns:
+        EventBus instance (singleton per process)
+
+    Raises:
+        ValueError: If event_bus_mode=redis but REDIS_URL not configured
     """
     global _event_bus
     if _event_bus is None:
-        _event_bus = InMemoryEventBus()
+        from app.config import get_settings
+
+        settings = get_settings()
+
+        if settings.event_bus_mode == "redis":
+            if not settings.redis_url:
+                raise ValueError(
+                    "EVENT_BUS_MODE=redis requires REDIS_URL to be set. "
+                    "Example: redis://localhost:6379/0"
+                )
+            from app.services.events.redis_bus import RedisEventBus
+
+            _event_bus = RedisEventBus(
+                redis_url=settings.redis_url,
+                buffer_size=settings.event_bus_buffer_size,
+            )
+            logger.info(
+                "event_bus_initialized",
+                mode="redis",
+                buffer_size=settings.event_bus_buffer_size,
+            )
+        else:
+            _event_bus = InMemoryEventBus(
+                buffer_size=settings.event_bus_buffer_size,
+            )
+            logger.info(
+                "event_bus_initialized",
+                mode="memory",
+                buffer_size=settings.event_bus_buffer_size,
+            )
+
     return _event_bus
 
 
-def set_event_bus(bus: EventBus) -> None:
+def set_event_bus(bus: EventBus | None) -> None:
     """
-    Set the event bus instance (for testing or multi-worker setup).
+    Set the event bus instance (for testing or runtime replacement).
 
     Args:
-        bus: EventBus implementation to use
+        bus: EventBus implementation to use, or None to reset
     """
     global _event_bus
     _event_bus = bus
+
+
+def reset_event_bus() -> None:
+    """
+    Reset the event bus singleton (for testing).
+
+    Forces re-initialization on next get_event_bus() call.
+    """
+    global _event_bus
+    _event_bus = None

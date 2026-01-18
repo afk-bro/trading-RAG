@@ -56,6 +56,9 @@ sentry-sdk[fastapi]==1.40.0
 # Rate limiting
 slowapi==0.1.9
 
+# Redis (for multi-worker SSE event bus)
+redis>=5.0.0
+
 # Testing (dev dependencies)
 # pytest==8.0.0
 # pytest-asyncio==0.23.4

@@ -223,12 +223,22 @@ async def event_stream(
 # ===========================================
 
 
+class RedisStatusInfo(BaseModel):
+    """Redis-specific status information."""
+
+    connected: bool
+    stream_lengths: dict[str, int] = {}
+    last_publish_ids: dict[str, str | None] = {}
+
+
 class SSEStatusResponse(BaseModel):
     """SSE system status."""
 
+    mode: str  # "memory" or "redis"
     subscriber_count: int
     buffer_size: int
     topics_available: list[str]
+    redis: RedisStatusInfo | None = None
 
 
 @router.get(
@@ -244,16 +254,45 @@ async def get_sse_status() -> SSEStatusResponse:
     **Requires**: X-Admin-Token header
 
     **Returns**:
-    - Current subscriber count
-    - Event buffer size
-    - Available topics
+    - mode: Event bus implementation ("memory" or "redis")
+    - subscriber_count: Current number of active SSE subscribers
+    - buffer_size: Maximum events buffered for reconnection
+    - topics_available: List of subscribable topic names
+    - redis: Redis-specific diagnostics (only when mode=redis)
+      - connected: Redis connection status
+      - stream_lengths: Current event count per workspace stream
+      - last_publish_ids: Most recent event ID per workspace
     """
+    from app.config import get_settings
     from app.services.events.schemas import COVERAGE_TOPICS, BACKTEST_TOPICS
 
+    settings = get_settings()
     bus = get_event_bus()
+    mode = settings.event_bus_mode
+
+    redis_info: RedisStatusInfo | None = None
+
+    if mode == "redis":
+        from app.services.events.redis_bus import RedisEventBus
+
+        if isinstance(bus, RedisEventBus):
+            try:
+                connected = await bus.ping()
+                stream_lengths = await bus.get_stream_lengths() if connected else {}
+
+                redis_info = RedisStatusInfo(
+                    connected=connected,
+                    stream_lengths=stream_lengths,
+                    last_publish_ids={},  # Can be populated per-workspace if needed
+                )
+            except Exception as e:
+                logger.warning("sse_status_redis_error", error=str(e))
+                redis_info = RedisStatusInfo(connected=False)
 
     return SSEStatusResponse(
+        mode=mode,
         subscriber_count=bus.subscriber_count(),
         buffer_size=bus.buffer_size() if hasattr(bus, "buffer_size") else 0,
         topics_available=list(COVERAGE_TOPICS | BACKTEST_TOPICS),
+        redis=redis_info,
     )

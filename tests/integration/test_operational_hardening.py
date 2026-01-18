@@ -310,3 +310,160 @@ class TestSSEEventDelivery:
         assert received.workspace_id == workspace_id
         assert received.payload["run_id"] == str(run_id)
         assert received.payload["status"] == "acknowledged"
+
+
+# =============================================================================
+# Phase 4b: SSE with Redis - Multi-worker Event Delivery
+# =============================================================================
+
+
+@pytest.mark.skipif(
+    not os.getenv("REDIS_URL"),
+    reason="Requires REDIS_URL for Redis EventBus testing",
+)
+class TestRedisSSEEventDelivery:
+    """Phase 4b: Verify Redis-backed SSE for multi-worker scenarios."""
+
+    @pytest.fixture
+    async def redis_bus(self):
+        """Create and cleanup RedisEventBus for testing."""
+        from app.services.events.redis_bus import RedisEventBus
+
+        bus = RedisEventBus(
+            redis_url=os.getenv("REDIS_URL"),
+            buffer_size=100,
+            read_block_ms=500,
+        )
+        yield bus
+        await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_redis_publish_and_receive(self, redis_bus):
+        """
+        Basic Redis event delivery:
+        - Publish event via XADD
+        - Subscriber receives via XREAD
+        """
+        workspace_id = uuid4()
+        run_id = uuid4()
+
+        from app.services.events.schemas import coverage_run_updated
+
+        received_events = []
+
+        async def collect_events():
+            subscriber_id = f"test-{uuid4()}"
+            async for event in redis_bus.subscribe(
+                subscriber_id=subscriber_id,
+                workspace_ids={workspace_id},
+                topics={"coverage"},
+            ):
+                received_events.append(event)
+                break
+
+        # Start subscriber
+        subscriber_task = asyncio.create_task(collect_events())
+        await asyncio.sleep(0.1)
+
+        # Publish event
+        event = coverage_run_updated(
+            event_id="",
+            workspace_id=workspace_id,
+            run_id=run_id,
+            status="acknowledged",
+        )
+        await redis_bus.publish(event)
+
+        # Wait for delivery
+        try:
+            await asyncio.wait_for(subscriber_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+
+        assert len(received_events) >= 1, "Expected to receive event via Redis"
+        assert received_events[0].workspace_id == workspace_id
+
+    @pytest.mark.asyncio
+    async def test_redis_reconnection_replay(self, redis_bus):
+        """
+        Reconnection with Last-Event-ID:
+        - Publish events before subscriber connects
+        - Connect with Last-Event-ID
+        - Should replay missed events
+        """
+        workspace_id = uuid4()
+
+        from app.services.events.schemas import coverage_run_updated
+
+        # Publish some events first
+        event1 = coverage_run_updated(
+            event_id="",
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+            status="open",
+        )
+        await redis_bus.publish(event1)
+        first_id = event1.id
+
+        event2 = coverage_run_updated(
+            event_id="",
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+            status="acknowledged",
+        )
+        await redis_bus.publish(event2)
+
+        # Now subscribe with first event's ID (should get event2)
+        received = []
+
+        async def collect_from_id():
+            async for event in redis_bus.subscribe(
+                subscriber_id=f"test-{uuid4()}",
+                workspace_ids={workspace_id},
+                topics={"coverage"},
+                last_event_id=first_id,
+            ):
+                received.append(event)
+                break
+
+        try:
+            await asyncio.wait_for(collect_from_id(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+
+        assert len(received) >= 1, "Expected replay of missed events"
+        # Should receive event2 (after event1)
+        assert received[0].payload["status"] == "acknowledged"
+
+    @pytest.mark.asyncio
+    async def test_redis_stream_lengths_diagnostic(self, redis_bus):
+        """
+        get_stream_lengths() should return stream info for diagnostics.
+        """
+        workspace_id = uuid4()
+
+        from app.services.events.schemas import coverage_run_updated
+
+        # Publish to create stream
+        event = coverage_run_updated(
+            event_id="",
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+            status="open",
+        )
+        await redis_bus.publish(event)
+
+        # Check stream lengths
+        lengths = await redis_bus.get_stream_lengths()
+
+        expected_key = f"sse:events:{workspace_id}"
+        assert expected_key in lengths, f"Expected stream {expected_key} in {lengths}"
+        assert lengths[expected_key] >= 1, "Expected at least 1 event in stream"
+
+    @pytest.mark.asyncio
+    async def test_redis_ping_succeeds(self, redis_bus):
+        """
+        ping() should return True when Redis is available.
+        """
+        result = await redis_bus.ping()
+        assert result is True, "Expected ping to succeed with running Redis"

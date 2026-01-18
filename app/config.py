@@ -228,6 +228,22 @@ class Settings(BaseSettings):
         description="SSE ticket expiry in seconds (default 5 minutes)",
     )
 
+    # Event Bus Configuration
+    event_bus_mode: Literal["memory", "redis"] = Field(
+        default="memory",
+        description="Event bus implementation: memory (single worker) or redis (multi-worker)",
+    )
+    redis_url: Optional[str] = Field(
+        default=None,
+        description="Redis URL for event bus (required when event_bus_mode=redis). Format: redis://host:port/db or rediss://... for TLS",
+    )
+    event_bus_buffer_size: int = Field(
+        default=2000,
+        ge=100,
+        le=10000,
+        description="Maximum events to buffer per workspace stream for reconnection",
+    )
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""
