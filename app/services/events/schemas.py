@@ -21,6 +21,7 @@ EventTopic = Literal[
     "pine.script.discovered",
     "pine.script.updated",
     "pine.script.spec_generated",
+    "pine.script.archived",
 ]
 
 # Topic categories for filtering
@@ -35,6 +36,7 @@ PINE_TOPICS = {
     "pine.script.discovered",
     "pine.script.updated",
     "pine.script.spec_generated",
+    "pine.script.archived",
 }
 
 
@@ -288,5 +290,25 @@ def pine_script_spec_generated(
             "script_id": str(script_id),
             "rel_path": rel_path,
             "sweepable_count": sweepable_count,
+        },
+    )
+
+
+def pine_script_archived(
+    event_id: str,
+    workspace_id: UUID,
+    script_id: UUID,
+    rel_path: str,
+    last_seen_at: str | None = None,
+) -> AdminEvent:
+    """Create a pine.script.archived event."""
+    return AdminEvent(
+        id=event_id,
+        topic="pine.script.archived",
+        workspace_id=workspace_id,
+        payload={
+            "script_id": str(script_id),
+            "rel_path": rel_path,
+            "last_seen_at": last_seen_at,
         },
     )

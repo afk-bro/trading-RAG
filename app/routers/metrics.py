@@ -310,6 +310,23 @@ PINE_DISCOVERY_DURATION = Histogram(
     buckets=[0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0],
 )
 
+PINE_SCRIPTS_ARCHIVED_TOTAL = Counter(
+    "pine_scripts_archived_total",
+    "Total Pine scripts archived",
+)
+
+PINE_ARCHIVE_RUNS_TOTAL = Counter(
+    "pine_archive_runs_total",
+    "Total Pine archive runs",
+    ["status"],  # success, failed
+)
+
+PINE_ARCHIVE_DURATION = Histogram(
+    "pine_archive_duration_seconds",
+    "Pine archive run duration in seconds",
+    buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
 
 def record_request(method: str, endpoint: str, status_code: int, duration: float):
     """Record request metrics."""
@@ -573,6 +590,30 @@ def record_pine_discovery_error():
 def record_pine_spec_generated(count: int = 1):
     """Record Pine spec generation."""
     PINE_SPECS_GENERATED_TOTAL.inc(count)
+
+
+def record_pine_archive_run(
+    status: str,
+    duration: float,
+    archived_count: int = 0,
+):
+    """Record Pine archive run metrics.
+
+    Args:
+        status: Run status (success, failed)
+        duration: Run duration in seconds
+        archived_count: Number of scripts archived
+    """
+    PINE_ARCHIVE_RUNS_TOTAL.labels(status=status).inc()
+    PINE_ARCHIVE_DURATION.observe(duration)
+
+    if archived_count > 0:
+        PINE_SCRIPTS_ARCHIVED_TOTAL.inc(archived_count)
+
+
+def record_pine_scripts_archived(count: int = 1):
+    """Record Pine scripts archived count."""
+    PINE_SCRIPTS_ARCHIVED_TOTAL.inc(count)
 
 
 @router.get("/metrics", include_in_schema=False)

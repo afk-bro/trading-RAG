@@ -95,6 +95,64 @@ class DiscoverResponse(BaseModel):
     )
 
 
+class ArchiveRequest(BaseModel):
+    """Request payload for archiving stale scripts."""
+
+    workspace_id: UUID = Field(..., description="Workspace to archive scripts in")
+    older_than_days: int = Field(
+        default=7,
+        ge=1,
+        le=365,
+        description="Archive scripts not seen in this many days",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="If true, preview which scripts would be archived",
+    )
+
+
+class ArchiveResponse(BaseModel):
+    """Response from archiving stale scripts."""
+
+    status: Literal["success", "dry_run"] = Field(
+        ..., description="Operation status"
+    )
+    archived_count: int = Field(
+        ..., description="Number of scripts archived"
+    )
+    archived_scripts: list[dict] = Field(
+        default_factory=list,
+        description="Details of archived scripts (id, rel_path, last_seen_at)",
+    )
+
+
+class ScriptListItem(BaseModel):
+    """Summary of a discovered script for list view."""
+
+    id: UUID
+    rel_path: str
+    source_type: str
+    title: Optional[str]
+    script_type: Optional[str]
+    pine_version: Optional[str]
+    status: str
+    sha256: str
+    has_spec: bool
+    last_seen_at: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class ScriptListResponse(BaseModel):
+    """Paginated list of scripts."""
+
+    items: list[ScriptListItem]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
 # ===========================================
 # Path Validation
 # ===========================================
@@ -301,3 +359,232 @@ async def get_discovery_stats(workspace_id: UUID):
         "counts_by_status": counts,
         "total": sum(counts.values()),
     }
+
+
+@router.post(
+    "/archive",
+    response_model=ArchiveResponse,
+    dependencies=[Depends(require_admin_token)],
+    summary="Archive stale scripts",
+    description="""
+    Archive scripts not seen in the specified number of days.
+
+    **Behavior:**
+    - Sets status = 'archived' for scripts where last_seen_at < NOW() - N days
+    - Idempotent: already-archived scripts are not affected
+    - Emits pine.script.archived SSE events for each archived script
+
+    **Use Cases:**
+    - Manual cleanup of scripts from deleted files
+    - Scheduled maintenance (via cron or pg_cron)
+    """,
+)
+async def archive_stale_scripts(request: ArchiveRequest):
+    """Archive scripts not seen in the specified number of days."""
+    pool = _get_pool()
+
+    from app.routers.metrics import record_pine_archive_run
+    from app.services.pine.discovery_repository import StrategyScriptRepository
+
+    log = logger.bind(
+        workspace_id=str(request.workspace_id),
+        older_than_days=request.older_than_days,
+        dry_run=request.dry_run,
+    )
+
+    repo = StrategyScriptRepository(pool)
+
+    start_time = time.monotonic()
+
+    try:
+        if request.dry_run:
+            # Dry run: just count without archiving
+            # We need to query the same way mark_archived does
+            async with pool.acquire() as conn:
+                query = """
+                    SELECT id, workspace_id, rel_path, last_seen_at
+                    FROM strategy_scripts
+                    WHERE workspace_id = $1
+                      AND status != 'archived'
+                      AND last_seen_at < NOW() - ($2 || ' days')::INTERVAL
+                """
+                rows = await conn.fetch(
+                    query, request.workspace_id, str(request.older_than_days)
+                )
+
+            archived_scripts = [
+                {
+                    "id": str(row["id"]),
+                    "rel_path": row["rel_path"],
+                    "last_seen_at": (
+                        row["last_seen_at"].isoformat()
+                        if row["last_seen_at"]
+                        else None
+                    ),
+                }
+                for row in rows
+            ]
+
+            log.info(
+                "archive_dry_run_complete",
+                would_archive=len(archived_scripts),
+            )
+
+            return ArchiveResponse(
+                status="dry_run",
+                archived_count=len(archived_scripts),
+                archived_scripts=archived_scripts,
+            )
+
+        # Actual archive operation
+        result = await repo.mark_archived(
+            request.workspace_id, request.older_than_days
+        )
+
+        # Emit events for archived scripts
+        if result.archived_count > 0:
+            from app.services.events import get_event_bus
+            from app.services.events.schemas import pine_script_archived
+
+            bus = get_event_bus()
+            for script in result.archived_scripts:
+                try:
+                    last_seen_str = None
+                    if script.last_seen_at:
+                        last_seen_str = script.last_seen_at.isoformat()
+
+                    event = pine_script_archived(
+                        event_id="",
+                        workspace_id=request.workspace_id,
+                        script_id=script.id,
+                        rel_path=script.rel_path,
+                        last_seen_at=last_seen_str,
+                    )
+                    await bus.publish(event)
+                except Exception as e:
+                    log.warning(
+                        "archived_event_emit_error",
+                        script_id=str(script.id),
+                        error=str(e),
+                    )
+
+        duration = time.monotonic() - start_time
+
+        # Record metrics
+        record_pine_archive_run(
+            status="success",
+            duration=duration,
+            archived_count=result.archived_count,
+        )
+
+        archived_scripts = [
+            {
+                "id": str(s.id),
+                "rel_path": s.rel_path,
+                "last_seen_at": s.last_seen_at.isoformat() if s.last_seen_at else None,
+            }
+            for s in result.archived_scripts
+        ]
+
+        log.info(
+            "archive_complete",
+            archived_count=result.archived_count,
+            duration_seconds=round(duration, 3),
+        )
+
+        return ArchiveResponse(
+            status="success",
+            archived_count=result.archived_count,
+            archived_scripts=archived_scripts,
+        )
+
+    except Exception as e:
+        duration = time.monotonic() - start_time
+        record_pine_archive_run(
+            status="failed",
+            duration=duration,
+            archived_count=0,
+        )
+
+        log.exception("archive_failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Archive operation failed: {e}",
+        )
+
+
+@router.get(
+    "/scripts",
+    response_model=ScriptListResponse,
+    dependencies=[Depends(require_admin_token)],
+    summary="List discovered scripts",
+    description="""
+    List scripts with optional filtering and pagination.
+
+    **Filters:**
+    - status: Filter by discovery status (discovered, spec_generated, published, archived, all)
+    - script_type: Filter by Pine script type (strategy, indicator, library)
+
+    **Pagination:**
+    - limit: Max results per page (default 50, max 100)
+    - offset: Number of results to skip
+
+    **Sorting:**
+    - Results ordered by last_seen_at descending (most recent first)
+    """,
+)
+async def list_scripts(
+    workspace_id: UUID,
+    status: Optional[str] = None,
+    script_type: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List discovered scripts with filtering and pagination."""
+    pool = _get_pool()
+
+    from app.services.pine.discovery_repository import StrategyScriptRepository
+
+    # Validate limit
+    if limit < 1:
+        limit = 1
+    elif limit > 100:
+        limit = 100
+
+    if offset < 0:
+        offset = 0
+
+    repo = StrategyScriptRepository(pool)
+    scripts, total = await repo.list_scripts(
+        workspace_id=workspace_id,
+        status=status,
+        script_type=script_type,
+        limit=limit,
+        offset=offset,
+    )
+
+    items = [
+        ScriptListItem(
+            id=s.id,
+            rel_path=s.rel_path,
+            source_type=s.source_type,
+            title=s.title,
+            script_type=s.script_type,
+            pine_version=s.pine_version,
+            status=s.status,
+            sha256=s.sha256,
+            has_spec=s.spec_json is not None,
+            last_seen_at=s.last_seen_at.isoformat() if s.last_seen_at else None,
+            created_at=s.created_at.isoformat() if s.created_at else None,
+            updated_at=s.updated_at.isoformat() if s.updated_at else None,
+        )
+        for s in scripts
+    ]
+
+    return ScriptListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=(offset + len(items)) < total,
+    )

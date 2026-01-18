@@ -635,3 +635,223 @@ class TestPineDiscoveryMetrics:
         record_pine_spec_generated(count=3)
 
         assert PINE_SPECS_GENERATED_TOTAL is not None
+
+
+class TestArchivingModels:
+    """Tests for archiving-related dataclasses."""
+
+    def test_archive_result_default_values(self):
+        """ArchiveResult has correct defaults."""
+        from app.services.pine.discovery_repository import ArchiveResult
+
+        result = ArchiveResult(archived_count=0)
+        assert result.archived_count == 0
+        assert result.archived_scripts == []
+
+    def test_archived_script_dataclass(self):
+        """ArchivedScript stores script info correctly."""
+        from datetime import datetime, timezone
+        from app.services.pine.discovery_repository import ArchivedScript
+
+        now = datetime.now(timezone.utc)
+        script = ArchivedScript(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rel_path="old/script.pine",
+            last_seen_at=now,
+        )
+
+        assert script.rel_path == "old/script.pine"
+        assert script.last_seen_at == now
+
+    def test_archived_script_none_last_seen(self):
+        """ArchivedScript handles None last_seen_at."""
+        from app.services.pine.discovery_repository import ArchivedScript
+
+        script = ArchivedScript(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rel_path="test.pine",
+            last_seen_at=None,
+        )
+
+        assert script.last_seen_at is None
+
+
+class TestArchivedEventSchema:
+    """Tests for pine.script.archived event schema."""
+
+    def test_pine_script_archived_in_topics(self):
+        """pine.script.archived is in PINE_TOPICS set."""
+        from app.services.events.schemas import PINE_TOPICS
+
+        assert "pine.script.archived" in PINE_TOPICS
+
+    def test_pine_script_archived_event_factory(self):
+        """pine_script_archived creates correct event."""
+        from app.services.events.schemas import pine_script_archived
+
+        workspace_id = uuid4()
+        script_id = uuid4()
+
+        event = pine_script_archived(
+            event_id="evt-123",
+            workspace_id=workspace_id,
+            script_id=script_id,
+            rel_path="stale/script.pine",
+            last_seen_at="2025-01-10T12:00:00+00:00",
+        )
+
+        assert event.topic == "pine.script.archived"
+        assert event.workspace_id == workspace_id
+        assert event.payload["script_id"] == str(script_id)
+        assert event.payload["rel_path"] == "stale/script.pine"
+        assert event.payload["last_seen_at"] == "2025-01-10T12:00:00+00:00"
+
+    def test_pine_script_archived_event_none_last_seen(self):
+        """pine_script_archived handles None last_seen_at."""
+        from app.services.events.schemas import pine_script_archived
+
+        event = pine_script_archived(
+            event_id="",
+            workspace_id=uuid4(),
+            script_id=uuid4(),
+            rel_path="test.pine",
+            last_seen_at=None,
+        )
+
+        assert event.payload["last_seen_at"] is None
+
+
+class TestArchiveMetrics:
+    """Tests for Pine archive Prometheus metrics."""
+
+    def test_archive_metrics_defined(self):
+        """Pine archive metrics are properly defined."""
+        from app.routers.metrics import (
+            PINE_SCRIPTS_ARCHIVED_TOTAL,
+            PINE_ARCHIVE_RUNS_TOTAL,
+            PINE_ARCHIVE_DURATION,
+        )
+
+        assert PINE_SCRIPTS_ARCHIVED_TOTAL is not None
+        assert PINE_ARCHIVE_RUNS_TOTAL is not None
+        assert PINE_ARCHIVE_DURATION is not None
+
+    def test_record_pine_archive_run_success(self):
+        """record_pine_archive_run records success metrics."""
+        from app.routers.metrics import record_pine_archive_run
+
+        record_pine_archive_run(
+            status="success",
+            duration=1.5,
+            archived_count=5,
+        )
+
+        # Function should complete without error
+        assert True
+
+    def test_record_pine_archive_run_failed(self):
+        """record_pine_archive_run records failed metrics."""
+        from app.routers.metrics import record_pine_archive_run
+
+        record_pine_archive_run(
+            status="failed",
+            duration=0.1,
+            archived_count=0,
+        )
+
+        # Function should complete without error
+        assert True
+
+    def test_record_pine_scripts_archived(self):
+        """record_pine_scripts_archived increments counter."""
+        from app.routers.metrics import record_pine_scripts_archived
+
+        record_pine_scripts_archived(count=10)
+
+        # Function should complete without error
+        assert True
+
+
+class TestDiscoveryResultWithArchived:
+    """Tests for DiscoveryResult with archived count."""
+
+    def test_discovery_result_has_archived_field(self):
+        """DiscoveryResult includes scripts_archived field."""
+        result = DiscoveryResult()
+        assert hasattr(result, "scripts_archived")
+        assert result.scripts_archived == 0
+
+    def test_discovery_result_archived_can_be_set(self):
+        """DiscoveryResult scripts_archived can be set."""
+        result = DiscoveryResult(scripts_archived=5)
+        assert result.scripts_archived == 5
+
+
+class TestDiscoverWithArchiving:
+    """Tests for discovery with archiving integration."""
+
+    @pytest.fixture
+    def mock_pool(self):
+        """Create a mock database pool."""
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_settings(self):
+        """Create mock settings."""
+        settings = MagicMock()
+        settings.data_dir = "/data"
+        return settings
+
+    @pytest.fixture
+    def service(self, mock_pool, mock_settings):
+        """Create PineDiscoveryService with mocks."""
+        return PineDiscoveryService(mock_pool, mock_settings)
+
+    @pytest.mark.asyncio
+    async def test_discover_with_archive_stale_days(self, service):
+        """discover() accepts archive_stale_days parameter."""
+        from app.services.pine.discovery_repository import ArchiveResult
+
+        workspace_id = uuid4()
+
+        with patch.object(service, "_scan_and_parse") as mock_scan, \
+             patch.object(service._repo, "mark_archived", new_callable=AsyncMock) as mock_archive, \
+             patch("app.services.events.get_event_bus") as mock_get_bus:
+
+            mock_scan.return_value = []
+            mock_archive.return_value = ArchiveResult(archived_count=3, archived_scripts=[])
+            mock_bus = MagicMock()
+            mock_bus.publish = AsyncMock(return_value=1)
+            mock_get_bus.return_value = mock_bus
+
+            result = await service.discover(
+                workspace_id=workspace_id,
+                scan_paths=["/data/pine"],
+                archive_stale_days=7,
+            )
+
+            # Should call mark_archived with 7 days
+            mock_archive.assert_called_once_with(workspace_id, 7)
+            assert result.scripts_archived == 3
+
+    @pytest.mark.asyncio
+    async def test_discover_without_archive_stale_days(self, service):
+        """discover() skips archiving when archive_stale_days is None."""
+        workspace_id = uuid4()
+
+        with patch.object(service, "_scan_and_parse") as mock_scan, \
+             patch.object(service._repo, "mark_archived", new_callable=AsyncMock) as mock_archive:
+
+            mock_scan.return_value = []
+
+            result = await service.discover(
+                workspace_id=workspace_id,
+                scan_paths=["/data/pine"],
+                archive_stale_days=None,
+            )
+
+            # Should NOT call mark_archived
+            mock_archive.assert_not_called()
+            assert result.scripts_archived == 0

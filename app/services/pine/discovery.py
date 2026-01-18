@@ -14,6 +14,8 @@ import structlog
 
 from app.services.pine.adapters.filesystem import SourceFile, scan_pine_files
 from app.services.pine.discovery_repository import (
+    ArchiveResult,
+    ArchivedScript,
     StrategyScript,
     StrategyScriptRepository,
     UpsertResult,
@@ -33,6 +35,7 @@ class DiscoveryResult:
     scripts_updated: int = 0
     scripts_unchanged: int = 0
     specs_generated: int = 0
+    scripts_archived: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -89,6 +92,7 @@ class PineDiscoveryService:
         generate_specs: bool = True,
         dry_run: bool = False,
         discovery_run_id: Optional[str] = None,
+        archive_stale_days: Optional[int] = None,
     ) -> DiscoveryResult:
         """
         Discover Pine scripts in the specified paths.
@@ -99,6 +103,7 @@ class PineDiscoveryService:
             generate_specs: Whether to generate specs for strategies
             dry_run: If True, don't persist or emit events
             discovery_run_id: Optional ID for log correlation
+            archive_stale_days: If set, archive scripts not seen in N days
 
         Returns:
             DiscoveryResult with counts and errors
@@ -190,6 +195,13 @@ class PineDiscoveryService:
             specs_generated = await self._generate_specs(changes, workspace_id, log)
             result.specs_generated = specs_generated
 
+        # Phase 4: Archive stale scripts (if enabled)
+        if archive_stale_days is not None:
+            archive_result = await self._archive_stale(
+                workspace_id, archive_stale_days, log
+            )
+            result.scripts_archived = archive_result.archived_count
+
         log.info(
             "discovery_complete",
             scanned=result.scripts_scanned,
@@ -197,6 +209,7 @@ class PineDiscoveryService:
             updated=result.scripts_updated,
             unchanged=result.scripts_unchanged,
             specs_generated=result.specs_generated,
+            archived=result.scripts_archived,
             errors=len(result.errors),
         )
 
@@ -425,3 +438,58 @@ class PineDiscoveryService:
                 )
 
         return count
+
+    async def _archive_stale(
+        self,
+        workspace_id: UUID,
+        older_than_days: int,
+        log,
+    ) -> ArchiveResult:
+        """Archive scripts not seen in N days and emit events."""
+        from app.services.events import get_event_bus
+        from app.services.events.schemas import pine_script_archived
+
+        try:
+            archive_result = await self._repo.mark_archived(
+                workspace_id, older_than_days
+            )
+
+            if archive_result.archived_count > 0:
+                log.info(
+                    "scripts_archived",
+                    count=archive_result.archived_count,
+                    older_than_days=older_than_days,
+                )
+
+                # Emit archived events
+                bus = get_event_bus()
+                for script in archive_result.archived_scripts:
+                    try:
+                        last_seen_str = None
+                        if script.last_seen_at:
+                            last_seen_str = script.last_seen_at.isoformat()
+
+                        event = pine_script_archived(
+                            event_id="",
+                            workspace_id=workspace_id,
+                            script_id=script.id,
+                            rel_path=script.rel_path,
+                            last_seen_at=last_seen_str,
+                        )
+                        await bus.publish(event)
+                    except Exception as e:
+                        log.warning(
+                            "archived_event_emit_error",
+                            script_id=str(script.id),
+                            error=str(e),
+                        )
+
+            return archive_result
+
+        except Exception as e:
+            log.warning(
+                "archive_stale_error",
+                older_than_days=older_than_days,
+                error=str(e),
+            )
+            return ArchiveResult(archived_count=0)

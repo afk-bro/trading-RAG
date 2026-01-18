@@ -48,6 +48,24 @@ class UpsertResult:
     changed_fields: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ArchivedScript:
+    """Info about an archived script (for event emission)."""
+
+    id: UUID
+    workspace_id: UUID
+    rel_path: str
+    last_seen_at: Optional[datetime]
+
+
+@dataclass
+class ArchiveResult:
+    """Result of an archive operation."""
+
+    archived_count: int
+    archived_scripts: list[ArchivedScript] = field(default_factory=list)
+
+
 # Fields to compare for change detection
 CHANGE_DETECT_FIELDS = [
     "sha256",
@@ -349,6 +367,136 @@ class StrategyScriptRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, workspace_id)
             return {row["status"]: row["count"] for row in rows}
+
+    async def mark_archived(
+        self,
+        workspace_id: UUID,
+        older_than_days: int = 7,
+    ) -> ArchiveResult:
+        """
+        Mark stale scripts as archived.
+
+        Archives scripts that:
+        - Belong to the workspace
+        - Have status != 'archived' (idempotent)
+        - Have last_seen_at older than N days
+
+        Args:
+            workspace_id: Workspace to archive scripts in
+            older_than_days: Scripts not seen in this many days will be archived
+
+        Returns:
+            ArchiveResult with count and list of archived scripts
+        """
+        # First, get the scripts that will be archived (for event emission)
+        select_query = """
+            SELECT id, workspace_id, rel_path, last_seen_at
+            FROM strategy_scripts
+            WHERE workspace_id = $1
+              AND status != 'archived'
+              AND last_seen_at < NOW() - ($2 || ' days')::INTERVAL
+        """
+
+        # Then update them
+        update_query = """
+            UPDATE strategy_scripts
+            SET status = 'archived'
+            WHERE workspace_id = $1
+              AND status != 'archived'
+              AND last_seen_at < NOW() - ($2 || ' days')::INTERVAL
+        """
+
+        async with self._pool.acquire() as conn:
+            # Get scripts to archive
+            rows = await conn.fetch(select_query, workspace_id, str(older_than_days))
+            archived_scripts = [
+                ArchivedScript(
+                    id=row["id"],
+                    workspace_id=row["workspace_id"],
+                    rel_path=row["rel_path"],
+                    last_seen_at=row["last_seen_at"],
+                )
+                for row in rows
+            ]
+
+            # Archive them
+            result = await conn.execute(update_query, workspace_id, str(older_than_days))
+            count = int(result.split()[-1]) if result else 0
+
+            return ArchiveResult(
+                archived_count=count,
+                archived_scripts=archived_scripts,
+            )
+
+    async def list_scripts(
+        self,
+        workspace_id: UUID,
+        status: Optional[str] = None,
+        script_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[StrategyScript], int]:
+        """
+        List scripts with filtering and pagination.
+
+        Args:
+            workspace_id: Workspace to list scripts from
+            status: Filter by status (None = all non-archived, 'all' = include archived)
+            script_type: Filter by script type (strategy, indicator, library)
+            limit: Max results to return
+            offset: Pagination offset
+
+        Returns:
+            Tuple of (scripts, total_count)
+        """
+        # Build WHERE clauses
+        conditions = ["workspace_id = $1"]
+        params: list = [workspace_id]
+        param_idx = 2
+
+        if status == "all":
+            pass  # No status filter
+        elif status:
+            conditions.append(f"status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+        else:
+            # Default: exclude archived
+            conditions.append("status != 'archived'")
+
+        if script_type:
+            conditions.append(f"script_type = ${param_idx}")
+            params.append(script_type)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions)
+
+        # Count query
+        count_query = f"""
+            SELECT COUNT(*) FROM strategy_scripts
+            WHERE {where_clause}
+        """
+
+        # Data query
+        data_query = f"""
+            SELECT id, workspace_id, rel_path, source_type, sha256,
+                   pine_version, script_type, title, status,
+                   spec_json, spec_generated_at, lint_json,
+                   strategy_id, published_at, last_seen_at,
+                   created_at, updated_at
+            FROM strategy_scripts
+            WHERE {where_clause}
+            ORDER BY last_seen_at DESC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        params.extend([limit, offset])
+
+        async with self._pool.acquire() as conn:
+            total = await conn.fetchval(count_query, *params[:-2])
+            rows = await conn.fetch(data_query, *params)
+            scripts = [self._row_to_model(row) for row in rows]
+
+            return scripts, total or 0
 
     def _row_to_model(self, row) -> StrategyScript:
         """Convert DB row to model."""
