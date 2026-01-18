@@ -232,9 +232,7 @@ class TestSchemaExports:
         declared = set(schemas.__all__)
 
         # Get all public names (not starting with _)
-        public_names = {
-            name for name in dir(schemas) if not name.startswith("_")
-        }
+        public_names = {name for name in dir(schemas) if not name.startswith("_")}
 
         # Filter out modules and common builtins
         ignored = {"annotations", "datetime", "UUID", "Optional", "Field", "BaseModel"}
