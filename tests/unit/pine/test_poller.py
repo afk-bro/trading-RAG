@@ -269,7 +269,7 @@ class TestPollerRunOnce:
             poller._do_poll_tick.assert_called_once()
 
 
-class TestPollerHealth:
+class TestGetHealth:
     """Tests for get_health method."""
 
     @pytest.mark.asyncio

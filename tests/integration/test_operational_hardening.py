@@ -498,7 +498,7 @@ class TestPineRepoPollerUnit:
         - Start sets running=True
         - Stop sets running=False gracefully
         """
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from app.services.pine.poller import PineRepoPoller
 
