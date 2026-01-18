@@ -342,6 +342,22 @@ PINE_ARCHIVE_DURATION = Histogram(
     buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
+# Pine discovery observability gauges
+PINE_SCRIPTS_PENDING_INGEST = Gauge(
+    "pine_scripts_pending_ingest",
+    "Number of Pine scripts pending (re-)ingest",
+)
+
+PINE_DISCOVERY_LAST_RUN_TIMESTAMP = Gauge(
+    "pine_discovery_last_run_timestamp",
+    "Unix timestamp of last Pine discovery run",
+)
+
+PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP = Gauge(
+    "pine_discovery_last_success_timestamp",
+    "Unix timestamp of last successful Pine discovery run",
+)
+
 
 def record_request(method: str, endpoint: str, status_code: int, duration: float):
     """Record request metrics."""
@@ -643,6 +659,31 @@ def record_pine_archive_run(
 def record_pine_scripts_archived(count: int = 1):
     """Record Pine scripts archived count."""
     PINE_SCRIPTS_ARCHIVED_TOTAL.inc(count)
+
+
+def set_pine_pending_ingest(count: int):
+    """Set the number of Pine scripts pending (re-)ingest.
+
+    Call this after discovery runs to update the gauge.
+    Useful for alerting on "pending ingest > 0 for N minutes".
+    """
+    PINE_SCRIPTS_PENDING_INGEST.set(count)
+
+
+def record_pine_discovery_timestamp(success: bool = True):
+    """Record Pine discovery run timestamp.
+
+    Updates PINE_DISCOVERY_LAST_RUN_TIMESTAMP always.
+    Updates PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP only if success=True.
+
+    Call this at the end of each discovery run.
+    """
+    import time
+
+    now = time.time()
+    PINE_DISCOVERY_LAST_RUN_TIMESTAMP.set(now)
+    if success:
+        PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP.set(now)
 
 
 @router.get("/metrics", include_in_schema=False)

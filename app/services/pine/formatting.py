@@ -90,22 +90,41 @@ def strategy_script_to_entry(
     )
 
 
-def build_canonical_url(source_type: str, rel_path: str) -> str:
+def build_canonical_url(
+    source_type: str,
+    rel_path: str,
+    repo_slug: Optional[str] = None,
+) -> str:
     """
     Build canonical URL for a Pine script.
 
     Format: pine://{source_type}/{rel_path}
+    For github: pine://github/{repo_slug}/{rel_path}
 
     Args:
         source_type: Source type (local, github, etc.)
         rel_path: Relative path to script
+        repo_slug: Repository identifier for github sources (e.g., "owner/repo").
+                   Phase B3.1: Required for github sources to ensure uniqueness.
 
     Returns:
         Canonical URL string
+
+    Examples:
+        >>> build_canonical_url("local", "strategies/breakout.pine")
+        'pine://local/strategies/breakout.pine'
+
+        >>> build_canonical_url("github", "strategies/rsi.pine", "acme/trading-scripts")
+        'pine://github/acme/trading-scripts/strategies/rsi.pine'
     """
     # Normalize path
     normalized = rel_path.replace("\\", "/").lstrip("/")
     normalized = "/".join(p for p in normalized.split("/") if p not in (".", ".."))
+
+    # Phase B3.1: Include repo_slug for github sources
+    if source_type == "github" and repo_slug:
+        return f"pine://github/{repo_slug}/{normalized}"
+
     return f"pine://{source_type}/{normalized}"
 
 
@@ -175,7 +194,11 @@ def build_pine_metadata(
     }
 
 
-def build_ingest_doc_id(source_type: str, rel_path: str) -> str:
+def build_ingest_doc_id(
+    source_type: str,
+    rel_path: str,
+    repo_slug: Optional[str] = None,
+) -> str:
     """
     Build a stable document ID for ingest.
 
@@ -185,10 +208,26 @@ def build_ingest_doc_id(source_type: str, rel_path: str) -> str:
     Args:
         source_type: Source type (local, github, etc.)
         rel_path: Relative path to script
+        repo_slug: Repository identifier for github sources (e.g., "owner/repo").
+                   Phase B3.1: Required for github sources to avoid collisions
+                   between scripts with same rel_path in different repos.
 
     Returns:
         Stable document ID string
+
+    Examples:
+        >>> build_ingest_doc_id("local", "strategies/breakout.pine")
+        'pine:local:strategies/breakout.pine'
+
+        >>> build_ingest_doc_id("github", "strategies/rsi.pine", "acme/trading-scripts")
+        'pine:github:acme/trading-scripts:strategies/rsi.pine'
     """
     normalized = rel_path.replace("\\", "/").lstrip("/")
     normalized = "/".join(p for p in normalized.split("/") if p not in (".", ".."))
+
+    # Phase B3.1: Include repo_slug for github sources to avoid doc_id collisions
+    # between scripts with same rel_path in different repositories.
+    if source_type == "github" and repo_slug:
+        return f"pine:github:{repo_slug}:{normalized}"
+
     return f"pine:{source_type}:{normalized}"

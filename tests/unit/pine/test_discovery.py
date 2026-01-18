@@ -1052,6 +1052,41 @@ class TestFormattingModule:
         doc_id2 = build_ingest_doc_id("local", "strategies/breakout.pine")
         assert doc_id1 == doc_id2
 
+    def test_build_ingest_doc_id_with_repo_slug(self):
+        """build_ingest_doc_id includes repo_slug for github sources (Phase B3.1)."""
+        from app.services.pine.formatting import build_ingest_doc_id
+
+        # GitHub with repo_slug should include it
+        doc_id = build_ingest_doc_id(
+            "github", "strategies/rsi.pine", repo_slug="acme/trading-scripts"
+        )
+        assert doc_id == "pine:github:acme/trading-scripts:strategies/rsi.pine"
+
+    def test_build_ingest_doc_id_github_without_slug_fallback(self):
+        """build_ingest_doc_id without repo_slug falls back (Phase B3.1 seam)."""
+        from app.services.pine.formatting import build_ingest_doc_id
+
+        # GitHub without repo_slug - falls back to simple format (not recommended)
+        doc_id = build_ingest_doc_id("github", "strategies/rsi.pine")
+        assert doc_id == "pine:github:strategies/rsi.pine"
+
+    def test_build_canonical_url_with_repo_slug(self):
+        """build_canonical_url includes repo_slug for github sources (Phase B3.1)."""
+        from app.services.pine.formatting import build_canonical_url
+
+        url = build_canonical_url(
+            "github", "strategies/rsi.pine", repo_slug="acme/trading-scripts"
+        )
+        assert url == "pine://github/acme/trading-scripts/strategies/rsi.pine"
+
+    def test_build_canonical_url_local_ignores_repo_slug(self):
+        """build_canonical_url ignores repo_slug for local sources."""
+        from app.services.pine.formatting import build_canonical_url
+
+        # Local source should ignore repo_slug
+        url = build_canonical_url("local", "strategies/breakout.pine", repo_slug="foo")
+        assert url == "pine://local/strategies/breakout.pine"
+
 
 class TestDiscoverWithAutoIngest:
     """Tests for discovery with auto-ingest integration."""
@@ -1103,7 +1138,7 @@ class TestDiscoverWithAutoIngest:
 
             mock_scan.return_value = []
 
-            result = await service.discover(
+            await service.discover(
                 workspace_id=workspace_id,
                 scan_paths=["/data/pine"],
                 emit_events=False,
@@ -1132,3 +1167,91 @@ class TestDiscoverWithAutoIngest:
             assert result.scripts_ingested == 3
             assert result.scripts_ingest_failed == 1
             assert result.chunks_created == 15
+
+
+class TestDiscoveryGaugeMetrics:
+    """Tests for Pine discovery gauge metrics."""
+
+    def test_pending_ingest_gauge_defined(self):
+        """PINE_SCRIPTS_PENDING_INGEST gauge is defined."""
+        from app.routers.metrics import PINE_SCRIPTS_PENDING_INGEST
+
+        assert PINE_SCRIPTS_PENDING_INGEST is not None
+        assert PINE_SCRIPTS_PENDING_INGEST._name == "pine_scripts_pending_ingest"
+
+    def test_last_run_timestamp_gauge_defined(self):
+        """PINE_DISCOVERY_LAST_RUN_TIMESTAMP gauge is defined."""
+        from app.routers.metrics import PINE_DISCOVERY_LAST_RUN_TIMESTAMP
+
+        assert PINE_DISCOVERY_LAST_RUN_TIMESTAMP is not None
+        assert (
+            PINE_DISCOVERY_LAST_RUN_TIMESTAMP._name
+            == "pine_discovery_last_run_timestamp"
+        )
+
+    def test_last_success_timestamp_gauge_defined(self):
+        """PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP gauge is defined."""
+        from app.routers.metrics import PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP
+
+        assert PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP is not None
+        assert (
+            PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP._name
+            == "pine_discovery_last_success_timestamp"
+        )
+
+    def test_set_pine_pending_ingest(self):
+        """set_pine_pending_ingest updates gauge value."""
+        from app.routers.metrics import (
+            PINE_SCRIPTS_PENDING_INGEST,
+            set_pine_pending_ingest,
+        )
+
+        set_pine_pending_ingest(42)
+        # Gauge should have value set (prometheus_client internals)
+        assert PINE_SCRIPTS_PENDING_INGEST._value._value == 42
+
+    def test_record_pine_discovery_timestamp_success(self):
+        """record_pine_discovery_timestamp updates both gauges on success."""
+        import time
+
+        from app.routers.metrics import (
+            PINE_DISCOVERY_LAST_RUN_TIMESTAMP,
+            PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP,
+            record_pine_discovery_timestamp,
+        )
+
+        before = time.time()
+        record_pine_discovery_timestamp(success=True)
+        after = time.time()
+
+        # Both timestamps should be updated
+        run_ts = PINE_DISCOVERY_LAST_RUN_TIMESTAMP._value._value
+        success_ts = PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP._value._value
+
+        assert before <= run_ts <= after
+        assert before <= success_ts <= after
+
+    def test_record_pine_discovery_timestamp_failure(self):
+        """record_pine_discovery_timestamp only updates run timestamp on failure."""
+        import time
+
+        from app.routers.metrics import (
+            PINE_DISCOVERY_LAST_RUN_TIMESTAMP,
+            PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP,
+            record_pine_discovery_timestamp,
+        )
+
+        # Set a known value for success timestamp
+        PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP.set(12345.0)
+
+        before = time.time()
+        record_pine_discovery_timestamp(success=False)
+        after = time.time()
+
+        # Run timestamp should be updated
+        run_ts = PINE_DISCOVERY_LAST_RUN_TIMESTAMP._value._value
+        assert before <= run_ts <= after
+
+        # Success timestamp should NOT be updated (still old value)
+        success_ts = PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP._value._value
+        assert success_ts == 12345.0

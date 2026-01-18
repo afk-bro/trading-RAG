@@ -15,7 +15,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
-from app.routers.metrics import record_pine_discovery_run
+from app.routers.metrics import (
+    record_pine_discovery_run,
+    record_pine_discovery_timestamp,
+    set_pine_pending_ingest,
+)
 
 router = APIRouter(prefix="/pine", tags=["admin-pine"])
 logger = structlog.get_logger(__name__)
@@ -319,6 +323,18 @@ async def discover_pine_scripts(
                 errors_count=len(result.errors),
             )
 
+            # Record timestamp gauges
+            record_pine_discovery_timestamp(success=op_status == "success")
+
+            # Update pending ingest gauge
+            try:
+                pending_count = await service._repo.count_pending_ingest(
+                    request.workspace_id
+                )
+                set_pine_pending_ingest(pending_count)
+            except Exception:
+                log.warning("failed_to_update_pending_ingest_gauge")
+
         log.info(
             "discovery_request_complete",
             status=op_status,
@@ -355,6 +371,7 @@ async def discover_pine_scripts(
             duration=duration,
             errors_count=1,
         )
+        record_pine_discovery_timestamp(success=False)
 
         log.exception("discovery_request_failed", error=str(e))
         raise HTTPException(

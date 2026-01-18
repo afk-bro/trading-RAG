@@ -4,6 +4,8 @@ Unit tests for Pine Script ingestion service.
 Tests content formatting and ingest logic without database/vector dependencies.
 """
 
+import pytest
+
 from app.services.pine.ingest import (
     extract_symbols_from_script,
     format_script_content,
@@ -360,3 +362,232 @@ class TestScriptIngestResult:
         assert result.success is False
         assert result.status == "failed"
         assert result.error == "Parse error"
+
+
+class TestIngestPipelineVectorCleanup:
+    """
+    Tests for ingest_pipeline vector cleanup on script edit.
+
+    Verifies that when a script is re-ingested with update_existing=True,
+    old vectors are deleted before new ones are created.
+    """
+
+    @pytest.mark.asyncio
+    async def test_edit_script_deletes_old_vectors(self):
+        """
+        When a script is edited and re-ingested, old vectors are cleaned up.
+
+        This is the critical test for preventing stale vector accumulation.
+        """
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from app.schemas import SourceType
+
+        # Setup: IDs for tracking
+        workspace_id = uuid4()
+        old_doc_id = uuid4()
+        new_doc_id = uuid4()
+        old_chunk_ids = [str(uuid4()), str(uuid4())]  # 2 chunks from first ingest
+        new_chunk_ids = [str(uuid4()), str(uuid4()), str(uuid4())]  # 3 chunks after edit
+
+        # Mock repositories
+        mock_doc_repo = MagicMock()
+        mock_chunk_repo = MagicMock()
+        mock_chunk_vector_repo = MagicMock()
+        mock_vector_repo = MagicMock()
+
+        # First call: doc exists (simulating re-ingest)
+        mock_doc_repo.get_by_canonical_url = AsyncMock(
+            return_value={
+                "id": old_doc_id,
+                "version": 1,
+                "canonical_url": "pine://local/test.pine",
+            }
+        )
+        mock_doc_repo.get_chunk_ids = AsyncMock(return_value=old_chunk_ids)
+        mock_doc_repo.supersede_and_create = AsyncMock(return_value=(new_doc_id, 2))
+        mock_doc_repo.get_by_content_hash = AsyncMock(return_value=None)
+        mock_doc_repo.update_last_indexed = AsyncMock(return_value=None)
+
+        mock_chunk_repo.create_batch = AsyncMock(return_value=new_chunk_ids)
+        mock_chunk_vector_repo.create_batch = AsyncMock(return_value=None)
+
+        mock_vector_repo.upsert_batch = AsyncMock(return_value=None)
+        mock_vector_repo.delete_batch = AsyncMock(return_value=None)
+
+        # Mock embedder
+        mock_embedder = MagicMock()
+        mock_embedder.embed_batch = AsyncMock(
+            return_value=[[0.1] * 768, [0.2] * 768, [0.3] * 768]  # 3 embeddings
+        )
+
+        # Mock extractor
+        mock_extractor = MagicMock()
+        mock_metadata = MagicMock()
+        mock_metadata.symbols = []
+        mock_metadata.entities = []
+        mock_metadata.topics = []
+        mock_metadata.quality_score = 0.8
+        mock_metadata.speaker = None
+        mock_extractor.extract = MagicMock(return_value=mock_metadata)
+
+        # Mock health validation result
+        from app.services.ingest.health import HealthResult, HealthStatus
+
+        mock_health_result = HealthResult(
+            source_id=new_doc_id,
+            workspace_id=workspace_id,
+            status=HealthStatus.OK,
+            checks=[],
+        )
+
+        # Patch the repository modules (imports happen inside ingest_pipeline)
+        with patch(
+            "app.repositories.documents.DocumentRepository", return_value=mock_doc_repo
+        ), patch(
+            "app.repositories.chunks.ChunkRepository", return_value=mock_chunk_repo
+        ), patch(
+            "app.repositories.vectors.ChunkVectorRepository",
+            return_value=mock_chunk_vector_repo,
+        ), patch(
+            "app.repositories.vectors.VectorRepository", return_value=mock_vector_repo
+        ), patch(
+            "app.routers.ingest.get_embedder", return_value=mock_embedder
+        ), patch(
+            "app.routers.ingest.get_extractor", return_value=mock_extractor
+        ), patch(
+            "app.services.ingest.validate_source_health",
+            new=AsyncMock(return_value=mock_health_result),
+        ), patch(
+            "app.routers.ingest._db_pool", MagicMock()
+        ), patch(
+            "app.routers.ingest._qdrant_client", MagicMock()
+        ):
+            from app.routers.ingest import ingest_pipeline
+
+            # Call ingest with update_existing=True (simulating script edit)
+            response = await ingest_pipeline(
+                workspace_id=workspace_id,
+                content="// Edited script content\nplot(close)",
+                source_type=SourceType.PINE_SCRIPT,
+                source_url=None,
+                canonical_url="pine://local/test.pine",
+                idempotency_key=None,
+                content_hash="newhash123",
+                title="Test Script",
+                update_existing=True,
+            )
+
+        # Assertions: verify the cleanup contract
+
+        # 1. Old chunk IDs were retrieved
+        mock_doc_repo.get_chunk_ids.assert_called_once_with(old_doc_id)
+
+        # 2. Old document was superseded
+        mock_doc_repo.supersede_and_create.assert_called_once()
+
+        # 3. New chunks were created
+        mock_chunk_repo.create_batch.assert_called_once()
+
+        # 4. CRITICAL: Old vectors were deleted
+        mock_vector_repo.delete_batch.assert_called_once_with(old_chunk_ids)
+
+        # 5. New vectors were created
+        mock_vector_repo.upsert_batch.assert_called_once()
+
+        # 6. Response reflects the update
+        assert response.doc_id == new_doc_id
+        assert response.superseded_doc_id == old_doc_id
+        assert response.version == 2
+        assert response.chunks_created == 3
+
+    @pytest.mark.asyncio
+    async def test_first_ingest_no_delete_called(self):
+        """
+        First ingest (no existing doc) should not call delete_batch.
+        """
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from app.schemas import SourceType
+
+        workspace_id = uuid4()
+        new_doc_id = uuid4()
+        chunk_ids = [str(uuid4())]
+
+        mock_doc_repo = MagicMock()
+        mock_chunk_repo = MagicMock()
+        mock_chunk_vector_repo = MagicMock()
+        mock_vector_repo = MagicMock()
+
+        # No existing doc
+        mock_doc_repo.get_by_canonical_url = AsyncMock(return_value=None)
+        mock_doc_repo.get_by_content_hash = AsyncMock(return_value=None)
+        mock_doc_repo.create = AsyncMock(return_value=new_doc_id)
+        mock_doc_repo.update_last_indexed = AsyncMock(return_value=None)
+
+        mock_chunk_repo.create_batch = AsyncMock(return_value=chunk_ids)
+        mock_chunk_vector_repo.create_batch = AsyncMock(return_value=None)
+        mock_vector_repo.upsert_batch = AsyncMock(return_value=None)
+        mock_vector_repo.delete_batch = AsyncMock(return_value=None)
+
+        mock_embedder = MagicMock()
+        mock_embedder.embed_batch = AsyncMock(return_value=[[0.1] * 768])
+
+        mock_extractor = MagicMock()
+        mock_metadata = MagicMock()
+        mock_metadata.symbols = []
+        mock_metadata.entities = []
+        mock_metadata.topics = []
+        mock_metadata.quality_score = 0.8
+        mock_metadata.speaker = None
+        mock_extractor.extract = MagicMock(return_value=mock_metadata)
+
+        # Mock health validation result
+        from app.services.ingest.health import HealthResult, HealthStatus
+
+        mock_health_result = HealthResult(
+            source_id=new_doc_id,
+            workspace_id=workspace_id,
+            status=HealthStatus.OK,
+            checks=[],
+        )
+
+        with patch(
+            "app.repositories.documents.DocumentRepository", return_value=mock_doc_repo
+        ), patch(
+            "app.repositories.chunks.ChunkRepository", return_value=mock_chunk_repo
+        ), patch(
+            "app.repositories.vectors.ChunkVectorRepository",
+            return_value=mock_chunk_vector_repo,
+        ), patch(
+            "app.repositories.vectors.VectorRepository", return_value=mock_vector_repo
+        ), patch(
+            "app.routers.ingest.get_embedder", return_value=mock_embedder
+        ), patch(
+            "app.routers.ingest.get_extractor", return_value=mock_extractor
+        ), patch(
+            "app.services.ingest.validate_source_health",
+            new=AsyncMock(return_value=mock_health_result),
+        ), patch(
+            "app.routers.ingest._db_pool", MagicMock()
+        ), patch(
+            "app.routers.ingest._qdrant_client", MagicMock()
+        ):
+            from app.routers.ingest import ingest_pipeline
+
+            await ingest_pipeline(
+                workspace_id=workspace_id,
+                content="// New script",
+                source_type=SourceType.PINE_SCRIPT,
+                source_url=None,
+                canonical_url="pine://local/new.pine",
+                idempotency_key=None,
+                content_hash="hash123",
+                title="New Script",
+                update_existing=False,
+            )
+
+        # delete_batch should NOT be called for first ingest
+        mock_vector_repo.delete_batch.assert_not_called()

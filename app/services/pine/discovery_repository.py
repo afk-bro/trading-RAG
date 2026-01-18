@@ -382,6 +382,24 @@ class StrategyScriptRepository:
             rows = await conn.fetch(query, workspace_id)
             return {row["status"]: row["count"] for row in rows}
 
+    async def count_pending_ingest(self, workspace_id: UUID) -> int:
+        """Count scripts that need (re-)ingest.
+
+        Uses the same logic as needs_ingest():
+        - ingest_status IS NULL (never ingested), OR
+        - last_ingested_sha != sha256 (content changed)
+
+        This matches the idx_strategy_scripts_ingest_pending index.
+        """
+        query = """
+            SELECT COUNT(*) FROM strategy_scripts
+            WHERE workspace_id = $1
+              AND status != 'archived'
+              AND (ingest_status IS NULL OR last_ingested_sha IS DISTINCT FROM sha256)
+        """
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(query, workspace_id) or 0
+
     async def mark_archived(
         self,
         workspace_id: UUID,
