@@ -134,10 +134,10 @@ class TestHandleWfo:
     def mock_job_repo(self):
         """Create mock job repository."""
         repo = MagicMock()
-        repo.enqueue = AsyncMock()
-        repo.list_children = AsyncMock(return_value=[])
+        repo.create = AsyncMock()
+        repo.list_by_parent = AsyncMock(return_value=[])
         repo.get = AsyncMock(return_value=None)
-        repo.update_status = AsyncMock()
+        repo.cancel = AsyncMock()
         return repo
 
     @pytest.fixture
@@ -145,11 +145,10 @@ class TestHandleWfo:
         """Create mock OHLCV repository."""
         repo = MagicMock()
         repo.get_available_range = AsyncMock(
-            return_value={
-                "min_ts": datetime(2023, 1, 1, tzinfo=timezone.utc),
-                "max_ts": datetime(2024, 12, 31, tzinfo=timezone.utc),
-                "row_count": 17520,
-            }
+            return_value=(
+                datetime(2023, 1, 1, tzinfo=timezone.utc),
+                datetime(2024, 12, 31, tzinfo=timezone.utc),
+            )
         )
         return repo
 
@@ -157,7 +156,7 @@ class TestHandleWfo:
     def mock_tune_repo(self):
         """Create mock tune repository."""
         repo = MagicMock()
-        repo.create_tune = AsyncMock(return_value={"id": uuid4()})
+        repo.create_tune = AsyncMock(return_value=uuid4())
         return repo
 
     @pytest.fixture
@@ -246,11 +245,10 @@ class TestHandleWfo:
         """Should enqueue child tune jobs for each fold."""
         # Use shorter data range to reduce fold count
         mock_ohlcv_repo.get_available_range = AsyncMock(
-            return_value={
-                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),  # ~180 days
-                "row_count": 4320,
-            }
+            return_value=(
+                datetime(2024, 1, 1, tzinfo=timezone.utc),
+                datetime(2024, 6, 30, tzinfo=timezone.utc),  # ~180 days
+            )
         )
 
         # Setup: Return succeeded jobs when polling (3 folds)
@@ -259,7 +257,7 @@ class TestHandleWfo:
             Job(id=uuid4(), type=JobType.TUNE, status=JobStatus.SUCCEEDED, payload={}),
             Job(id=uuid4(), type=JobType.TUNE, status=JobStatus.SUCCEEDED, payload={}),
         ]
-        mock_job_repo.list_children = AsyncMock(return_value=succeeded_jobs)
+        mock_job_repo.list_by_parent = AsyncMock(return_value=succeeded_jobs)
 
         # Setup: Return job when enqueuing (use function to create new job each time)
         async def create_enqueued_job(*args, **kwargs):
@@ -267,7 +265,7 @@ class TestHandleWfo:
                 id=uuid4(), type=JobType.TUNE, status=JobStatus.PENDING, payload={}
             )
 
-        mock_job_repo.enqueue = AsyncMock(side_effect=create_enqueued_job)
+        mock_job_repo.create = AsyncMock(side_effect=create_enqueued_job)
 
         ctx = {"pool": mock_pool, "events_repo": mock_events_repo}
 
@@ -283,7 +281,7 @@ class TestHandleWfo:
         assert result["status"] == "completed"
         assert result["n_folds"] >= 3
         assert result["folds_completed"] == 3
-        assert mock_job_repo.enqueue.call_count >= 3
+        assert mock_job_repo.create.call_count >= 3
 
     @pytest.mark.asyncio
     async def test_returns_failed_when_all_folds_fail(
@@ -298,11 +296,10 @@ class TestHandleWfo:
         """Should return failed status when all folds fail."""
         # Use shorter data range to reduce fold count
         mock_ohlcv_repo.get_available_range = AsyncMock(
-            return_value={
-                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),
-                "row_count": 4320,
-            }
+            return_value=(
+                datetime(2024, 1, 1, tzinfo=timezone.utc),
+                datetime(2024, 6, 30, tzinfo=timezone.utc),
+            )
         )
 
         # Setup: Return failed jobs when polling
@@ -311,14 +308,14 @@ class TestHandleWfo:
             Job(id=uuid4(), type=JobType.TUNE, status=JobStatus.FAILED, payload={}),
             Job(id=uuid4(), type=JobType.TUNE, status=JobStatus.FAILED, payload={}),
         ]
-        mock_job_repo.list_children = AsyncMock(return_value=failed_jobs)
+        mock_job_repo.list_by_parent = AsyncMock(return_value=failed_jobs)
 
         async def create_enqueued_job(*args, **kwargs):
             return Job(
                 id=uuid4(), type=JobType.TUNE, status=JobStatus.PENDING, payload={}
             )
 
-        mock_job_repo.enqueue = AsyncMock(side_effect=create_enqueued_job)
+        mock_job_repo.create = AsyncMock(side_effect=create_enqueued_job)
 
         ctx = {"pool": mock_pool, "events_repo": mock_events_repo}
 
@@ -346,11 +343,10 @@ class TestHandleWfo:
         """Should return partial status when some folds fail and allow_partial=True."""
         # Use shorter data range to reduce fold count
         mock_ohlcv_repo.get_available_range = AsyncMock(
-            return_value={
-                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                "max_ts": datetime(2024, 6, 30, tzinfo=timezone.utc),
-                "row_count": 4320,
-            }
+            return_value=(
+                datetime(2024, 1, 1, tzinfo=timezone.utc),
+                datetime(2024, 6, 30, tzinfo=timezone.utc),
+            )
         )
 
         # Create job with allow_partial=True
@@ -384,14 +380,14 @@ class TestHandleWfo:
             Job(id=uuid4(), type=JobType.TUNE, status=JobStatus.FAILED, payload={}),
             Job(id=uuid4(), type=JobType.TUNE, status=JobStatus.SUCCEEDED, payload={}),
         ]
-        mock_job_repo.list_children = AsyncMock(return_value=mixed_jobs)
+        mock_job_repo.list_by_parent = AsyncMock(return_value=mixed_jobs)
 
         async def create_enqueued_job(*args, **kwargs):
             return Job(
                 id=uuid4(), type=JobType.TUNE, status=JobStatus.PENDING, payload={}
             )
 
-        mock_job_repo.enqueue = AsyncMock(side_effect=create_enqueued_job)
+        mock_job_repo.create = AsyncMock(side_effect=create_enqueued_job)
 
         ctx = {"pool": mock_pool, "events_repo": mock_events_repo}
 
@@ -418,11 +414,10 @@ class TestHandleWfo:
         """Should raise InsufficientDataError when data range too short."""
         # Setup: Return short data range
         mock_ohlcv_repo.get_available_range = AsyncMock(
-            return_value={
-                "min_ts": datetime(2024, 1, 1, tzinfo=timezone.utc),
-                "max_ts": datetime(2024, 3, 1, tzinfo=timezone.utc),  # Only 60 days
-                "row_count": 1440,
-            }
+            return_value=(
+                datetime(2024, 1, 1, tzinfo=timezone.utc),
+                datetime(2024, 3, 1, tzinfo=timezone.utc),  # Only 60 days
+            )
         )
 
         job = Job(

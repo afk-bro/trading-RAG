@@ -113,14 +113,14 @@ async def _wait_for_children(
         elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
         if elapsed > CHILD_TIMEOUT:
             log.warning("wfo_child_timeout", elapsed_seconds=elapsed)
-            await events_repo.warning(
+            await events_repo.warn(
                 parent_job_id,
                 f"Child jobs timed out after {elapsed:.0f}s",
             )
             break
 
         # Get all child jobs
-        children = await job_repo.list_children(parent_job_id)
+        children = await job_repo.list_by_parent(parent_job_id)
 
         # Categorize by status
         pending = [j for j in children if j.status == JobStatus.PENDING]
@@ -163,14 +163,14 @@ async def _wait_for_children(
 
             # Cancel pending children
             for child in pending:
-                await job_repo.update_status(child.id, JobStatus.CANCELED)
+                await job_repo.cancel(child.id)
 
             return succeeded, failed, canceled + pending
 
         await asyncio.sleep(CHILD_POLL_INTERVAL)
 
     # Timeout case - return what we have
-    children = await job_repo.list_children(parent_job_id)
+    children = await job_repo.list_by_parent(parent_job_id)
     succeeded = [j for j in children if j.status == JobStatus.SUCCEEDED]
     failed = [j for j in children if j.status == JobStatus.FAILED]
     canceled = [j for j in children if j.status == JobStatus.CANCELED]
@@ -308,25 +308,22 @@ async def handle_wfo(job: Job, ctx: dict[str, Any]) -> dict[str, Any]:
         timeframe=timeframe,
     )
 
-    if not data_range or not data_range["min_ts"] or not data_range["max_ts"]:
+    if not data_range:
         raise ValueError(
             f"No OHLCV data available for {symbol} {timeframe} on {exchange_id}"
         )
 
-    available_start = data_range["min_ts"]
-    available_end = data_range["max_ts"]
+    available_start, available_end = data_range
 
     log.info(
         "wfo_data_range",
         available_start=available_start.isoformat(),
         available_end=available_end.isoformat(),
-        row_count=data_range.get("row_count"),
     )
 
     await events_repo.info(
         job.id,
-        f"Data available: {available_start.date()} to {available_end.date()} "
-        f"({data_range.get('row_count', 'unknown')} candles)",
+        f"Data available: {available_start.date()} to {available_end.date()}",
     )
 
     # Generate folds
@@ -366,14 +363,16 @@ async def handle_wfo(job: Job, ctx: dict[str, Any]) -> dict[str, Any]:
     child_job_ids: list[UUID] = []
     for fold in folds:
         # Create tune record for this fold
-        tune_record = await tune_repo.create_tune(
+        tune_id = await tune_repo.create_tune(
             workspace_id=workspace_id,
             strategy_entity_id=UUID(strategy_entity_id_str),
+            strategy_spec_id=None,  # WFO folds don't have individual specs
             param_space=payload.get("param_space", {}),
             search_type=payload.get("search_type", "grid"),
             n_trials=payload.get("n_trials", 100),
             seed=payload.get("seed"),
             objective_metric=payload.get("objective_metric", "sharpe"),
+            min_trades=payload.get("min_trades", 5),
             objective_type=payload.get("objective_type", "sharpe"),
             objective_params=payload.get("objective_params"),
             oos_ratio=fold.test_days / (fold.train_days + fold.test_days),
@@ -387,10 +386,10 @@ async def handle_wfo(job: Job, ctx: dict[str, Any]) -> dict[str, Any]:
             wfo_id=wfo_id,
             fold_index=fold.index,
         )
-        child_payload["tune_id"] = str(tune_record["id"])
+        child_payload["tune_id"] = str(tune_id)
 
         # Enqueue child job
-        child_job = await job_repo.enqueue(
+        child_job = await job_repo.create(
             job_type=JobType.TUNE,
             payload=child_payload,
             workspace_id=workspace_id,
@@ -403,7 +402,7 @@ async def handle_wfo(job: Job, ctx: dict[str, Any]) -> dict[str, Any]:
             "wfo_child_enqueued",
             fold_index=fold.index,
             child_job_id=str(child_job.id),
-            tune_id=str(tune_record["id"]),
+            tune_id=str(tune_id),
         )
 
     await events_repo.info(

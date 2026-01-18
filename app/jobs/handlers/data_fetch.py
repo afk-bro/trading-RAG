@@ -77,20 +77,24 @@ async def handle_data_fetch(job: Job, ctx: dict[str, Any]) -> dict[str, Any]:
 
     # Parse payload
     payload = job.payload
-    exchange_id = payload.get("exchange_id")
-    symbol = payload.get("symbol")
-    timeframe = payload.get("timeframe")
+    exchange_id_raw = payload.get("exchange_id")
+    symbol_raw = payload.get("symbol")
+    timeframe_raw = payload.get("timeframe")
     start_ts_str = payload.get("start_ts")
     end_ts_str = payload.get("end_ts")
 
     # Validate required fields
-    if not all([exchange_id, symbol, timeframe, start_ts_str, end_ts_str]):
+    if not all([exchange_id_raw, symbol_raw, timeframe_raw, start_ts_str, end_ts_str]):
         raise ValueError(
             "Missing required payload fields: exchange_id, symbol, timeframe, start_ts, end_ts"
         )
 
-    start_ts = parse_iso_timestamp(start_ts_str)
-    end_ts = parse_iso_timestamp(end_ts_str)
+    # Type narrow after validation
+    exchange_id: str = str(exchange_id_raw)
+    symbol: str = str(symbol_raw)
+    timeframe: str = str(timeframe_raw)
+    start_ts = parse_iso_timestamp(str(start_ts_str))
+    end_ts = parse_iso_timestamp(str(end_ts_str))
 
     log = logger.bind(
         job_id=str(job.id),
