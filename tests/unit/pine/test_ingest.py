@@ -389,7 +389,11 @@ class TestIngestPipelineVectorCleanup:
         old_doc_id = uuid4()
         new_doc_id = uuid4()
         old_chunk_ids = [str(uuid4()), str(uuid4())]  # 2 chunks from first ingest
-        new_chunk_ids = [str(uuid4()), str(uuid4()), str(uuid4())]  # 3 chunks after edit
+        new_chunk_ids = [
+            str(uuid4()),
+            str(uuid4()),
+            str(uuid4()),
+        ]  # 3 chunks after edit
 
         # Mock repositories
         mock_doc_repo = MagicMock()

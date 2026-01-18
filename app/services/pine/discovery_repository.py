@@ -452,7 +452,9 @@ class StrategyScriptRepository:
             ]
 
             # Archive them
-            result = await conn.execute(update_query, workspace_id, str(older_than_days))
+            result = await conn.execute(
+                update_query, workspace_id, str(older_than_days)
+            )
             count = int(result.split()[-1]) if result else 0
 
             return ArchiveResult(

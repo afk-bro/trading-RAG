@@ -105,9 +105,7 @@ class DiscoverResponse(BaseModel):
     specs_generated: int = Field(
         ..., description="Strategy specs generated (strategies only)"
     )
-    scripts_ingested: int = Field(
-        default=0, description="Scripts ingested to KB"
-    )
+    scripts_ingested: int = Field(default=0, description="Scripts ingested to KB")
     scripts_ingest_failed: int = Field(
         default=0, description="Scripts that failed ingest"
     )
@@ -138,12 +136,8 @@ class ArchiveRequest(BaseModel):
 class ArchiveResponse(BaseModel):
     """Response from archiving stale scripts."""
 
-    status: Literal["success", "dry_run"] = Field(
-        ..., description="Operation status"
-    )
-    archived_count: int = Field(
-        ..., description="Number of scripts archived"
-    )
+    status: Literal["success", "dry_run"] = Field(..., description="Operation status")
+    archived_count: int = Field(..., description="Number of scripts archived")
     archived_scripts: list[dict] = Field(
         default_factory=list,
         description="Details of archived scripts (id, rel_path, last_seen_at)",
@@ -465,9 +459,7 @@ async def archive_stale_scripts(request: ArchiveRequest):
                     "id": str(row["id"]),
                     "rel_path": row["rel_path"],
                     "last_seen_at": (
-                        row["last_seen_at"].isoformat()
-                        if row["last_seen_at"]
-                        else None
+                        row["last_seen_at"].isoformat() if row["last_seen_at"] else None
                     ),
                 }
                 for row in rows
@@ -485,9 +477,7 @@ async def archive_stale_scripts(request: ArchiveRequest):
             )
 
         # Actual archive operation
-        result = await repo.mark_archived(
-            request.workspace_id, request.older_than_days
-        )
+        result = await repo.mark_archived(request.workspace_id, request.older_than_days)
 
         # Emit events for archived scripts
         if result.archived_count > 0:

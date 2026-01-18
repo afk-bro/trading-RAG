@@ -816,12 +816,14 @@ class TestDiscoverWithArchiving:
 
         workspace_id = uuid4()
 
-        with patch.object(service, "_scan_and_parse") as mock_scan, \
-             patch.object(service._repo, "mark_archived", new_callable=AsyncMock) as mock_archive, \
-             patch("app.services.events.get_event_bus") as mock_get_bus:
+        with patch.object(service, "_scan_and_parse") as mock_scan, patch.object(
+            service._repo, "mark_archived", new_callable=AsyncMock
+        ) as mock_archive, patch("app.services.events.get_event_bus") as mock_get_bus:
 
             mock_scan.return_value = []
-            mock_archive.return_value = ArchiveResult(archived_count=3, archived_scripts=[])
+            mock_archive.return_value = ArchiveResult(
+                archived_count=3, archived_scripts=[]
+            )
             mock_bus = MagicMock()
             mock_bus.publish = AsyncMock(return_value=1)
             mock_get_bus.return_value = mock_bus
@@ -841,8 +843,9 @@ class TestDiscoverWithArchiving:
         """discover() skips archiving when archive_stale_days is None."""
         workspace_id = uuid4()
 
-        with patch.object(service, "_scan_and_parse") as mock_scan, \
-             patch.object(service._repo, "mark_archived", new_callable=AsyncMock) as mock_archive:
+        with patch.object(service, "_scan_and_parse") as mock_scan, patch.object(
+            service._repo, "mark_archived", new_callable=AsyncMock
+        ) as mock_archive:
 
             mock_scan.return_value = []
 
@@ -1113,8 +1116,9 @@ class TestDiscoverWithAutoIngest:
         """discover() skips auto_ingest when auto_ingest=False."""
         workspace_id = uuid4()
 
-        with patch.object(service, "_scan_and_parse") as mock_scan, \
-             patch.object(service, "_auto_ingest_scripts", new_callable=AsyncMock) as mock_ingest:
+        with patch.object(service, "_scan_and_parse") as mock_scan, patch.object(
+            service, "_auto_ingest_scripts", new_callable=AsyncMock
+        ) as mock_ingest:
 
             mock_scan.return_value = []
 
@@ -1133,8 +1137,9 @@ class TestDiscoverWithAutoIngest:
         """discover() skips event emission when emit_events=False."""
         workspace_id = uuid4()
 
-        with patch.object(service, "_scan_and_parse") as mock_scan, \
-             patch.object(service, "_emit_discovery_events", new_callable=AsyncMock) as mock_emit:
+        with patch.object(service, "_scan_and_parse") as mock_scan, patch.object(
+            service, "_emit_discovery_events", new_callable=AsyncMock
+        ) as mock_emit:
 
             mock_scan.return_value = []
 
@@ -1152,8 +1157,9 @@ class TestDiscoverWithAutoIngest:
         """discover() result includes ingest counts when auto_ingest enabled."""
         workspace_id = uuid4()
 
-        with patch.object(service, "_scan_and_parse") as mock_scan, \
-             patch.object(service, "_auto_ingest_scripts", new_callable=AsyncMock) as mock_ingest:
+        with patch.object(service, "_scan_and_parse") as mock_scan, patch.object(
+            service, "_auto_ingest_scripts", new_callable=AsyncMock
+        ) as mock_ingest:
 
             mock_scan.return_value = []
             mock_ingest.return_value = {"ingested": 3, "failed": 1, "chunks": 15}

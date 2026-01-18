@@ -47,8 +47,10 @@ def strategy_script_to_entry(
         return PineScriptEntry(
             rel_path=script.rel_path,
             sha256=script.sha256,
-            pine_version=parse_result.pine_version or PineVersion(script.pine_version or "5"),
-            script_type=parse_result.script_type or ScriptType(script.script_type or "strategy"),
+            pine_version=parse_result.pine_version
+            or PineVersion(script.pine_version or "5"),
+            script_type=parse_result.script_type
+            or ScriptType(script.script_type or "strategy"),
             title=parse_result.title or script.title,
             short_title=parse_result.short_title,
             overlay=parse_result.overlay,
@@ -56,8 +58,12 @@ def strategy_script_to_entry(
             imports=parse_result.imports,
             features=parse_result.features,
             lint=LintSummary(
-                error_count=script.lint_json.get("errors", 0) if script.lint_json else 0,
-                warning_count=script.lint_json.get("warnings", 0) if script.lint_json else 0,
+                error_count=(
+                    script.lint_json.get("errors", 0) if script.lint_json else 0
+                ),
+                warning_count=(
+                    script.lint_json.get("warnings", 0) if script.lint_json else 0
+                ),
                 info_count=script.lint_json.get("info", 0) if script.lint_json else 0,
             ),
         )
@@ -84,7 +90,9 @@ def strategy_script_to_entry(
         features={},
         lint=LintSummary(
             error_count=script.lint_json.get("errors", 0) if script.lint_json else 0,
-            warning_count=script.lint_json.get("warnings", 0) if script.lint_json else 0,
+            warning_count=(
+                script.lint_json.get("warnings", 0) if script.lint_json else 0
+            ),
             info_count=script.lint_json.get("info", 0) if script.lint_json else 0,
         ),
     )
@@ -157,7 +165,9 @@ def build_pine_metadata(
             "pine_version": entry.pine_version.value if entry.pine_version else None,
             "rel_path": entry.rel_path,
             "inputs": [inp.to_dict() for inp in entry.inputs] if entry.inputs else [],
-            "imports": [imp.to_dict() for imp in entry.imports] if entry.imports else [],
+            "imports": (
+                [imp.to_dict() for imp in entry.imports] if entry.imports else []
+            ),
             "features": entry.features or {},
             "lint_summary": {
                 "errors": entry.lint.error_count if entry.lint else 0,

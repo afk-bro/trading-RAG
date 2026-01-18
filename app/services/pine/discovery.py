@@ -209,7 +209,11 @@ class PineDiscoveryService:
         # Phase 4: Auto-ingest new/changed scripts to KB
         if auto_ingest:
             ingest_result = await self._auto_ingest_scripts(
-                changes, workspace_id, scan_paths[0] if scan_paths else None, log, emit_events
+                changes,
+                workspace_id,
+                scan_paths[0] if scan_paths else None,
+                log,
+                emit_events,
             )
             result.scripts_ingested = ingest_result["ingested"]
             result.scripts_ingest_failed = ingest_result["failed"]
@@ -537,9 +541,7 @@ class PineDiscoveryService:
                             )
 
                 # Convert to PineScriptEntry for formatting
-                entry = strategy_script_to_entry(
-                    script, source_content=source_content
-                )
+                entry = strategy_script_to_entry(script, source_content=source_content)
 
                 # Format content for embedding
                 content = format_script_content(
