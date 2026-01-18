@@ -106,6 +106,10 @@ def _write_file_atomic(path: Path, content: bytes) -> int:
     return len(content)
 
 
+# Schema version for tune.json - increment when format changes
+TUNE_ARTIFACT_SCHEMA_VERSION = "tune_v1"
+
+
 def _generate_tune_json(
     tune: dict[str, Any],
     result: TuneResult,
@@ -121,14 +125,26 @@ def _generate_tune_json(
     Returns:
         JSON bytes
     """
+    from app import __version__
+
+    settings = get_settings()
+
     tune_json = {
         "identifiers": {
             "tune_id": str(tune["id"]),
             "workspace_id": str(tune["workspace_id"]),
             "strategy_entity_id": str(tune["strategy_entity_id"]),
             "strategy_name": tune.get("strategy_name"),
+            "service_version": __version__,
+            "service_git_sha": settings.git_sha,
+            "config_schema_version": TUNE_ARTIFACT_SCHEMA_VERSION,
         },
-        "data_revision": data_revision,
+        "engine": {
+            "engine_id": "backtesting.py",
+            # Note: engine_version would require introspecting backtesting lib
+            "adapter_version": "1.0.0",
+        },
+        "data_lineage": data_revision,
         "param_space": tune.get("param_space", {}),
         "search": {
             "type": tune.get("search_type"),

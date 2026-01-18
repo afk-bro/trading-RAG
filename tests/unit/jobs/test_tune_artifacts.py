@@ -3,9 +3,9 @@
 import csv
 import io
 import json
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -17,6 +17,15 @@ from app.jobs.handlers.tune import (
     _write_file_atomic,
 )
 from app.services.backtest.tuner import TuneResult
+
+
+@pytest.fixture(autouse=True)
+def mock_settings():
+    """Mock get_settings for all tests in this module."""
+    mock = MagicMock()
+    mock.git_sha = "abc123test"
+    with patch("app.jobs.handlers.tune.get_settings", return_value=mock):
+        yield mock
 
 
 class TestWriteFileAtomic:
@@ -124,7 +133,7 @@ class TestGenerateTuneJson:
         content = _generate_tune_json(tune, result, data_revision)
         parsed = json.loads(content)
 
-        assert parsed["data_revision"] == data_revision
+        assert parsed["data_lineage"] == data_revision
 
     def test_handles_missing_optional_fields(self):
         """Should handle missing optional fields gracefully."""
@@ -148,7 +157,7 @@ class TestGenerateTuneJson:
         parsed = json.loads(content)
 
         assert parsed["identifiers"]["strategy_name"] is None
-        assert parsed["data_revision"] is None
+        assert parsed["data_lineage"] is None
         assert parsed["results"]["best_run_id"] is None
 
 
@@ -185,8 +194,12 @@ class TestGenerateTrialsCsv:
                 "status": "completed",
                 "skip_reason": None,
                 "failed_reason": None,
-                "metrics_is": {"return_pct": 15.5, "sharpe": 1.4, "max_drawdown_pct": 8.2, "num_trades": 25},
-                "metrics_oos": {"return_pct": 10.0, "sharpe": 1.0, "max_drawdown_pct": 10.1, "num_trades": 12},
+                "metrics_is": {
+                    "return_pct": 15.5, "sharpe": 1.4, "max_drawdown_pct": 8.2, "num_trades": 25
+                },
+                "metrics_oos": {
+                    "return_pct": 10.0, "sharpe": 1.0, "max_drawdown_pct": 10.1, "num_trades": 12
+                },
             },
             {
                 "trial_index": 1,
