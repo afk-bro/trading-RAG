@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.events.schemas import AdminEvent, coverage_run_updated
+from app.services.events.schemas import coverage_run_updated
 
 
 # Check for Redis availability
@@ -286,7 +286,9 @@ class TestRedisEventBusSubscription:
             await asyncio.wait_for(sub_task, timeout=5.0)
         except asyncio.TimeoutError:
             sub_task.cancel()
-            pytest.fail(f"Only saw statuses: {seen_statuses}, events: {len(received_events)}")
+            pytest.fail(
+                f"Only saw statuses: {seen_statuses}, events: {len(received_events)}"
+            )
 
         # Verify both statuses were received
         assert "acknowledged" in seen_statuses
@@ -362,7 +364,7 @@ class TestRedisEventBusSubscription:
             },
         )
 
-        second_id = await client.xadd(
+        await client.xadd(
             stream_key,
             {
                 "topic": "coverage.weak_run.updated",
@@ -371,7 +373,7 @@ class TestRedisEventBusSubscription:
             },
         )
 
-        third_id = await client.xadd(
+        await client.xadd(
             stream_key,
             {
                 "topic": "coverage.weak_run.updated",

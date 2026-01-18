@@ -5,13 +5,12 @@ a running Redis instance.
 """
 
 import asyncio
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from app.services.events.schemas import AdminEvent, coverage_run_updated
+from app.services.events.schemas import coverage_run_updated
 
 
 class TestRedisEventBusUnit:

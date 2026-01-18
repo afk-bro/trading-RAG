@@ -10,14 +10,16 @@ Stream key pattern: sse:events:<workspace_id>
 
 import asyncio
 import json
-import time
-from typing import AsyncIterator, Set
+from typing import TYPE_CHECKING, AsyncIterator, Optional, Set
 from uuid import UUID
 
 import structlog
 
 from app.services.events.bus import EventBus, _expand_topics
 from app.services.events.schemas import AdminEvent
+
+if TYPE_CHECKING:
+    import redis.asyncio
 
 logger = structlog.get_logger(__name__)
 
@@ -55,14 +57,14 @@ class RedisEventBus(EventBus):
         self._redis_url = redis_url
         self._buffer_size = buffer_size
         self._read_block_ms = read_block_ms
-        self._redis: "redis.asyncio.Redis | None" = None
+        self._redis: Optional["redis.asyncio.Redis"] = None
         self._subscribers: dict[str, asyncio.Task] = {}
         self._subscriber_queues: dict[str, asyncio.Queue[AdminEvent]] = {}
         self._filters: dict[str, tuple[Set[UUID], Set[str]]] = {}
         self._lock = asyncio.Lock()
         self._connected = False
 
-    async def _get_redis(self) -> "redis.asyncio.Redis":
+    async def _get_redis(self) -> "redis.asyncio.Redis":  # type: ignore[name-defined]
         """Get or create Redis connection."""
         if self._redis is None:
             import redis.asyncio as redis_async
@@ -74,7 +76,7 @@ class RedisEventBus(EventBus):
                 socket_keepalive=True,
             )
             # Test connection
-            await self._redis.ping()
+            await self._redis.ping()  # type: ignore[misc]
             self._connected = True
             logger.info("redis_event_bus_connected", url=self._redis_url[:30] + "...")
 
@@ -126,7 +128,7 @@ class RedisEventBus(EventBus):
         # XADD with auto-ID, returns the stream ID (becomes event.id)
         stream_id = await redis.xadd(
             stream_key,
-            payload,
+            payload,  # type: ignore[arg-type]
             maxlen=self._buffer_size,
             approximate=True,  # MAXLEN ~ for performance
         )
@@ -202,7 +204,7 @@ class RedisEventBus(EventBus):
         )
 
         try:
-            redis = await self._get_redis()
+            await self._get_redis()  # Ensure connection is established
 
             # Build stream keys for all workspaces
             streams: dict[str, str] = {}
@@ -267,7 +269,7 @@ class RedisEventBus(EventBus):
                 # XREAD BLOCK - blocking read from multiple streams
                 # Returns: [(stream_key, [(id, {fields}), ...]), ...]
                 results = await redis.xread(
-                    streams,
+                    streams,  # type: ignore[arg-type]
                     block=self._read_block_ms,
                     count=100,
                 )
@@ -450,7 +452,7 @@ class RedisEventBus(EventBus):
         """Test Redis connection."""
         try:
             redis = await self._get_redis()
-            await redis.ping()
+            await redis.ping()  # type: ignore[misc]
             return True
         except Exception as e:
             logger.warning("redis_ping_failed", error=str(e))

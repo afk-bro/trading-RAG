@@ -99,6 +99,17 @@ class SSEHealth(ComponentHealth):
     events_published_1h: int = 0
     queue_drops_1h: int = 0
     buffer_size: int = 0
+    bus_type: str = "memory"  # memory or redis
+
+
+class RedisHealth(ComponentHealth):
+    """Redis health (for multi-worker event bus)."""
+
+    connected: bool = False
+    configured: bool = False
+    stream_count: int = 0
+    total_stream_length: int = 0
+    ping_latency_ms: Optional[float] = None
 
 
 class IdempotencyHealth(ComponentHealth):
@@ -146,6 +157,7 @@ class SystemHealthSnapshot(BaseModel):
     llm: LLMHealth
     ingestion: IngestionHealth
     sse: SSEHealth
+    redis: Optional[RedisHealth] = None  # Only present when event_bus_mode=redis
     retention: RetentionHealth
     idempotency: IdempotencyHealth
     tunes: TuneHealth
@@ -339,7 +351,7 @@ async def _check_ingestion() -> IngestionHealth:
         return IngestionHealth(status="error", pending_jobs=-1)
 
 
-async def _check_sse() -> SSEHealth:
+async def _check_sse(settings: Settings) -> SSEHealth:
     """Check SSE event bus health."""
     try:
         from app.services.events import get_event_bus
@@ -347,14 +359,86 @@ async def _check_sse() -> SSEHealth:
         bus = get_event_bus()
         subscribers = bus.subscriber_count()
         buffer_size = bus.buffer_size() if hasattr(bus, "buffer_size") else 0
+        bus_type = settings.event_bus_mode
 
         return SSEHealth(
             status="ok",
             subscribers=subscribers,
             buffer_size=buffer_size,
+            bus_type=bus_type,
         )
     except Exception as e:
         return SSEHealth(status="error", error=str(e)[:200])
+
+
+async def _check_redis(settings: Settings) -> Optional[RedisHealth]:
+    """Check Redis health (only when event_bus_mode=redis)."""
+    if settings.event_bus_mode != "redis":
+        return None  # Redis not configured
+
+    if not settings.redis_url:
+        return RedisHealth(
+            status="error",
+            configured=False,
+            error="EVENT_BUS_MODE=redis but REDIS_URL not set",
+        )
+
+    start = time.perf_counter()
+    try:
+        from app.services.events import get_event_bus
+        from app.services.events.redis_bus import RedisEventBus
+
+        bus = get_event_bus()
+
+        if not isinstance(bus, RedisEventBus):
+            return RedisHealth(
+                status="error",
+                configured=True,
+                connected=False,
+                error="Event bus is not RedisEventBus",
+            )
+
+        # Ping Redis
+        ping_ok = await bus.ping()
+        ping_ms = (time.perf_counter() - start) * 1000
+
+        if not ping_ok:
+            return RedisHealth(
+                status="error",
+                configured=True,
+                connected=False,
+                ping_latency_ms=ping_ms,
+                error="Redis ping failed",
+            )
+
+        # Get stream stats
+        stream_lengths = await bus.get_stream_lengths()
+        stream_count = len(stream_lengths)
+        total_length = sum(stream_lengths.values())
+
+        # Determine status
+        status = "ok"
+        if ping_ms > 100:
+            status = "degraded"
+        if ping_ms > 500:
+            status = "error"
+
+        return RedisHealth(
+            status=status,
+            configured=True,
+            connected=True,
+            stream_count=stream_count,
+            total_stream_length=total_length,
+            ping_latency_ms=ping_ms,
+        )
+    except Exception as e:
+        return RedisHealth(
+            status="error",
+            configured=True,
+            connected=False,
+            ping_latency_ms=(time.perf_counter() - start) * 1000,
+            error=str(e)[:200],
+        )
 
 
 async def _check_retention() -> RetentionHealth:
@@ -573,6 +657,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         llm,
         ingestion,
         sse,
+        redis,
         retention,
         idempotency,
         tunes,
@@ -581,7 +666,8 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         _check_qdrant(settings),
         _check_llm(),
         _check_ingestion(),
-        _check_sse(),
+        _check_sse(settings),
+        _check_redis(settings),
         _check_retention(),
         _check_idempotency(),
         _check_tunes(),
@@ -599,12 +685,17 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
     llm = safe_result(llm, LLMHealth)
     ingestion = safe_result(ingestion, IngestionHealth)
     sse = safe_result(sse, SSEHealth)
+    # Redis can be None if not configured
+    if isinstance(redis, Exception):
+        redis = RedisHealth(status="error", error=str(redis)[:200])
     retention = safe_result(retention, RetentionHealth)
     idempotency = safe_result(idempotency, IdempotencyHealth)
     tunes = safe_result(tunes, TuneHealth)
 
-    # Calculate overall status
+    # Calculate overall status (only include Redis if configured)
     components = [db, qdrant, llm, sse, retention, idempotency, tunes]
+    if redis is not None:
+        components.append(redis)
     statuses = [c.status for c in components]
 
     ok_count = statuses.count("ok")
@@ -630,6 +721,8 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         issues.append("Ingestion: recent failures detected")
     if sse.status != "ok":
         issues.append(f"SSE: {sse.error or sse.status}")
+    if redis is not None and redis.status != "ok":
+        issues.append(f"Redis: {redis.error or redis.status}")
     if retention.status != "ok":
         issues.append(f"Retention: {retention.error or 'failing'}")
     if idempotency.status != "ok":
@@ -648,6 +741,7 @@ async def collect_system_health(settings: Settings) -> SystemHealthSnapshot:
         llm=llm,
         ingestion=ingestion,
         sse=sse,
+        redis=redis,
         retention=retention,
         idempotency=idempotency,
         tunes=tunes,
@@ -852,11 +946,26 @@ async def system_health_html(
     sse_h = snapshot.sse
     html += '<div class="card">'
     html += card_header("SSE Events", sse_h.status)
+    html += metric("Bus Type", sse_h.bus_type)
     html += metric("Subscribers", str(sse_h.subscribers))
     html += metric("Events (1h)", str(sse_h.events_published_1h))
     html += metric("Buffer Size", str(sse_h.buffer_size))
     html += metric("Queue Drops", str(sse_h.queue_drops_1h))
     html += "</div>"
+
+    # Redis card (only shown when configured)
+    if snapshot.redis is not None:
+        rd = snapshot.redis
+        html += '<div class="card">'
+        html += card_header("Redis", rd.status)
+        html += metric("Configured", "Yes" if rd.configured else "No")
+        html += metric("Connected", "Yes" if rd.connected else "No")
+        html += metric("Ping Latency", fmt_ms(rd.ping_latency_ms))
+        html += metric("Stream Count", str(rd.stream_count))
+        html += metric("Total Events", f"{rd.total_stream_length:,}")
+        if rd.error:
+            html += metric("Error", rd.error, error=True)
+        html += "</div>"
 
     # Retention card
     ret = snapshot.retention
