@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
-from typing import Any, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 import structlog

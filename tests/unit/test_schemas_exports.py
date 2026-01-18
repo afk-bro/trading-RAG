@@ -4,23 +4,21 @@ This test ensures backwards compatibility: `from app.schemas import X`
 must continue to work for all canonical schema names.
 """
 
-import pytest
-
 
 class TestSchemaExports:
     """Verify all canonical schemas are importable from app.schemas."""
 
     def test_common_enums_exported(self):
         """Core enums should be importable."""
-        from app.schemas import (
-            SourceType,
+        from app.schemas import (  # noqa: F401
             DocumentStatus,
-            VectorStatus,
-            QueryMode,
-            SymbolsMode,
             JobStatus,
-            RerankState,
             PineIngestStatus,
+            QueryMode,
+            RerankState,
+            SourceType,
+            SymbolsMode,
+            VectorStatus,
         )
 
         # Spot check enum values exist
@@ -29,11 +27,11 @@ class TestSchemaExports:
 
     def test_health_models_exported(self):
         """Health/error models should be importable."""
-        from app.schemas import (
+        from app.schemas import (  # noqa: F401
             DependencyHealth,
+            ErrorResponse,
             HealthResponse,
             ReadinessResponse,
-            ErrorResponse,
         )
 
         # Verify they're Pydantic models
@@ -42,13 +40,13 @@ class TestSchemaExports:
 
     def test_workspace_config_exported(self):
         """Workspace configuration schemas should be importable."""
-        from app.schemas import (
+        from app.schemas import (  # noqa: F401
+            ChunkingConfig,
             CrossEncoderConfig,
             LLMRerankConfig,
-            RerankConfig,
             NeighborConfig,
+            RerankConfig,
             RetrievalConfig,
-            ChunkingConfig,
             WorkspaceConfig,
         )
 
@@ -58,21 +56,21 @@ class TestSchemaExports:
 
     def test_ingest_schemas_exported(self):
         """Ingest-related schemas should be importable."""
-        from app.schemas import (
-            SourceInfo,
-            DocumentMetadata,
+        from app.schemas import (  # noqa: F401
             ChunkInput,
+            DocumentMetadata,
             IngestRequest,
             IngestResponse,
-            YouTubeIngestRequest,
-            YouTubeIngestResponse,
+            JobResponse,
             PDFBackendType,
             PDFConfig,
             PDFIngestRequest,
             PDFIngestResponse,
             ReembedRequest,
             ReembedResponse,
-            JobResponse,
+            SourceInfo,
+            YouTubeIngestRequest,
+            YouTubeIngestResponse,
         )
 
         assert hasattr(IngestRequest, "model_fields")
@@ -80,17 +78,17 @@ class TestSchemaExports:
 
     def test_query_schemas_exported(self):
         """Query-related schemas should be importable."""
-        from app.schemas import (
-            QueryFilters,
-            QueryRequest,
-            ChunkResultDebug,
+        from app.schemas import (  # noqa: F401
             ChunkResult,
-            KnowledgeExtractionStats,
-            QueryMeta,
-            QueryResponse,
-            QueryCompareRequest,
+            ChunkResultDebug,
             CompareMetrics,
+            KnowledgeExtractionStats,
+            QueryCompareRequest,
             QueryCompareResponse,
+            QueryFilters,
+            QueryMeta,
+            QueryRequest,
+            QueryResponse,
         )
 
         assert hasattr(QueryRequest, "model_fields")
@@ -98,72 +96,68 @@ class TestSchemaExports:
 
     def test_kb_schemas_exported(self):
         """Knowledge base schemas should be importable."""
-        from app.schemas import (
-            KBEntityType,
-            KBClaimType,
-            KBClaimStatus,
-            KBEntityStats,
-            KBEntityItem,
-            KBEntityListResponse,
-            KBEntityDetailResponse,
-            KBEvidenceItem,
-            KBClaimItem,
-            KBClaimListResponse,
-            KBClaimDetailResponse,
+        from app.schemas import (  # noqa: F401
             KBAnswerClaimRef,
             KBAnswerResponse,
+            KBClaimDetailResponse,
+            KBClaimItem,
+            KBClaimListResponse,
+            KBClaimStatus,
+            KBClaimType,
+            KBEntityDetailResponse,
+            KBEntityItem,
+            KBEntityListResponse,
+            KBEntityStats,
+            KBEntityType,
+            KBEvidenceItem,
         )
 
         assert hasattr(KBAnswerResponse, "model_fields")
 
     def test_trading_schemas_exported(self):
         """Trading-related schemas should be importable."""
-        from app.schemas import (
+        from app.schemas import (  # noqa: F401
             # Strategy Spec
-            StrategySpecStatus,
-            StrategySpecResponse,
-            StrategySpecRefreshRequest,
-            StrategyCompileResponse,
-            StrategySpecStatusUpdate,
-            # Trade Intent & Policy
-            IntentAction,
-            TradeIntent,
-            PolicyReason,
-            PolicyDecision,
-            PositionState,
+            BacktestSummary,
+            BacktestSummaryStatus,
+            CandidateStrategy,
             CurrentState,
-            # Trade Events
-            TradeEventType,
-            TradeEvent,
-            TradeEventListResponse,
+            ExecutionMode,
+            ExecutionRequest,
+            ExecutionResult,
+            IntentAction,
             IntentEvaluateRequest,
             IntentEvaluateResponse,
-            # Paper Execution
             OrderSide,
             OrderStatus,
-            ExecutionMode,
             PaperOrder,
             PaperPosition,
             PaperState,
-            ExecutionRequest,
-            ExecutionResult,
+            PolicyDecision,
+            PolicyReason,
+            PositionState,
             ReconciliationResult,
-            # Strategy Registry
-            StrategyEngine,
-            StrategyStatus,
-            StrategyReviewStatus,
-            StrategyRiskLevel,
-            BacktestSummaryStatus,
-            StrategyTags,
-            BacktestSummary,
-            StrategySourceRef,
+            StrategyCard,
+            StrategyCompileResponse,
             StrategyCreateRequest,
-            StrategyUpdateRequest,
+            StrategyDetailResponse,
+            StrategyEngine,
             StrategyListItem,
             StrategyListResponse,
-            StrategyDetailResponse,
-            CandidateStrategy,
-            StrategyCard,
+            StrategyReviewStatus,
+            StrategyRiskLevel,
+            StrategySourceRef,
+            StrategySpecRefreshRequest,
+            StrategySpecResponse,
+            StrategySpecStatus,
+            StrategySpecStatusUpdate,
+            StrategyStatus,
+            StrategyTags,
+            StrategyUpdateRequest,
+            TradeEvent,
+            TradeEventListResponse,
+            TradeEventType,
+            TradeIntent,
         )
 
         assert hasattr(TradeEvent, "model_fields")
@@ -171,41 +165,39 @@ class TestSchemaExports:
 
     def test_sources_schemas_exported(self):
         """Source-related schemas should be importable."""
-        from app.schemas import (
+        from app.schemas import (  # noqa: F401
             # Pine Script
-            PineScriptType,
-            PineVersionType,
+            CoverageResponse,
+            IngestRequestHint,
+            PineBuildStats,
+            PineChunkItem,
             PineDocStatus,
-            PineLintSeverity,
+            PineImportSchema,
             PineIngestRequest,
             PineIngestResponse,
-            PineLintSummary,
-            PineLintFinding,
             PineInputSchema,
-            PineImportSchema,
-            PineChunkItem,
+            PineLintFinding,
+            PineLintSeverity,
+            PineLintSummary,
+            PineMatchRankedResult,
+            PineMatchResponse,
+            PineMatchResult,
+            PineRebuildAndIngestRequest,
+            PineRebuildAndIngestResponse,
+            PineScriptDetailResponse,
             PineScriptListItem,
             PineScriptListResponse,
-            PineScriptDetailResponse,
             PineScriptLookupResponse,
-            PineRebuildAndIngestRequest,
-            PineBuildStats,
-            PineRebuildAndIngestResponse,
-            PineMatchResult,
-            PineMatchResponse,
-            # YouTube Match
-            IngestRequestHint,
-            PineMatchRankedResult,
-            YouTubeMatchPineRequest,
-            CoverageResponse,
-            YouTubeMatchPineResponse,
-            # Generic Sources
+            PineScriptType,
+            PineVersionType,
+            SourceChunkItem,
+            SourceDetailResponse,
+            SourceHealth,
+            SourceHealthCheck,
             SourceListItem,
             SourceListResponse,
-            SourceChunkItem,
-            SourceHealthCheck,
-            SourceHealth,
-            SourceDetailResponse,
+            YouTubeMatchPineRequest,
+            YouTubeMatchPineResponse,
         )
 
         assert hasattr(PineIngestRequest, "model_fields")

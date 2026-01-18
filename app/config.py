@@ -235,7 +235,7 @@ class Settings(BaseSettings):
     )
     redis_url: Optional[str] = Field(
         default=None,
-        description="Redis URL for event bus (required when event_bus_mode=redis). Format: redis://host:port/db or rediss://... for TLS",
+        description="Redis URL for event bus (required when event_bus_mode=redis)",
     )
     event_bus_buffer_size: int = Field(
         default=2000,
