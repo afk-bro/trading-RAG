@@ -314,6 +314,49 @@ class Settings(BaseSettings):
         description="Days to retain unpinned artifacts",
     )
 
+    # Data Sync History Windows (days by timeframe)
+    data_sync_history_1m: int = Field(
+        default=180,
+        ge=30,
+        le=730,
+        description="History days for 1m timeframe sync",
+    )
+    data_sync_history_5m: int = Field(
+        default=180,
+        ge=30,
+        le=730,
+        description="History days for 5m timeframe sync",
+    )
+    data_sync_history_15m: int = Field(
+        default=730,
+        ge=30,
+        le=1825,
+        description="History days for 15m timeframe sync",
+    )
+    data_sync_history_1h: int = Field(
+        default=730,
+        ge=30,
+        le=1825,
+        description="History days for 1h timeframe sync",
+    )
+    data_sync_history_1d: int = Field(
+        default=1825,
+        ge=365,
+        le=3650,
+        description="History days for 1d timeframe sync",
+    )
+
+    def get_data_sync_history_days(self, timeframe: str) -> int:
+        """Get history window in days for a timeframe."""
+        mapping = {
+            "1m": self.data_sync_history_1m,
+            "5m": self.data_sync_history_5m,
+            "15m": self.data_sync_history_15m,
+            "1h": self.data_sync_history_1h,
+            "1d": self.data_sync_history_1d,
+        }
+        return mapping.get(timeframe, self.data_sync_history_1h)
+
     @property
     def ollama_base_url(self) -> str:
         """Get the Ollama base URL."""

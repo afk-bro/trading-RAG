@@ -16,5 +16,6 @@ Handler contract:
 
 # Import handlers to trigger registration
 from app.jobs.handlers import data_fetch  # noqa: F401
+from app.jobs.handlers import data_sync  # noqa: F401
 
-__all__ = ["data_fetch"]
+__all__ = ["data_fetch", "data_sync"]
