@@ -676,6 +676,9 @@ def record_pine_discovery_timestamp(success: bool = True):
     Updates PINE_DISCOVERY_LAST_RUN_TIMESTAMP always.
     Updates PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP only if success=True.
 
+    Note: "partial" (scan completed with some ingest failures) counts as success.
+    Only "failed" (top-level exception) should pass success=False.
+
     Call this at the end of each discovery run.
     """
     import time

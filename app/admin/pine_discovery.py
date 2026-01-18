@@ -319,7 +319,8 @@ async def discover_pine_scripts(
             )
 
             # Record timestamp gauges
-            record_pine_discovery_timestamp(success=op_status == "success")
+            # "partial" counts as success (scan completed) - only "failed" skips success timestamp
+            record_pine_discovery_timestamp(success=op_status in ("success", "partial"))
 
             # Update pending ingest gauge
             try:
