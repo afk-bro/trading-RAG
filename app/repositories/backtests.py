@@ -1428,3 +1428,276 @@ class TuneRepository:
         async with self.pool.acquire() as conn:
             result = await conn.fetchval(query, lock_id)
             return bool(result)
+
+
+class WFORepository:
+    """Repository for wfo_runs table operations."""
+
+    def __init__(self, pool):
+        """Initialize with database connection pool."""
+        self.pool = pool
+
+    async def create_wfo(
+        self,
+        workspace_id: UUID,
+        strategy_entity_id: UUID,
+        wfo_config: dict[str, Any],
+        param_space: Optional[dict[str, Any]] = None,
+        data_source: Optional[dict[str, Any]] = None,
+    ) -> UUID:
+        """
+        Create a new WFO run record (status=pending).
+
+        Returns:
+            The new WFO run ID
+        """
+        query = """
+            INSERT INTO wfo_runs (
+                workspace_id, strategy_entity_id, wfo_config,
+                param_space, data_source, status
+            )
+            VALUES ($1, $2, $3, $4, $5, 'pending')
+            RETURNING id
+        """
+
+        async with self.pool.acquire() as conn:
+            wfo_id = await conn.fetchval(
+                query,
+                workspace_id,
+                strategy_entity_id,
+                json.dumps(wfo_config),
+                json.dumps(param_space) if param_space else None,
+                json.dumps(data_source) if data_source else None,
+            )
+
+        logger.info(
+            "Created WFO run",
+            wfo_id=str(wfo_id),
+            strategy_entity_id=str(strategy_entity_id),
+        )
+
+        return wfo_id
+
+    async def update_wfo_started(
+        self,
+        wfo_id: UUID,
+        n_folds: int,
+        job_id: Optional[UUID] = None,
+    ) -> None:
+        """Update WFO to running status with fold count."""
+        query = """
+            UPDATE wfo_runs
+            SET status = 'running',
+                n_folds = $2,
+                job_id = $3,
+                started_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, wfo_id, n_folds, job_id)
+
+        logger.info("Updated WFO as started", wfo_id=str(wfo_id), n_folds=n_folds)
+
+    async def update_wfo_completed(
+        self,
+        wfo_id: UUID,
+        status: str,
+        folds_completed: int,
+        folds_failed: int,
+        best_params: Optional[dict[str, Any]],
+        best_candidate: Optional[dict[str, Any]],
+        candidates: list[dict[str, Any]],
+        child_tune_ids: list[UUID],
+        warnings: list[str],
+    ) -> None:
+        """Update WFO with completion results."""
+        query = """
+            UPDATE wfo_runs
+            SET status = $2,
+                folds_completed = $3,
+                folds_failed = $4,
+                best_params = $5,
+                best_candidate = $6,
+                candidates = $7,
+                child_tune_ids = $8,
+                warnings = $9,
+                completed_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query,
+                wfo_id,
+                status,
+                folds_completed,
+                folds_failed,
+                json.dumps(best_params) if best_params else None,
+                json.dumps(best_candidate) if best_candidate else None,
+                json.dumps(candidates),
+                child_tune_ids,
+                json.dumps(warnings),
+            )
+
+        logger.info(
+            "Updated WFO as completed",
+            wfo_id=str(wfo_id),
+            status=status,
+            folds_completed=folds_completed,
+        )
+
+    async def update_wfo_failed(
+        self,
+        wfo_id: UUID,
+        error: str,
+        warnings: Optional[list[str]] = None,
+    ) -> None:
+        """Update WFO with failure status."""
+        query = """
+            UPDATE wfo_runs
+            SET status = 'failed',
+                error = $2,
+                warnings = $3,
+                completed_at = NOW()
+            WHERE id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                query,
+                wfo_id,
+                error,
+                json.dumps(warnings or []),
+            )
+
+        logger.info("Updated WFO as failed", wfo_id=str(wfo_id), error=error)
+
+    async def get_wfo(self, wfo_id: UUID) -> Optional[dict[str, Any]]:
+        """Get a WFO run by ID."""
+        query = """
+            SELECT w.*,
+                   e.name as strategy_name
+            FROM wfo_runs w
+            LEFT JOIN kb_entities e ON w.strategy_entity_id = e.id
+            WHERE w.id = $1
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, wfo_id)
+            if not row:
+                return None
+
+            result = dict(row)
+
+            # Parse JSONB fields
+            for field in [
+                "wfo_config",
+                "param_space",
+                "data_source",
+                "best_params",
+                "best_candidate",
+                "candidates",
+                "warnings",
+            ]:
+                if result.get(field) and isinstance(result[field], str):
+                    result[field] = json.loads(result[field])
+
+            return result
+
+    async def list_wfos(
+        self,
+        workspace_id: UUID,
+        strategy_entity_id: Optional[UUID] = None,
+        status: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """
+        List WFO runs with optional filtering.
+
+        Returns:
+            Tuple of (list of WFO records, total count)
+        """
+        # Build WHERE clauses
+        where_clauses = ["w.workspace_id = $1"]
+        params: list[Any] = [workspace_id]
+        param_idx = 2
+
+        if strategy_entity_id:
+            where_clauses.append(f"w.strategy_entity_id = ${param_idx}")
+            params.append(strategy_entity_id)
+            param_idx += 1
+
+        if status:
+            where_clauses.append(f"w.status = ${param_idx}")
+            params.append(status)
+            param_idx += 1
+
+        where_sql = " AND ".join(where_clauses)
+
+        # Count query
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM wfo_runs w
+            WHERE {where_sql}
+        """
+
+        # List query
+        list_query = f"""
+            SELECT w.*,
+                   e.name as strategy_name
+            FROM wfo_runs w
+            LEFT JOIN kb_entities e ON w.strategy_entity_id = e.id
+            WHERE {where_sql}
+            ORDER BY w.created_at DESC
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        params.extend([limit, offset])
+
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval(count_query, *params[:-2])
+            rows = await conn.fetch(list_query, *params)
+
+        results = []
+        for row in rows:
+            result = dict(row)
+            # Parse JSONB fields
+            for field in ["wfo_config", "param_space", "data_source", "warnings"]:
+                if result.get(field) and isinstance(result[field], str):
+                    result[field] = json.loads(result[field])
+            results.append(result)
+
+        return results, total
+
+    async def cancel_wfo(self, wfo_id: UUID) -> bool:
+        """
+        Cancel a WFO run.
+
+        Returns:
+            True if canceled, False if not in cancelable state
+        """
+        query = """
+            UPDATE wfo_runs
+            SET status = 'canceled',
+                completed_at = NOW()
+            WHERE id = $1 AND status IN ('pending', 'running')
+            RETURNING id
+        """
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(query, wfo_id)
+            return result is not None
+
+    async def delete_wfo(self, wfo_id: UUID) -> bool:
+        """
+        Delete a WFO run.
+
+        Returns:
+            True if deleted, False if not found
+        """
+        query = "DELETE FROM wfo_runs WHERE id = $1 RETURNING id"
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(query, wfo_id)
+            return result is not None
