@@ -18,5 +18,6 @@ Handler contract:
 from app.jobs.handlers import data_fetch  # noqa: F401
 from app.jobs.handlers import data_sync  # noqa: F401
 from app.jobs.handlers import tune  # noqa: F401
+from app.jobs.handlers import wfo  # noqa: F401
 
-__all__ = ["data_fetch", "data_sync", "tune"]
+__all__ = ["data_fetch", "data_sync", "tune", "wfo"]
