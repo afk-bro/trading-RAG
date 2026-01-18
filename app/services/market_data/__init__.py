@@ -4,5 +4,11 @@ from app.services.market_data.base import (
     MarketDataCandle,
     normalize_timeframe,
 )
+from app.services.market_data.ccxt_provider import CcxtMarketDataProvider
 
-__all__ = ["MarketDataProvider", "MarketDataCandle", "normalize_timeframe"]
+__all__ = [
+    "MarketDataProvider",
+    "MarketDataCandle",
+    "normalize_timeframe",
+    "CcxtMarketDataProvider",
+]
