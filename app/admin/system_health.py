@@ -149,13 +149,17 @@ class PineDiscoveryHealth(ComponentHealth):
     scripts_by_status: dict = Field(default_factory=dict)  # {status: count}
     scripts_by_ingest_status: dict = Field(
         default_factory=dict
-    )  # {ingest_status: count}
+    )  # {ingest_status: count} - values: pending, ok, error
     total_scripts: int = 0
     pending_ingest: int = 0
-    stale_scripts: int = 0  # Not seen in 7+ days
-    stale_ratio: Optional[float] = None  # stale_scripts / total_scripts
+    stale_scripts: int = 0
+    stale_ratio: Optional[float] = None  # stale_scripts / active_total
+    stale_cutoff_days: int = 7  # Time anchor
+    recent_ingest_errors: int = 0
+    window_ingest_errors_hours: int = 24  # Time anchor
     last_discovery_at: Optional[datetime] = None
-    recent_ingest_errors: int = 0  # Errors in last 24h
+    last_run_ts: Optional[float] = None  # Unix timestamp from gauge
+    last_success_ts: Optional[float] = None  # Unix timestamp from gauge
     notes: list[str] = Field(default_factory=list)  # Reasons for degraded/error
 
 
@@ -587,7 +591,16 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
     Gauge updates are guarded: only updated on successful DB query.
     On failure, gauges retain last-known-good values.
     """
-    from app.routers.metrics import set_pine_pending_ingest, set_pine_scripts_metrics
+    from app.routers.metrics import (
+        PINE_DISCOVERY_LAST_RUN_TIMESTAMP,
+        PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP,
+        set_pine_pending_ingest,
+        set_pine_scripts_metrics,
+    )
+
+    # Time anchors (constants for documentation/alerting)
+    STALE_CUTOFF_DAYS = 7
+    INGEST_ERROR_WINDOW_HOURS = 24
 
     if _db_pool is None:
         return PineDiscoveryHealth(status="unknown", error="Pool not initialized")
@@ -606,6 +619,7 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             total = sum(status_counts.values())
 
             # Get script counts by ingest status (NULL = pending)
+            # Canonical values: pending (NULL), ok, error
             ingest_rows = await conn.fetch(
                 """
                 SELECT
@@ -623,7 +637,7 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             # Get pending ingest count:
             # - Never ingested (ingest_status IS NULL)
             # - Content changed (sha256 != last_ingested_sha)
-            # - Failed and needs retry (ingest_status = 'failed')
+            # - Error and needs retry (ingest_status = 'error')
             pending_ingest = (
                 await conn.fetchval(
                     """
@@ -633,7 +647,7 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                   AND (
                     ingest_status IS NULL
                     OR last_ingested_sha IS DISTINCT FROM sha256
-                    OR ingest_status = 'failed'
+                    OR ingest_status = 'error'
                   )
             """
                 )
@@ -648,15 +662,15 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             """
             )
 
-            # Get stale script count (not seen in 7+ days)
+            # Get stale script count (not seen in N days)
             # "seen" = last_seen_at updated on every discovery scan hit
             stale_count = (
                 await conn.fetchval(
-                    """
+                    f"""
                 SELECT COUNT(*)
                 FROM strategy_scripts
                 WHERE status != 'archived'
-                  AND last_seen_at < NOW() - INTERVAL '7 days'
+                  AND last_seen_at < NOW() - INTERVAL '{STALE_CUTOFF_DAYS} days'
             """
                 )
                 or 0
@@ -666,15 +680,15 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             active_total = sum(c for s, c in status_counts.items() if s != "archived")
             stale_ratio = stale_count / active_total if active_total > 0 else None
 
-            # Get recent ingest errors (last 24h)
-            # Use last_ingested_at for accurate timing
+            # Get recent ingest errors (last N hours)
+            # Use last_ingested_at for accurate timing, status='error' (canonical)
             recent_errors = (
                 await conn.fetchval(
-                    """
+                    f"""
                 SELECT COUNT(*)
                 FROM strategy_scripts
-                WHERE ingest_status = 'failed'
-                  AND last_ingested_at >= NOW() - INTERVAL '24 hours'
+                WHERE ingest_status = 'error'
+                  AND last_ingested_at >= NOW() - INTERVAL '{INGEST_ERROR_WINDOW_HOURS} hours'
             """
                 )
                 or 0
@@ -683,6 +697,10 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
             # --- DB queries succeeded, safe to update gauges ---
             set_pine_scripts_metrics(status_counts)
             set_pine_pending_ingest(pending_ingest)
+
+            # Read timestamp gauges (0 means never set)
+            last_run_ts = PINE_DISCOVERY_LAST_RUN_TIMESTAMP._value.get()
+            last_success_ts = PINE_DISCOVERY_LAST_SUCCESS_TIMESTAMP._value.get()
 
             # Determine health status with notes
             status = "ok"
@@ -714,8 +732,12 @@ async def _check_pine_discovery() -> PineDiscoveryHealth:
                 pending_ingest=pending_ingest,
                 stale_scripts=stale_count,
                 stale_ratio=round(stale_ratio, 3) if stale_ratio is not None else None,
-                last_discovery_at=last_seen,
+                stale_cutoff_days=STALE_CUTOFF_DAYS,
                 recent_ingest_errors=recent_errors,
+                window_ingest_errors_hours=INGEST_ERROR_WINDOW_HOURS,
+                last_discovery_at=last_seen,
+                last_run_ts=last_run_ts if last_run_ts > 0 else None,
+                last_success_ts=last_success_ts if last_success_ts > 0 else None,
                 notes=notes,
             )
     except Exception as e:
@@ -1201,14 +1223,26 @@ async def system_health_html(
     stale_pct = f"{pd.stale_ratio:.1%}" if pd.stale_ratio is not None else "-"
     stale_error = pd.stale_ratio is not None and pd.stale_ratio > 0.5
     html += metric(
-        "Stale (7d+)", f"{pd.stale_scripts:,} ({stale_pct})", error=stale_error
+        f"Stale ({pd.stale_cutoff_days}d+)",
+        f"{pd.stale_scripts:,} ({stale_pct})",
+        error=stale_error,
     )
     html += metric(
-        "Ingest Errors (24h)",
+        f"Ingest Errors ({pd.window_ingest_errors_hours}h)",
         str(pd.recent_ingest_errors),
         error=pd.recent_ingest_errors > 0,
     )
-    html += metric("Last Seen", fmt_dt(pd.last_discovery_at))
+
+    # Format timestamps from gauges
+    def fmt_ts(ts: Optional[float]) -> str:
+        if ts is None:
+            return "-"
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+
+    html += metric("Last Run", fmt_ts(pd.last_run_ts))
+    html += metric("Last Success", fmt_ts(pd.last_success_ts))
     # Show ingest status breakdown
     if pd.scripts_by_ingest_status:
         for ingest_status, count in pd.scripts_by_ingest_status.items():
