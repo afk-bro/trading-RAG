@@ -10,13 +10,12 @@ class TestJobType:
         assert JobType.TUNE == "tune"
         assert JobType.WFO == "wfo"
 
-    def test_job_type_values(self):
-        assert set(JobType) == {
-            JobType.DATA_SYNC,
-            JobType.DATA_FETCH,
-            JobType.TUNE,
-            JobType.WFO,
-        }
+    def test_job_type_has_required_members(self):
+        """Required job types exist - won't break when new types added."""
+        required = {"DATA_SYNC", "DATA_FETCH", "TUNE", "WFO"}
+        actual = {jt.name for jt in JobType}
+        missing = required - actual
+        assert not missing, f"Missing JobType members: {missing}"
 
 
 class TestJobStatus:
