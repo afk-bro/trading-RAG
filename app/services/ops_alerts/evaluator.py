@@ -213,21 +213,38 @@ class OpsAlertEvaluator:
                 "worst_run_id": run_id of worst gap,
             }
         """
+        # priority_score is computed, not stored. Compute inline using the formula:
+        # - base: (0.5 - best_score) clamped to [0, 0.5], or 0.5 if NULL
+        # - +0.2 if num_above_threshold == 0
+        # - +0.15 for NO_MATCHES reason code
+        # - +0.1 for NO_STRONG_MATCHES reason code
+        # - +0.05 recency bonus (last 24h)
         query = """
+            WITH scored AS (
+                SELECT
+                    id,
+                    best_score,
+                    (
+                        CASE WHEN best_score IS NULL THEN 0.5
+                             ELSE GREATEST(0.0, LEAST(0.5, 0.5 - best_score))
+                        END
+                        + CASE WHEN num_above_threshold = 0 THEN 0.2 ELSE 0.0 END
+                        + CASE WHEN 'NO_MATCHES' = ANY(reason_codes) THEN 0.15 ELSE 0.0 END
+                        + CASE WHEN 'NO_STRONG_MATCHES' = ANY(reason_codes) THEN 0.1 ELSE 0.0 END
+                        + CASE WHEN created_at > NOW() - INTERVAL '24 hours' THEN 0.05 ELSE 0.0 END
+                    ) AS priority_score
+                FROM match_runs
+                WHERE workspace_id = $1
+                  AND weak_coverage = true
+                  AND coverage_status = 'open'
+            )
             SELECT
                 COUNT(*) FILTER (WHERE priority_score >= $2) AS p1_open,
                 COUNT(*) FILTER (WHERE priority_score >= $3 AND priority_score < $2) AS p2_open,
                 COUNT(*) AS total_open,
                 MIN(best_score) AS worst_score,
-                (SELECT id FROM match_runs
-                 WHERE workspace_id = $1
-                   AND weak_coverage = true
-                   AND coverage_status = 'open'
-                 ORDER BY best_score ASC NULLS LAST LIMIT 1) AS worst_run_id
-            FROM match_runs
-            WHERE workspace_id = $1
-              AND weak_coverage = true
-              AND coverage_status = 'open'
+                (SELECT id FROM scored ORDER BY priority_score DESC LIMIT 1) AS worst_run_id
+            FROM scored
         """
 
         async with self.pool.acquire() as conn:
