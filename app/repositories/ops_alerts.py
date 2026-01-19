@@ -41,6 +41,7 @@ class OpsAlert:
     resolved_at: Optional[datetime]
     acknowledged_at: Optional[datetime]
     acknowledged_by: Optional[str]
+    occurrence_count: int = 1
 
     @classmethod
     def from_row(cls, row: dict) -> "OpsAlert":
@@ -65,6 +66,7 @@ class OpsAlert:
             resolved_at=row.get("resolved_at"),
             acknowledged_at=row.get("acknowledged_at"),
             acknowledged_by=row.get("acknowledged_by"),
+            occurrence_count=row.get("occurrence_count", 1),
         )
 
 
@@ -110,7 +112,8 @@ class OpsAlertsRepository:
                 payload = EXCLUDED.payload,
                 severity = EXCLUDED.severity,
                 job_run_id = EXCLUDED.job_run_id,
-                source = EXCLUDED.source
+                source = EXCLUDED.source,
+                occurrence_count = ops_alerts.occurrence_count + 1
             WHERE ops_alerts.status = 'active'
             RETURNING
                 id,

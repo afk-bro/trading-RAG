@@ -393,3 +393,96 @@ class TestUpsertResult:
         )
         assert result.is_new is False
         assert result.escalated is True
+
+
+class TestOpsAlertModel:
+    """Test OpsAlert dataclass."""
+
+    def test_occurrence_count_default(self):
+        """OpsAlert defaults occurrence_count to 1."""
+        alert = OpsAlert(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rule_type="health_degraded",
+            severity="high",
+            status="active",
+            rule_version="v1",
+            dedupe_key="health_degraded:2026-01-19",
+            payload={"test": "value"},
+            source="alert_evaluator",
+            job_run_id=None,
+            created_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(timezone.utc),
+            resolved_at=None,
+            acknowledged_at=None,
+            acknowledged_by=None,
+        )
+        assert alert.occurrence_count == 1
+
+    def test_occurrence_count_explicit(self):
+        """OpsAlert accepts explicit occurrence_count."""
+        alert = OpsAlert(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            rule_type="drift_spike",
+            severity="medium",
+            status="active",
+            rule_version="v1",
+            dedupe_key="drift_spike:2026-01-19-14",
+            payload={},
+            source="alert_evaluator",
+            job_run_id=None,
+            created_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(timezone.utc),
+            resolved_at=None,
+            acknowledged_at=None,
+            acknowledged_by=None,
+            occurrence_count=5,
+        )
+        assert alert.occurrence_count == 5
+
+    def test_from_row_with_occurrence_count(self):
+        """OpsAlert.from_row handles occurrence_count."""
+        row = {
+            "id": uuid4(),
+            "workspace_id": uuid4(),
+            "rule_type": "weak_coverage_p1",
+            "severity": "high",
+            "status": "active",
+            "rule_version": "v1",
+            "dedupe_key": "weak_coverage_p1:2026-01-19",
+            "payload": {"count": 3},
+            "source": "alert_evaluator",
+            "job_run_id": None,
+            "created_at": datetime.now(timezone.utc),
+            "last_seen_at": datetime.now(timezone.utc),
+            "resolved_at": None,
+            "acknowledged_at": None,
+            "acknowledged_by": None,
+            "occurrence_count": 7,
+        }
+        alert = OpsAlert.from_row(row)
+        assert alert.occurrence_count == 7
+
+    def test_from_row_missing_occurrence_count_defaults_to_1(self):
+        """OpsAlert.from_row defaults occurrence_count to 1 if missing."""
+        row = {
+            "id": uuid4(),
+            "workspace_id": uuid4(),
+            "rule_type": "confidence_drop",
+            "severity": "medium",
+            "status": "active",
+            "rule_version": "v1",
+            "dedupe_key": "confidence_drop:2026-01-19-14",
+            "payload": {},
+            "source": "alert_evaluator",
+            "job_run_id": None,
+            "created_at": datetime.now(timezone.utc),
+            "last_seen_at": datetime.now(timezone.utc),
+            "resolved_at": None,
+            "acknowledged_at": None,
+            "acknowledged_by": None,
+            # occurrence_count intentionally missing
+        }
+        alert = OpsAlert.from_row(row)
+        assert alert.occurrence_count == 1
