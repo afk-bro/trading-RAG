@@ -28,7 +28,9 @@ from app.services.testing.run_orchestrator import RunOrchestrator
 # =============================================================================
 
 
-def make_bars(price_data: list[tuple[float, float, float, float, float]]) -> list[OHLCVBar]:
+def make_bars(
+    price_data: list[tuple[float, float, float, float, float]]
+) -> list[OHLCVBar]:
     """Create OHLCV bars from (open, high, low, close, volume) tuples.
 
     Timestamps start at 2024-01-01 and increment daily.
@@ -51,7 +53,9 @@ def make_bars(price_data: list[tuple[float, float, float, float, float]]) -> lis
 
 def make_flat_bars(close_price: float, count: int) -> list[OHLCVBar]:
     """Create N bars at a constant price."""
-    return make_bars([(close_price, close_price, close_price, close_price, 1000.0)] * count)
+    return make_bars(
+        [(close_price, close_price, close_price, close_price, 1000.0)] * count
+    )
 
 
 def make_spec(
@@ -199,19 +203,19 @@ class TestTradeCreation:
         spec = make_spec(lookback_days=2)
         paper_state = make_paper_state()
         # BUY on bar 0, SELL on bar 2
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],
-            2: [IntentAction.CLOSE_LONG],
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],
+                2: [IntentAction.CLOSE_LONG],
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         assert len(trades) == 1
         assert trades[0]["entry_price"] == 100.0
@@ -252,10 +256,12 @@ class TestPositionState:
         bars = make_flat_bars(100.0, 10)
         spec = make_spec(lookback_days=2)
         paper_state = make_paper_state()
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],
-            2: [IntentAction.CLOSE_LONG],
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],
+                2: [IntentAction.CLOSE_LONG],
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
@@ -273,10 +279,12 @@ class TestPositionState:
         spec = make_spec(dollars_per_trade=1000.0, lookback_days=2)
         paper_state = make_paper_state(starting_equity=10000.0)
         # BUY then SELL at same price - cash should be unchanged
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],
-            2: [IntentAction.CLOSE_LONG],
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],
+                2: [IntentAction.CLOSE_LONG],
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
@@ -310,9 +318,7 @@ class TestInsufficientBalance:
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         # No trades should be created
         assert len(trades) == 0
@@ -325,19 +331,19 @@ class TestInsufficientBalance:
         spec = make_spec(dollars_per_trade=9000.0, lookback_days=2)  # Needs $9000
         paper_state = make_paper_state(starting_equity=10000.0)  # Has $10000
         # Try two BUYs - second should fail
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],
-            1: [IntentAction.OPEN_LONG],  # Should be rejected
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],
+                1: [IntentAction.OPEN_LONG],  # Should be rejected
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         # Only one trade (force-closed at end)
         assert len(trades) == 1
@@ -356,29 +362,31 @@ class TestPnLCalculation:
     def test_profitable_trade_pnl(self):
         """PnL should be positive when exit_price > entry_price."""
         # Prices: bar0=100, bar1=100, bar2=100, bar3=110 (exit)
-        bars = make_bars([
-            (100, 100, 100, 100, 1000),  # bar 0
-            (100, 100, 100, 100, 1000),  # bar 1
-            (100, 100, 100, 100, 1000),  # bar 2
-            (100, 110, 100, 110, 1000),  # bar 3 - price rises
-            (110, 110, 110, 110, 1000),  # bar 4
-        ])
+        bars = make_bars(
+            [
+                (100, 100, 100, 100, 1000),  # bar 0
+                (100, 100, 100, 100, 1000),  # bar 1
+                (100, 100, 100, 100, 1000),  # bar 2
+                (100, 110, 100, 110, 1000),  # bar 3 - price rises
+                (110, 110, 110, 110, 1000),  # bar 4
+            ]
+        )
         spec = make_spec(dollars_per_trade=1000.0, lookback_days=2)
         paper_state = make_paper_state()
         # BUY at bar 0 (price=100), SELL at bar 2 (price=110 - bar 3 in actual index)
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],  # Entry at 100
-            2: [IntentAction.CLOSE_LONG],  # Exit at 110
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],  # Entry at 100
+                2: [IntentAction.CLOSE_LONG],  # Exit at 110
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         assert len(trades) == 1
         trade = trades[0]
@@ -396,28 +404,30 @@ class TestPnLCalculation:
 
     def test_losing_trade_pnl(self):
         """PnL should be negative when exit_price < entry_price."""
-        bars = make_bars([
-            (100, 100, 100, 100, 1000),
-            (100, 100, 100, 100, 1000),
-            (100, 100, 100, 100, 1000),
-            (100, 100, 90, 90, 1000),  # Price drops
-            (90, 90, 90, 90, 1000),
-        ])
+        bars = make_bars(
+            [
+                (100, 100, 100, 100, 1000),
+                (100, 100, 100, 100, 1000),
+                (100, 100, 100, 100, 1000),
+                (100, 100, 90, 90, 1000),  # Price drops
+                (90, 90, 90, 90, 1000),
+            ]
+        )
         spec = make_spec(dollars_per_trade=1000.0, lookback_days=2)
         paper_state = make_paper_state()
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],  # Entry at 100
-            2: [IntentAction.CLOSE_LONG],  # Exit at 90
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],  # Entry at 100
+                2: [IntentAction.CLOSE_LONG],  # Exit at 90
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         assert len(trades) == 1
         trade = trades[0]
@@ -433,21 +443,21 @@ class TestPnLCalculation:
         spec = make_spec(dollars_per_trade=1000.0, lookback_days=2)
         paper_state = make_paper_state()
         # Two round trips at same price (0 PnL each)
-        runner = DeterministicRunner({
-            0: [IntentAction.OPEN_LONG],
-            2: [IntentAction.CLOSE_LONG],
-            4: [IntentAction.OPEN_LONG],
-            6: [IntentAction.CLOSE_LONG],
-        })
+        runner = DeterministicRunner(
+            {
+                0: [IntentAction.OPEN_LONG],
+                2: [IntentAction.CLOSE_LONG],
+                4: [IntentAction.OPEN_LONG],
+                6: [IntentAction.CLOSE_LONG],
+            }
+        )
 
         orchestrator = RunOrchestrator(
             events_repo=MagicMock(),
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         assert len(trades) == 2
         assert paper_state.realized_pnl == 0.0  # Two flat trades
@@ -473,9 +483,7 @@ class TestForceClose:
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         # Should have one trade from force close
         assert len(trades) == 1
@@ -484,12 +492,14 @@ class TestForceClose:
 
     def test_force_close_uses_last_bar_price(self):
         """Force close should use the last bar's close price."""
-        bars = make_bars([
-            (100, 100, 100, 100, 1000),
-            (100, 100, 100, 100, 1000),
-            (100, 100, 100, 100, 1000),
-            (100, 100, 100, 150, 1000),  # Last bar closes at 150
-        ])
+        bars = make_bars(
+            [
+                (100, 100, 100, 100, 1000),
+                (100, 100, 100, 100, 1000),
+                (100, 100, 100, 100, 1000),
+                (100, 100, 100, 150, 1000),  # Last bar closes at 150
+            ]
+        )
         spec = make_spec(dollars_per_trade=1000.0, lookback_days=2)
         paper_state = make_paper_state()
         runner = DeterministicRunner({0: [IntentAction.OPEN_LONG]})
@@ -499,9 +509,7 @@ class TestForceClose:
             runner=runner,
         )
 
-        trades, _ = orchestrator._simulate_bars(
-            spec, paper_state, bars, MagicMock()
-        )
+        trades, _ = orchestrator._simulate_bars(spec, paper_state, bars, MagicMock())
 
         assert len(trades) == 1
         assert trades[0]["exit_price"] == 150.0
