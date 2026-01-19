@@ -593,7 +593,13 @@
 
         <!-- Job History Table -->
         <div class="job-history hidden" id="job-history-section">
-            <h4>Session Job History</h4>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <h4 style="margin: 0;">Job History</h4>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" class="copy-btn" onclick="exportJobHistory()" title="Export as JSON">Export JSON</button>
+                    <button type="button" class="copy-btn" onclick="clearJobHistory()" title="Clear history for this workspace">Clear</button>
+                </div>
+            </div>
             <table>
                 <thead>
                     <tr>
@@ -716,14 +722,19 @@ function formatAllTimestamps() {
 }
 
 // =============================================================================
-// Job History (Session Storage)
+// Job History (localStorage, keyed by workspace)
 // =============================================================================
 
-const JOB_HISTORY_KEY = 'ingestJobHistory';
+const JOB_HISTORY_PREFIX = 'ingestJobHistory:';
+const JOB_HISTORY_MAX = 20;
+
+function getJobHistoryKey() {
+    return JOB_HISTORY_PREFIX + getWorkspaceId();
+}
 
 function getJobHistory() {
     try {
-        return JSON.parse(sessionStorage.getItem(JOB_HISTORY_KEY)) || [];
+        return JSON.parse(localStorage.getItem(getJobHistoryKey())) || [];
     } catch {
         return [];
     }
@@ -732,10 +743,31 @@ function getJobHistory() {
 function addJobToHistory(entry) {
     const history = getJobHistory();
     history.unshift(entry);  // newest first
-    // Keep only last 20 entries
-    if (history.length > 20) history.pop();
-    sessionStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(history));
+    // Keep only last 20 entries per workspace
+    while (history.length > JOB_HISTORY_MAX) history.pop();
+    localStorage.setItem(getJobHistoryKey(), JSON.stringify(history));
     renderJobHistory();
+}
+
+function clearJobHistory() {
+    if (!confirm('Clear job history for this workspace?')) return;
+    localStorage.removeItem(getJobHistoryKey());
+    renderJobHistory();
+}
+
+function exportJobHistory() {
+    const history = getJobHistory();
+    if (history.length === 0) {
+        alert('No history to export');
+        return;
+    }
+    const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ingest-history-${getWorkspaceId()}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 function renderJobHistory() {
@@ -814,6 +846,10 @@ function updateWorkspaceUrl() {
     const url = new URL(window.location);
     url.searchParams.set('workspace_id', document.getElementById('workspace-select').value);
     window.history.replaceState({}, '', url);
+    // Re-render job history for the new workspace
+    renderJobHistory();
+    // Hide results from previous workspace
+    hideResults();
 }
 
 // =============================================================================
