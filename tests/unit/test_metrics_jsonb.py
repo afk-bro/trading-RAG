@@ -191,7 +191,7 @@ class TestMetricsAPIResponse:
 
     def test_tune_run_list_item_includes_metrics(self):
         """TuneRunListItem should accept metrics_is and metrics_oos."""
-        from app.routers.backtests import TuneRunListItem
+        from app.routers.backtests.schemas import TuneRunListItem
 
         item = TuneRunListItem(
             trial_index=0,
@@ -210,7 +210,7 @@ class TestMetricsAPIResponse:
 
     def test_tune_run_list_item_metrics_optional(self):
         """metrics_is and metrics_oos should be optional."""
-        from app.routers.backtests import TuneRunListItem
+        from app.routers.backtests.schemas import TuneRunListItem
 
         item = TuneRunListItem(
             trial_index=0,
