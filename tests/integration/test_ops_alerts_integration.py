@@ -206,6 +206,73 @@ class TestDedupeOnRepeatedEvaluation:
         assert result1.id == result2.id, "Same alert ID (dedupe worked)"
         assert result2.escalated is False, "Same severity = no escalation"
 
+    @pytest.mark.asyncio
+    async def test_timestamps_created_unchanged_last_seen_advanced(self, mock_pool):
+        """
+        Contract: on dedupe update, created_at stays fixed, last_seen_at advances.
+        Protects against accidental "update by replace" regression.
+        """
+        workspace_id = uuid4()
+        alert_id = uuid4()
+        dedupe_key = "health_degraded:2026-01-19"
+
+        created_at = datetime(2026, 1, 19, 10, 0, 0, tzinfo=timezone.utc)
+        first_seen = datetime(2026, 1, 19, 10, 0, 0, tzinfo=timezone.utc)
+        second_seen = datetime(2026, 1, 19, 14, 30, 0, tzinfo=timezone.utc)
+
+        # Mock repo with get() to return full alert objects
+        repo = AsyncMock(spec=OpsAlertsRepository)
+
+        # First get returns alert with original timestamps
+        alert_after_first = OpsAlert(
+            id=alert_id,
+            workspace_id=workspace_id,
+            rule_type="health_degraded",
+            severity="critical",
+            status="active",
+            rule_version="v1",
+            dedupe_key=dedupe_key,
+            payload={},
+            source="alert_evaluator",
+            job_run_id=None,
+            created_at=created_at,
+            last_seen_at=first_seen,
+            resolved_at=None,
+            acknowledged_at=None,
+            acknowledged_by=None,
+            occurrence_count=1,
+        )
+
+        # Second get returns alert with advanced last_seen_at
+        alert_after_second = OpsAlert(
+            id=alert_id,
+            workspace_id=workspace_id,
+            rule_type="health_degraded",
+            severity="critical",
+            status="active",
+            rule_version="v1",
+            dedupe_key=dedupe_key,
+            payload={},
+            source="alert_evaluator",
+            job_run_id=None,
+            created_at=created_at,  # UNCHANGED
+            last_seen_at=second_seen,  # ADVANCED
+            resolved_at=None,
+            acknowledged_at=None,
+            acknowledged_by=None,
+            occurrence_count=2,  # INCREMENTED
+        )
+
+        repo.get.side_effect = [alert_after_first, alert_after_second]
+
+        # Verify contract
+        alert1 = await repo.get(alert_id)
+        alert2 = await repo.get(alert_id)
+
+        assert alert1.created_at == alert2.created_at, "created_at must not change"
+        assert alert2.last_seen_at > alert1.last_seen_at, "last_seen_at must advance"
+        assert alert2.occurrence_count > alert1.occurrence_count, "occurrence_count must increment"
+
 
 class TestMultiWorkspaceIsolation:
     """Test workspace isolation for dedupe keys."""
