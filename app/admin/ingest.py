@@ -62,7 +62,9 @@ async def _fetch_last_ingests(workspace_id: str) -> dict[str, str]:
             UUID(workspace_id),
         )
         return {
-            row["source_type"]: row["last_ingest"].isoformat() if row["last_ingest"] else None
+            row["source_type"]: (
+                row["last_ingest"].isoformat() if row["last_ingest"] else None
+            )
             for row in rows
         }
 
@@ -93,7 +95,11 @@ async def ingest_page(
         selected_workspace_id = workspaces[0]["id"]
 
     # Fetch last ingest timestamps for selected workspace
-    last_ingests = await _fetch_last_ingests(selected_workspace_id)
+    last_ingests = (
+        await _fetch_last_ingests(selected_workspace_id)
+        if selected_workspace_id
+        else {}
+    )
 
     return templates.TemplateResponse(
         "ingest.html",
