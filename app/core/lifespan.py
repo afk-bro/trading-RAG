@@ -25,6 +25,7 @@ from app.routers import (
 )
 from app.admin import set_db_pool as set_admin_db_pool
 from app.admin import set_qdrant_client as set_admin_qdrant_client
+from app.admin.data import set_db_pool as set_admin_data_db_pool
 from app.services.pine.poller import PineRepoPoller, set_poller
 
 logger = structlog.get_logger(__name__)
@@ -146,6 +147,7 @@ async def _init_database(settings) -> Optional[asyncpg.Pool]:
             execution.set_db_pool(pool)
             testing.set_db_pool(pool)
             set_admin_db_pool(pool)
+            set_admin_data_db_pool(pool)
 
             return pool
 
