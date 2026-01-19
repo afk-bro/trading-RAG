@@ -148,6 +148,65 @@ class TestEscalationDetection:
         assert result.id == alert_id
 
 
+class TestDedupeOnRepeatedEvaluation:
+    """Test dedupe contract: repeated evaluation doesn't create duplicates."""
+
+    @pytest.mark.asyncio
+    async def test_second_evaluation_updates_existing_alert_not_creates_new(
+        self, mock_pool
+    ):
+        """
+        Scenario (encodes manual verification):
+        1. First evaluate() triggers health_degraded → total_new=1
+        2. Second evaluate() same condition still true → total_new=0
+        3. Same alert row updated (last_seen_at advanced, occurrence_count incremented)
+
+        This is the core dedupe contract we rely on.
+        """
+        workspace_id = uuid4()
+        alert_id = uuid4()
+        dedupe_key = "health_degraded:2026-01-19"
+
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+
+        # First upsert: new alert created
+        # Second upsert: existing alert updated (is_new=False)
+        conn.fetchrow.side_effect = [
+            None,  # No existing severity (first eval)
+            {"id": alert_id, "is_new": True, "current_severity": "critical"},
+            {"severity": "critical"},  # Existing severity (second eval)
+            {"id": alert_id, "is_new": False, "current_severity": "critical"},
+        ]
+
+        repo = OpsAlertsRepository(mock_pool)
+
+        # First evaluation - creates new alert
+        result1 = await repo.upsert(
+            workspace_id=workspace_id,
+            rule_type="health_degraded",
+            severity="critical",
+            dedupe_key=dedupe_key,
+            payload={"overall_status": "error"},
+            source="alert_evaluator",
+        )
+
+        # Second evaluation - same condition, should update not create
+        result2 = await repo.upsert(
+            workspace_id=workspace_id,
+            rule_type="health_degraded",
+            severity="critical",
+            dedupe_key=dedupe_key,
+            payload={"overall_status": "error"},
+            source="alert_evaluator",
+        )
+
+        # Core contract assertions
+        assert result1.is_new is True, "First eval should create new alert"
+        assert result2.is_new is False, "Second eval should update existing"
+        assert result1.id == result2.id, "Same alert ID (dedupe worked)"
+        assert result2.escalated is False, "Same severity = no escalation"
+
+
 class TestMultiWorkspaceIsolation:
     """Test workspace isolation for dedupe keys."""
 
