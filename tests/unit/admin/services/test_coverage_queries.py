@@ -6,7 +6,7 @@ No database required - all I/O is stubbed.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from app.admin.services.coverage_queries import (
     parse_json_field,
