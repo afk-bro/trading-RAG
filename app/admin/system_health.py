@@ -18,7 +18,6 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from app.admin.services.health_models import (
-    ComponentHealth,
     DBHealth,
     IdempotencyHealth,
     IngestionHealth,
