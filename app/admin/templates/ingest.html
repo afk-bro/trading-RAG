@@ -361,6 +361,40 @@
         color: var(--warning);
         font-size: 13px;
     }
+
+    /* Button group for submit + copy curl */
+    .btn-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .copy-curl-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .copy-curl-btn:hover {
+        background: var(--bg-secondary);
+        color: var(--text);
+        border-color: var(--text-muted);
+    }
+
+    .copy-curl-btn.copied {
+        color: var(--success);
+        border-color: var(--success);
+    }
+
+    .copy-curl-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 </style>
 
 <div class="card">
@@ -420,7 +454,10 @@
             <label>YouTube URL (video or playlist)</label>
             <input type="url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=...">
         </div>
-        <button type="button" class="btn" onclick="submitYoutube()">Ingest Video</button>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitYoutube()">Ingest Video</button>
+            <button type="button" class="copy-curl-btn" onclick="copyYoutubeCurl(this)">Copy curl</button>
+        </div>
     </div>
 
     <!-- PDF Tab -->
@@ -455,7 +492,10 @@
                 Dry run (extract + chunk, no DB writes)
             </label>
         </div>
-        <button type="button" class="btn" onclick="submitPdf()">Upload & Ingest</button>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitPdf()">Upload & Ingest</button>
+            <button type="button" class="copy-curl-btn" onclick="copyPdfCurl(this)">Copy curl</button>
+        </div>
     </div>
 
     <!-- Pine Script Tab -->
@@ -485,7 +525,10 @@
                 Dry run (preview only)
             </label>
         </div>
-        <button type="button" class="btn" onclick="submitPine()">Ingest Registry</button>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitPine()">Ingest Registry</button>
+            <button type="button" class="copy-curl-btn" onclick="copyPineCurl(this)">Copy curl</button>
+        </div>
     </div>
 
     <!-- Generic Tab -->
@@ -521,7 +564,10 @@
             <label>Content</label>
             <textarea id="generic-content" placeholder="Paste content here..."></textarea>
         </div>
-        <button type="button" class="btn" onclick="submitGeneric()">Ingest Content</button>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitGeneric()">Ingest Content</button>
+            <button type="button" class="copy-curl-btn" onclick="copyGenericCurl(this)">Copy curl</button>
+        </div>
     </div>
 
     <!-- Results Panel -->
@@ -1162,6 +1208,173 @@ async function submitGeneric() {
     } finally {
         setLoading(btn, false);
     }
+}
+
+// =============================================================================
+// Copy curl Functions
+// =============================================================================
+
+function getBaseUrl() {
+    return window.location.origin;
+}
+
+function showCopied(btn) {
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('copied');
+    }, 2000);
+}
+
+function copyYoutubeCurl(btn) {
+    const url = document.getElementById('youtube-url').value.trim();
+    const workspaceId = getWorkspaceId();
+
+    if (!url) {
+        alert('Enter a YouTube URL first');
+        return;
+    }
+
+    const payload = JSON.stringify({ workspace_id: workspaceId, url: url });
+
+    const curl = `# YouTube Ingest
+# Workspace: ${workspaceId}
+# URL: ${url}
+curl -X POST '${getBaseUrl()}/sources/youtube/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d '${payload.replace(/'/g, "'\\''")}'`;
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+
+function copyPdfCurl(btn) {
+    const fileInput = document.getElementById('pdf-file');
+    const workspaceId = getWorkspaceId();
+    const title = document.getElementById('pdf-title').value.trim();
+    const author = document.getElementById('pdf-author').value.trim();
+    const backend = document.getElementById('pdf-backend').value;
+    const dryRun = document.getElementById('pdf-dry-run').checked;
+
+    // Build form fields
+    let formFields = [
+        `-F 'workspace_id=${workspaceId}'`,
+        `-F 'backend=${backend}'`,
+    ];
+    if (title) formFields.push(`-F 'title=${title}'`);
+    if (author) formFields.push(`-F 'author=${author}'`);
+    if (dryRun) formFields.push(`-F 'dry_run=true'`);
+
+    // File path - use filename if selected, otherwise placeholder
+    const filePath = fileInput.files[0]
+        ? fileInput.files[0].name
+        : '/path/to/file.pdf';
+    formFields.unshift(`-F 'file=@${filePath}'`);
+
+    const curl = `# PDF Ingest
+# Workspace: ${workspaceId}
+# File: ${filePath}${dryRun ? '\n# DRY RUN - no data will be written' : ''}
+curl -X POST '${getBaseUrl()}/sources/pdf/ingest' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  ${formFields.join(' \\\n  ')}`;
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+
+function copyPineCurl(btn) {
+    const registryPath = document.getElementById('pine-registry-path').value.trim();
+    const workspaceId = getWorkspaceId();
+
+    if (!registryPath) {
+        alert('Enter a registry path first');
+        return;
+    }
+
+    const payload = {
+        workspace_id: workspaceId,
+        registry_path: registryPath,
+        include_source: document.getElementById('pine-include-source').checked,
+        skip_lint_errors: document.getElementById('pine-skip-lint-errors').checked,
+        update_existing: document.getElementById('pine-update-existing').checked,
+        dry_run: document.getElementById('pine-dry-run').checked,
+    };
+    const dryRun = payload.dry_run;
+
+    const curl = `# Pine Script Ingest
+# Workspace: ${workspaceId}
+# Registry: ${registryPath}${dryRun ? '\n# DRY RUN - no data will be written' : ''}
+curl -X POST '${getBaseUrl()}/sources/pine/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d '${JSON.stringify(payload).replace(/'/g, "'\\''")}'`;
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+
+function copyGenericCurl(btn) {
+    const content = document.getElementById('generic-content').value.trim();
+    const workspaceId = getWorkspaceId();
+
+    if (!content) {
+        alert('Enter content first');
+        return;
+    }
+
+    const payload = {
+        workspace_id: workspaceId,
+        content: content,
+        source: {
+            type: document.getElementById('generic-source-type').value,
+        }
+    };
+
+    const url = document.getElementById('generic-url').value.trim();
+    const title = document.getElementById('generic-title').value.trim();
+    const author = document.getElementById('generic-author').value.trim();
+
+    if (url) payload.source.url = url;
+    if (title || author) {
+        payload.metadata = {};
+        if (title) payload.metadata.title = title;
+        if (author) payload.metadata.author = author;
+    }
+
+    // For large content, suggest using a file
+    const contentPreview = content.length > 100
+        ? content.slice(0, 100) + '...'
+        : content;
+    const useFile = content.length > 500;
+
+    let curl;
+    if (useFile) {
+        // Suggest saving to file for large content
+        curl = `# Generic Ingest
+# Workspace: ${workspaceId}
+# Source Type: ${payload.source.type}
+# Content: (${content.length} chars - save payload to file first)
+
+# Save this payload to a file:
+# cat > /tmp/payload.json << 'PAYLOAD_EOF'
+# ${JSON.stringify(payload, null, 2).replace(/\n/g, '\n# ')}
+# PAYLOAD_EOF
+
+curl -X POST '${getBaseUrl()}/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d @/tmp/payload.json`;
+    } else {
+        curl = `# Generic Ingest
+# Workspace: ${workspaceId}
+# Source Type: ${payload.source.type}
+curl -X POST '${getBaseUrl()}/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d '${JSON.stringify(payload).replace(/'/g, "'\\''")}'`;
+    }
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
 }
 </script>
 {% endblock %}
