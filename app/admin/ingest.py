@@ -42,7 +42,7 @@ async def _fetch_workspaces() -> list[dict]:
         ]
 
 
-async def _fetch_last_ingests(workspace_id: str) -> dict[str, str]:
+async def _fetch_last_ingests(workspace_id: str) -> dict[str, str | None]:
     """Fetch last successful ingest timestamp per source type for a workspace.
 
     Returns:

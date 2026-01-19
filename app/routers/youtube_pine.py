@@ -308,7 +308,7 @@ async def youtube_match_pine(
         best_score=coverage_assessment.best_score,
         num_above_threshold=coverage_assessment.num_above_threshold,
         reason_codes=coverage_assessment.reason_codes,
-        candidate_count=len(candidate_strategies) if candidate_strategies else 0,
+        candidate_count=len(candidate_strategies or []),
     )
 
     # Record match run for analytics (async, don't block response)

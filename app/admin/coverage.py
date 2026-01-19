@@ -1419,6 +1419,8 @@ async def seed_coverage_fixtures(
         match_runs_created=match_runs_created,
     )
 
+    # workspace_id is guaranteed to be set by this point (either from query param or created)
+    assert workspace_id is not None
     return SeedCoverageResponse(
         status="success",
         workspace_id=workspace_id,
