@@ -8,8 +8,6 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-import pytest
-
 from app.schemas import PaperState, IntentAction, TradeIntent
 from app.services.strategy.models import (
     OHLCVBar,
