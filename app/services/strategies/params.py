@@ -276,7 +276,7 @@ def validate_params(
 
         spec = specs[name]
         is_valid, error = spec.validate(value)
-        if not is_valid:
+        if not is_valid and error:
             errors.append(error)
 
     return ValidationResult(
@@ -366,8 +366,9 @@ def validate_and_repair_params(
     else:
         # Try to repair
         repair_result = repair_params(params, specs)
-        # Re-validate repaired params
-        revalidate = validate_params(repair_result.repaired_params, specs, strict=False)
+        # Re-validate repaired params (repaired_params is always set after repair)
+        repaired = repair_result.repaired_params or {}
+        revalidate = validate_params(repaired, specs, strict=False)
 
         return ValidationResult(
             is_valid=revalidate.is_valid,

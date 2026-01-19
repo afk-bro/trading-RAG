@@ -7,7 +7,7 @@ metadata, conversion utilities, and warning computation.
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from app.services.kb.constants import (
@@ -346,7 +346,7 @@ def utc_now_iso() -> str:
     return datetime.now(tz.utc).isoformat().replace("+00:00", "Z")
 
 
-def clean_nan_for_json(obj: any) -> any:
+def clean_nan_for_json(obj: Any) -> Any:
     """
     Recursively clean NaN/Inf values from an object for JSON serialization.
 

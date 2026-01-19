@@ -246,7 +246,7 @@ class RunPlan(BaseModel):
     status: RunPlanStatus = RunPlanStatus.pending
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def n_variants(self) -> int:
         """Number of variants in the plan."""

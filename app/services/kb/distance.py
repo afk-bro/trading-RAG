@@ -156,7 +156,7 @@ def _compute_centroid(
         return {}
 
     # Collect all keys
-    all_keys = set()
+    all_keys: set[str] = set()
     for n in neighbors:
         all_keys.update(n.keys())
 
