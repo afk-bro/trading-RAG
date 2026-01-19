@@ -203,7 +203,7 @@ async def create_wfo(
     }
 
     # Enqueue WFO job
-    job = await job_repo.enqueue(
+    job = await job_repo.create(
         job_type=JobType.WFO,
         payload=job_payload,
         workspace_id=workspace_id,

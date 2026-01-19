@@ -521,6 +521,8 @@ async def create_tune(
         best_params=result.best_params,
         best_score=result.best_score,
         leaderboard=leaderboard,
+        counts=None,
+        gates=None,
         warnings=result.warnings,
     )
 
