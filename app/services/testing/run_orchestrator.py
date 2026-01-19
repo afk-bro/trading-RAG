@@ -8,8 +8,21 @@ from uuid import UUID
 
 import structlog
 
-from app.schemas import PaperState, TradeEvent, TradeEventType
-from app.services.strategy.models import OHLCVBar
+from app.schemas import (
+    PaperState,
+    PaperPosition,
+    TradeEvent,
+    TradeEventType,
+    IntentAction,
+)
+from app.services.strategy.models import (
+    OHLCVBar,
+    ExecutionSpec,
+    MarketSnapshot,
+    EntryConfig,
+    ExitConfig,
+    RiskConfig,
+)
 from app.services.testing.models import (
     RunPlan,
     RunVariant,
@@ -499,28 +512,25 @@ class RunOrchestrator:
                     duration_ms=duration_ms,
                 )
 
-            # TODO: Create ExecutionSpec from materialized_spec
-            # TODO: Create isolated PaperState for this variant
-            # TODO: Run simulation through bars using runner
-            # TODO: Collect closed trades and final state
+            # Create ExecutionSpec from materialized spec
+            exec_spec = self._build_execution_spec(materialized_spec, variant_namespace)
 
-            # For now, placeholder implementation
-            # The actual simulation loop would:
-            # 1. Create ExecutionSpec from materialized_spec
-            # 2. Create isolated PaperBroker with fresh state
-            # 3. For each bar, create MarketSnapshot and call runner.evaluate()
-            # 4. Execute any returned intents through PaperBroker
-            # 5. Track closed trades for metrics calculation
-
-            # Placeholder: Simulate no trades scenario
+            # Create isolated PaperState for this variant
             starting_equity = 10000.0
             paper_state = PaperState(
-                workspace_id=run_plan.workspace_id,
+                workspace_id=variant_namespace,  # Isolated namespace
                 starting_equity=starting_equity,
                 cash=starting_equity,
                 realized_pnl=0.0,
+                last_event_id=None,
+                last_event_at=None,
+                reconciled_at=None,
             )
-            closed_trades: list[dict] = []
+
+            # Run simulation through bars
+            closed_trades, events_count = self._simulate_bars(
+                exec_spec, paper_state, bars, log
+            )
 
             # Calculate metrics
             metrics = self._calculate_metrics(
@@ -542,7 +552,7 @@ class RunOrchestrator:
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_ms=duration_ms,
-                events_recorded=0,  # TODO: Track actual events
+                events_recorded=events_count,
             )
 
         except Exception as e:
@@ -559,6 +569,199 @@ class RunOrchestrator:
                 completed_at=completed_at,
                 duration_ms=duration_ms,
             )
+
+    def _build_execution_spec(
+        self, spec_dict: dict, instance_id: UUID
+    ) -> ExecutionSpec:
+        """Build ExecutionSpec from materialized spec dict.
+
+        Args:
+            spec_dict: Materialized specification dictionary
+            instance_id: Unique instance ID for this variant
+
+        Returns:
+            ExecutionSpec ready for evaluation
+        """
+        return ExecutionSpec(
+            strategy_id=spec_dict["strategy_id"],
+            instance_id=instance_id,
+            name=spec_dict.get("name", "variant"),
+            workspace_id=(
+                UUID(spec_dict["workspace_id"])
+                if isinstance(spec_dict["workspace_id"], str)
+                else spec_dict["workspace_id"]
+            ),
+            symbols=spec_dict["symbols"],
+            timeframe=spec_dict["timeframe"],
+            entry=EntryConfig(**spec_dict["entry"]),
+            exit=ExitConfig(**spec_dict["exit"]),
+            risk=RiskConfig(**spec_dict["risk"]),
+        )
+
+    def _simulate_bars(
+        self,
+        spec: ExecutionSpec,
+        paper_state: PaperState,
+        bars: list[OHLCVBar],
+        log,
+    ) -> tuple[list[dict], int]:
+        """Simulate strategy execution through OHLCV bars.
+
+        In-memory simulation that:
+        1. Builds MarketSnapshot for each bar
+        2. Calls runner.evaluate() to get intents
+        3. Executes intents (open/close positions)
+        4. Tracks closed trades for metrics
+
+        Args:
+            spec: ExecutionSpec for this variant
+            paper_state: Isolated paper trading state
+            bars: OHLCV bars to simulate through
+            log: Bound logger for this variant
+
+        Returns:
+            Tuple of (closed_trades list, event count)
+        """
+        closed_trades: list[dict] = []
+        events_count = 0
+        symbol = spec.symbols[0]  # Single symbol for v0
+
+        # Track open position for this symbol
+        open_position: Optional[dict] = None
+
+        # Need at least lookback + 1 bars to start evaluating
+        min_bars = max(spec.entry.lookback_days, 2)
+
+        for i, bar in enumerate(bars):
+            # Skip until we have enough history
+            if i < min_bars:
+                continue
+
+            # Build MarketSnapshot with history up to current bar
+            history = bars[: i + 1]
+            is_last_bar = i == len(bars) - 1
+
+            snapshot = MarketSnapshot(
+                symbol=symbol,
+                ts=bar.ts,
+                timeframe=spec.timeframe,
+                bars=history,
+                is_eod=is_last_bar,  # Force exit on last bar
+                last_price=None,
+                high_52w=None,
+                low_52w=None,
+            )
+
+            # Evaluate strategy
+            evaluation = self._runner.evaluate(spec, snapshot, paper_state)
+            events_count += 1
+
+            # Process intents
+            for intent in evaluation.intents:
+                if intent.action == IntentAction.OPEN_LONG and open_position is None:
+                    # Open new position
+                    qty = spec.risk.dollars_per_trade / bar.close
+                    cost = qty * bar.close
+                    if cost <= paper_state.cash:
+                        paper_state.cash -= cost
+                        open_position = {
+                            "symbol": symbol,
+                            "qty": qty,
+                            "entry_price": bar.close,
+                            "entry_ts": bar.ts,
+                        }
+                        # Add to paper_state positions
+                        paper_state.positions[symbol] = PaperPosition(
+                            workspace_id=paper_state.workspace_id,
+                            symbol=symbol,
+                            side="long",
+                            quantity=qty,
+                            avg_price=bar.close,
+                            unrealized_pnl=0.0,
+                            opened_at=bar.ts,
+                        )
+                        log.debug(
+                            "position_opened",
+                            symbol=symbol,
+                            qty=qty,
+                            price=bar.close,
+                        )
+
+                elif intent.action == IntentAction.CLOSE_LONG and open_position:
+                    # Close position
+                    exit_price = bar.close
+                    pnl = (exit_price - open_position["entry_price"]) * open_position[
+                        "qty"
+                    ]
+                    proceeds = open_position["qty"] * exit_price
+                    paper_state.cash += proceeds
+                    paper_state.realized_pnl += pnl
+
+                    # Track equity at close for drawdown calculation
+                    exit_equity = paper_state.cash + sum(
+                        p.quantity * p.avg_price for p in paper_state.positions.values()
+                    )
+
+                    closed_trades.append(
+                        {
+                            "symbol": symbol,
+                            "entry_price": open_position["entry_price"],
+                            "exit_price": exit_price,
+                            "qty": open_position["qty"],
+                            "pnl": pnl,
+                            "exit_equity": exit_equity,
+                            "entry_ts": open_position["entry_ts"],
+                            "exit_ts": bar.ts,
+                        }
+                    )
+
+                    # Remove from positions
+                    if symbol in paper_state.positions:
+                        del paper_state.positions[symbol]
+                    open_position = None
+
+                    log.debug(
+                        "position_closed",
+                        symbol=symbol,
+                        pnl=pnl,
+                        exit_price=exit_price,
+                    )
+
+        # Force close any remaining position at end
+        if open_position and bars:
+            last_bar = bars[-1]
+            exit_price = last_bar.close
+            pnl = (exit_price - open_position["entry_price"]) * open_position["qty"]
+            proceeds = open_position["qty"] * exit_price
+            paper_state.cash += proceeds
+            paper_state.realized_pnl += pnl
+
+            exit_equity = paper_state.cash
+
+            closed_trades.append(
+                {
+                    "symbol": symbol,
+                    "entry_price": open_position["entry_price"],
+                    "exit_price": exit_price,
+                    "qty": open_position["qty"],
+                    "pnl": pnl,
+                    "exit_equity": exit_equity,
+                    "entry_ts": open_position["entry_ts"],
+                    "exit_ts": last_bar.ts,
+                }
+            )
+
+            if symbol in paper_state.positions:
+                del paper_state.positions[symbol]
+
+            log.debug(
+                "position_force_closed",
+                symbol=symbol,
+                pnl=pnl,
+                reason="end_of_data",
+            )
+
+        return closed_trades, events_count
 
     @staticmethod
     def _parse_ohlcv_csv(content: bytes) -> list[OHLCVBar]:
@@ -855,6 +1058,12 @@ class RunOrchestrator:
             workspace_id=run_plan.workspace_id,
             event_type=mapped_type,
             payload=payload,
+            strategy_entity_id=None,
+            symbol=None,
+            timeframe=None,
+            intent_id=None,
+            order_id=None,
+            position_id=None,
         )
 
         try:
@@ -902,7 +1111,10 @@ def select_best_variant(
         return None, None
 
     # Sort by: -objective_score, -return_pct, +max_drawdown_pct, +variant_id
-    def sort_key(r: RunResult):
+    def sort_key(r: RunResult) -> tuple[float, float, float, str]:
+        # Type narrowing: we filtered to ensure these are not None
+        assert r.objective_score is not None
+        assert r.metrics is not None
         return (
             -r.objective_score,  # Higher is better
             -r.metrics.return_pct,  # Higher is better

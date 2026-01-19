@@ -47,8 +47,37 @@ def mock_backtest_repo():
 
 @pytest.fixture
 def mock_runner():
-    """Create mock strategy runner."""
-    return MagicMock()
+    """Create mock strategy runner.
+
+    Returns a runner that produces empty evaluation results.
+    """
+    from datetime import datetime, timezone
+    from app.services.strategy.models import StrategyEvaluation
+
+    runner = MagicMock()
+    runner.evaluate.return_value = StrategyEvaluation(
+        spec_id="test",
+        symbol="AAPL",
+        ts=datetime.now(timezone.utc),
+        intents=[],
+        signals=[],
+        metadata={},
+    )
+    return runner
+
+
+def make_complete_base_spec(workspace_id=None) -> dict:
+    """Create a complete base_spec for testing."""
+    return {
+        "strategy_id": "breakout_52w_high",
+        "name": "Test Strategy",
+        "workspace_id": str(workspace_id or uuid4()),
+        "symbols": ["AAPL"],
+        "timeframe": "daily",
+        "entry": {"type": "breakout_52w_high", "lookback_days": 2},  # Small for tests
+        "exit": {"type": "eod"},
+        "risk": {"dollars_per_trade": 1000.0, "max_positions": 5},
+    }
 
 
 @pytest.fixture
@@ -111,10 +140,7 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[],
             dataset_ref="test.csv",
         )
@@ -134,10 +160,7 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[],
             dataset_ref="test.csv",
         )
@@ -156,10 +179,7 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[
                 RunVariant(
                     variant_id="abc123def456",
@@ -184,10 +204,7 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[
                 RunVariant(variant_id="variant1", label="v1", spec_overrides={}),
                 RunVariant(variant_id="variant2", label="v2", spec_overrides={}),
@@ -208,10 +225,7 @@ class TestExecutePersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[
                 RunVariant(variant_id="abc123", label="baseline", spec_overrides={}),
             ],
@@ -240,10 +254,7 @@ class TestExecuteWithoutPersistence:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[],
             dataset_ref="test.csv",
         )
@@ -264,10 +275,7 @@ class TestCompleteRunPlanAggregates:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[
                 RunVariant(variant_id="v1", label="v1", spec_overrides={}),
                 RunVariant(variant_id="v2", label="v2", spec_overrides={}),
@@ -307,10 +315,7 @@ class TestFinalizeInFinally:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[
                 RunVariant(variant_id="v1", label="v1", spec_overrides={}),
             ],
@@ -353,10 +358,7 @@ class TestFinalizeInFinally:
         workspace_id = uuid4()
         run_plan = RunPlan(
             workspace_id=workspace_id,
-            base_spec={
-                "strategy_name": "test",
-                "risk": {"dollars_per_trade": 100, "max_positions": 1},
-            },
+            base_spec=make_complete_base_spec(workspace_id),
             variants=[
                 RunVariant(variant_id="v1", label="v1", spec_overrides={}),
             ],
