@@ -36,6 +36,15 @@ class TelegramNotifier:
     TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
     MAX_MESSAGE_LENGTH = 4000  # Telegram limit is ~4096
 
+    # Rule type to topic category mapping
+    RULE_TOPIC_MAP = {
+        "health_degraded": "health",
+        "weak_coverage:P1": "strategy",
+        "weak_coverage:P2": "strategy",
+        "drift_spike": "strategy",
+        "confidence_drop": "strategy",
+    }
+
     def __init__(
         self,
         bot_token: str,
@@ -43,6 +52,9 @@ class TelegramNotifier:
         base_url: Optional[str] = None,
         timeout: float = 10.0,
         enabled: bool = True,
+        message_thread_id: Optional[int] = None,
+        topic_health: Optional[int] = None,
+        topic_strategy: Optional[int] = None,
     ):
         """
         Initialize Telegram notifier.
@@ -53,12 +65,20 @@ class TelegramNotifier:
             base_url: Admin UI base URL for deep links (optional)
             timeout: Request timeout in seconds
             enabled: Master kill switch
+            message_thread_id: Default topic ID (fallback)
+            topic_health: Topic ID for health alerts
+            topic_strategy: Topic ID for strategy alerts
         """
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.base_url = base_url.rstrip("/") if base_url else None
         self.timeout = timeout
         self.enabled = enabled
+        self.message_thread_id = message_thread_id
+        self.topic_map = {
+            "health": topic_health,
+            "strategy": topic_strategy,
+        }
 
     async def send_alert(
         self,
@@ -89,7 +109,20 @@ class TelegramNotifier:
                 message[: self.MAX_MESSAGE_LENGTH - 50] + "\n\n<i>(truncated...)</i>"
             )
 
-        return await self._send(message, alert.id)
+        # Get topic ID for this rule type
+        topic_id = self._get_topic_for_rule(alert.rule_type)
+
+        return await self._send(message, alert.id, topic_id)
+
+    def _get_topic_for_rule(self, rule_type: str) -> Optional[int]:
+        """Get the topic ID for a given rule type."""
+        category = self.RULE_TOPIC_MAP.get(rule_type)
+        if category:
+            topic_id = self.topic_map.get(category)
+            if topic_id is not None:
+                return topic_id
+        # Fall back to default topic
+        return self.message_thread_id
 
     async def send_batch(
         self,
@@ -237,7 +270,9 @@ class TelegramNotifier:
         """Escape HTML special characters."""
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    async def _send(self, message: str, alert_id) -> bool:
+    async def _send(
+        self, message: str, alert_id, topic_id: Optional[int] = None
+    ) -> bool:
         """Send message to Telegram with retry."""
         payload = {
             "chat_id": self.chat_id,
@@ -245,6 +280,9 @@ class TelegramNotifier:
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
+        # Add topic/thread ID for forum supergroups
+        if topic_id is not None:
+            payload["message_thread_id"] = topic_id
 
         url = self.TELEGRAM_API.format(token=self.bot_token)
 
@@ -311,6 +349,9 @@ def get_telegram_notifier() -> Optional[TelegramNotifier]:
     enabled = getattr(settings, "telegram_enabled", True)
     timeout = getattr(settings, "telegram_timeout_secs", 10.0)
     base_url = getattr(settings, "admin_base_url", None)
+    message_thread_id = getattr(settings, "telegram_message_thread_id", None)
+    topic_health = getattr(settings, "telegram_topic_health", None)
+    topic_strategy = getattr(settings, "telegram_topic_strategy", None)
 
     return TelegramNotifier(
         bot_token=bot_token,
@@ -318,4 +359,7 @@ def get_telegram_notifier() -> Optional[TelegramNotifier]:
         base_url=base_url,
         timeout=timeout,
         enabled=enabled,
+        message_thread_id=message_thread_id,
+        topic_health=topic_health,
+        topic_strategy=topic_strategy,
     )

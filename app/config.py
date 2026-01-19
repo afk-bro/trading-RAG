@@ -253,6 +253,19 @@ class Settings(BaseSettings):
         default=None,
         description="Telegram chat/group ID to send alerts to (format: -100123456789)",
     )
+    telegram_message_thread_id: Optional[int] = Field(
+        default=None,
+        description="Default topic ID (fallback if no per-category topic set)",
+    )
+    # Per-category topic routing for forum supergroups
+    telegram_topic_health: Optional[int] = Field(
+        default=None,
+        description="Topic ID for health_degraded alerts (system_health channel)",
+    )
+    telegram_topic_strategy: Optional[int] = Field(
+        default=None,
+        description="Topic ID for strategy alerts (weak_coverage, drift, confidence)",
+    )
     telegram_enabled: bool = Field(
         default=True,
         description="Master kill switch for Telegram alerts (requires bot_token and chat_id)",
