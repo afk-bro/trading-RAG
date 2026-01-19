@@ -522,6 +522,9 @@ class RunOrchestrator:
                 starting_equity=starting_equity,
                 cash=starting_equity,
                 realized_pnl=0.0,
+                last_event_id=None,
+                last_event_at=None,
+                reconciled_at=None,
             )
 
             # Run simulation through bars
@@ -644,6 +647,9 @@ class RunOrchestrator:
                 timeframe=spec.timeframe,
                 bars=history,
                 is_eod=is_last_bar,  # Force exit on last bar
+                last_price=None,
+                high_52w=None,
+                low_52w=None,
             )
 
             # Evaluate strategy
@@ -666,11 +672,13 @@ class RunOrchestrator:
                         }
                         # Add to paper_state positions
                         paper_state.positions[symbol] = PaperPosition(
+                            workspace_id=paper_state.workspace_id,
                             symbol=symbol,
-                            qty=qty,
+                            side="long",
+                            quantity=qty,
                             avg_price=bar.close,
-                            current_price=bar.close,
                             unrealized_pnl=0.0,
+                            opened_at=bar.ts,
                         )
                         log.debug(
                             "position_opened",
@@ -691,7 +699,7 @@ class RunOrchestrator:
 
                     # Track equity at close for drawdown calculation
                     exit_equity = paper_state.cash + sum(
-                        p.qty * p.current_price for p in paper_state.positions.values()
+                        p.quantity * p.avg_price for p in paper_state.positions.values()
                     )
 
                     closed_trades.append(
@@ -1050,6 +1058,12 @@ class RunOrchestrator:
             workspace_id=run_plan.workspace_id,
             event_type=mapped_type,
             payload=payload,
+            strategy_entity_id=None,
+            symbol=None,
+            timeframe=None,
+            intent_id=None,
+            order_id=None,
+            position_id=None,
         )
 
         try:
@@ -1097,7 +1111,10 @@ def select_best_variant(
         return None, None
 
     # Sort by: -objective_score, -return_pct, +max_drawdown_pct, +variant_id
-    def sort_key(r: RunResult):
+    def sort_key(r: RunResult) -> tuple[float, float, float, str]:
+        # Type narrowing: we filtered to ensure these are not None
+        assert r.objective_score is not None
+        assert r.metrics is not None
         return (
             -r.objective_score,  # Higher is better
             -r.metrics.return_pct,  # Higher is better
