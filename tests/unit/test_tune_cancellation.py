@@ -124,7 +124,7 @@ class TestCancellationAPISemantics:
             "n_trials": 10,
         }
 
-        with patch("app.routers.backtests._get_repos") as mock_get_repos:
+        with patch("app.routers.backtests.tunes._get_repos") as mock_get_repos:
             mock_tune_repo = AsyncMock()
             mock_tune_repo.get_tune.return_value = mock_tune
             mock_get_repos.return_value = (None, None, mock_tune_repo)
@@ -154,7 +154,7 @@ class TestCancellationAPISemantics:
             "n_trials": 10,
         }
 
-        with patch("app.routers.backtests._get_repos") as mock_get_repos:
+        with patch("app.routers.backtests.tunes._get_repos") as mock_get_repos:
             mock_tune_repo = AsyncMock()
             mock_tune_repo.get_tune.return_value = mock_tune
             mock_get_repos.return_value = (None, None, mock_tune_repo)

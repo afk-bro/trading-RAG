@@ -1,6 +1,6 @@
 """Tests for overfit diagnostics (gap computation)."""
 
-from app.routers.backtests import TuneRunListItem
+from app.routers.backtests.schemas import TuneRunListItem
 
 
 class TestOverfitGapComputation:
