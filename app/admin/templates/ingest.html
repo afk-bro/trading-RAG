@@ -1,0 +1,1380 @@
+{% extends "layout.html" %}
+
+{% block title %}Ingest - KB Admin{% endblock %}
+
+{% block content %}
+<style>
+    /* Tab styling */
+    .tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 1.5rem;
+    }
+
+    .tab {
+        padding: 0.75rem 1.5rem;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .tab:hover {
+        color: var(--text);
+    }
+
+    .tab.active {
+        color: var(--link);
+        border-bottom-color: var(--link);
+    }
+
+    .tab-content {
+        display: none;
+    }
+
+    .tab-content.active {
+        display: block;
+    }
+
+    /* Form layout */
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .form-group input[type="text"],
+    .form-group input[type="url"],
+    .form-group input[type="password"],
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        max-width: 500px;
+    }
+
+    .form-group textarea {
+        min-height: 120px;
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+    }
+
+    .form-row {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .form-row .form-group {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    /* Checkbox groups */
+    .checkbox-group {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+
+    .checkbox-group label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        color: var(--text);
+        font-size: 14px;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+        width: auto;
+    }
+
+    /* Token input section */
+    .token-section {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .token-section.token-saved {
+        border-color: var(--success);
+        background: rgba(63, 185, 80, 0.1);
+    }
+
+    .token-section .form-row {
+        align-items: flex-end;
+    }
+
+    .token-status {
+        color: var(--success);
+        font-size: 13px;
+    }
+
+    /* Workspace selector */
+    .workspace-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .workspace-section select {
+        min-width: 300px;
+    }
+
+    /* Results panel */
+    .results-panel {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        background: var(--bg);
+        border-radius: 6px;
+        border: 1px solid var(--border);
+    }
+
+    .results-panel.hidden {
+        display: none;
+    }
+
+    .results-panel h3 {
+        margin-bottom: 1rem;
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+
+    .result-grid {
+        display: grid;
+        grid-template-columns: 150px 1fr;
+        gap: 0.5rem 1rem;
+        font-size: 14px;
+    }
+
+    .result-grid dt {
+        color: var(--text-muted);
+    }
+
+    .result-grid dd {
+        margin: 0;
+        word-break: break-all;
+    }
+
+    .result-errors {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid var(--danger);
+        border-radius: 6px;
+    }
+
+    .result-errors h4 {
+        color: var(--danger);
+        margin-bottom: 0.5rem;
+        font-size: 13px;
+    }
+
+    .result-errors ul {
+        margin: 0;
+        padding-left: 1.5rem;
+        font-size: 13px;
+    }
+
+    .result-warnings {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: rgba(210, 153, 34, 0.1);
+        border: 1px solid var(--warning);
+        border-radius: 6px;
+    }
+
+    .result-warnings h4 {
+        color: var(--warning);
+        margin-bottom: 0.5rem;
+        font-size: 13px;
+    }
+
+    .job-link {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+    }
+
+    /* Loading state */
+    .btn.loading {
+        opacity: 0.7;
+        pointer-events: none;
+    }
+
+    .btn.loading::after {
+        content: '...';
+    }
+
+    /* File input styling */
+    input[type="file"] {
+        padding: 8px 0;
+    }
+
+    /* Last ingest timestamps */
+    .last-ingest-info {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .last-ingest-info .timestamp {
+        color: var(--text);
+        cursor: help;
+        border-bottom: 1px dotted var(--text-muted);
+    }
+
+    .last-ingest-info .never {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    .badge-stale {
+        background: rgba(139, 148, 158, 0.2);
+        color: var(--text-muted);
+        font-size: 10px;
+        padding: 2px 6px;
+        margin-left: 0.5rem;
+    }
+
+    /* Job history table */
+    .job-history {
+        margin-top: 1.5rem;
+        border-top: 1px solid var(--border);
+        padding-top: 1rem;
+    }
+
+    .job-history h4 {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+    }
+
+    .job-history table {
+        font-size: 12px;
+    }
+
+    .job-history th, .job-history td {
+        padding: 8px 10px;
+    }
+
+    .job-history .copy-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 2px 6px;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+
+    .job-history .copy-btn:hover {
+        background: var(--bg-secondary);
+        color: var(--text);
+    }
+
+    /* Raw JSON expandable */
+    .raw-response {
+        margin-top: 1rem;
+    }
+
+    .raw-response summary {
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 12px;
+        padding: 0.5rem 0;
+    }
+
+    .raw-response summary:hover {
+        color: var(--text);
+    }
+
+    .raw-response pre {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1rem;
+        font-size: 11px;
+        overflow-x: auto;
+        max-height: 300px;
+        margin-top: 0.5rem;
+    }
+
+    .raw-response .copy-json-btn {
+        float: right;
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 4px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: 4px;
+        margin-top: -2rem;
+        margin-right: 0.5rem;
+    }
+
+    .raw-response .copy-json-btn:hover {
+        background: var(--bg-secondary);
+        color: var(--text);
+    }
+
+    /* Stats summary in results */
+    .result-stats {
+        display: flex;
+        gap: 1.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .result-stat {
+        text-align: center;
+    }
+
+    .result-stat-value {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .result-stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .dry-run-notice {
+        background: rgba(210, 153, 34, 0.1);
+        border: 1px solid var(--warning);
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+        color: var(--warning);
+        font-size: 13px;
+    }
+
+    /* Button group for submit + copy curl */
+    .btn-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .copy-curl-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    .copy-curl-btn:hover {
+        background: var(--bg-secondary);
+        color: var(--text);
+        border-color: var(--text-muted);
+    }
+
+    .copy-curl-btn.copied {
+        color: var(--success);
+        border-color: var(--success);
+    }
+
+    .copy-curl-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+</style>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Ingest Content</h2>
+    </div>
+
+    <!-- Admin Token Section -->
+    <div class="token-section" id="token-section">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Admin Token (required for API calls)</label>
+                <input type="password" id="admin-token-input" placeholder="Enter admin token">
+            </div>
+            <div class="form-group" style="flex: 0;">
+                <label>&nbsp;</label>
+                <button type="button" class="btn btn-secondary" onclick="saveToken()">Save Token</button>
+            </div>
+            <div class="form-group" style="flex: 0; align-self: center;">
+                <span class="token-status" id="token-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workspace Selector -->
+    <div class="workspace-section">
+        <div class="form-group">
+            <label>Workspace</label>
+            <select id="workspace-select" onchange="updateWorkspaceUrl()">
+                {% if not workspaces %}
+                <option value="">No workspaces available</option>
+                {% else %}
+                {% for ws in workspaces %}
+                <option value="{{ ws.id }}" {% if ws.id == workspace_id %}selected{% endif %}>
+                    {{ ws.name }} ({{ ws.slug }})
+                </option>
+                {% endfor %}
+                {% endif %}
+            </select>
+        </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab {% if active_tab == 'youtube' %}active{% endif %}" data-tab="youtube" onclick="switchTab('youtube')">YouTube</button>
+        <button class="tab {% if active_tab == 'pdf' %}active{% endif %}" data-tab="pdf" onclick="switchTab('pdf')">PDF</button>
+        <button class="tab {% if active_tab == 'pine' %}active{% endif %}" data-tab="pine" onclick="switchTab('pine')">Pine Script</button>
+        <button class="tab {% if active_tab == 'generic' %}active{% endif %}" data-tab="generic" onclick="switchTab('generic')">Generic</button>
+    </div>
+
+    <!-- YouTube Tab -->
+    <div class="tab-content {% if active_tab == 'youtube' %}active{% endif %}" id="youtube-tab">
+        <div class="last-ingest-info">
+            Last ingest: {% if last_ingests.get('youtube') %}<span class="timestamp" data-iso="{{ last_ingests.youtube }}" title="{{ last_ingests.youtube }}">{{ last_ingests.youtube[:19] | replace('T', ' ') }} UTC</span>{% else %}<span class="never">Never</span>{% endif %}
+        </div>
+        <div class="form-group">
+            <label>YouTube URL (video or playlist)</label>
+            <input type="url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=...">
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitYoutube()">Ingest Video</button>
+            <button type="button" class="copy-curl-btn" onclick="copyYoutubeCurl(this)">Copy curl</button>
+        </div>
+    </div>
+
+    <!-- PDF Tab -->
+    <div class="tab-content {% if active_tab == 'pdf' %}active{% endif %}" id="pdf-tab">
+        <div class="last-ingest-info">
+            Last ingest: {% if last_ingests.get('pdf') %}<span class="timestamp" data-iso="{{ last_ingests.pdf }}" title="{{ last_ingests.pdf }}">{{ last_ingests.pdf[:19] | replace('T', ' ') }} UTC</span>{% else %}<span class="never">Never</span>{% endif %}
+        </div>
+        <div class="form-group">
+            <label>PDF File</label>
+            <input type="file" id="pdf-file" accept=".pdf">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Title (optional, auto-extracted)</label>
+                <input type="text" id="pdf-title" placeholder="Document title">
+            </div>
+            <div class="form-group">
+                <label>Author (optional)</label>
+                <input type="text" id="pdf-author" placeholder="Author name">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Extraction Backend</label>
+            <select id="pdf-backend">
+                <option value="pymupdf" selected>PyMuPDF (default, faster)</option>
+                <option value="pdfplumber">pdfplumber (better tables)</option>
+            </select>
+        </div>
+        <div class="checkbox-group">
+            <label>
+                <input type="checkbox" id="pdf-dry-run">
+                Dry run (extract + chunk, no DB writes)
+            </label>
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitPdf()">Upload & Ingest</button>
+            <button type="button" class="copy-curl-btn" onclick="copyPdfCurl(this)">Copy curl</button>
+        </div>
+    </div>
+
+    <!-- Pine Script Tab -->
+    <div class="tab-content {% if active_tab == 'pine' %}active{% endif %}" id="pine-tab">
+        <div class="last-ingest-info">
+            Last ingest: {% if last_ingests.get('pine_script') %}<span class="timestamp" data-iso="{{ last_ingests.pine_script }}" title="{{ last_ingests.pine_script }}">{{ last_ingests.pine_script[:19] | replace('T', ' ') }} UTC</span>{% else %}<span class="never">Never</span>{% endif %}
+        </div>
+        <div class="form-group">
+            <label>Registry Path (server path to pine_registry.json)</label>
+            <input type="text" id="pine-registry-path" placeholder="/data/pine/pine_registry.json">
+        </div>
+        <div class="checkbox-group">
+            <label>
+                <input type="checkbox" id="pine-include-source" checked>
+                Include source code
+            </label>
+            <label>
+                <input type="checkbox" id="pine-skip-lint-errors">
+                Skip scripts with lint errors
+            </label>
+            <label>
+                <input type="checkbox" id="pine-update-existing">
+                Update existing (upsert)
+            </label>
+            <label>
+                <input type="checkbox" id="pine-dry-run">
+                Dry run (preview only)
+            </label>
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitPine()">Ingest Registry</button>
+            <button type="button" class="copy-curl-btn" onclick="copyPineCurl(this)">Copy curl</button>
+        </div>
+    </div>
+
+    <!-- Generic Tab -->
+    <div class="tab-content {% if active_tab == 'generic' %}active{% endif %}" id="generic-tab">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Source Type</label>
+                <select id="generic-source-type">
+                    <option value="article">Article</option>
+                    <option value="note">Note</option>
+                    <option value="transcript">Transcript</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="pdf">PDF</option>
+                    <option value="pine_script">Pine Script</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Source URL (optional)</label>
+                <input type="url" id="generic-url" placeholder="https://...">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Title (optional)</label>
+                <input type="text" id="generic-title" placeholder="Document title">
+            </div>
+            <div class="form-group">
+                <label>Author (optional)</label>
+                <input type="text" id="generic-author" placeholder="Author name">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Content</label>
+            <textarea id="generic-content" placeholder="Paste content here..."></textarea>
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitGeneric()">Ingest Content</button>
+            <button type="button" class="copy-curl-btn" onclick="copyGenericCurl(this)">Copy curl</button>
+        </div>
+    </div>
+
+    <!-- Results Panel -->
+    <div class="results-panel hidden" id="results-panel">
+        <h3>Ingestion Result</h3>
+        <div id="result-dry-run-notice"></div>
+        <div id="result-status"></div>
+        <div class="result-stats hidden" id="result-stats"></div>
+        <dl class="result-grid" id="result-details"></dl>
+        <div id="result-errors"></div>
+        <div id="result-warnings"></div>
+        <div class="job-link hidden" id="job-link-section">
+            <a href="#" id="job-detail-link" target="_blank">View Job Run Detail</a>
+            <span id="job-poll-status"></span>
+        </div>
+
+        <!-- Raw Response JSON (expandable) -->
+        <details class="raw-response hidden" id="raw-response-section">
+            <summary>Show raw response</summary>
+            <button type="button" class="copy-json-btn" onclick="copyRawJson()">Copy</button>
+            <pre id="raw-response-json"></pre>
+        </details>
+
+        <!-- Job History Table -->
+        <div class="job-history hidden" id="job-history-section">
+            <h4>Session Job History</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Source</th>
+                        <th>Status</th>
+                        <th>Docs</th>
+                        <th>Chunks</th>
+                        <th>Vectors</th>
+                        <th>Run ID</th>
+                    </tr>
+                </thead>
+                <tbody id="job-history-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+// =============================================================================
+// Token Management
+// =============================================================================
+
+function saveToken() {
+    const token = document.getElementById('admin-token-input').value;
+    if (token) {
+        localStorage.setItem('adminToken', token);
+        document.getElementById('token-status').textContent = 'Saved';
+        document.getElementById('token-section').classList.add('token-saved');
+        document.getElementById('admin-token-input').value = '';
+        document.getElementById('admin-token-input').placeholder = 'Token saved';
+    }
+}
+
+function getAdminToken() {
+    return localStorage.getItem('adminToken') || '';
+}
+
+// Pre-fill token status on load
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('adminToken');
+    if (saved) {
+        document.getElementById('token-status').textContent = 'Using saved token';
+        document.getElementById('token-section').classList.add('token-saved');
+        document.getElementById('admin-token-input').placeholder = 'Token saved (enter new to replace)';
+    }
+
+    // Format timestamps on page load
+    formatAllTimestamps();
+    // Render job history from session storage
+    renderJobHistory();
+});
+
+// =============================================================================
+// Timestamp Formatting
+// =============================================================================
+
+const STALE_DAYS = 7;  // Show "stale" badge if last ingest is older than this
+
+function formatRelativeTime(isoString) {
+    if (!isoString) return null;
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffSec < 60) return 'just now';
+    if (diffMin < 60) return `${diffMin} min ago`;
+    if (diffHour < 24) return `${diffHour} hr ago`;
+    if (diffDay < 7) return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
+    if (diffDay < 30) return `${Math.floor(diffDay / 7)} wk ago`;
+    return `${Math.floor(diffDay / 30)} mo ago`;
+}
+
+function formatAbsoluteTime(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    // Format: "2026-01-18 16:03 PST"
+    const options = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short'
+    };
+    return date.toLocaleString('en-US', options).replace(',', '');
+}
+
+function isStale(isoString) {
+    if (!isoString) return false;
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffDays = (now - date) / (1000 * 60 * 60 * 24);
+    return diffDays > STALE_DAYS;
+}
+
+function formatAllTimestamps() {
+    document.querySelectorAll('.timestamp[data-iso]').forEach(el => {
+        const iso = el.getAttribute('data-iso');
+        if (!iso) return;
+
+        const relative = formatRelativeTime(iso);
+        const absolute = formatAbsoluteTime(iso);
+
+        el.textContent = relative;
+        el.title = absolute;
+
+        // Add stale badge if needed
+        if (isStale(iso)) {
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-stale';
+            badge.textContent = 'stale';
+            el.after(badge);
+        }
+    });
+}
+
+// =============================================================================
+// Job History (Session Storage)
+// =============================================================================
+
+const JOB_HISTORY_KEY = 'ingestJobHistory';
+
+function getJobHistory() {
+    try {
+        return JSON.parse(sessionStorage.getItem(JOB_HISTORY_KEY)) || [];
+    } catch {
+        return [];
+    }
+}
+
+function addJobToHistory(entry) {
+    const history = getJobHistory();
+    history.unshift(entry);  // newest first
+    // Keep only last 20 entries
+    if (history.length > 20) history.pop();
+    sessionStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(history));
+    renderJobHistory();
+}
+
+function renderJobHistory() {
+    const history = getJobHistory();
+    const tbody = document.getElementById('job-history-tbody');
+    const section = document.getElementById('job-history-section');
+
+    if (history.length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+
+    section.classList.remove('hidden');
+    tbody.innerHTML = history.map(job => `
+        <tr>
+            <td title="${escapeHtml(job.timestamp)}">${escapeHtml(job.relativeTime || formatRelativeTime(job.timestamp))}</td>
+            <td>${escapeHtml(job.source)}</td>
+            <td><span class="badge ${job.success ? 'badge-verified' : 'badge-rejected'}">${escapeHtml(job.status)}</span></td>
+            <td>${job.docs ?? '-'}</td>
+            <td>${job.chunks ?? '-'}</td>
+            <td>${job.vectors ?? '-'}</td>
+            <td>${job.runId ? `<button class="copy-btn" onclick="copyToClipboard('${escapeHtml(job.runId)}')">${escapeHtml(job.runId.slice(0, 8))}...</button>` : '-'}</td>
+        </tr>
+    `).join('');
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback could be added here
+    });
+}
+
+// =============================================================================
+// Raw JSON Response
+// =============================================================================
+
+let lastRawResponse = null;
+
+function showRawResponse(result) {
+    lastRawResponse = result;
+    const section = document.getElementById('raw-response-section');
+    const pre = document.getElementById('raw-response-json');
+    pre.textContent = JSON.stringify(result, null, 2);
+    section.classList.remove('hidden');
+}
+
+function copyRawJson() {
+    if (lastRawResponse) {
+        navigator.clipboard.writeText(JSON.stringify(lastRawResponse, null, 2));
+    }
+}
+
+// =============================================================================
+// Tab Switching
+// =============================================================================
+
+function switchTab(tabName) {
+    // Update URL
+    const url = new URL(window.location);
+    url.searchParams.set('tab', tabName);
+    window.history.replaceState({}, '', url);
+
+    // Update tab buttons
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+
+    // Hide results when switching tabs
+    hideResults();
+}
+
+function updateWorkspaceUrl() {
+    const url = new URL(window.location);
+    url.searchParams.set('workspace_id', document.getElementById('workspace-select').value);
+    window.history.replaceState({}, '', url);
+}
+
+// =============================================================================
+// Result Display
+// =============================================================================
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
+function hideResults() {
+    document.getElementById('results-panel').classList.add('hidden');
+}
+
+function showResults() {
+    document.getElementById('results-panel').classList.remove('hidden');
+}
+
+function displayResult(result, success, sourceType = 'unknown') {
+    showResults();
+
+    // Show raw JSON response (expandable)
+    showRawResponse(result);
+
+    // Dry run notice
+    const dryRunNoticeEl = document.getElementById('result-dry-run-notice');
+    if (result.status === 'dry_run' || result.dry_run) {
+        dryRunNoticeEl.innerHTML = '<div class="dry-run-notice">Dry run - no data was written to the database</div>';
+    } else {
+        dryRunNoticeEl.innerHTML = '';
+    }
+
+    // Status badge
+    const statusEl = document.getElementById('result-status');
+    const status = result.status || (success ? 'success' : 'error');
+    const badgeClass = success ? 'badge-verified' : 'badge-rejected';
+    statusEl.innerHTML = `<span class="badge ${badgeClass}">${escapeHtml(status)}</span>`;
+
+    // Stats summary cards (for chunk/vector counts)
+    const statsEl = document.getElementById('result-stats');
+    const chunks = result.chunks_created ?? result.chunks_added ?? null;
+    const vectors = result.vectors_created ?? result.vectors_indexed ?? null;
+    const docs = result.scripts_indexed ?? (result.doc_id ? 1 : null);
+
+    if (chunks !== null || vectors !== null || docs !== null) {
+        let statsHtml = '';
+        if (docs !== null) {
+            statsHtml += `<div class="result-stat"><div class="result-stat-value">${docs}</div><div class="result-stat-label">Documents</div></div>`;
+        }
+        if (chunks !== null) {
+            statsHtml += `<div class="result-stat"><div class="result-stat-value">${chunks}</div><div class="result-stat-label">Chunks</div></div>`;
+        }
+        if (vectors !== null) {
+            statsHtml += `<div class="result-stat"><div class="result-stat-value">${vectors}</div><div class="result-stat-label">Vectors</div></div>`;
+        }
+        statsEl.innerHTML = statsHtml;
+        statsEl.classList.remove('hidden');
+    } else {
+        statsEl.classList.add('hidden');
+    }
+
+    // Result details
+    const detailsEl = document.getElementById('result-details');
+    let html = '';
+
+    // Common fields
+    if (result.doc_id) html += `<dt>Document ID</dt><dd>${escapeHtml(result.doc_id)}</dd>`;
+    if (result.video_id) html += `<dt>Video ID</dt><dd>${escapeHtml(result.video_id)}</dd>`;
+
+    // PDF fields
+    if (result.pages_extracted !== undefined) html += `<dt>Pages Extracted</dt><dd>${result.pages_extracted}</dd>`;
+    if (result.total_pages !== undefined) html += `<dt>Total Pages</dt><dd>${result.total_pages}</dd>`;
+
+    // Pine fields
+    if (result.scripts_processed !== undefined) html += `<dt>Scripts Processed</dt><dd>${result.scripts_processed}</dd>`;
+    if (result.scripts_already_indexed !== undefined) html += `<dt>Already Indexed</dt><dd>${result.scripts_already_indexed}</dd>`;
+    if (result.scripts_skipped !== undefined) html += `<dt>Scripts Skipped</dt><dd>${result.scripts_skipped}</dd>`;
+    if (result.ingest_run_id) html += `<dt>Run ID</dt><dd>${escapeHtml(result.ingest_run_id)}</dd>`;
+
+    // Playlist fields
+    if (result.is_playlist) {
+        html += `<dt>Playlist</dt><dd>Yes (${result.video_urls?.length || 0} videos)</dd>`;
+    }
+
+    detailsEl.innerHTML = html;
+
+    // Errors
+    const errorsEl = document.getElementById('result-errors');
+    if (result.errors?.length) {
+        errorsEl.innerHTML = `
+            <div class="result-errors">
+                <h4>Errors (${result.errors.length})</h4>
+                <ul>${result.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            </div>`;
+    } else if (result.error_reason) {
+        errorsEl.innerHTML = `
+            <div class="result-errors">
+                <h4>Error</h4>
+                <p>${escapeHtml(result.error_reason)}</p>
+            </div>`;
+    } else {
+        errorsEl.innerHTML = '';
+    }
+
+    // Warnings
+    const warningsEl = document.getElementById('result-warnings');
+    if (result.warnings?.length) {
+        warningsEl.innerHTML = `
+            <div class="result-warnings">
+                <h4>Warnings (${result.warnings.length})</h4>
+                <ul>${result.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
+            </div>`;
+    } else {
+        warningsEl.innerHTML = '';
+    }
+
+    // Job link for async operations
+    const runId = result.run_id || result.job_run_id || result.ingest_run_id;
+    const jobLinkSection = document.getElementById('job-link-section');
+    if (runId) {
+        document.getElementById('job-detail-link').href = `/admin/jobs/runs/${runId}/detail`;
+        jobLinkSection.classList.remove('hidden');
+        pollJobStatus(runId);
+    } else {
+        jobLinkSection.classList.add('hidden');
+    }
+
+    // Add to job history
+    addJobToHistory({
+        timestamp: new Date().toISOString(),
+        source: sourceType,
+        status: status,
+        success: success,
+        docs: docs,
+        chunks: chunks,
+        vectors: vectors,
+        runId: runId
+    });
+}
+
+// =============================================================================
+// Job Polling
+// =============================================================================
+
+const TERMINAL_STATES = ['succeeded', 'failed', 'canceled', 'completed', 'error'];
+
+function isTerminal(state) {
+    return TERMINAL_STATES.includes((state || '').toLowerCase());
+}
+
+function pollJobStatus(runId) {
+    const pollStatusEl = document.getElementById('job-poll-status');
+
+    const poll = async () => {
+        try {
+            const res = await fetch(`/admin/jobs/runs/${runId}`, {
+                headers: { 'X-Admin-Token': getAdminToken() }
+            });
+
+            if (!res.ok) {
+                pollStatusEl.textContent = '(polling failed)';
+                return;
+            }
+
+            const job = await res.json();
+            const state = (job.status || job.state || '').toLowerCase();
+
+            // Update status indicator
+            pollStatusEl.innerHTML = ` <span class="badge badge-${state === 'succeeded' || state === 'completed' ? 'verified' : state === 'failed' || state === 'error' ? 'rejected' : 'pending'}">${escapeHtml(job.status || job.state)}</span>`;
+
+            if (!isTerminal(state)) {
+                setTimeout(poll, 2000);
+            }
+        } catch (e) {
+            pollStatusEl.textContent = '(polling error)';
+        }
+    };
+
+    pollStatusEl.textContent = ' (polling...)';
+    poll();
+}
+
+// =============================================================================
+// Form Submission Helpers
+// =============================================================================
+
+function setLoading(btn, loading) {
+    if (loading) {
+        btn.classList.add('loading');
+        btn.disabled = true;
+    } else {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+    }
+}
+
+function getWorkspaceId() {
+    return document.getElementById('workspace-select').value;
+}
+
+async function handleResponse(response, sourceType = 'unknown') {
+    const result = await response.json();
+    displayResult(result, response.ok, sourceType);
+    return result;
+}
+
+// =============================================================================
+// Submit Functions
+// =============================================================================
+
+async function submitYoutube() {
+    const btn = event.target;
+    const url = document.getElementById('youtube-url').value.trim();
+
+    if (!url) {
+        alert('Please enter a YouTube URL');
+        return;
+    }
+
+    if (!getAdminToken()) {
+        alert('Please enter and save your admin token first');
+        return;
+    }
+
+    setLoading(btn, true);
+    hideResults();
+
+    try {
+        const response = await fetch('/sources/youtube/ingest', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': getAdminToken(),
+            },
+            body: JSON.stringify({
+                workspace_id: getWorkspaceId(),
+                url: url
+            })
+        });
+
+        await handleResponse(response, 'YouTube');
+    } catch (e) {
+        displayResult({ error_reason: e.message }, false, 'YouTube');
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function submitPdf() {
+    const btn = event.target;
+    const fileInput = document.getElementById('pdf-file');
+
+    if (!fileInput.files[0]) {
+        alert('Please select a PDF file');
+        return;
+    }
+
+    if (!getAdminToken()) {
+        alert('Please enter and save your admin token first');
+        return;
+    }
+
+    setLoading(btn, true);
+    hideResults();
+
+    try {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('workspace_id', getWorkspaceId());
+
+        const title = document.getElementById('pdf-title').value.trim();
+        const author = document.getElementById('pdf-author').value.trim();
+        const backend = document.getElementById('pdf-backend').value;
+
+        if (title) formData.append('title', title);
+        if (author) formData.append('author', author);
+        formData.append('backend', backend);
+
+        const dryRun = document.getElementById('pdf-dry-run').checked;
+        if (dryRun) formData.append('dry_run', 'true');
+
+        const response = await fetch('/sources/pdf/ingest', {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': getAdminToken(),
+            },
+            body: formData
+        });
+
+        await handleResponse(response, 'PDF');
+    } catch (e) {
+        displayResult({ error_reason: e.message }, false, 'PDF');
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function submitPine() {
+    const btn = event.target;
+    const registryPath = document.getElementById('pine-registry-path').value.trim();
+
+    if (!registryPath) {
+        alert('Please enter a registry path');
+        return;
+    }
+
+    if (!getAdminToken()) {
+        alert('Please enter and save your admin token first');
+        return;
+    }
+
+    setLoading(btn, true);
+    hideResults();
+
+    try {
+        const response = await fetch('/sources/pine/ingest', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': getAdminToken(),
+            },
+            body: JSON.stringify({
+                workspace_id: getWorkspaceId(),
+                registry_path: registryPath,
+                include_source: document.getElementById('pine-include-source').checked,
+                skip_lint_errors: document.getElementById('pine-skip-lint-errors').checked,
+                update_existing: document.getElementById('pine-update-existing').checked,
+                dry_run: document.getElementById('pine-dry-run').checked,
+            })
+        });
+
+        await handleResponse(response, 'Pine');
+    } catch (e) {
+        displayResult({ error_reason: e.message }, false, 'Pine');
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function submitGeneric() {
+    const btn = event.target;
+    const content = document.getElementById('generic-content').value.trim();
+
+    if (!content) {
+        alert('Please enter content');
+        return;
+    }
+
+    if (!getAdminToken()) {
+        alert('Please enter and save your admin token first');
+        return;
+    }
+
+    setLoading(btn, true);
+    hideResults();
+
+    try {
+        const payload = {
+            workspace_id: getWorkspaceId(),
+            content: content,
+            source: {
+                type: document.getElementById('generic-source-type').value,
+            }
+        };
+
+        const url = document.getElementById('generic-url').value.trim();
+        const title = document.getElementById('generic-title').value.trim();
+        const author = document.getElementById('generic-author').value.trim();
+
+        if (url) payload.source.url = url;
+        if (title || author) {
+            payload.metadata = {};
+            if (title) payload.metadata.title = title;
+            if (author) payload.metadata.author = author;
+        }
+
+        const sourceTypeLabel = document.getElementById('generic-source-type').value;
+        const response = await fetch('/ingest', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': getAdminToken(),
+            },
+            body: JSON.stringify(payload)
+        });
+
+        await handleResponse(response, sourceTypeLabel);
+    } catch (e) {
+        displayResult({ error_reason: e.message }, false, 'Generic');
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+// =============================================================================
+// Copy curl Functions
+// =============================================================================
+
+function getBaseUrl() {
+    return window.location.origin;
+}
+
+function showCopied(btn) {
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('copied');
+    }, 2000);
+}
+
+function copyYoutubeCurl(btn) {
+    const url = document.getElementById('youtube-url').value.trim();
+    const workspaceId = getWorkspaceId();
+
+    if (!url) {
+        alert('Enter a YouTube URL first');
+        return;
+    }
+
+    const payload = JSON.stringify({ workspace_id: workspaceId, url: url });
+
+    const curl = `# YouTube Ingest
+# Workspace: ${workspaceId}
+# URL: ${url}
+curl -X POST '${getBaseUrl()}/sources/youtube/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d '${payload.replace(/'/g, "'\\''")}'`;
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+
+function copyPdfCurl(btn) {
+    const fileInput = document.getElementById('pdf-file');
+    const workspaceId = getWorkspaceId();
+    const title = document.getElementById('pdf-title').value.trim();
+    const author = document.getElementById('pdf-author').value.trim();
+    const backend = document.getElementById('pdf-backend').value;
+    const dryRun = document.getElementById('pdf-dry-run').checked;
+
+    // Build form fields
+    let formFields = [
+        `-F 'workspace_id=${workspaceId}'`,
+        `-F 'backend=${backend}'`,
+    ];
+    if (title) formFields.push(`-F 'title=${title}'`);
+    if (author) formFields.push(`-F 'author=${author}'`);
+    if (dryRun) formFields.push(`-F 'dry_run=true'`);
+
+    // File path - use filename if selected, otherwise placeholder
+    const filePath = fileInput.files[0]
+        ? fileInput.files[0].name
+        : '/path/to/file.pdf';
+    formFields.unshift(`-F 'file=@${filePath}'`);
+
+    const curl = `# PDF Ingest
+# Workspace: ${workspaceId}
+# File: ${filePath}${dryRun ? '\n# DRY RUN - no data will be written' : ''}
+curl -X POST '${getBaseUrl()}/sources/pdf/ingest' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  ${formFields.join(' \\\n  ')}`;
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+
+function copyPineCurl(btn) {
+    const registryPath = document.getElementById('pine-registry-path').value.trim();
+    const workspaceId = getWorkspaceId();
+
+    if (!registryPath) {
+        alert('Enter a registry path first');
+        return;
+    }
+
+    const payload = {
+        workspace_id: workspaceId,
+        registry_path: registryPath,
+        include_source: document.getElementById('pine-include-source').checked,
+        skip_lint_errors: document.getElementById('pine-skip-lint-errors').checked,
+        update_existing: document.getElementById('pine-update-existing').checked,
+        dry_run: document.getElementById('pine-dry-run').checked,
+    };
+    const dryRun = payload.dry_run;
+
+    const curl = `# Pine Script Ingest
+# Workspace: ${workspaceId}
+# Registry: ${registryPath}${dryRun ? '\n# DRY RUN - no data will be written' : ''}
+curl -X POST '${getBaseUrl()}/sources/pine/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d '${JSON.stringify(payload).replace(/'/g, "'\\''")}'`;
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+
+function copyGenericCurl(btn) {
+    const content = document.getElementById('generic-content').value.trim();
+    const workspaceId = getWorkspaceId();
+
+    if (!content) {
+        alert('Enter content first');
+        return;
+    }
+
+    const payload = {
+        workspace_id: workspaceId,
+        content: content,
+        source: {
+            type: document.getElementById('generic-source-type').value,
+        }
+    };
+
+    const url = document.getElementById('generic-url').value.trim();
+    const title = document.getElementById('generic-title').value.trim();
+    const author = document.getElementById('generic-author').value.trim();
+
+    if (url) payload.source.url = url;
+    if (title || author) {
+        payload.metadata = {};
+        if (title) payload.metadata.title = title;
+        if (author) payload.metadata.author = author;
+    }
+
+    // For large content, suggest using a file
+    const contentPreview = content.length > 100
+        ? content.slice(0, 100) + '...'
+        : content;
+    const useFile = content.length > 500;
+
+    let curl;
+    if (useFile) {
+        // Suggest saving to file for large content
+        curl = `# Generic Ingest
+# Workspace: ${workspaceId}
+# Source Type: ${payload.source.type}
+# Content: (${content.length} chars - save payload to file first)
+
+# Save this payload to a file:
+# cat > /tmp/payload.json << 'PAYLOAD_EOF'
+# ${JSON.stringify(payload, null, 2).replace(/\n/g, '\n# ')}
+# PAYLOAD_EOF
+
+curl -X POST '${getBaseUrl()}/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d @/tmp/payload.json`;
+    } else {
+        curl = `# Generic Ingest
+# Workspace: ${workspaceId}
+# Source Type: ${payload.source.type}
+curl -X POST '${getBaseUrl()}/ingest' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Admin-Token: $ADMIN_TOKEN' \\
+  -d '${JSON.stringify(payload).replace(/'/g, "'\\''")}'`;
+    }
+
+    navigator.clipboard.writeText(curl).then(() => showCopied(btn));
+}
+</script>
+{% endblock %}
