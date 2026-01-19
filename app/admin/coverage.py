@@ -22,6 +22,16 @@ from app.admin.services.coverage_models import (
     WeakCoverageItem,
     WeakCoverageResponse,
 )
+from app.admin.services.coverage_queries import (
+    build_template_items,
+    collect_candidate_ids,
+    fetch_weak_coverage_runs,
+    get_default_workspace_id,
+    get_workspace_from_run,
+    hydrate_strategy_cards,
+    hydrate_strategy_cards_for_template,
+    parse_json_field,
+)
 from app.deps.security import require_admin_token
 from app.schemas import StrategyCard
 
@@ -49,10 +59,6 @@ def _get_pool():
     if _db_pool is None:
         raise HTTPException(503, "Database not available")
     return _db_pool
-
-
-# Max unique strategy IDs to hydrate (prevents payload bloat)
-MAX_HYDRATION_IDS = 300
 
 
 @router.get(
@@ -100,12 +106,9 @@ async def list_weak_coverage(
     """
     pool = _get_pool()
 
-    from app.services.coverage_gap import MatchRunRepository
-
-    repo = MatchRunRepository(pool)
-
     try:
-        items = await repo.list_weak_coverage_for_cockpit(
+        items = await fetch_weak_coverage_runs(
+            pool=pool,
             workspace_id=workspace_id,
             limit=limit,
             since=since,
@@ -122,70 +125,11 @@ async def list_weak_coverage(
     missing_strategy_ids: list[UUID] = []
 
     if include_candidate_cards and items:
-        # Collect all unique candidate IDs across all items (preserve order for first N)
-        all_candidate_ids: list[UUID] = []
-        seen: set[UUID] = set()
-        for item in items:
-            for cid in item.get("candidate_strategy_ids", []):
-                if cid and cid not in seen:
-                    seen.add(cid)
-                    all_candidate_ids.append(cid)
-                    if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
-                        break
-            if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
-                break
-
-        if all_candidate_ids:
-            try:
-                from app.services.strategy import StrategyRepository
-                from app.schemas import (
-                    BacktestSummaryStatus,
-                    StrategyEngine,
-                    StrategyStatus,
-                    StrategyTags,
-                )
-
-                strategy_repo = StrategyRepository(pool)
-                cards_dict = await strategy_repo.get_cards_by_ids(
-                    workspace_id, all_candidate_ids
-                )
-
-                # Convert to schema
-                strategy_cards_by_id = {}
-                for uuid_str, card in cards_dict.items():
-                    tags_data = card.get("tags") or {}
-                    strategy_cards_by_id[uuid_str] = StrategyCard(
-                        id=card["id"],
-                        name=card["name"],
-                        slug=card["slug"],
-                        engine=StrategyEngine(card["engine"]),
-                        status=StrategyStatus(card["status"]),
-                        tags=StrategyTags(**tags_data) if tags_data else StrategyTags(),
-                        backtest_status=(
-                            BacktestSummaryStatus(card["backtest_status"])
-                            if card.get("backtest_status")
-                            else None
-                        ),
-                        last_backtest_at=card.get("last_backtest_at"),
-                        best_oos_score=card.get("best_oos_score"),
-                        max_drawdown=card.get("max_drawdown"),
-                    )
-
-                # Track missing IDs (deleted/archived strategies)
-                found_ids = set(cards_dict.keys())
-                for cid in all_candidate_ids:
-                    if str(cid) not in found_ids:
-                        missing_strategy_ids.append(cid)
-
-                logger.info(
-                    "hydrated_candidate_cards",
-                    requested=len(all_candidate_ids),
-                    found=len(strategy_cards_by_id),
-                    missing=len(missing_strategy_ids),
-                )
-            except Exception as e:
-                logger.warning("candidate_card_hydration_failed", error=str(e))
-                # Don't fail the whole request, just skip hydration
+        candidate_ids = collect_candidate_ids(items)
+        if candidate_ids:
+            strategy_cards_by_id, missing_strategy_ids = await hydrate_strategy_cards(
+                pool, workspace_id, candidate_ids
+            )
 
     return WeakCoverageResponse(
         items=response_items,
@@ -300,35 +244,10 @@ async def explain_strategy_match(
     if not run_row:
         raise HTTPException(404, "Match run not found")
 
-    # Parse intent_json
-    intent_json = run_row["intent_json"]
-    if isinstance(intent_json, str):
-        try:
-            intent_json = json.loads(intent_json)
-        except json.JSONDecodeError:
-            intent_json = {}
-    elif not intent_json:
-        intent_json = {}
-
-    # Parse candidate_scores to get matched_tags for this strategy
-    candidate_scores = run_row["candidate_scores"]
-    if isinstance(candidate_scores, str):
-        try:
-            candidate_scores = json.loads(candidate_scores)
-        except json.JSONDecodeError:
-            candidate_scores = {}
-    elif not candidate_scores:
-        candidate_scores = {}
-
-    # Parse explanations_cache
-    explanations_cache = run_row["explanations_cache"]
-    if isinstance(explanations_cache, str):
-        try:
-            explanations_cache = json.loads(explanations_cache)
-        except json.JSONDecodeError:
-            explanations_cache = {}
-    elif not explanations_cache:
-        explanations_cache = {}
+    # Parse JSON fields (may be string or dict from DB)
+    intent_json = parse_json_field(run_row["intent_json"])
+    candidate_scores = parse_json_field(run_row["candidate_scores"])
+    explanations_cache = parse_json_field(run_row["explanations_cache"])
 
     strategy_id_str = str(request.strategy_id)
     strategy_score_data = candidate_scores.get(strategy_id_str, {})
@@ -483,13 +402,7 @@ async def coverage_cockpit(
 
     # Get default workspace if not specified
     if not workspace_id:
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
-                if row:
-                    workspace_id = row["id"]
-        except Exception as e:
-            logger.warning("Could not fetch default workspace", error=str(e))
+        workspace_id = await get_default_workspace_id(pool)
 
     if not workspace_id:
         return templates.TemplateResponse(
@@ -506,13 +419,9 @@ async def coverage_cockpit(
             },
         )
 
-    from app.services.coverage_gap import MatchRunRepository
-    from app.services.strategy import StrategyRepository
-
-    repo = MatchRunRepository(pool)
-
     try:
-        items = await repo.list_weak_coverage_for_cockpit(
+        items = await fetch_weak_coverage_runs(
+            pool=pool,
             workspace_id=workspace_id,
             limit=50,
             since=None,
@@ -539,77 +448,13 @@ async def coverage_cockpit(
         items = sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
 
     # Hydrate strategy cards
-    strategy_cards: dict = {}
-    missing_strategy_ids: list = []
+    candidate_ids = collect_candidate_ids(items)
+    strategy_cards, missing_strategy_ids = await hydrate_strategy_cards_for_template(
+        pool, workspace_id, candidate_ids
+    )
 
-    all_candidate_ids: list[UUID] = []
-    seen: set[UUID] = set()
-    for item in items:
-        for cid in item.get("candidate_strategy_ids", []):
-            if cid and cid not in seen:
-                seen.add(cid)
-                all_candidate_ids.append(cid)
-                if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
-                    break
-        if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
-            break
-
-    if all_candidate_ids:
-        try:
-            strategy_repo = StrategyRepository(pool)
-            cards_dict = await strategy_repo.get_cards_by_ids(
-                workspace_id, all_candidate_ids
-            )
-
-            for uuid_str, card in cards_dict.items():
-                tags_data = card.get("tags") or {}
-                strategy_cards[uuid_str] = {
-                    "id": str(card["id"]),
-                    "name": card["name"],
-                    "slug": card["slug"],
-                    "engine": card["engine"],
-                    "status": card["status"],
-                    "tags": tags_data,
-                    "backtest_status": card.get("backtest_status"),
-                    "last_backtest_at": (
-                        card["last_backtest_at"].isoformat()
-                        if card.get("last_backtest_at")
-                        else None
-                    ),
-                    "best_oos_score": card.get("best_oos_score"),
-                    "max_drawdown": card.get("max_drawdown"),
-                }
-
-            found_ids = set(cards_dict.keys())
-            for cid in all_candidate_ids:
-                if str(cid) not in found_ids:
-                    missing_strategy_ids.append(str(cid))
-
-        except Exception as e:
-            logger.warning("cockpit_card_hydration_failed", error=str(e))
-
-    # Convert items for template (ensure UUIDs are strings for JSON)
-    template_items = []
-    for item in items:
-        template_item = {
-            "run_id": str(item["run_id"]),
-            "created_at": item["created_at"],
-            "intent_signature": item.get("intent_signature", ""),
-            "script_type": item.get("script_type"),
-            "weak_reason_codes": item.get("weak_reason_codes", []),
-            "best_score": item.get("best_score"),
-            "num_above_threshold": item.get("num_above_threshold", 0),
-            "candidate_strategy_ids": [
-                str(c) for c in item.get("candidate_strategy_ids", [])
-            ],
-            "candidate_scores": item.get("candidate_scores", {}),
-            "query_preview": item.get("query_preview", ""),
-            "source_ref": item.get("source_ref"),
-            "coverage_status": item.get("coverage_status", "open"),
-            "priority_score": item.get("priority_score", 0.0),
-            "resolution_note": item.get("resolution_note"),
-        }
-        template_items.append(template_item)
+    # Convert items for template
+    template_items = build_template_items(items)
 
     # Get admin token from environment for JS PATCH calls
     admin_token = os.environ.get("ADMIN_TOKEN", "")
@@ -648,16 +493,7 @@ async def coverage_cockpit_detail(
 
     # Get workspace from run if not specified
     if not workspace_id:
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT workspace_id FROM match_runs WHERE id = $1",
-                    run_id,
-                )
-                if row:
-                    workspace_id = row["workspace_id"]
-        except Exception as e:
-            logger.warning("Could not fetch workspace from run", error=str(e))
+        workspace_id = await get_workspace_from_run(pool, run_id)
 
     if not workspace_id:
         return templates.TemplateResponse(
@@ -676,14 +512,10 @@ async def coverage_cockpit_detail(
             },
         )
 
-    from app.services.coverage_gap import MatchRunRepository
-    from app.services.strategy import StrategyRepository
-
-    repo = MatchRunRepository(pool)
-
     # Fetch all items (status=all) to ensure linked run is visible
     try:
-        items = await repo.list_weak_coverage_for_cockpit(
+        items = await fetch_weak_coverage_runs(
+            pool=pool,
             workspace_id=workspace_id,
             limit=100,
             since=None,
@@ -712,78 +544,14 @@ async def coverage_cockpit_detail(
     if not run_found:
         logger.warning("deep_link_run_not_in_list", run_id=str(run_id))
 
-    # Hydrate strategy cards (same logic as main cockpit)
-    strategy_cards: dict = {}
-    missing_strategy_ids: list = []
-
-    all_candidate_ids: list[UUID] = []
-    seen: set[UUID] = set()
-    for item in items:
-        for cid in item.get("candidate_strategy_ids", []):
-            if cid and cid not in seen:
-                seen.add(cid)
-                all_candidate_ids.append(cid)
-                if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
-                    break
-        if len(all_candidate_ids) >= MAX_HYDRATION_IDS:
-            break
-
-    if all_candidate_ids:
-        try:
-            strategy_repo = StrategyRepository(pool)
-            cards_dict = await strategy_repo.get_cards_by_ids(
-                workspace_id, all_candidate_ids
-            )
-
-            for uuid_str, card in cards_dict.items():
-                tags_data = card.get("tags") or {}
-                strategy_cards[uuid_str] = {
-                    "id": str(card["id"]),
-                    "name": card["name"],
-                    "slug": card["slug"],
-                    "engine": card["engine"],
-                    "status": card["status"],
-                    "tags": tags_data,
-                    "backtest_status": card.get("backtest_status"),
-                    "last_backtest_at": (
-                        card["last_backtest_at"].isoformat()
-                        if card.get("last_backtest_at")
-                        else None
-                    ),
-                    "best_oos_score": card.get("best_oos_score"),
-                    "max_drawdown": card.get("max_drawdown"),
-                }
-
-            found_ids = set(cards_dict.keys())
-            for cid in all_candidate_ids:
-                if str(cid) not in found_ids:
-                    missing_strategy_ids.append(str(cid))
-
-        except Exception as e:
-            logger.warning("cockpit_detail_card_hydration_failed", error=str(e))
+    # Hydrate strategy cards
+    candidate_ids = collect_candidate_ids(items)
+    strategy_cards, missing_strategy_ids = await hydrate_strategy_cards_for_template(
+        pool, workspace_id, candidate_ids
+    )
 
     # Convert items for template
-    template_items = []
-    for item in items:
-        template_item = {
-            "run_id": str(item["run_id"]),
-            "created_at": item["created_at"],
-            "intent_signature": item.get("intent_signature", ""),
-            "script_type": item.get("script_type"),
-            "weak_reason_codes": item.get("weak_reason_codes", []),
-            "best_score": item.get("best_score"),
-            "num_above_threshold": item.get("num_above_threshold", 0),
-            "candidate_strategy_ids": [
-                str(c) for c in item.get("candidate_strategy_ids", [])
-            ],
-            "candidate_scores": item.get("candidate_scores", {}),
-            "query_preview": item.get("query_preview", ""),
-            "source_ref": item.get("source_ref"),
-            "coverage_status": item.get("coverage_status", "open"),
-            "priority_score": item.get("priority_score", 0.0),
-            "resolution_note": item.get("resolution_note"),
-        }
-        template_items.append(template_item)
+    template_items = build_template_items(items)
 
     admin_token = os.environ.get("ADMIN_TOKEN", "")
 
