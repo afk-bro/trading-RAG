@@ -244,6 +244,30 @@ class Settings(BaseSettings):
         description="Maximum events to buffer per workspace stream for reconnection",
     )
 
+    # Telegram Alerting Configuration
+    telegram_bot_token: Optional[str] = Field(
+        default=None,
+        description="Telegram bot token for ops alerts (format: 123456:ABC-xyz...)",
+    )
+    telegram_chat_id: Optional[str] = Field(
+        default=None,
+        description="Telegram chat/group ID to send alerts to (format: -100123456789)",
+    )
+    telegram_enabled: bool = Field(
+        default=True,
+        description="Master kill switch for Telegram alerts (requires bot_token and chat_id)",
+    )
+    telegram_timeout_secs: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="Telegram API request timeout in seconds",
+    )
+    admin_base_url: Optional[str] = Field(
+        default=None,
+        description="Base URL for admin UI deep links in Telegram messages",
+    )
+
     # Pine Repo Polling Configuration
     pine_repo_poll_enabled: bool = Field(
         default=False,
