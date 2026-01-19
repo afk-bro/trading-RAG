@@ -403,3 +403,36 @@ class OpsAlertsRepository:
             rows = await conn.fetch(query, *params)
 
         return {r["dedupe_key"] for r in rows}
+
+    async def reopen(self, alert_id: UUID) -> Optional[OpsAlert]:
+        """
+        Reopen a resolved alert.
+
+        Sets status back to 'active', clears resolved_at.
+        Keeps acknowledged_at/acknowledged_by for history.
+
+        Returns the reopened alert or None if not found/already active.
+        Idempotent: returns alert even if already active.
+        """
+        query = """
+            UPDATE ops_alerts
+            SET status = 'active', resolved_at = NULL
+            WHERE id = $1 AND status = 'resolved'
+            RETURNING *
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, alert_id)
+
+        if row:
+            logger.info("ops_alert_reopened", alert_id=str(alert_id))
+            return OpsAlert.from_row(dict(row))
+
+        # Check if already active (for idempotent return)
+        get_query = "SELECT * FROM ops_alerts WHERE id = $1"
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(get_query, alert_id)
+
+        if row:
+            return OpsAlert.from_row(dict(row))
+        return None

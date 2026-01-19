@@ -1,18 +1,25 @@
 """Admin endpoints for operational alerts.
 
 Provides read-only access to ops alerts with filtering,
-plus acknowledge/resolve actions.
+plus acknowledge/resolve actions, and a management UI.
 """
 
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 from app.repositories.ops_alerts import OpsAlertsRepository, OpsAlert
+
+# Templates
+_template_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(_template_dir))
 
 router = APIRouter(prefix="/ops-alerts", tags=["admin-ops-alerts"])
 logger = structlog.get_logger(__name__)
@@ -57,6 +64,7 @@ class OpsAlertResponse(BaseModel):
     resolved_at: Optional[str] = None
     acknowledged_at: Optional[str] = None
     acknowledged_by: Optional[str] = None
+    occurrence_count: int = 1
 
     @classmethod
     def from_model(cls, alert: OpsAlert) -> "OpsAlertResponse":
@@ -79,6 +87,7 @@ class OpsAlertResponse(BaseModel):
                 alert.acknowledged_at.isoformat() if alert.acknowledged_at else None
             ),
             acknowledged_by=alert.acknowledged_by,
+            occurrence_count=alert.occurrence_count,
         )
 
 
@@ -108,9 +117,75 @@ class ResolveResponse(BaseModel):
     was_already_resolved: bool
 
 
+class ReopenResponse(BaseModel):
+    """Response for reopen action."""
+
+    id: UUID
+    status: str
+    was_already_active: bool
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
+
+
+# =============================================================================
+# UI Endpoint
+# =============================================================================
+
+
+@router.get("/ui", response_class=HTMLResponse)
+async def ops_alerts_ui(
+    request: Request,
+    workspace_id: UUID = Query(..., description="Workspace ID (required)"),
+    _: bool = Depends(require_admin_token),
+) -> HTMLResponse:
+    """
+    Ops alerts management UI.
+
+    Two-panel layout with queue list and detail panel.
+    """
+    repo = get_repo()
+
+    # Get active alerts for initial load
+    active_alerts, active_total = await repo.list_alerts(
+        workspace_id=workspace_id,
+        status=["active"],
+        limit=50,
+    )
+
+    # Get resolved alerts count
+    _resolved_alerts, resolved_total = await repo.list_alerts(
+        workspace_id=workspace_id,
+        status=["resolved"],
+        limit=1,
+    )
+
+    # Build severity counts for badges
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for alert in active_alerts:
+        if alert.severity in severity_counts:
+            severity_counts[alert.severity] += 1
+
+    # Build rule type counts
+    rule_type_counts: dict[str, int] = {}
+    for alert in active_alerts:
+        rule_type_counts[alert.rule_type] = rule_type_counts.get(alert.rule_type, 0) + 1
+
+    return templates.TemplateResponse(
+        "ops_alerts.html",
+        {
+            "request": request,
+            "workspace_id": str(workspace_id),
+            "alerts": active_alerts,
+            "active_count": active_total,
+            "resolved_count": resolved_total,
+            "severity_counts": severity_counts,
+            "rule_type_counts": rule_type_counts,
+            "selected_status": "active",
+        },
+    )
 
 
 @router.get("", response_model=OpsAlertListResponse)
@@ -241,6 +316,38 @@ async def resolve_ops_alert(
             alert.resolved_at.isoformat() if alert and alert.resolved_at else None
         ),
         was_already_resolved=was_already,
+    )
+
+
+@router.post("/{alert_id}/reopen", response_model=ReopenResponse)
+async def reopen_ops_alert(
+    alert_id: UUID,
+    _: bool = Depends(require_admin_token),
+) -> ReopenResponse:
+    """
+    Reopen a resolved ops alert.
+
+    Sets status back to 'active', clears resolved_at.
+    Keeps acknowledged_at/acknowledged_by for history.
+
+    Idempotent: returns 200 even if already active.
+    """
+    repo = get_repo()
+
+    # First check if alert exists
+    alert = await repo.get(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    was_already_active = alert.status == "active"
+
+    if not was_already_active:
+        alert = await repo.reopen(alert_id)
+
+    return ReopenResponse(
+        id=alert_id,
+        status=alert.status if alert else "active",
+        was_already_active=was_already_active,
     )
 
 
