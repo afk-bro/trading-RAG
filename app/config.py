@@ -371,5 +371,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    # BaseSettings reads required fields from env vars at runtime
+    # mypy: Pydantic BaseSettings __init__ signature differs from runtime
+    # (required fields are populated from environment variables)
     return Settings()  # type: ignore[call-arg]

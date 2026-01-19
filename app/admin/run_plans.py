@@ -299,7 +299,7 @@ async def admin_run_plan_detail(
             detail=f"Run plan {run_plan_id} not found",
         )
 
-    # Parse events
+    # Parse events into template context (Any acceptable at UI boundary)
     run_plan: dict[str, Any] = {
         "run_plan_id": run_plan_id,
         "workspace_id": str(workspace_id),
