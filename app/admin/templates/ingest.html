@@ -455,7 +455,7 @@
             <input type="url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=...">
         </div>
         <div class="btn-group">
-            <button type="button" class="btn" onclick="submitYoutube()">Ingest Video</button>
+            <button type="button" class="btn" onclick="submitYoutube(event)">Ingest Video</button>
             <button type="button" class="copy-curl-btn" onclick="copyYoutubeCurl(this)">Copy curl</button>
         </div>
     </div>
@@ -493,7 +493,7 @@
             </label>
         </div>
         <div class="btn-group">
-            <button type="button" class="btn" onclick="submitPdf()">Upload & Ingest</button>
+            <button type="button" class="btn" onclick="submitPdf(event)">Upload & Ingest</button>
             <button type="button" class="copy-curl-btn" onclick="copyPdfCurl(this)">Copy curl</button>
         </div>
     </div>
@@ -526,7 +526,7 @@
             </label>
         </div>
         <div class="btn-group">
-            <button type="button" class="btn" onclick="submitPine()">Ingest Registry</button>
+            <button type="button" class="btn" onclick="submitPine(event)">Ingest Registry</button>
             <button type="button" class="copy-curl-btn" onclick="copyPineCurl(this)">Copy curl</button>
         </div>
     </div>
@@ -565,7 +565,7 @@
             <textarea id="generic-content" placeholder="Paste content here..."></textarea>
         </div>
         <div class="btn-group">
-            <button type="button" class="btn" onclick="submitGeneric()">Ingest Content</button>
+            <button type="button" class="btn" onclick="submitGeneric(event)">Ingest Content</button>
             <button type="button" class="copy-curl-btn" onclick="copyGenericCurl(this)">Copy curl</button>
         </div>
     </div>
@@ -674,7 +674,7 @@ function formatRelativeTime(isoString) {
 function formatAbsoluteTime(isoString) {
     if (!isoString) return '';
     const date = new Date(isoString);
-    // Format: "2026-01-18 16:03 PST"
+    // Format: "2023-01-18 16:03 PST"
     const options = {
         year: 'numeric',
         month: '2-digit',
@@ -1026,7 +1026,7 @@ async function handleResponse(response, sourceType = 'unknown') {
 // Submit Functions
 // =============================================================================
 
-async function submitYoutube() {
+async function submitYoutube(event) {
     const btn = event.target;
     const url = document.getElementById('youtube-url').value.trim();
 
@@ -1064,7 +1064,7 @@ async function submitYoutube() {
     }
 }
 
-async function submitPdf() {
+async function submitPdf(event) {
     const btn = event.target;
     const fileInput = document.getElementById('pdf-file');
 
@@ -1113,7 +1113,7 @@ async function submitPdf() {
     }
 }
 
-async function submitPine() {
+async function submitPine(event) {
     const btn = event.target;
     const registryPath = document.getElementById('pine-registry-path').value.trim();
 
@@ -1155,7 +1155,7 @@ async function submitPine() {
     }
 }
 
-async function submitGeneric() {
+async function submitGeneric(event) {
     const btn = event.target;
     const content = document.getElementById('generic-content').value.trim();
 
