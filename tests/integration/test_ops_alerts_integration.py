@@ -271,7 +271,9 @@ class TestDedupeOnRepeatedEvaluation:
 
         assert alert1.created_at == alert2.created_at, "created_at must not change"
         assert alert2.last_seen_at > alert1.last_seen_at, "last_seen_at must advance"
-        assert alert2.occurrence_count > alert1.occurrence_count, "occurrence_count must increment"
+        assert (
+            alert2.occurrence_count > alert1.occurrence_count
+        ), "occurrence_count must increment"
 
 
 class TestMultiWorkspaceIsolation:
