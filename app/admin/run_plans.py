@@ -300,7 +300,7 @@ async def admin_run_plan_detail(
         )
 
     # Parse events
-    run_plan = {
+    run_plan: dict[str, Any] = {
         "run_plan_id": run_plan_id,
         "workspace_id": str(workspace_id),
         "status": "running",

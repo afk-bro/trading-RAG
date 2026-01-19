@@ -2,7 +2,7 @@
 # Mypy ratchet: fail if ignore count grows beyond baseline
 # Update BASELINE when you intentionally fix modules (decrease is good!)
 
-BASELINE=62
+BASELINE=45
 CURRENT=$(grep -c "ignore_errors = True" mypy.ini 2>/dev/null || echo 0)
 
 if [ "$CURRENT" -gt "$BASELINE" ]; then

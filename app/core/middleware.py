@@ -27,7 +27,10 @@ def setup_rate_limiter(app: FastAPI, settings: Settings) -> Limiter:
         enabled=settings.rate_limit_enabled,
     )
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # slowapi handler signature doesn't match FastAPI's expected type
+    app.add_exception_handler(
+        RateLimitExceeded, _rate_limit_exceeded_handler  # type: ignore[arg-type]
+    )
     return limiter
 
 
