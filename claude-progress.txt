@@ -1,5 +1,76 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 90 Summary
+Date: Session 90 (Composite FK Constraint Migration)
+Status: Server Not Running - 228/263 Tests Passing (86.7%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Review failing tests to identify code-verifiable improvements
+- Add composite FK constraint migration for workspace_id validation
+
+### Infrastructure Status (Unchanged)
+- **Server**: NOT RUNNING (port 8000 not listening - confirmed via lsof)
+- **Docker**: Commands blocked in environment
+- **Python/uvicorn**: Commands blocked in environment
+- **init.sh**: Cannot execute due to command restrictions
+- **Browser automation**: Available but no server to test
+
+### Code Changes Made
+
+#### Added: Composite FK Constraint Migration (migration 075)
+
+**File created:** `migrations/075_chunks_composite_fk.sql`
+
+**Purpose:** Enforce that `chunks.workspace_id` must match `documents.workspace_id` at the database level.
+
+**Implementation:**
+1. Added unique constraint on `documents(id, workspace_id)` - required for composite FK target
+2. Dropped existing simple FK constraint `fk_chunks_document`
+3. Added composite FK constraint `fk_chunks_document_workspace` on `(doc_id, workspace_id)`
+
+**Test supported:** "Composite FK constraint (doc_id, workspace_id) enforced"
+
+**How it works:**
+- PostgreSQL composite FK requires target columns to be unique together
+- New constraint validates both `doc_id` exists AND `workspace_id` matches
+- Attempting to insert chunk with mismatched workspace_id will fail with FK violation
+- Cascade delete preserved from original constraint
+
+### Failing Tests Analysis (35 total)
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Container control (health) | 3 | Docker commands blocked |
+| YouTube API | 5 | External API + runtime |
+| OpenRouter/LLM | 5 | API key + runtime |
+| n8n workflows | 8 | n8n not configured |
+| Service recovery | 2 | Container control |
+| Performance/Load | 4 | Large datasets + runtime |
+| Composite FK | 1 | **FIXED** - migration added |
+| GIN indexes | 2 | Runtime EXPLAIN needed |
+| Answer model config | 1 | Code done - needs runtime |
+| Reranking | 1 | Code done - needs runtime |
+| Multiple providers | 1 | Code done - needs runtime |
+| Graceful shutdown | 1 | Container control |
+| Docker image size | 1 | Docker build required |
+| Test coverage | 1 | pytest --cov required |
+| Query timeout | 1 | Runtime required |
+| Atomicity | 1 | Design uses graceful degradation |
+
+### Test Status
+- Previous: 228/263 passing (86.7%)
+- This session: 228/263 passing (86.7%) - no change in count
+- Migration added for composite FK test - will pass when applied to database
+
+### Next Steps When Environment Available
+1. Apply migration 075 to database
+2. Test composite FK enforcement with mismatched workspace_id insert
+3. Verify existing data is compatible (no orphans)
+4. Mark test as passing if verified
+
+---
+
 ## Session 89 Summary
 Date: Session 89 (Feature Implementation - answer_model per-request override)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)
