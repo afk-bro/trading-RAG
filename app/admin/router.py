@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.admin import analytics as analytics_router
 from app.admin import alerts as alerts_router
+from app.admin import ops_alerts as ops_alerts_router
 from app.admin import coverage as coverage_router
 from app.admin import retention as retention_router
 from app.admin import events as events_router
@@ -36,6 +37,9 @@ router.include_router(analytics_router.router)
 
 # Alerts
 router.include_router(alerts_router.router)
+
+# Ops Alerts
+router.include_router(ops_alerts_router.router)
 
 # Coverage
 router.include_router(coverage_router.router)
@@ -100,6 +104,7 @@ def set_db_pool(pool):
     """Set the database pool for all admin routes."""
     analytics_router.set_db_pool(pool)
     alerts_router.set_db_pool(pool)
+    ops_alerts_router.set_db_pool(pool)
     coverage_router.set_db_pool(pool)
     retention_router.set_db_pool(pool)
     system_health_router.set_db_pool(pool)

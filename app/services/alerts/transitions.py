@@ -1,7 +1,8 @@
 """Alert transition layer - handles state changes and DB operations."""
 
+import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
@@ -20,9 +21,39 @@ SEVERITY_MAP = {
 class AlertTransitionManager:
     """Manages alert state transitions."""
 
-    def __init__(self, repo):
-        """Initialize with alerts repository."""
+    def __init__(
+        self,
+        repo,
+        webhook_enabled: bool = False,
+        slack_webhook_url: Optional[str] = None,
+        alert_webhook_url: Optional[str] = None,
+        alert_webhook_headers: Optional[str] = None,
+    ):
+        """
+        Initialize with alerts repository and webhook configuration.
+
+        Args:
+            repo: AlertsRepository instance
+            webhook_enabled: Enable webhook delivery
+            slack_webhook_url: Optional Slack webhook URL
+            alert_webhook_url: Optional generic webhook URL
+            alert_webhook_headers: Optional JSON string of headers for generic webhook
+        """
         self.repo = repo
+        self.webhook_enabled = webhook_enabled
+        self.slack_webhook_url = slack_webhook_url
+        self.alert_webhook_url = alert_webhook_url
+
+        # Parse webhook headers if provided
+        self.webhook_headers = None
+        if alert_webhook_headers:
+            try:
+                self.webhook_headers = json.loads(alert_webhook_headers)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Invalid JSON in alert_webhook_headers, ignoring",
+                    headers=alert_webhook_headers,
+                )
 
     async def process_evaluation(
         self,
@@ -99,6 +130,11 @@ class AlertTransitionManager:
                 fingerprint=fingerprint,
             )
 
+            # Send webhooks for NEW activations (not updates to existing active alerts)
+            is_new_activation = not existing or existing["status"] != "active"
+            if is_new_activation and self.webhook_enabled:
+                await self._send_webhooks(result, workspace_id, rule_type, severity, context_json, timeframe)
+
             return {"action": "activated", "event_id": result["id"]}
 
         # Condition clear: resolve if active
@@ -108,3 +144,54 @@ class AlertTransitionManager:
                 return {"action": "resolved", "event_id": existing["id"]}
 
         return {"action": "no_change", "reason": "unchanged"}
+
+    async def _send_webhooks(
+        self,
+        result: dict[str, Any],
+        workspace_id: UUID,
+        rule_type: RuleType,
+        severity: Severity,
+        context_json: dict[str, Any],
+        timeframe: str,
+    ) -> None:
+        """
+        Send webhooks for new alert activation (fire and forget).
+
+        Args:
+            result: Result from upsert_activate
+            workspace_id: Workspace ID
+            rule_type: Alert rule type
+            severity: Alert severity
+            context_json: Alert context
+            timeframe: Timeframe
+        """
+        try:
+            from app.services.ops_alerts.webhook_sink import send_alert_webhooks
+
+            # Build alert event dict for webhook
+            alert_event = {
+                "id": result["id"],
+                "workspace_id": workspace_id,
+                "rule_type": rule_type.value,
+                "severity": severity.value,
+                "status": "active",
+                "activated_at": result.get("activated_at"),
+                "last_seen": result.get("last_seen"),
+                "context_json": context_json,
+                "timeframe": timeframe,
+            }
+
+            await send_alert_webhooks(
+                alert_event=alert_event,
+                slack_webhook_url=self.slack_webhook_url,
+                generic_webhook_url=self.alert_webhook_url,
+                generic_webhook_headers=self.webhook_headers,
+            )
+
+        except Exception as e:
+            # Never let webhook failures block alert processing
+            logger.exception(
+                "Failed to send alert webhooks",
+                alert_id=result.get("id"),
+                error=str(e),
+            )

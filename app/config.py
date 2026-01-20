@@ -216,6 +216,24 @@ class Settings(BaseSettings):
         description="Maximum position size as percentage of equity (0.20 = 20%)",
     )
 
+    # Webhook Configuration for Ops Alerts
+    webhook_enabled: bool = Field(
+        default=False,
+        description="Enable webhook delivery for ops alerts",
+    )
+    slack_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Slack incoming webhook URL for alert notifications",
+    )
+    alert_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Generic webhook URL for alert notifications",
+    )
+    alert_webhook_headers: Optional[str] = Field(
+        default=None,
+        description="JSON string of headers for generic webhook (e.g., API keys)",
+    )
+
     # SSE (Server-Sent Events) Configuration
     sse_ticket_secret: Optional[str] = Field(
         default=None,
