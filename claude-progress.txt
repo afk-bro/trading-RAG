@@ -30,6 +30,15 @@ Modified `.github/workflows/ci.yml`:
 - **Query timeout test**: Already implemented correctly in `app/routers/query.py` with `asyncio.wait_for(timeout=settings.query_timeout_s)`
 - **Dockerfile already optimized**: Uses slim base, no-cache pip, non-root user
 
+#### 4. Verified Implementations
+- **Graceful shutdown**: `app/core/lifespan.py` properly closes Pine poller, reranker, DB pool, Qdrant client
+- **Composite FK constraint**: Migration 075 properly creates FK on chunks(doc_id, workspace_id)
+- **Coverage configuration**: Tests can now be run with `pytest --cov=app` to check 70% threshold
+
+### Commits Made
+1. `ci: add test coverage tracking with 70% threshold` - .coveragerc + CI workflow
+2. `docs: session 96 progress - coverage config added` - Progress notes
+
 ### Infrastructure Status (Unchanged - Session 23 of Blocked Sequence)
 - **Server**: NOT RUNNING (port 8000 not listening)
 - **Docker**: Commands blocked ("docker not in allowed commands")
