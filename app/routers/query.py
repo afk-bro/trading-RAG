@@ -181,27 +181,43 @@ async def query(
 
     # --- Config extraction ---
     # Precedence: request override > workspace config > defaults
-    # TODO: Fetch workspace config from DB when workspace table is extended
-    # For now, use hardcoded defaults with request overrides
 
-    # Default configs (would come from workspace.config JSONB)
-    workspace_rerank = {
-        "enabled": False,
-        "method": "cross_encoder",
-        "candidates_k": 50,
-        "final_k": 10,
-        "cross_encoder": {"device": "cuda", "model": "BAAI/bge-reranker-v2-m3"},
-    }
-    workspace_neighbor = {
-        "enabled": True,
-        "window": 1,
-        "pdf_window": 2,
-        "min_chars": 200,
-        "max_total": 20,
-    }
-    workspace_retrieval = {
-        "top_k": 8,
-    }
+    # Fetch workspace config from DB
+    async with _db_pool.acquire() as conn:
+        workspace_row = await conn.fetchrow(
+            "SELECT config FROM workspaces WHERE id = $1", request.workspace_id
+        )
+
+    # Extract config sections with fallback to defaults
+    workspace_config = workspace_row["config"] if workspace_row else {}
+
+    # Default configs (fallback if not in workspace.config JSONB)
+    workspace_rerank = workspace_config.get(
+        "rerank",
+        {
+            "enabled": False,
+            "method": "cross_encoder",
+            "candidates_k": 50,
+            "final_k": 10,
+            "cross_encoder": {"device": "cuda", "model": "BAAI/bge-reranker-v2-m3"},
+        },
+    )
+    workspace_neighbor = workspace_config.get(
+        "neighbor",
+        {
+            "enabled": True,
+            "window": 1,
+            "pdf_window": 2,
+            "min_chars": 200,
+            "max_total": 20,
+        },
+    )
+    workspace_retrieval = workspace_config.get(
+        "retrieval",
+        {
+            "top_k": 8,
+        },
+    )
 
     # --- Safety caps (prevent accidental latency bombs) ---
     MAX_CANDIDATES_K = 200  # CrossEncoder MAX_CANDIDATES
