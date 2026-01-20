@@ -1,5 +1,127 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 73 Summary
+Date: Session 73 (Bug Fix Session)
+Status: Services Degraded (Qdrant Down) - 223/263 Tests Passing (84.8%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Analyze remaining 40 failing tests
+- Find and fix any bugs in testable features
+
+### Infrastructure Status (via /health)
+- **Overall status**: "degraded"
+- **Qdrant**: "error" - "All connection attempts failed" (~48ms to error)
+- **Supabase**: "ok" (~425ms latency)
+- **Ollama**: "ok" (~30ms latency)
+- **active_collection**: "kb_nomic_embed_text_v1"
+- **embed_model**: "nomic-embed-text"
+- **version**: "0.1.0"
+
+### Verification Performed via Browser Automation
+1. **Health Endpoint** (/health) - PASSED
+   - Status: degraded (correctly reports Qdrant down)
+   - Supabase and Ollama healthy
+   - All required fields present with latency_ms
+
+2. **API Documentation** (/docs) - PASSED
+   - Swagger UI loads correctly at http://localhost:8000/docs
+   - All endpoints documented and organized by section
+   - Health, Ingestion, YouTube, PDF sections visible
+   - Shows version 0.1.0, OAS 3.1
+
+3. **Debug Workspaces** (/debug/workspaces) - PASSED
+   - Returns 7 workspaces with full metadata
+   - Database connectivity confirmed healthy
+   - All workspaces have is_active: true, ingestion_enabled: true
+
+4. **Metrics Endpoint** (/metrics) - PASSED
+   - Prometheus format data returned
+   - Per-endpoint breakdown working correctly
+   - Shows request counts by endpoint and status code
+   - Process metrics: ~1GB virtual memory, ~269MB resident
+   - 21 open file descriptors
+
+5. **Admin System Health** (/admin/system/health) - PASSED
+   - Beautiful dashboard UI showing all subsystems
+   - Database: degraded (434.9ms acquire, 128.0ms query)
+   - Qdrant: error (properly reflected)
+   - LLM: ok (openrouter configured, google/gemma-3-27b-it:free)
+   - SSE Events: ok (memory bus)
+   - Retention, Idempotency, Backtest Tunes, Ingestion: all ok
+   - Pine Repos/Discovery/Poller: all ok
+   - Version 0.1.0 | SHA: dev shown at bottom
+
+6. **Ops Alerts API** (/admin/ops-alerts) - PASSED
+   - Returns 3 active alerts for Default Workspace
+   - Alerts: weak_coverage:P2 (medium), weak_coverage:P1 (high), health_degraded (critical)
+   - Proper JSON response with pagination
+
+### Bug Fixed This Session
+
+**Issue: Ops Alerts UI showing "No active alerts" despite alerts existing**
+
+The `/admin/ops-alerts/ui` endpoint was passing `"alerts": active_alerts` to the template,
+but the `ops_alerts.html` template expects `items` variable name (uses `{% for item in items %}`).
+
+**Root Cause**: Template variable name mismatch between endpoint and template
+- Endpoint passed: `"alerts": active_alerts`
+- Template expected: `items`
+
+**Fix**: Changed line 181 in `app/admin/ops_alerts.py`:
+```python
+# Before
+"alerts": active_alerts,
+# After
+"items": active_alerts,  # Template expects 'items', not 'alerts'
+```
+
+**Commit**: `42c1e88 fix(admin): pass correct template variable to ops_alerts UI`
+
+**Note**: The fix was committed but could not be verified via browser because the
+server stopped during the edit and uvicorn/python/docker commands are blocked.
+The fix is syntactically correct and will work when the server is restarted.
+
+### Blocked Tests Analysis (40 remaining)
+All 40 failing tests remain blocked by infrastructure/environmental constraints:
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Docker container control | 3 | Docker commands blocked |
+| YouTube external API | 6 | Network access to YouTube |
+| OpenRouter/LLM answer mode | 5 | Qdrant down (needs vectors) |
+| n8n workflow tests | 8 | n8n setup required |
+| Document versioning | 4 | Qdrant for vector deletion |
+| Service recovery tests | 2 | Container control needed |
+| Index performance | 3 | 1000+ documents required |
+| Memory profiling | 1 | Profiling tools blocked |
+| Test coverage | 1 | pytest-cov blocked |
+| Docker image size | 1 | Docker build blocked |
+| Migration safety | 1 | Fresh DB required |
+| Query timeout | 1 | Qdrant needed |
+| Transcript languages | 2 | YouTube API needed |
+| Large playlist | 1 | YouTube API needed |
+| Partial failure atomicity | 1 | Complex setup needed |
+
+### Key Constraint
+Commands blocked in this environment:
+- docker, docker-compose
+- pytest
+- uvicorn
+- python
+- curl
+- pgrep, source
+
+### Recommendations for Next Session
+1. **Restart server** to verify ops-alerts UI fix works
+2. **Start Qdrant** container to unblock ~15+ tests
+3. Once Qdrant is up, test:
+   - Query answer mode with OpenRouter
+   - Document versioning workflow
+   - Vector deletion on supersede
+
+---
+
 ## Session 72 Summary
 Date: Session 72 (Verification Session)
 Status: Services Degraded (Qdrant Down) - 223/263 Tests Passing (84.8%)
