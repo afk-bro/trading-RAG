@@ -119,7 +119,9 @@ class PaperEquityRepository:
         Returns:
             Created EquitySnapshot, or None if dedupe skipped the insert
         """
-        inputs_hash = compute_inputs_hash(workspace_id, cash, positions_value, realized_pnl)
+        inputs_hash = compute_inputs_hash(
+            workspace_id, cash, positions_value, realized_pnl
+        )
 
         async with self._pool.acquire() as conn:
             # Dedupe check: skip if latest snapshot has same hash
@@ -173,9 +175,7 @@ class PaperEquityRepository:
             )
             return snapshot
 
-    async def get_latest_snapshot(
-        self, workspace_id: UUID
-    ) -> Optional[EquitySnapshot]:
+    async def get_latest_snapshot(self, workspace_id: UUID) -> Optional[EquitySnapshot]:
         """Get the most recent snapshot for a workspace.
 
         Args:

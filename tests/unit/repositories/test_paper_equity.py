@@ -82,7 +82,9 @@ class TestEquitySnapshotFromRow:
 
         assert snapshot.id == sample_snapshot_row["id"]
         assert snapshot.workspace_id == sample_snapshot_row["workspace_id"]
-        assert snapshot.strategy_version_id == sample_snapshot_row["strategy_version_id"]
+        assert (
+            snapshot.strategy_version_id == sample_snapshot_row["strategy_version_id"]
+        )
         assert snapshot.snapshot_ts == sample_snapshot_row["snapshot_ts"]
         assert snapshot.computed_at == sample_snapshot_row["computed_at"]
         assert snapshot.equity == 105000.0
@@ -434,7 +436,9 @@ class TestComputeDrawdown:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_compute_drawdown_single_snapshot(self, mock_pool, sample_snapshot_row):
+    async def test_compute_drawdown_single_snapshot(
+        self, mock_pool, sample_snapshot_row
+    ):
         """Test drawdown with single snapshot (peak = current)."""
         pool, conn = mock_pool
         conn.fetch = AsyncMock(return_value=[sample_snapshot_row])

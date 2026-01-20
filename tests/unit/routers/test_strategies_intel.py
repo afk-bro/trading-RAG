@@ -171,7 +171,9 @@ class TestGetLatestIntel:
         assert data["confidence_components"]["performance"] == 0.8
         assert data["engine_version"] == "intel_runner_v0.1"
 
-    def test_get_latest_intel_strategy_not_found(self, client, mock_db_pool, sample_strategy):
+    def test_get_latest_intel_strategy_not_found(
+        self, client, mock_db_pool, sample_strategy
+    ):
         """Should return 404 if strategy not found."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = None
@@ -520,7 +522,9 @@ class TestRecomputeIntel:
                     ):
                         response = client.post(
                             f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/recompute",
-                            params={"workspace_id": str(sample_strategy["workspace_id"])},
+                            params={
+                                "workspace_id": str(sample_strategy["workspace_id"])
+                            },
                             headers={"X-Admin-Token": "test-token"},
                         )
 
@@ -562,7 +566,9 @@ class TestRecomputeIntel:
         assert response.status_code == 500
         assert "computation failed" in response.json()["detail"].lower()
 
-    def test_recompute_intel_strategy_not_found(self, client, mock_db_pool, sample_strategy):
+    def test_recompute_intel_strategy_not_found(
+        self, client, mock_db_pool, sample_strategy
+    ):
         """Should return 404 if strategy not found."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = None

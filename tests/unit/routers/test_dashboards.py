@@ -83,7 +83,9 @@ class TestEquityCurveEndpoint:
         assert result["summary"]["max_drawdown_pct"] == 0.05
 
     @pytest.mark.asyncio
-    async def test_equity_curve_handles_empty_data(self, sample_workspace_id, mock_pool):
+    async def test_equity_curve_handles_empty_data(
+        self, sample_workspace_id, mock_pool
+    ):
         """Test equity curve handles empty data gracefully."""
         from app.routers.dashboards import get_equity_curve
 
@@ -140,7 +142,9 @@ class TestIntelTimelineEndpoint:
         assert result["versions"][0]["strategy_name"] == "Test Strategy"
 
     @pytest.mark.asyncio
-    async def test_intel_timeline_filters_by_version(self, sample_workspace_id, mock_pool):
+    async def test_intel_timeline_filters_by_version(
+        self, sample_workspace_id, mock_pool
+    ):
         """Test intel timeline can filter by version_id."""
         from app.routers.dashboards import get_intel_timeline
 

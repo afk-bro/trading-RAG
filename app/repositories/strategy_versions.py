@@ -361,9 +361,7 @@ class StrategyVersionsRepository:
 
                 current_state = version_row["state"]
                 if "active" not in VALID_TRANSITIONS.get(current_state, set()):
-                    raise ValueError(
-                        f"Cannot activate from state '{current_state}'"
-                    )
+                    raise ValueError(f"Cannot activate from state '{current_state}'")
 
                 strategy_id = version_row["strategy_id"]
                 version_number = version_row["version_number"]
@@ -490,9 +488,7 @@ class StrategyVersionsRepository:
 
                 current_state = version_row["state"]
                 if "paused" not in VALID_TRANSITIONS.get(current_state, set()):
-                    raise ValueError(
-                        f"Cannot pause from state '{current_state}'"
-                    )
+                    raise ValueError(f"Cannot pause from state '{current_state}'")
 
                 strategy_id = version_row["strategy_id"]
 
@@ -584,9 +580,7 @@ class StrategyVersionsRepository:
 
                 current_state = version_row["state"]
                 if "retired" not in VALID_TRANSITIONS.get(current_state, set()):
-                    raise ValueError(
-                        f"Cannot retire from state '{current_state}'"
-                    )
+                    raise ValueError(f"Cannot retire from state '{current_state}'")
 
                 strategy_id = version_row["strategy_id"]
 

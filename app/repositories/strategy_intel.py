@@ -109,7 +109,9 @@ class StrategyIntelRepository:
             ValueError: If confidence_score outside [0, 1]
         """
         if not 0.0 <= confidence_score <= 1.0:
-            raise ValueError(f"confidence_score must be in [0, 1], got {confidence_score}")
+            raise ValueError(
+                f"confidence_score must be in [0, 1], got {confidence_score}"
+            )
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(

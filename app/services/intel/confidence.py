@@ -116,7 +116,10 @@ def compute_regime(ohlcv: Optional[pd.DataFrame]) -> tuple[str, dict]:
         Tuple of (regime_string, features_dict)
     """
     if ohlcv is None or len(ohlcv) < 20:
-        return "unknown", {"reason": "insufficient_data", "bars": len(ohlcv) if ohlcv is not None else 0}
+        return "unknown", {
+            "reason": "insufficient_data",
+            "bars": len(ohlcv) if ohlcv is not None else 0,
+        }
 
     # Normalize column names
     df = ohlcv.copy()
@@ -133,7 +136,9 @@ def compute_regime(ohlcv: Optional[pd.DataFrame]) -> tuple[str, dict]:
         return "unknown", {"reason": "insufficient_returns"}
 
     volatility = returns.rolling(window=14).std().iloc[-1]
-    vol_percentile = _compute_percentile(volatility, returns.rolling(window=14).std().dropna())
+    vol_percentile = _compute_percentile(
+        volatility, returns.rolling(window=14).std().dropna()
+    )
 
     # Compute trend strength (R-squared of linear regression)
     trend_strength = _compute_trend_strength(close, lookback=min(50, len(close)))
@@ -195,7 +200,7 @@ def _compute_trend_strength(close: pd.Series, lookback: int = 50) -> float:
         correlation = np.corrcoef(x, window)[0, 1]
         if np.isnan(correlation):
             return 0.0
-        return float(correlation ** 2)
+        return float(correlation**2)
     except (ValueError, FloatingPointError):
         return 0.0
 
@@ -279,7 +284,10 @@ def _compute_drawdown_component(ctx: ConfidenceContext) -> float:
 
     if ctx.wfo_metrics and ctx.wfo_metrics.get("max_drawdown_pct") is not None:
         max_dd = abs(ctx.wfo_metrics["max_drawdown_pct"])
-    elif ctx.backtest_metrics and ctx.backtest_metrics.get("max_drawdown_pct") is not None:
+    elif (
+        ctx.backtest_metrics
+        and ctx.backtest_metrics.get("max_drawdown_pct") is not None
+    ):
         max_dd = abs(ctx.backtest_metrics["max_drawdown_pct"])
 
     if max_dd is None:
@@ -475,8 +483,7 @@ def _build_explanation(
 
     # Sort by weighted contribution
     contributions = [
-        (name, components[name], weights.get(name, 0.0))
-        for name in components
+        (name, components[name], weights.get(name, 0.0)) for name in components
     ]
     contributions.sort(key=lambda x: x[1] * x[2], reverse=True)
 
@@ -484,13 +491,15 @@ def _build_explanation(
         if weight > 0:
             level = _score_to_level(value)
             contribution = round(value * weight, 3)
-            explanations.append({
-                "component": name,
-                "score": round(value, 3),
-                "weight": weight,
-                "contribution": contribution,
-                "level": level,
-            })
+            explanations.append(
+                {
+                    "component": name,
+                    "score": round(value, 3),
+                    "weight": weight,
+                    "contribution": contribution,
+                    "level": level,
+                }
+            )
 
     return {
         "regime": regime,
@@ -529,9 +538,13 @@ def _generate_summary(components: dict[str, float], regime: str) -> str:
 
 def _get_metrics_source(ctx: ConfidenceContext) -> str:
     """Determine which metrics source was used."""
-    if ctx.wfo_metrics and any(ctx.wfo_metrics.get(k) is not None for k in ["oos_sharpe", "oos_return_pct"]):
+    if ctx.wfo_metrics and any(
+        ctx.wfo_metrics.get(k) is not None for k in ["oos_sharpe", "oos_return_pct"]
+    ):
         return "wfo"
-    elif ctx.backtest_metrics and any(ctx.backtest_metrics.get(k) is not None for k in ["sharpe", "return_pct"]):
+    elif ctx.backtest_metrics and any(
+        ctx.backtest_metrics.get(k) is not None for k in ["sharpe", "return_pct"]
+    ):
         return "backtest"
     else:
         return "none"

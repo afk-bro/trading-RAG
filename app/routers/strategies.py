@@ -793,7 +793,9 @@ async def list_intel_snapshots(
     version_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
     limit: int = Query(50, ge=1, le=200, description="Max results"),
-    cursor: Optional[datetime] = Query(None, description="Cursor (as_of_ts) for pagination"),
+    cursor: Optional[datetime] = Query(
+        None, description="Cursor (as_of_ts) for pagination"
+    ),
     _: bool = Depends(require_admin_token),
 ) -> IntelSnapshotListResponse:
     """List intel snapshots for a strategy version (newest first)."""
@@ -890,7 +892,9 @@ async def recompute_intel(
         existing = await intel_repo.get_latest_snapshot(version_id)
         if existing:
             return _snapshot_to_response(existing)
-        raise HTTPException(500, "Computation returned None but no existing snapshot found")
+        raise HTTPException(
+            500, "Computation returned None but no existing snapshot found"
+        )
 
     logger.info(
         "intel_recompute_success",

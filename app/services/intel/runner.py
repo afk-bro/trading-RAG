@@ -235,9 +235,11 @@ class IntelRunner:
             # Parse JSONB fields
             if isinstance(data.get("config_snapshot"), str):
                 import json
+
                 data["config_snapshot"] = json.loads(data["config_snapshot"])
             if isinstance(data.get("regime_awareness"), str):
                 import json
+
                 data["regime_awareness"] = json.loads(data["regime_awareness"])
 
             return data
@@ -268,9 +270,11 @@ class IntelRunner:
                 data = dict(row)
                 if isinstance(data.get("config_snapshot"), str):
                     import json
+
                     data["config_snapshot"] = json.loads(data["config_snapshot"])
                 if isinstance(data.get("regime_awareness"), str):
                     import json
+
                     data["regime_awareness"] = json.loads(data["regime_awareness"])
                 result.append(data)
 
@@ -328,6 +332,7 @@ class IntelRunner:
             summary = row["summary"]
             if isinstance(summary, str):
                 import json
+
                 summary = json.loads(summary)
 
             # Map summary fields to expected metrics format
@@ -379,24 +384,26 @@ class IntelRunner:
             )
             return None
 
-    def _get_latest_candle_ts(self, ohlcv: Optional[pd.DataFrame]) -> Optional[datetime]:
+    def _get_latest_candle_ts(
+        self, ohlcv: Optional[pd.DataFrame]
+    ) -> Optional[datetime]:
         """Get timestamp of latest candle from OHLCV data."""
         if ohlcv is None or len(ohlcv) == 0:
             return None
 
         try:
             # Try index first
-            if hasattr(ohlcv.index, 'to_pydatetime'):
+            if hasattr(ohlcv.index, "to_pydatetime"):
                 ts = ohlcv.index[-1]
-                if hasattr(ts, 'to_pydatetime'):
+                if hasattr(ts, "to_pydatetime"):
                     return ts.to_pydatetime()
                 return ts
 
             # Try timestamp column
-            for col in ['timestamp', 'ts', 'date', 'datetime']:
+            for col in ["timestamp", "ts", "date", "datetime"]:
                 if col in ohlcv.columns:
                     ts = ohlcv[col].iloc[-1]
-                    if hasattr(ts, 'to_pydatetime'):
+                    if hasattr(ts, "to_pydatetime"):
                         return ts.to_pydatetime()
                     return ts
 

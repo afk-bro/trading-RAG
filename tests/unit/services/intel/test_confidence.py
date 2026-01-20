@@ -36,13 +36,16 @@ def trending_ohlcv():
     base = 100
     prices = [base + i * 0.5 + np.random.normal(0, 0.1) for i in range(100)]
 
-    return pd.DataFrame({
-        "open": prices,
-        "high": [p + 0.3 for p in prices],
-        "low": [p - 0.3 for p in prices],
-        "close": prices,
-        "volume": [1000] * 100,
-    }, index=dates)
+    return pd.DataFrame(
+        {
+            "open": prices,
+            "high": [p + 0.3 for p in prices],
+            "low": [p - 0.3 for p in prices],
+            "close": prices,
+            "volume": [1000] * 100,
+        },
+        index=dates,
+    )
 
 
 @pytest.fixture
@@ -53,13 +56,16 @@ def ranging_ohlcv():
     base = 100
     prices = [base + 2 * np.sin(i / 5) + np.random.normal(0, 0.2) for i in range(100)]
 
-    return pd.DataFrame({
-        "open": prices,
-        "high": [p + 0.5 for p in prices],
-        "low": [p - 0.5 for p in prices],
-        "close": prices,
-        "volume": [1000] * 100,
-    }, index=dates)
+    return pd.DataFrame(
+        {
+            "open": prices,
+            "high": [p + 0.5 for p in prices],
+            "low": [p - 0.5 for p in prices],
+            "close": prices,
+            "volume": [1000] * 100,
+        },
+        index=dates,
+    )
 
 
 @pytest.fixture
@@ -70,13 +76,16 @@ def volatile_ohlcv():
     base = 100
     prices = [base + np.random.normal(0, 5) for i in range(100)]
 
-    return pd.DataFrame({
-        "open": prices,
-        "high": [p + 3 for p in prices],
-        "low": [p - 3 for p in prices],
-        "close": prices,
-        "volume": [1000] * 100,
-    }, index=dates)
+    return pd.DataFrame(
+        {
+            "open": prices,
+            "high": [p + 3 for p in prices],
+            "low": [p - 3 for p in prices],
+            "close": prices,
+            "volume": [1000] * 100,
+        },
+        index=dates,
+    )
 
 
 @pytest.fixture
@@ -459,7 +468,13 @@ class TestComputeConfidence:
         """Test that all expected components are in result."""
         result = compute_confidence(full_context)
 
-        expected_components = ["performance", "drawdown", "stability", "data_freshness", "regime_fit"]
+        expected_components = [
+            "performance",
+            "drawdown",
+            "stability",
+            "data_freshness",
+            "regime_fit",
+        ]
         for component in expected_components:
             assert component in result.confidence_components
 

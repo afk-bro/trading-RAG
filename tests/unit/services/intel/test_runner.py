@@ -129,7 +129,13 @@ class TestRunForVersion:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_creates_snapshot(self, mock_pool, sample_version_row, sample_backtest_summary, sample_snapshot_row):
+    async def test_creates_snapshot(
+        self,
+        mock_pool,
+        sample_version_row,
+        sample_backtest_summary,
+        sample_snapshot_row,
+    ):
         """Test that snapshot is created successfully."""
         pool, conn = mock_pool
 
@@ -137,26 +143,30 @@ class TestRunForVersion:
         workspace_id = sample_version_row["workspace_id"]
 
         # Mock version fetch
-        conn.fetchrow = AsyncMock(side_effect=[
-            sample_version_row,  # version data
-            {"summary": json.dumps(sample_backtest_summary)},  # backtest (version-linked fails)
-            None,  # get_latest_snapshot returns None
-        ])
+        conn.fetchrow = AsyncMock(
+            side_effect=[
+                sample_version_row,  # version data
+                {
+                    "summary": json.dumps(sample_backtest_summary)
+                },  # backtest (version-linked fails)
+                None,  # get_latest_snapshot returns None
+            ]
+        )
         conn.fetch = AsyncMock(return_value=[])
 
         # Mock the intel repository
         with patch.object(
             IntelRunner,
-            '_fetch_version_data',
+            "_fetch_version_data",
             new_callable=AsyncMock,
             return_value={
                 **sample_version_row,
                 "config_snapshot": {"symbol": "BTC/USDT"},
                 "regime_awareness": {"good_regimes": ["trend_low_vol"]},
-            }
+            },
         ), patch.object(
             IntelRunner,
-            '_fetch_backtest_metrics',
+            "_fetch_backtest_metrics",
             new_callable=AsyncMock,
             return_value=sample_backtest_summary,
         ):
@@ -165,15 +175,16 @@ class TestRunForVersion:
             # Mock the repository insert
             with patch.object(
                 runner._intel_repo,
-                'insert_snapshot',
+                "insert_snapshot",
                 new_callable=AsyncMock,
             ) as mock_insert, patch.object(
                 runner._intel_repo,
-                'get_latest_snapshot',
+                "get_latest_snapshot",
                 new_callable=AsyncMock,
                 return_value=None,
             ):
                 from app.repositories.strategy_intel import IntelSnapshot
+
                 mock_insert.return_value = IntelSnapshot(
                     id=uuid4(),
                     workspace_id=workspace_id,
@@ -200,7 +211,9 @@ class TestRunForVersion:
                 mock_insert.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_dedupe_skips_same_hash(self, mock_pool, sample_version_row, sample_backtest_summary):
+    async def test_dedupe_skips_same_hash(
+        self, mock_pool, sample_version_row, sample_backtest_summary
+    ):
         """Test that deduplication skips when inputs_hash matches."""
         pool, conn = mock_pool
 
@@ -212,6 +225,7 @@ class TestRunForVersion:
 
         # Pre-compute what hash will be generated
         from app.services.intel.confidence import compute_confidence, ConfidenceContext
+
         ctx = ConfidenceContext(
             version_id=version_id,
             as_of_ts=fixed_ts,
@@ -221,16 +235,16 @@ class TestRunForVersion:
 
         with patch.object(
             IntelRunner,
-            '_fetch_version_data',
+            "_fetch_version_data",
             new_callable=AsyncMock,
             return_value={
                 **sample_version_row,
                 "config_snapshot": {"symbol": "BTC/USDT"},
                 "regime_awareness": None,
-            }
+            },
         ), patch.object(
             IntelRunner,
-            '_fetch_backtest_metrics',
+            "_fetch_backtest_metrics",
             new_callable=AsyncMock,
             return_value=sample_backtest_summary,
         ):
@@ -238,6 +252,7 @@ class TestRunForVersion:
 
             # Mock existing snapshot with same inputs_hash
             from app.repositories.strategy_intel import IntelSnapshot
+
             existing_snapshot = IntelSnapshot(
                 id=uuid4(),
                 workspace_id=workspace_id,
@@ -256,12 +271,12 @@ class TestRunForVersion:
 
             with patch.object(
                 runner._intel_repo,
-                'get_latest_snapshot',
+                "get_latest_snapshot",
                 new_callable=AsyncMock,
                 return_value=existing_snapshot,
             ), patch.object(
                 runner._intel_repo,
-                'insert_snapshot',
+                "insert_snapshot",
                 new_callable=AsyncMock,
             ) as mock_insert:
                 result = await runner.run_for_version(
@@ -276,7 +291,9 @@ class TestRunForVersion:
                 mock_insert.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_force_bypasses_dedupe(self, mock_pool, sample_version_row, sample_backtest_summary):
+    async def test_force_bypasses_dedupe(
+        self, mock_pool, sample_version_row, sample_backtest_summary
+    ):
         """Test that force=True bypasses deduplication."""
         pool, conn = mock_pool
 
@@ -285,16 +302,16 @@ class TestRunForVersion:
 
         with patch.object(
             IntelRunner,
-            '_fetch_version_data',
+            "_fetch_version_data",
             new_callable=AsyncMock,
             return_value={
                 **sample_version_row,
                 "config_snapshot": {"symbol": "BTC/USDT"},
                 "regime_awareness": None,
-            }
+            },
         ), patch.object(
             IntelRunner,
-            '_fetch_backtest_metrics',
+            "_fetch_backtest_metrics",
             new_callable=AsyncMock,
             return_value=sample_backtest_summary,
         ):
@@ -304,12 +321,12 @@ class TestRunForVersion:
 
             with patch.object(
                 runner._intel_repo,
-                'get_latest_snapshot',
+                "get_latest_snapshot",
                 new_callable=AsyncMock,
                 return_value=None,  # Would have same hash
             ), patch.object(
                 runner._intel_repo,
-                'insert_snapshot',
+                "insert_snapshot",
                 new_callable=AsyncMock,
             ) as mock_insert:
                 mock_insert.return_value = IntelSnapshot(
@@ -352,7 +369,7 @@ class TestRunForWorkspaceActive:
 
         with patch.object(
             runner,
-            '_fetch_active_versions',
+            "_fetch_active_versions",
             new_callable=AsyncMock,
             return_value=[],
         ):
@@ -364,7 +381,9 @@ class TestRunForWorkspaceActive:
             assert result == []
 
     @pytest.mark.asyncio
-    async def test_processes_all_active_versions(self, mock_pool, sample_version_row, sample_backtest_summary):
+    async def test_processes_all_active_versions(
+        self, mock_pool, sample_version_row, sample_backtest_summary
+    ):
         """Test that all active versions are processed."""
         pool, conn = mock_pool
         workspace_id = uuid4()
@@ -380,12 +399,12 @@ class TestRunForWorkspaceActive:
 
         with patch.object(
             runner,
-            '_fetch_active_versions',
+            "_fetch_active_versions",
             new_callable=AsyncMock,
             return_value=versions,
         ), patch.object(
             runner,
-            'run_for_version',
+            "run_for_version",
             new_callable=AsyncMock,
         ) as mock_run:
             from app.repositories.strategy_intel import IntelSnapshot
@@ -448,12 +467,12 @@ class TestRunForWorkspaceActive:
 
         with patch.object(
             runner,
-            '_fetch_active_versions',
+            "_fetch_active_versions",
             new_callable=AsyncMock,
             return_value=versions,
         ), patch.object(
             runner,
-            'run_for_version',
+            "run_for_version",
             new_callable=AsyncMock,
         ) as mock_run:
             from app.repositories.strategy_intel import IntelSnapshot
@@ -517,13 +536,15 @@ class TestFetchHelpers:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_fetch_backtest_metrics_maps_fields(self, mock_pool, sample_backtest_summary):
+    async def test_fetch_backtest_metrics_maps_fields(
+        self, mock_pool, sample_backtest_summary
+    ):
         """Test that backtest summary fields are mapped correctly."""
         pool, conn = mock_pool
 
-        conn.fetchrow = AsyncMock(return_value={
-            "summary": json.dumps(sample_backtest_summary)
-        })
+        conn.fetchrow = AsyncMock(
+            return_value={"summary": json.dumps(sample_backtest_summary)}
+        )
 
         runner = IntelRunner(pool)
         result = await runner._fetch_backtest_metrics(
@@ -562,16 +583,16 @@ class TestConvenienceFunction:
     """Tests for compute_and_store_snapshot convenience function."""
 
     @pytest.mark.asyncio
-    async def test_creates_runner_and_calls(self, mock_pool, sample_version_row, sample_backtest_summary):
+    async def test_creates_runner_and_calls(
+        self, mock_pool, sample_version_row, sample_backtest_summary
+    ):
         """Test that convenience function works correctly."""
         pool, conn = mock_pool
 
         version_id = uuid4()
         workspace_id = uuid4()
 
-        with patch(
-            'app.services.intel.runner.IntelRunner'
-        ) as MockRunner:
+        with patch("app.services.intel.runner.IntelRunner") as MockRunner:
             mock_runner_instance = AsyncMock()
             mock_runner_instance.run_for_version = AsyncMock(return_value=None)
             MockRunner.return_value = mock_runner_instance

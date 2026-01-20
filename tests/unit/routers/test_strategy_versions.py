@@ -114,7 +114,9 @@ def client(mock_db_pool):
 class TestCreateVersion:
     """Tests for POST /strategies/{id}/versions."""
 
-    def test_create_version_success(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_create_version_success(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should create version and return 201."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy
@@ -147,7 +149,9 @@ class TestCreateVersion:
         assert data["state"] == "draft"
         assert data["config_snapshot"] == {"param": 10}
 
-    def test_create_version_strategy_not_found(self, client, mock_db_pool, sample_strategy):
+    def test_create_version_strategy_not_found(
+        self, client, mock_db_pool, sample_strategy
+    ):
         """Should return 404 if strategy not found."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = None
@@ -195,7 +199,9 @@ class TestCreateVersion:
 class TestListVersions:
     """Tests for GET /strategies/{id}/versions."""
 
-    def test_list_versions_success(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_list_versions_success(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should list versions with pagination."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy
@@ -225,7 +231,9 @@ class TestListVersions:
         # Config hash should be truncated to 16 chars in list view
         assert len(data["items"][0]["config_hash"]) == 16
 
-    def test_list_versions_strategy_not_found(self, client, mock_db_pool, sample_strategy):
+    def test_list_versions_strategy_not_found(
+        self, client, mock_db_pool, sample_strategy
+    ):
         """Should return 404 if strategy not found."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = None
@@ -251,7 +259,9 @@ class TestListVersions:
 class TestGetVersion:
     """Tests for GET /strategies/{id}/versions/{vid}."""
 
-    def test_get_version_success(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_get_version_success(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should return version details."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy
@@ -313,7 +323,9 @@ class TestGetVersion:
 class TestActivateVersion:
     """Tests for POST /strategies/{id}/versions/{vid}/activate."""
 
-    def test_activate_version_success(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_activate_version_success(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should activate version and return updated state."""
         activated_version = StrategyVersion(
             id=sample_version.id,
@@ -350,7 +362,10 @@ class TestActivateVersion:
                 response = client.post(
                     f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/activate",
                     params={"workspace_id": str(sample_strategy["workspace_id"])},
-                    json={"triggered_by": "admin:deploy", "reason": "Initial deployment"},
+                    json={
+                        "triggered_by": "admin:deploy",
+                        "reason": "Initial deployment",
+                    },
                     headers={"X-Admin-Token": "test-token"},
                 )
 
@@ -359,13 +374,17 @@ class TestActivateVersion:
         assert data["state"] == "active"
         assert data["activated_at"] is not None
 
-    def test_activate_version_invalid_state(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_activate_version_invalid_state(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should return 400 for invalid state transition."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy
 
         mock_version_repo = AsyncMock()
-        mock_version_repo.activate.side_effect = ValueError("Cannot activate from state 'retired'")
+        mock_version_repo.activate.side_effect = ValueError(
+            "Cannot activate from state 'retired'"
+        )
 
         with patch(
             "app.routers.strategies.StrategyRepository",
@@ -394,7 +413,9 @@ class TestActivateVersion:
 class TestPauseVersion:
     """Tests for POST /strategies/{id}/versions/{vid}/pause."""
 
-    def test_pause_version_success(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_pause_version_success(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should pause version and return updated state."""
         paused_version = StrategyVersion(
             id=sample_version.id,
@@ -431,7 +452,10 @@ class TestPauseVersion:
                 response = client.post(
                     f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/pause",
                     params={"workspace_id": str(sample_strategy["workspace_id"])},
-                    json={"triggered_by": "admin:emergency", "reason": "Market volatility"},
+                    json={
+                        "triggered_by": "admin:emergency",
+                        "reason": "Market volatility",
+                    },
                     headers={"X-Admin-Token": "test-token"},
                 )
 
@@ -440,13 +464,17 @@ class TestPauseVersion:
         assert data["state"] == "paused"
         assert data["paused_at"] is not None
 
-    def test_pause_version_invalid_state(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_pause_version_invalid_state(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should return 400 for invalid state transition."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy
 
         mock_version_repo = AsyncMock()
-        mock_version_repo.pause.side_effect = ValueError("Cannot pause from state 'draft'")
+        mock_version_repo.pause.side_effect = ValueError(
+            "Cannot pause from state 'draft'"
+        )
 
         with patch(
             "app.routers.strategies.StrategyRepository",
@@ -474,7 +502,9 @@ class TestPauseVersion:
 class TestRetireVersion:
     """Tests for POST /strategies/{id}/versions/{vid}/retire."""
 
-    def test_retire_version_success(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_retire_version_success(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should retire version and return updated state."""
         retired_version = StrategyVersion(
             id=sample_version.id,
@@ -560,7 +590,9 @@ class TestGetTransitions:
         assert data[0]["to_state"] == "draft"
         assert data[0]["triggered_by"] == "admin:test"
 
-    def test_get_transitions_version_not_found(self, client, mock_db_pool, sample_strategy):
+    def test_get_transitions_version_not_found(
+        self, client, mock_db_pool, sample_strategy
+    ):
         """Should return 404 if version not found."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy
@@ -611,7 +643,9 @@ class TestSchemaValidation:
 
         assert response.status_code == 422
 
-    def test_transition_missing_triggered_by(self, client, mock_db_pool, sample_strategy, sample_version):
+    def test_transition_missing_triggered_by(
+        self, client, mock_db_pool, sample_strategy, sample_version
+    ):
         """Should return 422 if triggered_by is missing."""
         mock_strategy_repo = AsyncMock()
         mock_strategy_repo.get_by_id.return_value = sample_strategy

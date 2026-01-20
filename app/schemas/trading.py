@@ -718,7 +718,10 @@ class StrategyVersionCreateRequest(BaseModel):
 
     config_snapshot: dict = Field(..., description="Immutable strategy configuration")
     version_tag: Optional[str] = Field(
-        None, min_length=1, max_length=50, description="Optional version tag (e.g., v1.0-beta)"
+        None,
+        min_length=1,
+        max_length=50,
+        description="Optional version tag (e.g., v1.0-beta)",
     )
     regime_awareness: Optional[dict] = Field(
         default_factory=dict, description="Regime-specific behavior config"
@@ -733,7 +736,9 @@ class StrategyVersionResponse(BaseModel):
 
     id: UUID = Field(..., description="Version UUID")
     strategy_id: UUID = Field(..., description="Parent strategy UUID")
-    strategy_entity_id: UUID = Field(..., description="Legacy entity ID for FK compatibility")
+    strategy_entity_id: UUID = Field(
+        ..., description="Legacy entity ID for FK compatibility"
+    )
     version_number: int = Field(..., description="Auto-incremented version number")
     version_tag: Optional[str] = Field(None, description="Optional version tag")
     config_snapshot: dict = Field(..., description="Immutable strategy configuration")
@@ -804,9 +809,13 @@ class VersionTransitionResponse(BaseModel):
 class IntelSnapshotCreateRequest(BaseModel):
     """Request for creating an intelligence snapshot."""
 
-    strategy_version_id: UUID = Field(..., description="Strategy version this intel is for")
+    strategy_version_id: UUID = Field(
+        ..., description="Strategy version this intel is for"
+    )
     as_of_ts: datetime = Field(..., description="Market time the intel refers to")
-    regime: str = Field(..., min_length=1, max_length=100, description="Regime classification")
+    regime: str = Field(
+        ..., min_length=1, max_length=100, description="Regime classification"
+    )
     confidence_score: float = Field(
         ..., ge=0.0, le=1.0, description="Aggregated confidence [0, 1]"
     )
@@ -824,7 +833,10 @@ class IntelSnapshotCreateRequest(BaseModel):
         None, max_length=50, description="Version of computation engine"
     )
     inputs_hash: Optional[str] = Field(
-        None, min_length=64, max_length=64, description="SHA256 of inputs for deduplication"
+        None,
+        min_length=64,
+        max_length=64,
+        description="SHA256 of inputs for deduplication",
     )
     run_id: Optional[UUID] = Field(None, description="Link to job/workflow run")
 
@@ -843,8 +855,12 @@ class IntelSnapshotResponse(BaseModel):
         default_factory=dict, description="Confidence breakdown"
     )
     features: dict = Field(default_factory=dict, description="Feature values")
-    explain: dict = Field(default_factory=dict, description="Human-readable explanation")
-    engine_version: Optional[str] = Field(None, description="Computation engine version")
+    explain: dict = Field(
+        default_factory=dict, description="Human-readable explanation"
+    )
+    engine_version: Optional[str] = Field(
+        None, description="Computation engine version"
+    )
     inputs_hash: Optional[str] = Field(None, description="Input hash for deduplication")
     run_id: Optional[UUID] = Field(None, description="Job/run link")
 

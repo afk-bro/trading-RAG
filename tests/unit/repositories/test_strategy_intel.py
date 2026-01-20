@@ -64,14 +64,21 @@ class TestIntelSnapshotFromRow:
 
         assert snapshot.id == sample_snapshot_row["id"]
         assert snapshot.workspace_id == sample_snapshot_row["workspace_id"]
-        assert snapshot.strategy_version_id == sample_snapshot_row["strategy_version_id"]
+        assert (
+            snapshot.strategy_version_id == sample_snapshot_row["strategy_version_id"]
+        )
         assert snapshot.as_of_ts == sample_snapshot_row["as_of_ts"]
         assert snapshot.computed_at == sample_snapshot_row["computed_at"]
         assert snapshot.regime == "trending_bullish"
         assert snapshot.confidence_score == 0.85
-        assert snapshot.confidence_components == {"regime_fit": 0.9, "backtest_oos": 0.8}
+        assert snapshot.confidence_components == {
+            "regime_fit": 0.9,
+            "backtest_oos": 0.8,
+        }
         assert snapshot.features == {"rsi": 65.5, "macd_histogram": 0.12}
-        assert snapshot.explain == {"summary": "Strong uptrend with momentum confirmation"}
+        assert snapshot.explain == {
+            "summary": "Strong uptrend with momentum confirmation"
+        }
         assert snapshot.engine_version == "1.0.0"
         assert snapshot.inputs_hash == "a" * 64
         assert snapshot.run_id == sample_snapshot_row["run_id"]
