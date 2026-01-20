@@ -67,10 +67,27 @@ All remaining tests require runtime verification or external dependencies:
 | Transcript languages | 2 | YouTube API + runtime |
 | Large playlist | 1 | YouTube API + runtime |
 
+### Code Verification of Implemented Features
+
+The following features have been verified as complete via code review - all need runtime testing:
+
+| Feature | Test Line | Code Location | Status |
+|---------|-----------|---------------|--------|
+| Answer model per-request | 1325 | `app/schemas/query.py:68`, `app/routers/query.py:640` | Complete |
+| Query timeout (504) | 2000 | `app/routers/query.py:162-173` | Complete |
+| max_context_tokens truncation | 779 | `app/services/llm_base.py:237-246` | Complete |
+| Reranking system | 791 | `app/services/reranker.py`, `app/routers/query.py:439+` | Complete |
+| Multiple embed providers | 1137 | `app/repositories/vectors.py:388` (ON CONFLICT) | Complete |
+| YouTube multi-language | 2052 | `app/routers/youtube.py:145-287` | Complete |
+| Auto-generated fallback | 2062 | `app/routers/youtube.py:195-260` | Complete |
+| Playlist expansion | 266 | `app/routers/youtube.py:348-388, 455-472` | Complete |
+| Single video metadata | 254 | `app/routers/youtube.py:75-128, 496-518` | Complete |
+
 ### Test Status
 - Current: 228/263 passing (86.7%)
 - No runtime changes possible without Docker/Python access
 - This is session 21 in blocked sequence (74-94)
+- 9 features verified complete via code review - awaiting runtime testing
 
 ### What's Needed to Progress
 1. **CRITICAL**: Docker Desktop WSL2 integration must be enabled
