@@ -1,5 +1,97 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 104 Summary
+Date: 2026-01-20
+Status: Backtest Chart Visualization MVP + CI Fixes
+
+### Session Goals
+- Complete backtest chart visualization MVP (equity curve + trades table)
+- Fix all CI/CD linting failures (Black, flake8, mypy)
+- Verify visualization works via browser automation
+
+### Accomplished This Session
+
+**1. Backtest Chart Visualization MVP (app/routers/backtests/chart.py)**
+- Plotly.js dual-axis chart (equity curve + drawdown overlay)
+- Summary stats display (return %, max DD, Sharpe, win rate, etc.)
+- Trades table with pagination
+- JSON and CSV export endpoints
+- JSONB string parsing for asyncpg edge cases
+
+**2. Admin UI Integration (app/admin/backtests.py)**
+- `GET /admin/backtests/runs/{run_id}` endpoint
+- Jinja2 template with Plotly visualization
+- Fixed UUID-to-string conversion for templates
+- Admin token authentication
+
+**3. CI/CD Fixes**
+
+*Black Formatting (14 files)*
+- Fixed formatting across app/ and tests/
+- Commit: `ffc6b5b`
+
+*flake8 Linting*
+- Removed unused imports with autoflake (10 files)
+- Fixed line-too-long errors (extracted f-string variables)
+- Removed unused variable assignments in tests
+- Commit: `b5703cb`
+
+*mypy Type Errors (4 files)*
+- `chart.py`: Added `EquitySource` type alias for Literal
+- `evaluator.py`: Union return type for `_evaluate_rule`
+- `dashboards.py`: Type annotation for `versions` list
+- `strategy_versions.py`: Type annotation for `VALID_TRANSITIONS` dict
+- Commit: `f3dfa09`
+
+**4. Browser Verification**
+- Confirmed equity chart renders with drawdown overlay
+- Summary cards display correctly
+- Trades table with pagination works
+- Export buttons functional
+
+### Files Created
+- `app/routers/backtests/chart.py` - API endpoints for chart data
+- `app/admin/templates/backtest_run_detail.html` - Plotly visualization template
+- `tests/unit/routers/test_backtest_chart.py` - 21 unit tests
+
+### Files Modified (CI fixes)
+- `app/routers/backtests/chart.py` - Added EquitySource type alias
+- `app/services/ops_alerts/evaluator.py` - Fixed return type annotation
+- `app/routers/dashboards.py` - Added versions type annotation
+- `app/repositories/strategy_versions.py` - Added VALID_TRANSITIONS type
+- `app/admin/backtests.py` - Fixed Black formatting
+- 10 test files - Removed unused imports/variables, fixed line lengths
+
+### Test Results
+- All 21 chart tests passing
+- CI pipeline green (lint, unit-tests, integration-tests, build)
+
+### Commits This Session
+1. `196f2e5` feat(backtests): add chart visualization MVP with equity curve and trades
+2. `45e6f40` style: fix black formatting in backtests.py
+3. `ffc6b5b` style: fix black formatting across codebase
+4. `b5703cb` fix: resolve flake8 linting errors
+5. `f3dfa09` fix: resolve mypy type errors
+
+### Key Technical Details
+
+**JSONB Parsing Issue**
+asyncpg sometimes returns JSONB as string instead of dict. Fixed by adding JSON string detection in `_parse_equity_curve()` and `_parse_trades()`:
+```python
+if isinstance(raw, str):
+    try:
+        raw = json.loads(raw)
+    except json.JSONDecodeError:
+        return [], "missing"
+```
+
+**Type Fixes**
+- `EquitySource = Literal["jsonb", "csv", "missing"]` prevents mypy arg-type error
+- `VALID_TRANSITIONS: dict[str, set[str]]` fixes "Unsupported right operand" error
+- Union return type `AlertCondition | list[AlertCondition]` for polymorphic method
+
+---
+
 ## Session 103 Summary
 Date: 2026-01-20
 Status: PR9 Complete - Paper Equity + Drawdown Alerts + Auto-Pause + Dashboards
