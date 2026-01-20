@@ -104,6 +104,15 @@ class YouTubeIngestRequest(BaseModel):
             "Example: ['es', 'es-ES', 'en'] for Spanish first, then English."
         ),
     )
+    max_playlist_videos: int = Field(
+        default=200,
+        ge=1,
+        le=500,
+        description=(
+            "Maximum number of videos to fetch from a playlist. "
+            "Defaults to 200, max 500. Large playlists will be truncated."
+        ),
+    )
 
 
 class YouTubeIngestResponse(BaseModel):

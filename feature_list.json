@@ -28,7 +28,7 @@
       "Step 5: Restart Qdrant container",
       "Step 6: GET /health and verify qdrant status returns to 'ok'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -40,7 +40,7 @@
       "Step 4: GET /health and verify supabase status is 'error'",
       "Step 5: Restore valid credentials and verify status returns to 'ok'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -51,7 +51,7 @@
       "Step 3: Stop Ollama container",
       "Step 4: GET /health and verify ollama status is 'error'"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -237,7 +237,7 @@
       "Step 6: Verify is_playlist is false",
       "Step 7: Verify chunks_created > 0"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -251,7 +251,7 @@
       "Step 6: Verify duration_secs is extracted",
       "Step 7: Verify video_id matches URL"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -263,7 +263,7 @@
       "Step 4: Verify video_urls array is returned",
       "Step 5: Verify video_urls contains individual video URLs"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -430,7 +430,7 @@
       "Step 4: Verify answer is non-empty string",
       "Step 5: Verify answer includes citations like [1], [2]"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -441,7 +441,7 @@
       "Step 3: Verify results contain citation URLs",
       "Step 4: Verify YouTube URLs include timestamp parameter (t=123)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -765,7 +765,7 @@
       "Step 3: Verify LLM is called via OpenRouter",
       "Step 4: Verify response model matches configured answer_model"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -776,7 +776,7 @@
       "Step 3: Verify context passed to LLM doesn't exceed 2000 tokens",
       "Step 4: Verify truncation happens cleanly (not mid-chunk)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -788,7 +788,7 @@
       "Step 4: POST /query with rerank=true",
       "Step 5: Verify result order may differ (reranked)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1087,7 +1087,7 @@
       "Step 4: Verify new requests are rejected",
       "Step 5: Verify service shuts down cleanly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1134,7 +1134,7 @@
       "Step 3: Verify chunk_vectors has records for both providers",
       "Step 4: Verify query can target specific collection"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1278,7 +1278,7 @@
       "Step 3: Insert chunk with matching doc_id and workspace_id",
       "Step 4: Verify success"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1289,7 +1289,7 @@
       "Step 3: Verify GIN index is used",
       "Step 4: Verify query time is sub-100ms"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1300,7 +1300,7 @@
       "Step 3: Verify index is used",
       "Step 4: Verify query time is sub-100ms"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1322,7 +1322,7 @@
       "Step 3: POST /query with different answer_model",
       "Step 4: Verify different model used"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1887,7 +1887,7 @@
       "Step 3: Verify transaction rolled back",
       "Step 4: Verify no orphan chunks in database"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1957,7 +1957,7 @@
       "Step 2: Check image size",
       "Step 3: Verify size < 1GB"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "style",
@@ -1997,7 +1997,7 @@
       "Step 3: Verify timeout error returned",
       "Step 4: Verify service remains responsive"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2049,7 +2049,7 @@
       "Step 2: Verify transcript fetched successfully",
       "Step 3: Verify language field set correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2059,7 +2059,7 @@
       "Step 2: Verify transcript fetched successfully",
       "Step 3: Verify quality_score reflects auto-generated nature"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2272,7 +2272,7 @@
       "Step 2: Generate coverage report",
       "Step 3: Verify coverage > 70%"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -2329,7 +2329,7 @@
       "Step 2: Verify video_urls returned for all videos",
       "Step 3: Verify no timeout or memory issues"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

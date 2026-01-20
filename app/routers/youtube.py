@@ -456,12 +456,14 @@ async def ingest_youtube(
             video_urls = await fetch_playlist_videos(
                 playlist_id=playlist_id,
                 api_key=settings.youtube_api_key,
+                max_results=request.max_playlist_videos,
             )
 
             logger.info(
                 "Expanded playlist",
                 playlist_id=playlist_id,
                 video_count=len(video_urls),
+                max_requested=request.max_playlist_videos,
             )
 
             return YouTubeIngestResponse(
