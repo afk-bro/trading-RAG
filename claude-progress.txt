@@ -1,5 +1,72 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 84 Summary
+Date: Session 84 (Environment Blocked - Session 11 of Blocked Sequence)
+Status: Server Not Running - 223/263 Tests Passing (84.8%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Attempt to start FastAPI server
+- Progress remaining tests
+
+### Infrastructure Status (Unchanged from Sessions 74-83)
+- **Server**: NOT RUNNING (port 8000 not listening)
+- **Commands Blocked**: python, uvicorn, docker, curl, wget, bash, sh, source, which, echo, sed
+- **Puppeteer**: Working, confirmed connection refused on localhost:8000
+- **Supabase MCP**: Available but requires permission grant
+- **WSL2 Issue**: Docker Desktop not connected to WSL2 distro
+
+### Attempted Server Start Methods (All Blocked)
+1. `lsof -i :8000` - Exit code 1 (not listening)
+2. `.venv/bin/uvicorn app.main:app` - Command 'uvicorn' blocked
+3. `.venv/bin/python -m uvicorn` - Command 'python' blocked
+4. `docker compose -f docker-compose.rag.yml up -d` - Command 'docker' blocked
+5. Puppeteer navigation to localhost:8000 - Connection refused
+
+### Analysis This Session
+
+1. **Feature List Status Review**
+   - 223 tests passing (84.8%)
+   - 40 tests failing (15.2%)
+   - All failing tests require runtime environment or external services
+
+2. **Failing Test Categories** (All require blocked infrastructure):
+   | Category | Count | Blocker |
+   |----------|-------|---------|
+   | Docker/Container control | 3 | Need to stop/restart containers |
+   | YouTube external API | 4 | Network access to YouTube APIs |
+   | OpenRouter/LLM answer mode | 5 | Requires API key |
+   | n8n workflow tests | 8 | n8n service not setup |
+   | Document versioning | 4 | Code correct, needs runtime |
+   | Service recovery | 2 | Container control needed |
+   | Index/Performance | 4 | 1000+ documents or GIN index testing |
+   | Multiple embed providers | 1 | Need Qdrant + re-embed |
+   | Reranking | 1 | Needs runtime with Qdrant |
+   | Migration safety | 1 | Fresh DB required |
+   | Query timeout | 1 | Needs runtime testing |
+   | Transcript languages | 2 | YouTube API needed |
+   | Docker image size | 1 | Docker build blocked |
+   | Partial failure/atomicity | 1 | Complex setup needed |
+   | Composite FK constraint | 1 | By design (app-level enforcement) |
+   | Test coverage >70% | 1 | pytest --cov blocked |
+
+### Git Status
+- Branch: master
+- 20 commits ahead of origin/master
+- Latest commit: 240a9c7 (docs: update progress notes for session 83)
+- Working tree clean
+
+### What's Needed to Progress
+1. **CRITICAL**: Docker Desktop WSL2 integration must be enabled
+2. Alternative: Run session on a machine with native Docker
+3. Alternative: Cloud-based development environment
+4. Grant Supabase MCP permissions for database-level testing
+
+### Session Summary
+This is session 11 in the blocked sequence (74-84). Same environment constraints persist. Cannot progress any of the 40 failing tests without runtime environment access. Codebase remains stable at 84.8% test pass rate.
+
+---
+
 ## Session 83 Summary
 Date: Session 83 (Environment Blocked - Session 10 of Blocked Sequence)
 Status: Server Not Running - 223/263 Tests Passing (84.8%)
