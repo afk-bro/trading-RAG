@@ -224,6 +224,12 @@ class Settings(BaseSettings):
         description="Maximum position size as percentage of equity (0.20 = 20%)",
     )
 
+    # Auto-Pause Guardrail (safety feature)
+    auto_pause_enabled: bool = Field(
+        default=False,
+        description="Auto-pause active strategy versions on CRITICAL alerts (drawdown, confidence)",
+    )
+
     # SSE (Server-Sent Events) Configuration
     sse_ticket_secret: Optional[str] = Field(
         default=None,

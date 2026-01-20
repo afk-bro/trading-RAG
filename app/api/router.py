@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.routers import (
     backtests,
+    dashboards,
     execution,
     forward_metrics,
     health,
@@ -65,6 +66,9 @@ api_router.include_router(
 
 # Strategy Registry
 api_router.include_router(strategies.router, prefix="/strategies", tags=["Strategies"])
+
+# Dashboards (read-only views)
+api_router.include_router(dashboards.router, tags=["Dashboards"])
 
 # Admin
 api_router.include_router(admin_router)  # Admin UI (not in OpenAPI docs)

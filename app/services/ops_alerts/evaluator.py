@@ -25,6 +25,18 @@ from app.services.ops_alerts.models import (
 
 logger = structlog.get_logger(__name__)
 
+# Metric for auto-pause actions
+try:
+    from prometheus_client import Counter
+
+    AUTO_PAUSE_COUNTER = Counter(
+        "ops_alert_auto_pause_total",
+        "Auto-pause actions triggered by CRITICAL alerts",
+        ["rule_type", "workspace_id"],
+    )
+except ImportError:
+    AUTO_PAUSE_COUNTER = None  # type: ignore
+
 
 class OpsAlertEvaluator:
     """
@@ -63,10 +75,16 @@ class OpsAlertEvaluator:
     DRAWDOWN_CLEAR_CRITICAL = 0.16  # Clear critical when DD < 16%
     DRAWDOWN_WINDOW_DAYS = 30  # Rolling window for peak calculation
 
-    def __init__(self, repo: OpsAlertsRepository, pool: Any):
+    def __init__(
+        self,
+        repo: OpsAlertsRepository,
+        pool: Any,
+        auto_pause_enabled: bool = False,
+    ):
         """Initialize evaluator with repository and DB pool."""
         self.repo = repo
         self.pool = pool
+        self.auto_pause_enabled = auto_pause_enabled
 
     async def evaluate(
         self,
@@ -199,12 +217,17 @@ class OpsAlertEvaluator:
             else:
                 result.by_rule_type[rule_key] = {"resolved": True}
 
+        # Auto-pause pass (guardrail for CRITICAL alerts)
+        if self.auto_pause_enabled:
+            await self._auto_pause_pass(workspace_id, result, ctx, now)
+
         log.info(
             "ops_alert_eval_completed",
             conditions_evaluated=result.conditions_evaluated,
             alerts_triggered=result.alerts_triggered,
             alerts_new=result.alerts_new,
             alerts_resolved=result.alerts_resolved,
+            versions_auto_paused=result.versions_auto_paused,
             errors=len(result.errors),
         )
 
@@ -1099,3 +1122,98 @@ class OpsAlertEvaluator:
                     resolved.append(alert)
 
         return resolved
+
+    async def _auto_pause_pass(
+        self,
+        workspace_id: UUID,
+        result: EvalResult,
+        ctx: EvalContext,
+        now: datetime,
+    ) -> None:
+        """
+        Auto-pause active strategy versions when CRITICAL alerts fire.
+
+        Triggered by:
+        - WORKSPACE_DRAWDOWN_HIGH at critical level (pauses all active versions)
+        - STRATEGY_CONFIDENCE_LOW at critical level (pauses specific version)
+
+        This is a safety guardrail to prevent continued losses during adverse conditions.
+        """
+        from app.repositories.strategy_versions import StrategyVersionsRepository
+
+        versions_to_pause: set[UUID] = set()
+
+        # Check if drawdown critical alert fired
+        drawdown_result = result.by_rule_type.get("workspace_drawdown_high", {})
+        if (
+            drawdown_result.get("triggered")
+            and drawdown_result.get("severity") == Severity.HIGH.value
+        ):
+            # CRITICAL drawdown - pause all active versions in workspace
+            if ctx.strategy_intel:
+                for version_data in ctx.strategy_intel:
+                    versions_to_pause.add(version_data["version_id"])
+                logger.warning(
+                    "auto_pause_drawdown_critical",
+                    workspace_id=str(workspace_id),
+                    versions_count=len(versions_to_pause),
+                )
+
+        # Check if any strategy confidence critical alerts fired
+        confidence_result = result.by_rule_type.get("strategy_confidence_low", {})
+        if confidence_result.get("triggered"):
+            # Check each triggered alert in the result
+            if ctx.strategy_intel:
+                for version_data in ctx.strategy_intel:
+                    version_id = version_data["version_id"]
+                    # Look for critical confidence alerts for this version
+                    # These would have dedupe_key like strategy_confidence_low:{vid}:critical:{date}
+                    snapshots = version_data.get("snapshots", [])
+                    if snapshots:
+                        latest_score = snapshots[0].get("confidence_score")
+                        if (
+                            latest_score is not None
+                            and latest_score < self.STRATEGY_CONFIDENCE_CRITICAL
+                        ):
+                            versions_to_pause.add(version_id)
+                            logger.warning(
+                                "auto_pause_confidence_critical",
+                                workspace_id=str(workspace_id),
+                                version_id=str(version_id),
+                                confidence_score=latest_score,
+                            )
+
+        # Perform the pauses
+        if versions_to_pause:
+            version_repo = StrategyVersionsRepository(self.pool)
+
+            for version_id in versions_to_pause:
+                try:
+                    await version_repo.pause(
+                        version_id=version_id,
+                        triggered_by="system:auto_pause",
+                        reason="Auto-paused by CRITICAL alert guardrail",
+                    )
+                    result.versions_auto_paused += 1
+                    result.auto_paused_version_ids.append(version_id)
+
+                    # Record metric
+                    if AUTO_PAUSE_COUNTER:
+                        AUTO_PAUSE_COUNTER.labels(
+                            rule_type="guardrail",
+                            workspace_id=str(workspace_id),
+                        ).inc()
+
+                    logger.info(
+                        "strategy_version_auto_paused",
+                        workspace_id=str(workspace_id),
+                        version_id=str(version_id),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "auto_pause_failed",
+                        workspace_id=str(workspace_id),
+                        version_id=str(version_id),
+                        error=str(e),
+                    )
+                    result.errors.append(f"auto_pause:{version_id}:{str(e)}")

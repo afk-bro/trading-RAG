@@ -13,6 +13,7 @@ Standard operating procedures for Trading RAG service.
 7. [Service Restart Procedure](#service-restart-procedure)
 8. [Failure Modes & Recovery](#failure-modes--recovery)
 9. [Strategy Alerts](#strategy-alerts)
+10. [Drawdown Alerts](#drawdown-alerts)
 
 ---
 
@@ -682,6 +683,119 @@ curl -s "http://localhost:8000/admin/ops-alerts" \
 curl -s "http://localhost:8000/strategies/{id}/versions/{vid}/intel/latest" \
   -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.confidence_score'
 ```
+
+---
+
+## Drawdown Alerts
+
+Operational alerts for paper trading equity monitoring.
+
+### WORKSPACE_DRAWDOWN_HIGH
+
+**Triggers when:** Paper trading drawdown exceeds thresholds (computed over 30-day rolling window).
+
+| Severity | Threshold | Meaning |
+|----------|-----------|---------|
+| MEDIUM (warn) | `DD >= 12%` | Significant drawdown, attention needed |
+| HIGH (critical) | `DD >= 20%` | Severe drawdown, immediate action required |
+
+**Auto-resolves when:** Drawdown recovers below hysteresis threshold (warn: 10%, critical: 16%)
+
+### When WORKSPACE_DRAWDOWN_HIGH Fires
+
+#### 1. Confirm Data Freshness
+
+Check that `current_ts` in the payload is recent:
+
+```bash
+# View alert payload
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "workspace_drawdown_high")'
+```
+
+Key payload fields:
+- `drawdown_pct`: Current drawdown percentage (e.g., 0.15 = 15%)
+- `peak_equity`: Highest equity in window
+- `current_equity`: Current equity
+- `peak_ts`: When peak occurred
+- `window_days`: Rolling window (default 30)
+
+#### 2. Analyze Drawdown Cause
+
+| Pattern | Likely Cause | Action |
+|---------|--------------|--------|
+| Sharp single drop | Large losing trade | Review trade, check position sizing |
+| Gradual decline | Strategy underperforming | Review strategy confidence, consider pause |
+| Peak was recent | New peak followed by pullback | May be normal volatility, monitor |
+| Peak was 20+ days ago | Extended drawdown | Serious concern, review all active strategies |
+
+#### 3. Review Active Strategies
+
+```bash
+# List active versions for the workspace
+curl -s "http://localhost:8000/strategies?workspace_id={ws_id}" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.active_version_id != null)'
+```
+
+Cross-reference with confidence alerts - if both WORKSPACE_DRAWDOWN_HIGH and STRATEGY_CONFIDENCE_LOW are firing, pause is strongly indicated.
+
+#### 4. Action Ladder
+
+| Severity | Recommended Action |
+|----------|-------------------|
+| **MEDIUM (warn)** | Monitor closely. Review recent trades. Check for open positions with large unrealized losses. |
+| **HIGH (critical)** | Immediate action. Pause active strategy versions. Close or reduce risky positions. Do NOT ignore - 20%+ drawdown indicates significant capital at risk. |
+
+#### 5. Pausing on Critical Drawdown
+
+When critical drawdown fires, pause all active versions:
+
+```bash
+# List active versions
+curl -s "http://localhost:8000/strategies?workspace_id={ws_id}" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq -r '.[] | .active_version_id | select(. != null)'
+
+# Pause each active version
+curl -X POST "http://localhost:8000/strategies/{strategy_id}/versions/{version_id}/pause" \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+### Prometheus Metrics
+
+Monitor drawdown patterns:
+
+```promql
+# Current drawdown by workspace
+workspace_drawdown_pct
+
+# Drawdown alert rate
+rate(ops_alert_evals_total{rule_type="workspace_drawdown_high", result="triggered"}[1h])
+
+# Currently active drawdown alerts
+ops_alert_active{rule_type="workspace_drawdown_high"}
+```
+
+### Recovery Verification
+
+After addressing drawdown:
+
+```bash
+# Check alert was resolved
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "workspace_drawdown_high" and .resolved_at != null)'
+
+# Verify drawdown has improved
+# (via equity curve endpoint when available)
+```
+
+### Hysteresis Values
+
+| Level | Trigger | Clear |
+|-------|---------|-------|
+| Warn | >= 12% | < 10% |
+| Critical | >= 20% | < 16% |
+
+The 2-4% hysteresis gap prevents flapping when drawdown hovers near threshold.
 
 ---
 

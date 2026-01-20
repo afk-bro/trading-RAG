@@ -122,6 +122,10 @@ class EvalResult:
     alerts_escalated: int = 0
     telegram_sent: int = 0
 
+    # Auto-pause actions (guardrail)
+    versions_auto_paused: int = 0
+    auto_paused_version_ids: list[UUID] = field(default_factory=list)
+
     # Per-rule details
     by_rule_type: dict[str, dict] = field(default_factory=dict)
 
