@@ -67,9 +67,7 @@ def sample_tune():
 class TestTuneDetailEndpoint:
     """Regression tests for GET /admin/backtests/tunes/{id}."""
 
-    def test_tune_detail_renders_successfully(
-        self, client, mock_db_pool, sample_tune
-    ):
+    def test_tune_detail_renders_successfully(self, client, mock_db_pool, sample_tune):
         """Tune detail page renders without 500 error.
 
         Regression test for:

@@ -229,8 +229,8 @@ async def fetch_transcript(
                     if best_transcript is None or best_transcript.is_generated:
                         for lang in preferred_languages:
                             try:
-                                best_transcript = transcript_list.find_generated_transcript(
-                                    [lang]
+                                best_transcript = (
+                                    transcript_list.find_generated_transcript([lang])
                                 )
                                 fetched_language = lang
                                 is_auto_generated = True

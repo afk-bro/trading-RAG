@@ -232,7 +232,9 @@ class TestMarkNotified:
         assert "recovery_notified_at IS NULL" in query
 
     @pytest.mark.asyncio
-    async def test_mark_notified_escalation_uses_escalation_notified_at(self, mock_pool):
+    async def test_mark_notified_escalation_uses_escalation_notified_at(
+        self, mock_pool
+    ):
         """escalation type updates escalation_notified_at column."""
         pool, conn = mock_pool
         repo = OpsAlertsRepository(pool)
@@ -315,9 +317,7 @@ class TestSendNotificationsHandler:
         mock_repo.get_pending_notifications.assert_called_once_with(workspace_id)
 
     @pytest.mark.asyncio
-    async def test_send_notifications_sends_activations(
-        self, mock_notifier, mock_repo
-    ):
+    async def test_send_notifications_sends_activations(self, mock_notifier, mock_repo):
         """_send_notifications sends activation notifications."""
         alert = make_alert(status="active", notified_at=None)
         mock_repo.get_pending_notifications.return_value = {
@@ -332,15 +332,11 @@ class TestSendNotificationsHandler:
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=False
         )
-        mock_repo.mark_notified.assert_called_once_with(
-            alert.id, "activation", "tg123"
-        )
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "activation", "tg123")
         assert sent == 1
 
     @pytest.mark.asyncio
-    async def test_send_notifications_sends_recoveries(
-        self, mock_notifier, mock_repo
-    ):
+    async def test_send_notifications_sends_recoveries(self, mock_notifier, mock_repo):
         """_send_notifications sends recovery notifications."""
         alert = make_alert(status="resolved", recovery_notified_at=None)
         mock_repo.get_pending_notifications.return_value = {
@@ -359,9 +355,7 @@ class TestSendNotificationsHandler:
         assert sent == 1
 
     @pytest.mark.asyncio
-    async def test_send_notifications_sends_escalations(
-        self, mock_notifier, mock_repo
-    ):
+    async def test_send_notifications_sends_escalations(self, mock_notifier, mock_repo):
         """_send_notifications sends escalation notifications."""
         alert = make_alert(
             status="active",
@@ -381,9 +375,7 @@ class TestSendNotificationsHandler:
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=True
         )
-        mock_repo.mark_notified.assert_called_once_with(
-            alert.id, "escalation", "tg123"
-        )
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "escalation", "tg123")
         assert sent == 1
 
     @pytest.mark.asyncio
@@ -409,9 +401,7 @@ class TestSendNotificationsHandler:
         assert sent == 1  # Only the winner counts
 
     @pytest.mark.asyncio
-    async def test_send_notifications_records_failures(
-        self, mock_notifier, mock_repo
-    ):
+    async def test_send_notifications_records_failures(self, mock_notifier, mock_repo):
         """_send_notifications records delivery failures."""
         alert = make_alert()
         mock_repo.get_pending_notifications.return_value = {

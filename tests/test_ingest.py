@@ -7,6 +7,7 @@ import time
 
 BASE_URL = "http://localhost:8000"
 
+
 def test_ingest():
     """Test the /ingest endpoint."""
     payload = {
@@ -14,7 +15,7 @@ def test_ingest():
         "idempotency_key": f"test-chunk-vectors-{int(time.time())}",
         "source": {
             "url": f"https://example.com/test-article-{int(time.time())}",
-            "type": "article"
+            "type": "article",
         },
         "content": """The Federal Reserve has announced a significant change in monetary policy.
         Chairman Powell discussed the implications for AAPL, GOOGL, and MSFT stock prices.
@@ -24,10 +25,7 @@ def test_ingest():
         This is additional content to ensure we have enough text to create meaningful chunks.
         The market reacted positively to the news, with tech stocks leading the gains.
         Analysts expect continued volatility as investors digest the policy implications.""",
-        "metadata": {
-            "title": "Fed Policy Impact Analysis",
-            "author": "Test Author"
-        }
+        "metadata": {"title": "Fed Policy Impact Analysis", "author": "Test Author"},
     }
 
     print("Testing POST /ingest...")
@@ -36,6 +34,7 @@ def test_ingest():
     result = response.json()
     print(f"Response: {json.dumps(result, indent=2)}")
     return result
+
 
 if __name__ == "__main__":
     test_ingest()

@@ -195,9 +195,7 @@ class TestRecoveryNotificationFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_already_recovery_notified_not_resent(
-        self, mock_notifier, mock_repo
-    ):
+    async def test_already_recovery_notified_not_resent(self, mock_notifier, mock_repo):
         """Alert with recovery_notified_at set is not resent."""
         mock_repo.get_pending_notifications.return_value = {
             "activations": [],
@@ -262,9 +260,7 @@ class TestEscalationNotificationFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_escalation_requires_prior_activation(
-        self, mock_notifier, mock_repo
-    ):
+    async def test_escalation_requires_prior_activation(self, mock_notifier, mock_repo):
         """Escalation notification only sent for already-activated alerts."""
         # Alert was escalated but not yet activated (shouldn't happen normally)
         alert = make_alert(

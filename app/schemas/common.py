@@ -106,8 +106,12 @@ class CircuitBreakerStatus(BaseModel):
     """Status of a circuit breaker."""
 
     failures: int = Field(..., description="Consecutive failure count")
-    is_open: bool = Field(..., description="True if circuit is open (blocking requests)")
-    last_failure: Optional[str] = Field(None, description="ISO timestamp of last failure")
+    is_open: bool = Field(
+        ..., description="True if circuit is open (blocking requests)"
+    )
+    last_failure: Optional[str] = Field(
+        None, description="ISO timestamp of last failure"
+    )
 
 
 class HealthResponse(BaseModel):

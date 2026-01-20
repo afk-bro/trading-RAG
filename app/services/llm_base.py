@@ -17,6 +17,7 @@ def _count_tokens(text: str) -> int:
     """Count tokens in text using cl100k_base encoding."""
     return len(_token_encoding.encode(text))
 
+
 # Message types
 Role = Literal["system", "user", "assistant"]
 

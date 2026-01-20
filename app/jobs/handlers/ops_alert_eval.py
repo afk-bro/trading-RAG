@@ -194,7 +194,9 @@ async def _send_notifications(
     # Process activations (new alerts)
     for alert in pending["activations"]:
         try:
-            result = await notifier.send_alert(alert, is_recovery=False, is_escalation=False)
+            result = await notifier.send_alert(
+                alert, is_recovery=False, is_escalation=False
+            )
             if result.ok:
                 # Conditional mark - only count if we won the race
                 if await repo.mark_notified(alert.id, "activation", result.message_id):
@@ -211,7 +213,9 @@ async def _send_notifications(
     # Process recoveries (resolved alerts)
     for alert in pending["recoveries"]:
         try:
-            result = await notifier.send_alert(alert, is_recovery=True, is_escalation=False)
+            result = await notifier.send_alert(
+                alert, is_recovery=True, is_escalation=False
+            )
             if result.ok:
                 if await repo.mark_notified(alert.id, "recovery", result.message_id):
                     sent += 1
@@ -227,7 +231,9 @@ async def _send_notifications(
     # Process escalations (severity bumped on already-activated alerts)
     for alert in pending["escalations"]:
         try:
-            result = await notifier.send_alert(alert, is_recovery=False, is_escalation=True)
+            result = await notifier.send_alert(
+                alert, is_recovery=False, is_escalation=True
+            )
             if result.ok:
                 if await repo.mark_notified(alert.id, "escalation", result.message_id):
                     sent += 1
