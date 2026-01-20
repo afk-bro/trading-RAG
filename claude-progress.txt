@@ -1,5 +1,85 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 94 Summary
+Date: Session 94 (Code Analysis)
+Status: Server Not Running - 228/263 Tests Passing (86.7%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Analyze failing tests that can be addressed via code review
+- Document design decisions affecting test expectations
+
+### Infrastructure Status (Unchanged - Session 21 of Blocked Sequence)
+- **Server**: NOT RUNNING (port 8000 not listening - confirmed via lsof)
+- **Docker**: Commands blocked in environment ("docker not in allowed commands")
+- **Python/uvicorn**: Commands blocked in environment
+- **Supabase MCP**: Available but requires permission grant
+- **Browser automation**: Available but no server to test
+
+### Code Analysis Findings
+
+#### Test: "Partial failure during ingest is handled atomically" (line 1890)
+
+**Expectation:** Test expects that if failure occurs between chunk creation and vector creation, the transaction should be rolled back with no orphan chunks.
+
+**Reality:** The current implementation is **resilient** rather than **atomic**:
+- Document is created
+- Chunks are created
+- If embedding fails → returns `status="partial"`, chunks preserved
+- If Qdrant fails → returns `status="partial"`, chunks preserved
+
+**Design Decision:** This is intentional for resilience. The `status="partial"` allows:
+1. Retrying embedding later via `/reembed` endpoint
+2. Not losing work done if external services (Ollama, Qdrant) fail
+3. Progressive recovery rather than all-or-nothing
+
+**Evidence in code:**
+- `app/routers/ingest.py` lines 330-344: Explicit comment "Continue without vectors - they can be added later"
+- `status="partial"` used consistently across codebase for similar patterns (WFO, Pine discovery)
+
+**Recommendation:** Either:
+1. Mark test as "by design - resilient not atomic" and update test expectation
+2. Add a `strict_atomicity=True` parameter to ingest for use cases requiring all-or-nothing
+3. Document that current behavior is intentional for operational resilience
+
+#### Other Failing Tests Summary (35 total)
+All remaining tests require runtime verification or external dependencies:
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Container control (health) | 3 | Docker commands blocked |
+| YouTube API | 3 | External API + runtime |
+| OpenRouter/LLM | 4 | API key + runtime |
+| n8n workflows | 8 | n8n not configured |
+| Service recovery | 2 | Container control |
+| Partial failure atomicity | 1 | Design decision needed |
+| Performance/Load | 4 | Large datasets + runtime |
+| Composite FK | 1 | Migration 075 needs DB apply |
+| GIN indexes | 2 | Runtime EXPLAIN needed |
+| Answer model config | 1 | Code done - needs runtime |
+| Reranking | 1 | Code done - needs runtime |
+| Multiple providers | 1 | Code done - needs runtime |
+| Graceful shutdown | 1 | Container control |
+| Docker image size | 1 | Docker build required |
+| Test coverage | 1 | pytest --cov required |
+| Query timeout | 1 | Code done - needs runtime |
+| max_context_tokens | 1 | Code done - needs runtime |
+| Transcript languages | 2 | YouTube API + runtime |
+| Large playlist | 1 | YouTube API + runtime |
+
+### Test Status
+- Current: 228/263 passing (86.7%)
+- No runtime changes possible without Docker/Python access
+- This is session 21 in blocked sequence (74-94)
+
+### What's Needed to Progress
+1. **CRITICAL**: Docker Desktop WSL2 integration must be enabled
+2. Or: Grant Supabase MCP permissions to apply migration 075
+3. Or: Run session on machine with native Docker
+4. Or: Cloud-based development environment
+
+---
+
 ## Session 93 Summary
 Date: Session 93 (Environment Assessment)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)
