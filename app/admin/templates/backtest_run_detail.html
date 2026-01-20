@@ -17,40 +17,60 @@
     </h1>
     <div class="detail-meta">
         <span title="{{ run.id }}">ID: {{ run.id[:12] }}...
-            <button onclick="navigator.clipboard.writeText('{{ run.id }}')" class="copy-btn" title="Copy ID">📋</button>
+            <button onclick="navigator.clipboard.writeText('{{ run.id }}')" class="copy-btn" title="Copy ID">&#128203;</button>
         </span>
         <span>Created: {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') if run.created_at else '-' }}</span>
         <span>Strategy: {{ run.strategy_entity_id[:8] }}...</span>
     </div>
 </div>
 
+<!-- Export Buttons -->
+<div class="export-buttons">
+    <button id="btn-csv" class="btn btn-secondary" disabled>Download Trades CSV</button>
+    <button id="btn-json" class="btn btn-secondary" onclick="downloadJson()">Download JSON</button>
+</div>
+
+<!-- Chart Container -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Equity Curve & Drawdown</h3>
+        <div id="chart-meta" class="chart-meta"></div>
+    </div>
+    <div id="chart-container">
+        <div id="chart-loading" class="chart-loading">Loading chart data...</div>
+        <div id="chart-error" class="chart-error" style="display: none;"></div>
+        <div id="equity-chart" style="width: 100%; height: 400px;"></div>
+    </div>
+    <div id="chart-notes" class="chart-notes" style="display: none;"></div>
+</div>
+
 <!-- Summary Stats -->
-{% if run.summary %}
-<div class="stats">
+<div class="stats" id="summary-stats">
     <div class="stat">
-        <div class="stat-value {% if run.summary.return_pct >= 0 %}text-success{% else %}text-danger{% endif %}">
-            {{ "%.2f"|format(run.summary.return_pct) }}%
-        </div>
+        <div class="stat-value" id="stat-return">-</div>
         <div class="stat-label">Return</div>
     </div>
     <div class="stat">
-        <div class="stat-value">{{ "%.2f"|format(run.summary.sharpe or 0) }}</div>
+        <div class="stat-value" id="stat-sharpe">-</div>
         <div class="stat-label">Sharpe</div>
     </div>
     <div class="stat">
-        <div class="stat-value text-danger">{{ "%.2f"|format(run.summary.max_drawdown_pct) }}%</div>
+        <div class="stat-value" id="stat-maxdd">-</div>
         <div class="stat-label">Max DD</div>
     </div>
     <div class="stat">
-        <div class="stat-value">{{ "%.1f"|format((run.summary.win_rate or 0) * 100) }}%</div>
+        <div class="stat-value" id="stat-winrate">-</div>
         <div class="stat-label">Win Rate</div>
     </div>
     <div class="stat">
-        <div class="stat-value">{{ run.summary.trades }}</div>
+        <div class="stat-value" id="stat-trades">-</div>
         <div class="stat-label">Trades</div>
     </div>
+    <div class="stat">
+        <div class="stat-value" id="stat-pf">-</div>
+        <div class="stat-label">Profit Factor</div>
+    </div>
 </div>
-{% endif %}
 
 <!-- Parameters -->
 {% if run.params %}
@@ -72,6 +92,49 @@
 </div>
 {% endif %}
 
+<!-- Trades Table -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Trades</h3>
+        <div class="pagination-controls">
+            <select id="page-size" onchange="changePageSize()">
+                <option value="25">25 per page</option>
+                <option value="50" selected>50 per page</option>
+                <option value="100">100 per page</option>
+            </select>
+        </div>
+    </div>
+    <div id="trades-container">
+        <div id="trades-loading" class="chart-loading">Loading trades...</div>
+        <table id="trades-table" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>Side</th>
+                    <th>Size</th>
+                    <th>Entry Price</th>
+                    <th>Exit Price</th>
+                    <th>PnL</th>
+                    <th>Return</th>
+                </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+        </table>
+        <div id="trades-empty" class="empty-state" style="display: none;">
+            <h3>No Trades</h3>
+            <p>Trades not stored for this run</p>
+        </div>
+    </div>
+    <div class="pagination" id="trades-pagination" style="display: none;">
+        <div class="pagination-info" id="pagination-info"></div>
+        <div class="pagination-buttons">
+            <button id="btn-prev" class="btn btn-secondary" onclick="prevPage()" disabled>Prev</button>
+            <button id="btn-next" class="btn btn-secondary" onclick="nextPage()" disabled>Next</button>
+        </div>
+    </div>
+</div>
+
 <!-- Full JSON (expandable) -->
 <div class="card">
     <div class="card-header">
@@ -83,20 +146,354 @@
     </div>
 </div>
 
+<!-- Plotly CDN -->
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
 <script>
+const RUN_ID = '{{ run.id }}';
+const ADMIN_TOKEN = localStorage.getItem('adminToken') || '';
+let chartData = null;
+let currentPage = 1;
+let pageSize = 50;
+
+// Fetch chart data on load
+async function loadChartData() {
+    try {
+        const resp = await fetch(`/backtests/runs/${RUN_ID}/chart-data?page=${currentPage}&page_size=${pageSize}`, {
+            headers: { 'X-Admin-Token': ADMIN_TOKEN }
+        });
+
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+
+        chartData = await resp.json();
+        renderChart();
+        renderSummary();
+        renderTrades();
+        updateExportButtons();
+        showNotes();
+    } catch (err) {
+        document.getElementById('chart-loading').style.display = 'none';
+        document.getElementById('chart-error').style.display = 'block';
+        document.getElementById('chart-error').textContent = `Error loading chart data: ${err.message}`;
+        document.getElementById('trades-loading').style.display = 'none';
+    }
+}
+
+function renderChart() {
+    document.getElementById('chart-loading').style.display = 'none';
+
+    if (!chartData.equity || chartData.equity.length === 0) {
+        document.getElementById('chart-error').style.display = 'block';
+        document.getElementById('chart-error').textContent = 'No equity curve data available';
+        return;
+    }
+
+    // Show dataset meta
+    if (chartData.dataset_meta) {
+        const meta = chartData.dataset_meta;
+        const parts = [];
+        if (meta.symbol) parts.push(meta.symbol);
+        if (meta.timeframe) parts.push(meta.timeframe);
+        if (meta.date_min && meta.date_max) {
+            parts.push(`${meta.date_min.split('T')[0]} - ${meta.date_max.split('T')[0]}`);
+        }
+        if (meta.row_count) parts.push(`${meta.row_count} bars`);
+        document.getElementById('chart-meta').textContent = parts.join(' | ');
+    }
+
+    // Compute drawdown
+    const timestamps = chartData.equity.map(p => p.t);
+    const equityValues = chartData.equity.map(p => p.equity);
+
+    let peak = equityValues[0];
+    const drawdownPct = equityValues.map(eq => {
+        if (eq > peak) peak = eq;
+        return ((eq - peak) / peak) * 100;  // Negative percentage
+    });
+
+    // Max observed drawdown
+    const maxDD = Math.min(...drawdownPct);
+
+    // Equity trace
+    const equityTrace = {
+        x: timestamps,
+        y: equityValues,
+        name: 'Equity',
+        type: 'scatter',
+        mode: 'lines',
+        line: { color: '#3fb950', width: 2 },
+        yaxis: 'y',
+        hovertemplate: '%{x}<br>Equity: $%{y:,.2f}<extra></extra>'
+    };
+
+    // Drawdown trace
+    const drawdownTrace = {
+        x: timestamps,
+        y: drawdownPct,
+        name: 'Drawdown',
+        type: 'scatter',
+        mode: 'lines',
+        fill: 'tozeroy',
+        fillcolor: 'rgba(248, 81, 73, 0.2)',
+        line: { color: '#f85149', width: 1 },
+        yaxis: 'y2',
+        hovertemplate: '%{x}<br>Drawdown: %{y:.2f}%<extra></extra>'
+    };
+
+    const layout = {
+        title: {
+            text: `Max Drawdown: ${maxDD.toFixed(2)}%`,
+            font: { size: 14, color: '#8b949e' },
+            x: 0.99,
+            xanchor: 'right'
+        },
+        xaxis: {
+            type: 'date',
+            gridcolor: '#30363d',
+            linecolor: '#30363d'
+        },
+        yaxis: {
+            title: 'Equity ($)',
+            side: 'left',
+            gridcolor: '#30363d',
+            linecolor: '#30363d',
+            tickformat: ',.0f'
+        },
+        yaxis2: {
+            title: 'Drawdown (%)',
+            side: 'right',
+            overlaying: 'y',
+            gridcolor: 'transparent',
+            linecolor: '#30363d',
+            tickformat: '.1f',
+            range: [Math.min(maxDD * 1.2, -1), 1]  // Some padding
+        },
+        hovermode: 'x unified',
+        legend: {
+            orientation: 'h',
+            y: -0.15,
+            x: 0.5,
+            xanchor: 'center'
+        },
+        margin: { t: 40, r: 60, b: 60, l: 60 },
+        paper_bgcolor: '#161b22',
+        plot_bgcolor: '#0d1117',
+        font: { color: '#c9d1d9' }
+    };
+
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false
+    };
+
+    Plotly.newPlot('equity-chart', [equityTrace, drawdownTrace], layout, config);
+}
+
+function renderSummary() {
+    const s = chartData.summary || {};
+
+    const returnEl = document.getElementById('stat-return');
+    if (s.return_pct != null) {
+        returnEl.textContent = `${s.return_pct >= 0 ? '+' : ''}${s.return_pct.toFixed(2)}%`;
+        returnEl.className = `stat-value ${s.return_pct >= 0 ? 'text-success' : 'text-danger'}`;
+    }
+
+    const sharpeEl = document.getElementById('stat-sharpe');
+    sharpeEl.textContent = s.sharpe != null ? s.sharpe.toFixed(2) : '-';
+
+    const maxddEl = document.getElementById('stat-maxdd');
+    if (s.max_drawdown_pct != null) {
+        maxddEl.textContent = `-${Math.abs(s.max_drawdown_pct).toFixed(2)}%`;
+        maxddEl.className = 'stat-value text-danger';
+    }
+
+    const winrateEl = document.getElementById('stat-winrate');
+    if (s.win_rate != null) {
+        // Handle both 0-1 and 0-100 formats
+        const wr = s.win_rate > 1 ? s.win_rate : s.win_rate * 100;
+        winrateEl.textContent = `${wr.toFixed(1)}%`;
+    }
+
+    const tradesEl = document.getElementById('stat-trades');
+    tradesEl.textContent = s.trades != null ? s.trades : '-';
+
+    const pfEl = document.getElementById('stat-pf');
+    pfEl.textContent = s.profit_factor != null ? s.profit_factor.toFixed(2) : '-';
+}
+
+function renderTrades() {
+    document.getElementById('trades-loading').style.display = 'none';
+
+    const trades = chartData.trades_page || [];
+    const pagination = chartData.trades_pagination || { page: 1, page_size: 50, total: 0 };
+
+    if (pagination.total === 0) {
+        document.getElementById('trades-empty').style.display = 'block';
+        return;
+    }
+
+    const tbody = document.getElementById('trades-body');
+    tbody.innerHTML = '';
+
+    trades.forEach(t => {
+        const row = document.createElement('tr');
+        const pnlClass = t.pnl >= 0 ? 'text-success' : 'text-danger';
+        row.innerHTML = `
+            <td>${formatTime(t.t_entry)}</td>
+            <td>${formatTime(t.t_exit)}</td>
+            <td><span class="badge badge-${t.side}">${t.side.toUpperCase()}</span></td>
+            <td>${t.size != null ? t.size.toFixed(4) : '-'}</td>
+            <td>${t.entry_price != null ? '$' + t.entry_price.toLocaleString() : '-'}</td>
+            <td>${t.exit_price != null ? '$' + t.exit_price.toLocaleString() : '-'}</td>
+            <td class="${pnlClass}">${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
+            <td class="${pnlClass}">${t.return_pct >= 0 ? '+' : ''}${t.return_pct.toFixed(2)}%</td>
+        `;
+        tbody.appendChild(row);
+    });
+
+    document.getElementById('trades-table').style.display = 'table';
+    document.getElementById('trades-pagination').style.display = 'flex';
+
+    // Update pagination
+    const totalPages = Math.ceil(pagination.total / pagination.page_size);
+    document.getElementById('pagination-info').textContent =
+        `Page ${pagination.page} of ${totalPages} (${pagination.total} trades)`;
+
+    document.getElementById('btn-prev').disabled = pagination.page <= 1;
+    document.getElementById('btn-next').disabled = pagination.page >= totalPages;
+
+    currentPage = pagination.page;
+    pageSize = pagination.page_size;
+}
+
+function formatTime(ts) {
+    if (!ts) return '-';
+    try {
+        const d = new Date(ts);
+        return d.toLocaleString('en-US', {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+    } catch {
+        return ts.split('T')[0];
+    }
+}
+
+function updateExportButtons() {
+    const csvBtn = document.getElementById('btn-csv');
+    if (chartData.exports && chartData.exports.trades_csv) {
+        csvBtn.disabled = false;
+        csvBtn.onclick = () => window.location.href = chartData.exports.trades_csv;
+    }
+}
+
+function downloadJson() {
+    if (chartData && chartData.exports && chartData.exports.json_snapshot) {
+        window.location.href = chartData.exports.json_snapshot;
+    }
+}
+
+function showNotes() {
+    if (chartData.notes && chartData.notes.length > 0) {
+        const notesDiv = document.getElementById('chart-notes');
+        notesDiv.style.display = 'block';
+        notesDiv.innerHTML = chartData.notes.map(n => `<div class="note">${n}</div>`).join('');
+    }
+}
+
+async function changePage(newPage) {
+    currentPage = newPage;
+    document.getElementById('trades-loading').style.display = 'block';
+    document.getElementById('trades-table').style.display = 'none';
+
+    try {
+        const resp = await fetch(
+            `/backtests/runs/${RUN_ID}/chart-data?page=${currentPage}&page_size=${pageSize}`,
+            { headers: { 'X-Admin-Token': ADMIN_TOKEN } }
+        );
+        const data = await resp.json();
+        chartData.trades_page = data.trades_page;
+        chartData.trades_pagination = data.trades_pagination;
+        renderTrades();
+    } catch (err) {
+        console.error('Failed to load trades page:', err);
+    }
+}
+
+function prevPage() { if (currentPage > 1) changePage(currentPage - 1); }
+function nextPage() { changePage(currentPage + 1); }
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('page-size').value);
+    changePage(1);
+}
+
 function toggleJson() {
     const el = document.getElementById('full-json');
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
+
+// Initialize
+document.addEventListener('DOMContentLoaded', loadChartData);
 </script>
 
 <style>
     .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
     .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
     .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-long { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-short { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
     .text-success { color: var(--success); }
     .text-danger { color: var(--danger); }
     .copy-btn { background: none; border: none; cursor: pointer; font-size: 12px; padding: 2px 4px; }
     .copy-btn:hover { background: var(--bg); border-radius: 4px; }
+
+    .export-buttons {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+
+    .chart-loading, .chart-error {
+        padding: 40px;
+        text-align: center;
+        color: var(--text-muted);
+    }
+
+    .chart-error {
+        color: var(--danger);
+        background: rgba(248, 81, 73, 0.1);
+        border-radius: 6px;
+    }
+
+    .chart-meta {
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+
+    .chart-notes {
+        padding: 12px;
+        margin-top: 12px;
+        background: rgba(210, 153, 34, 0.1);
+        border-radius: 6px;
+    }
+
+    .chart-notes .note {
+        color: var(--warning);
+        font-size: 14px;
+    }
+
+    .pagination-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .pagination-controls select {
+        padding: 4px 8px;
+        font-size: 13px;
+    }
 </style>
 {% endblock %}
