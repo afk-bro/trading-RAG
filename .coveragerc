@@ -1,0 +1,29 @@
+# Coverage configuration for trading-RAG
+# Run with: pytest --cov=app --cov-report=html --cov-report=term-missing tests/unit/
+
+[run]
+source = app
+branch = True
+omit =
+    app/__pycache__/*
+    app/tests/*
+    app/**/tests/*
+    */__init__.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+    @abstractmethod
+fail_under = 70
+show_missing = True
+precision = 2
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml
