@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Strategy Lifecycle v0.5** - Version management and state machine for strategies
+  - `strategy_versions` table with immutable config snapshots (SHA256 hash)
+  - State machine: `draft` → `active` ↔ `paused` → `retired` (retired is terminal)
+  - One-active constraint via partial unique index on `(strategy_id) WHERE state='active'`
+  - Immutability trigger blocks changes to config_snapshot, config_hash after creation
+  - `strategy_version_transitions` audit table for state change history
+  - Denormalized `active_version_id` pointer on strategies with consistency trigger
+  - Backtest linkage: optional FK from backtest_runs and backtest_tunes
+  - API endpoints: create version, list versions, get version, activate, pause, retire
+  - Migrations: 076a-076c (versions + triggers), 077 (transitions), 078 (backtest linkage), 079 (active pointer)
+
+- **Strategy Intelligence Snapshots (v1.5 Step 1)** - Append-only time series for regime + confidence
+  - `strategy_intel_snapshots` table for tracking intel per strategy version
+  - Dual time axes: `as_of_ts` (market time) and `computed_at` (wall clock)
+  - Core intel: `regime` (TEXT), `confidence_score` [0,1], `confidence_components` (JSONB)
+  - Provenance: `engine_version`, `inputs_hash` (SHA256), `run_id`
+  - Indexes: version+time, workspace+time, computed_at for efficient queries
+  - Repository with insert_snapshot(), get_latest_snapshot(), list_snapshots()
+  - Pydantic schemas: IntelSnapshotCreateRequest, IntelSnapshotResponse, list schemas
+  - Migration: 080_strategy_intel_snapshots.sql
+
 - **Idempotent Telegram Notification Delivery** - Race-safe notification system for ops alerts
   - Activation, recovery, and escalation notifications via Telegram
   - Delivery tracking columns: `notified_at`, `recovery_notified_at`, `escalation_notified_at`

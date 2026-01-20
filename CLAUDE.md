@@ -95,6 +95,10 @@ PostgreSQL tables (via Supabase):
 | `documents` | Source metadata, content hash, status lifecycle |
 | `chunks` | Text segments, token counts, metadata arrays |
 | `chunk_vectors` | Maps chunks to embedding model/collection |
+| `strategies` | Strategy registry with tags, source refs, backtest summaries |
+| `strategy_versions` | Immutable config snapshots with state machine (draft→active↔paused→retired) |
+| `strategy_version_transitions` | Audit log for version state changes |
+| `strategy_intel_snapshots` | Append-only time series of regime + confidence per version |
 | `backtest_runs` | Strategy backtest results with metrics |
 | `tune_sessions` | Parameter sweep sessions |
 | `wfo_runs` | Walk-forward optimization results |
@@ -114,6 +118,17 @@ All tables FK to workspaces for multi-tenant isolation. Migrations in `migration
 | POST | `/sources/pine/ingest` | Pine Script registry (admin) |
 | POST | `/query` | Semantic search (`retrieve` or `answer` mode) |
 | GET | `/jobs/{job_id}` | Async job status |
+
+### Strategy Lifecycle
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/strategies/{id}/versions` | Create draft version |
+| GET | `/strategies/{id}/versions` | List versions |
+| GET | `/strategies/{id}/versions/{vid}` | Get version details |
+| POST | `/strategies/{id}/versions/{vid}/activate` | Activate version (pauses current active) |
+| POST | `/strategies/{id}/versions/{vid}/pause` | Pause active version |
+| POST | `/strategies/{id}/versions/{vid}/retire` | Retire version (terminal) |
+| GET | `/strategies/{id}/versions/{vid}/transitions` | Get audit trail |
 
 ### Backtests & WFO
 | Method | Endpoint | Description |
