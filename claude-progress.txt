@@ -1,5 +1,85 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 91 Summary
+Date: Session 91 (max_context_tokens Implementation)
+Status: Server Not Running - 228/263 Tests Passing (86.7%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Review failing tests to identify code-verifiable improvements
+- Implement max_context_tokens truncation feature
+
+### Infrastructure Status (Unchanged)
+- **Server**: NOT RUNNING (port 8000 not listening)
+- **Docker**: "docker could not be found in WSL 2 distro"
+- **init.sh**: Fails due to Docker unavailability
+- **Browser automation**: Available but no server to test
+
+### Code Changes Made
+
+#### Implemented: "Answer generation respects max_context_tokens" (test line 779)
+
+**Problem identified:** `max_context_tokens` parameter was passed to `generate_answer()` but never actually used to truncate the context.
+
+**Files modified:**
+
+1. **app/services/llm_base.py**
+   - Added `import tiktoken` and `_token_encoding` module-level variable
+   - Added `_count_tokens()` helper function
+   - Modified `generate_answer()` to truncate context by whole chunks
+   - Added detailed logging for context truncation events
+   - Updated logging to show chunks_provided, chunks_included, context_tokens, max_context_tokens
+
+2. **app/services/llm.py** (duplicate implementation)
+   - Same changes as llm_base.py to ensure consistency
+
+**How it works:**
+- Uses tiktoken with cl100k_base encoding to count tokens
+- Iterates through chunks and adds them to context until adding the next chunk would exceed max_context_tokens
+- Truncates cleanly at chunk boundaries (no mid-chunk truncation)
+- Logs truncation events with details: max limit, chunks included vs total, tokens used
+
+**Test supported:** "Answer generation respects max_context_tokens"
+- Step 1: Ingest large corpus ✓
+- Step 2: POST /query with max_context_tokens=2000 ✓
+- Step 3: Verify context passed to LLM doesn't exceed 2000 tokens ✓
+- Step 4: Verify truncation happens cleanly (not mid-chunk) ✓
+
+### Failing Tests Analysis (35 total)
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Container control (health) | 3 | Docker commands blocked |
+| YouTube API | 5 | External API + runtime |
+| OpenRouter/LLM | 4 | API key + runtime |
+| n8n workflows | 8 | n8n not configured |
+| Service recovery | 2 | Container control |
+| Performance/Load | 4 | Large datasets + runtime |
+| Composite FK | 1 | Migration added - needs DB apply |
+| GIN indexes | 2 | Runtime EXPLAIN needed |
+| Answer model config | 1 | Code done - needs runtime |
+| Reranking | 1 | Code done - needs runtime |
+| Multiple providers | 1 | Code done - needs runtime |
+| Graceful shutdown | 1 | Container control |
+| Docker image size | 1 | Docker build required |
+| Test coverage | 1 | pytest --cov required |
+| Query timeout | 1 | Code done - needs runtime |
+| max_context_tokens | 1 | **IMPLEMENTED** - needs runtime |
+
+### Test Status
+- Previous: 228/263 passing (86.7%)
+- This session: 228/263 passing (86.7%) - no runtime change possible
+- 1 feature implemented this session:
+  1. max_context_tokens truncation (needs runtime verification)
+
+### Next Steps When Environment Available
+1. Apply migration 075 to database (composite FK)
+2. Test max_context_tokens with large corpus and small limit
+3. Test query timeout with short `QUERY_TIMEOUT_S=1` setting
+4. Mark tests as passing after verification
+
+---
+
 ## Session 90 Summary
 Date: Session 90 (Composite FK Constraint Migration)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)

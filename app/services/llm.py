@@ -4,10 +4,19 @@ from typing import Optional
 
 import httpx
 import structlog
+import tiktoken
 
 from app.config import get_settings
 
 logger = structlog.get_logger(__name__)
+
+# Token counter for context truncation
+_token_encoding = tiktoken.get_encoding("cl100k_base")
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens in text using cl100k_base encoding."""
+    return len(_token_encoding.encode(text))
 
 
 class LLMNotConfiguredError(Exception):
@@ -119,11 +128,31 @@ class OpenRouterLLM:
         Returns:
             Answer with citations
         """
-        # Build context with citation numbers
+        # Build context with citation numbers, truncating by whole chunks
+        # to stay within max_context_tokens
         context_parts = []
+        total_tokens = 0
+        chunks_included = 0
+
         for i, chunk in enumerate(context_chunks, 1):
             source_info = chunk.get("title", chunk.get("source_url", f"Source {i}"))
-            context_parts.append(f"[{i}] {source_info}:\n{chunk['content']}\n")
+            chunk_text = f"[{i}] {source_info}:\n{chunk['content']}\n"
+            chunk_tokens = _count_tokens(chunk_text)
+
+            # Check if adding this chunk would exceed the limit
+            if total_tokens + chunk_tokens > max_context_tokens:
+                logger.info(
+                    "Truncating context to respect max_context_tokens",
+                    max_context_tokens=max_context_tokens,
+                    chunks_included=chunks_included,
+                    chunks_total=len(context_chunks),
+                    tokens_used=total_tokens,
+                )
+                break
+
+            context_parts.append(chunk_text)
+            total_tokens += chunk_tokens
+            chunks_included += 1
 
         context = "\n".join(context_parts)
 
@@ -146,7 +175,10 @@ Answer the question based on the context above. Use citations like [1], [2] to r
         logger.info(
             "Generating answer",
             question=question[:50],
-            num_chunks=len(context_chunks),
+            chunks_provided=len(context_chunks),
+            chunks_included=chunks_included,
+            context_tokens=total_tokens,
+            max_context_tokens=max_context_tokens,
             model=model or self.model,
         )
 
