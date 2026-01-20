@@ -1,5 +1,98 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 103 Summary
+Date: 2026-01-20
+Status: PR9 Complete - Paper Equity + Drawdown Alerts + Auto-Pause + Dashboards
+
+### Session Goals
+- Continue PR9b implementation (runbook, auto-pause, dashboards)
+- Update documentation (CLAUDE.md, README.md, CHANGELOG.md)
+- Clean up repository
+
+### Accomplished This Session
+
+**1. WORKSPACE_DRAWDOWN_HIGH Runbook (docs/ops/runbooks.md)**
+- Threshold table (warn 12%, critical 20%)
+- Data freshness verification steps
+- Drawdown cause analysis patterns
+- Action ladder by severity level
+- Prometheus queries for monitoring
+- Hysteresis values (clear warn 10%, clear critical 16%)
+
+**2. Auto-Pause Guardrail (app/services/ops_alerts/evaluator.py)**
+- `auto_pause_enabled` config flag in app/config.py (default: false)
+- `_auto_pause_pass()` method triggered after CRITICAL alerts
+- Pauses all active versions on CRITICAL drawdown (>20%)
+- Pauses specific version on CRITICAL confidence (<0.20)
+- Prometheus counter `ops_alert_auto_pause_total`
+- `EvalResult` extended with `versions_auto_paused`, `auto_paused_version_ids`
+- Error handling with audit trail in result.errors
+
+**3. Read-Only Dashboard Endpoints (app/routers/dashboards.py)**
+- `GET /dashboards/{ws}/equity` - Equity curve with drawdown overlay
+  - Rolling peak calculation, summary stats
+- `GET /dashboards/{ws}/intel-timeline` - Confidence & regime history
+  - Per-version grouping, filter by version_id
+- `GET /dashboards/{ws}/alerts` - Active alerts by severity
+  - Counts by status/severity/rule_type
+- `GET /dashboards/{ws}/summary` - Combined overview
+  - Single call for dashboard landing pages
+
+**4. Documentation Updates**
+- CLAUDE.md: Added paper_equity_snapshots table, dashboard endpoints
+- README.md: Added 4 new features, routes, schema, AUTO_PAUSE_ENABLED env var
+- CHANGELOG.md: Added PR9 and PR9b features
+
+**5. Repository Cleanup**
+- Removed stale MCP Puppeteer log files
+- Verified logs directory gitignored
+
+### Files Created
+- `app/routers/dashboards.py` - 324 lines (4 dashboard endpoints)
+- `tests/unit/test_ops_alert_auto_pause.py` - 317 lines (11 tests)
+- `tests/unit/routers/test_dashboards.py` - 214 lines (8 tests)
+
+### Files Modified
+- `app/config.py` - Added auto_pause_enabled flag
+- `app/api/router.py` - Registered dashboards router
+- `app/services/ops_alerts/evaluator.py` - Added auto-pause logic (+120 lines)
+- `app/services/ops_alerts/models.py` - Extended EvalResult
+- `docs/ops/runbooks.md` - Added drawdown runbook (+114 lines)
+- `CLAUDE.md`, `README.md`, `CHANGELOG.md` - Documentation updates
+
+### Test Results
+- 11 auto-pause tests passing
+- 8 dashboard tests passing
+- 2867 total unit tests passing
+
+### Commits This Session
+1. `fd4291a` feat(alerts): add auto-pause guardrail and dashboard endpoints (PR9b)
+2. `3fd7d97` docs: update documentation for PR9 features
+
+### PR9 Complete Summary
+| Component | Status |
+|-----------|--------|
+| paper_equity_snapshots schema | PR9a ✓ |
+| PaperEquityRepository | PR9a ✓ |
+| Paper broker equity hook | PR9a ✓ |
+| WORKSPACE_DRAWDOWN_HIGH rule | PR9a ✓ |
+| Prometheus workspace_drawdown_pct gauge | PR9a ✓ |
+| Drawdown runbook | PR9b ✓ |
+| Auto-pause guardrail | PR9b ✓ |
+| Dashboard endpoints | PR9b ✓ |
+| Documentation | PR9b ✓ |
+
+### v1.5 Progress
+- Step 1: Intel snapshots schema ✓
+- Step 2: Confidence computation + runner + API ✓
+- Step 3: Strategy alerts
+  - PR8: Confidence alerts ✓
+  - PR8.1: Observability + runbook ✓
+  - PR9: Drawdown alerts + auto-pause + dashboards ✓
+  - PR10: Admin UI affordance (optional)
+
+---
+
 ## Session 102 Summary
 Date: 2026-01-20
 Status: PR8.1 Observability & Runbook Complete
