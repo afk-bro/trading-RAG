@@ -1,5 +1,96 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 92 Summary
+Date: Session 92 (Multi-language Transcript Support)
+Status: Server Not Running - 228/263 Tests Passing (86.7%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Implement multi-language transcript support for YouTube
+- Add auto-generated transcript fallback
+
+### Infrastructure Status (Unchanged)
+- **Server**: NOT RUNNING (port 8000 not listening)
+- **Docker**: Commands blocked in environment
+- **Python/uvicorn**: Commands blocked in environment
+- **Browser automation**: Available but no server to test
+
+### Code Changes Made
+
+#### Implemented: Multi-language YouTube transcript support (test lines 2052, 2062)
+
+**Files modified:**
+
+1. **app/routers/youtube.py**
+   - Updated `fetch_transcript()` to accept `preferred_languages` parameter
+   - Added fallback logic: manual transcript -> auto-generated -> any available
+   - Changed return type from `list[dict]` to `dict` with keys:
+     - `segments`: list of transcript segments
+     - `language`: language code of fetched transcript
+     - `is_auto_generated`: boolean indicating transcript type
+   - Updated `ingest_youtube()` to pass `preferred_languages` from request
+   - Added language and is_auto_generated to success response
+
+2. **app/routers/youtube_pine.py**
+   - Updated to handle new `fetch_transcript()` return format
+
+3. **app/routers/ingest.py**
+   - Added `is_auto_generated` parameter to `ingest_pipeline()`
+   - Apply 0.3 quality_score penalty for auto-generated transcripts
+
+4. **app/schemas/ingest.py**
+   - Added `preferred_languages` field to `YouTubeIngestRequest`
+   - Added `language` and `is_auto_generated` fields to `YouTubeIngestResponse`
+
+**How it works:**
+- Users can specify `preferred_languages` array (e.g., `["es", "es-ES", "en"]`)
+- Defaults to `["en", "en-US", "en-GB"]` if not specified
+- First tries manual transcripts in preferred language order
+- Falls back to auto-generated transcripts if manual unavailable
+- Falls back to any available transcript as last resort
+- Auto-generated transcripts get 0.3 quality_score penalty
+
+**Tests supported:**
+- "Transcript fetch supports multiple languages" (line 2052)
+- "Transcript fallback to auto-generated if manual unavailable" (line 2062)
+
+### Failing Tests Analysis (35 total)
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Container control (health) | 3 | Docker commands blocked |
+| YouTube API | 3 | External API + runtime (2 FIXED this session) |
+| OpenRouter/LLM | 4 | API key + runtime |
+| n8n workflows | 8 | n8n not configured |
+| Service recovery | 2 | Container control |
+| Performance/Load | 4 | Large datasets + runtime |
+| Composite FK | 1 | Migration added - needs DB apply |
+| GIN indexes | 2 | Runtime EXPLAIN needed |
+| Answer model config | 1 | Code done - needs runtime |
+| Reranking | 1 | Code done - needs runtime |
+| Multiple providers | 1 | Code done - needs runtime |
+| Graceful shutdown | 1 | Container control |
+| Docker image size | 1 | Docker build required |
+| Test coverage | 1 | pytest --cov required |
+| Query timeout | 1 | Code done - needs runtime |
+| max_context_tokens | 1 | Code done - needs runtime |
+
+### Test Status
+- Previous: 228/263 passing (86.7%)
+- This session: 228/263 passing (86.7%) - no runtime change possible
+- 2 features implemented this session:
+  1. Multi-language transcript support (needs runtime verification)
+  2. Auto-generated transcript fallback (needs runtime verification)
+
+### Next Steps When Environment Available
+1. Apply migration 075 to database (composite FK)
+2. Test YouTube ingestion with Spanish video
+3. Test YouTube ingestion with video that only has auto-generated transcript
+4. Verify quality_score penalty applied correctly
+5. Mark tests as passing after verification
+
+---
+
 ## Session 91 Summary
 Date: Session 91 (max_context_tokens Implementation)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)
