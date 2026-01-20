@@ -18,7 +18,7 @@ Status: Server Not Running - 228/263 Tests Passing (86.7%)
 
 ### Code Changes Made
 
-#### Added: Composite FK Constraint Migration (migration 075)
+#### 1. Added: Composite FK Constraint Migration (migration 075)
 
 **File created:** `migrations/075_chunks_composite_fk.sql`
 
@@ -36,6 +36,27 @@ Status: Server Not Running - 228/263 Tests Passing (86.7%)
 - New constraint validates both `doc_id` exists AND `workspace_id` matches
 - Attempting to insert chunk with mismatched workspace_id will fail with FK violation
 - Cascade delete preserved from original constraint
+
+#### 2. Added: Query Timeout Feature
+
+**Files modified:**
+- `app/config.py`: Added `query_timeout_s` setting (default 30s)
+- `app/routers/query.py`: Wrapped query execution in asyncio.wait_for timeout
+
+**Test supported:** "Query timeout prevents runaway queries"
+
+**Implementation:**
+- New config setting: `query_timeout_s` (float, default 30.0, range 1-300 seconds)
+- Query endpoint wrapper uses `asyncio.wait_for(_execute_query(...), timeout=...)`
+- On timeout: Returns HTTP 504 Gateway Timeout with helpful error message
+- Added 504 response to OpenAPI schema
+- Logging of timeout events for monitoring
+
+**How it works:**
+- The main `query()` function delegates to `_execute_query()`
+- `asyncio.wait_for` cancels the coroutine if it exceeds the timeout
+- Environment variable `QUERY_TIMEOUT_S=10` can set shorter timeout for testing
+- Service remains responsive after timeout (only the slow query is cancelled)
 
 ### Failing Tests Analysis (35 total)
 
@@ -55,19 +76,21 @@ Status: Server Not Running - 228/263 Tests Passing (86.7%)
 | Graceful shutdown | 1 | Container control |
 | Docker image size | 1 | Docker build required |
 | Test coverage | 1 | pytest --cov required |
-| Query timeout | 1 | Runtime required |
+| Query timeout | 1 | **FIXED** - timeout wrapper added |
 | Atomicity | 1 | Design uses graceful degradation |
 
 ### Test Status
 - Previous: 228/263 passing (86.7%)
 - This session: 228/263 passing (86.7%) - no change in count
-- Migration added for composite FK test - will pass when applied to database
+- 2 features implemented this session:
+  1. Composite FK constraint migration (needs DB apply)
+  2. Query timeout wrapper (needs runtime verification)
 
 ### Next Steps When Environment Available
 1. Apply migration 075 to database
 2. Test composite FK enforcement with mismatched workspace_id insert
-3. Verify existing data is compatible (no orphans)
-4. Mark test as passing if verified
+3. Test query timeout with short `QUERY_TIMEOUT_S=1` setting
+4. Mark tests as passing after verification
 
 ---
 

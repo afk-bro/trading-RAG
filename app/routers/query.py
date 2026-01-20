@@ -119,6 +119,7 @@ def build_citation_url(
         422: {"description": "Validation error"},
         429: {"description": "Rate limit exceeded"},
         500: {"description": "Internal server error"},
+        504: {"description": "Query timeout - operation took too long"},
     },
 )
 async def query(
@@ -150,7 +151,34 @@ async def query(
     5. Neighbor expansion (context continuity)
     6. Build citation URLs and results
     7. If mode=answer: generate LLM response with citations
+
+    Timeout:
+    - Queries are subject to settings.query_timeout_s (default 30s)
+    - Exceeding timeout returns 504 Gateway Timeout
     """
+    try:
+        return await asyncio.wait_for(
+            _execute_query(request, settings),
+            timeout=settings.query_timeout_s,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Query timeout exceeded",
+            workspace_id=str(request.workspace_id),
+            question_preview=request.question[:50],
+            timeout_s=settings.query_timeout_s,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Query timeout exceeded ({settings.query_timeout_s}s). Try a simpler query or reduce result count.",  # noqa: E501
+        )
+
+
+async def _execute_query(
+    request: QueryRequest,
+    settings: Settings,
+) -> QueryResponse:
+    """Internal query execution - wrapped by timeout in main endpoint."""
     from app.repositories.chunks import ChunkRepository
     from app.repositories.vectors import VectorRepository
 

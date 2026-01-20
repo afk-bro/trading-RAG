@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     )
     llm_timeout: int = Field(default=60, description="LLM request timeout in seconds")
 
+    # Query endpoint timeout
+    query_timeout_s: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Overall query endpoint timeout in seconds (prevents runaway queries)",
+    )
+
     # Qdrant Configuration
     qdrant_host: str = Field(default="localhost", description="Qdrant host")
     qdrant_port: int = Field(default=6333, description="Qdrant port")
