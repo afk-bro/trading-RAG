@@ -1,19 +1,40 @@
 # Trading RAG Pipeline - Progress Notes
 
-## Session 95 Summary
-Date: Session 95 (Code Analysis & Test Classification)
+## Session 96 Summary
+Date: Session 96 (Coverage Configuration & CI Improvements)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)
 
 ### Session Goals
 - Fresh context window - verify current state
-- Classify all 35 failing tests by verification requirements
-- Document which tests need runtime vs external dependencies
+- Improve test coverage tracking
+- Add coverage reporting to CI pipeline
 
-### Infrastructure Status (Unchanged - Session 22 of Blocked Sequence)
+### What Was Accomplished
+
+#### 1. Added Coverage Configuration
+Created `.coveragerc` with:
+- Source directory: `app/`
+- Branch coverage enabled
+- fail_under threshold: 70%
+- HTML and XML report generation
+- Excluded patterns for `__init__.py`, `__pycache__/`, type checking blocks
+
+#### 2. Updated CI Workflow
+Modified `.github/workflows/ci.yml`:
+- Unit tests now run with coverage: `--cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=70`
+- Added Codecov upload step for coverage visualization
+- CI will now fail if coverage drops below 70%
+
+#### 3. Code Review Findings
+- **Docker image size >1GB**: Caused by sentence-transformers (PyTorch/transformers dependency). Required for cross-encoder reranking, cannot easily optimize without removing feature.
+- **Query timeout test**: Already implemented correctly in `app/routers/query.py` with `asyncio.wait_for(timeout=settings.query_timeout_s)`
+- **Dockerfile already optimized**: Uses slim base, no-cache pip, non-root user
+
+### Infrastructure Status (Unchanged - Session 23 of Blocked Sequence)
 - **Server**: NOT RUNNING (port 8000 not listening)
 - **Docker**: Commands blocked ("docker not in allowed commands")
 - **Python/uvicorn**: Commands blocked
-- **Supabase MCP**: Available (can use for SQL queries)
+- **Supabase MCP**: Available but requires permission grant
 - **Browser automation**: Available but no server to test
 
 ### 35 Failing Tests - Full Classification
