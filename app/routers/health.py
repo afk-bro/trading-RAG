@@ -664,7 +664,8 @@ async def list_documents(settings: Settings = Depends(get_settings)):
             """
             SELECT
                 id, workspace_id, source_url, canonical_url, source_type,
-                content_hash, title, author, language, status, version, created_at, updated_at, last_indexed_at  # noqa: E501
+                content_hash, title, author, language, status, version,
+                created_at, updated_at, last_indexed_at
             FROM documents
             ORDER BY created_at DESC
             LIMIT 20

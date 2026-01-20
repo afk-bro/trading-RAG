@@ -223,9 +223,12 @@ class DurationStatsRepository:
                 timeframe,
                 regime_key,
                 SUM(n_segments) as n_segments,
-                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY median_duration_bars) as median_duration_bars,  # noqa: E501
-                PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY median_duration_bars) as p25_duration_bars,  # noqa: E501
-                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY median_duration_bars) as p75_duration_bars,  # noqa: E501
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY median_duration_bars)
+                    as median_duration_bars,
+                PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY median_duration_bars)
+                    as p25_duration_bars,
+                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY median_duration_bars)
+                    as p75_duration_bars,
                 MAX(updated_at) as updated_at
             FROM regime_duration_stats
             WHERE timeframe = $1
