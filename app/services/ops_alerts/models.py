@@ -15,6 +15,8 @@ class OpsRuleType(str, Enum):
     WEAK_COVERAGE_P2 = "weak_coverage:P2"
     DRIFT_SPIKE = "drift_spike"
     CONFIDENCE_DROP = "confidence_drop"
+    # Strategy intelligence alerts (v1.5)
+    STRATEGY_CONFIDENCE_LOW = "strategy_confidence_low"
 
 
 class Severity(str, Enum):
@@ -47,9 +49,13 @@ class OpsAlertRule:
     requires_health: bool = False
     requires_coverage: bool = False
     requires_match_runs: bool = False
+    requires_strategy_intel: bool = False
 
     # Volume gating (for drift/confidence rules)
     min_sample_count: int = 0
+
+    # Persistence gating (require N consecutive violations)
+    persistence_count: int = 1
 
     def build_dedupe_key(self, date_str: str, extra: Optional[str] = None) -> str:
         """
@@ -92,6 +98,7 @@ class EvalContext:
     health_snapshot: Optional[Any] = None  # SystemHealthSnapshot
     coverage_stats: Optional[dict] = None  # Coverage counts by priority
     match_run_stats: Optional[dict] = None  # Recent match run aggregates
+    strategy_intel: Optional[list[dict]] = None  # Active versions with intel snapshots
 
 
 @dataclass
@@ -159,6 +166,14 @@ RULES: dict[OpsRuleType, OpsAlertRule] = {
         default_severity=Severity.MEDIUM,
         requires_match_runs=True,
         min_sample_count=50,  # Volume gate
+    ),
+    OpsRuleType.STRATEGY_CONFIDENCE_LOW: OpsAlertRule(
+        rule_type=OpsRuleType.STRATEGY_CONFIDENCE_LOW,
+        description="Strategy version confidence score is below threshold",
+        dedupe_period=DedupePeriod.DAILY,
+        default_severity=Severity.MEDIUM,  # Escalates to HIGH for critical
+        requires_strategy_intel=True,
+        persistence_count=2,  # Require 2 consecutive low snapshots
     ),
 }
 

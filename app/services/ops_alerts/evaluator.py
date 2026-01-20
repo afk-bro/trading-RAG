@@ -44,6 +44,12 @@ class OpsAlertEvaluator:
     CONFIDENCE_FLOOR = 0.45  # Absolute floor for median best_score
     CONFIDENCE_DELTA_THRESHOLD = 0.10  # Relative drop from baseline
 
+    # Thresholds for strategy confidence alerts (v1.5)
+    STRATEGY_CONFIDENCE_WARN = 0.35  # Warn if score < this
+    STRATEGY_CONFIDENCE_CRITICAL = 0.20  # Critical if score < this
+    STRATEGY_CONFIDENCE_CLEAR_WARN = 0.40  # Clear warn when score >= this
+    STRATEGY_CONFIDENCE_CLEAR_CRITICAL = 0.25  # Clear critical when score >= this
+
     def __init__(self, repo: OpsAlertsRepository, pool: Any):
         """Initialize evaluator with repository and DB pool."""
         self.repo = repo
@@ -79,48 +85,58 @@ class OpsAlertEvaluator:
         # Evaluate each rule
         for rule in get_all_rules():
             try:
-                condition = await self._evaluate_rule(rule, ctx)
-                result.conditions_evaluated += 1
+                eval_result = await self._evaluate_rule(rule, ctx)
+
+                # Normalize to list (some rules return multiple conditions)
+                conditions = (
+                    eval_result if isinstance(eval_result, list) else [eval_result]
+                )
 
                 rule_result: dict[str, Any] = {
-                    "triggered": condition.triggered,
+                    "triggered": False,
+                    "count": 0,
                 }
 
-                if condition.skip_reason:
-                    rule_result["skipped"] = condition.skip_reason
-                    log.debug(
-                        "ops_alert_rule_skipped",
-                        rule_type=rule.rule_type.value,
-                        reason=condition.skip_reason,
-                    )
-                elif condition.triggered:
-                    triggered_keys.add(condition.dedupe_key)
+                for condition in conditions:
+                    result.conditions_evaluated += 1
 
-                    # Upsert the alert
-                    upsert_result = await self.repo.upsert(
-                        workspace_id=workspace_id,
-                        rule_type=rule.rule_type.value,
-                        severity=condition.severity.value,
-                        dedupe_key=condition.dedupe_key,
-                        payload=condition.payload,
-                        source="alert_evaluator",
-                        job_run_id=job_run_id,
-                        rule_version=rule.version,
-                    )
+                    if condition.skip_reason:
+                        rule_result["skipped"] = condition.skip_reason
+                        log.debug(
+                            "ops_alert_rule_skipped",
+                            rule_type=rule.rule_type.value,
+                            reason=condition.skip_reason,
+                        )
+                    elif condition.triggered:
+                        rule_result["triggered"] = True
+                        rule_result["count"] = rule_result.get("count", 0) + 1
+                        triggered_keys.add(condition.dedupe_key)
 
-                    result.alerts_triggered += 1
-                    if upsert_result.is_new:
-                        result.alerts_new += 1
-                        rule_result["new"] = True
-                    else:
-                        result.alerts_updated += 1
+                        # Upsert the alert
+                        upsert_result = await self.repo.upsert(
+                            workspace_id=workspace_id,
+                            rule_type=rule.rule_type.value,
+                            severity=condition.severity.value,
+                            dedupe_key=condition.dedupe_key,
+                            payload=condition.payload,
+                            source="alert_evaluator",
+                            job_run_id=job_run_id,
+                            rule_version=rule.version,
+                        )
 
-                    if upsert_result.escalated:
-                        result.alerts_escalated += 1
-                        rule_result["escalated"] = True
+                        result.alerts_triggered += 1
+                        if upsert_result.is_new:
+                            result.alerts_new += 1
+                            rule_result["new"] = True
+                        else:
+                            result.alerts_updated += 1
 
-                    rule_result["alert_id"] = str(upsert_result.id)
-                    rule_result["severity"] = condition.severity.value
+                        if upsert_result.escalated:
+                            result.alerts_escalated += 1
+                            rule_result["escalated"] = True
+
+                        rule_result["alert_id"] = str(upsert_result.id)
+                        rule_result["severity"] = condition.severity.value
 
                 result.by_rule_type[rule.rule_type.value] = rule_result
 
@@ -185,6 +201,12 @@ class OpsAlertEvaluator:
             ctx.match_run_stats = await self._get_match_run_stats(workspace_id, now)
         except Exception as e:
             logger.warning("ops_alert_match_runs_fetch_failed", error=str(e))
+
+        # Load strategy intel for confidence alerts (v1.5)
+        try:
+            ctx.strategy_intel = await self._get_strategy_intel(workspace_id)
+        except Exception as e:
+            logger.warning("ops_alert_strategy_intel_fetch_failed", error=str(e))
 
         return ctx
 
@@ -316,6 +338,93 @@ class OpsAlertEvaluator:
             ),
         }
 
+    async def _get_strategy_intel(self, workspace_id: UUID) -> list[dict]:
+        """
+        Get active strategy versions with their latest intel snapshots.
+
+        Returns list of dicts with:
+        - strategy_id, strategy_name, version_id
+        - latest N intel snapshots (for persistence gating)
+        - weakest confidence components
+        """
+        # Get all active versions for this workspace with recent intel
+        query = """
+            WITH active_versions AS (
+                SELECT
+                    v.id AS version_id,
+                    v.strategy_id,
+                    s.name AS strategy_name,
+                    v.version_number,
+                    v.version_tag
+                FROM strategy_versions v
+                JOIN strategies s ON v.strategy_id = s.id
+                WHERE s.workspace_id = $1
+                  AND v.state = 'active'
+            ),
+            recent_snapshots AS (
+                SELECT
+                    sis.strategy_version_id,
+                    sis.as_of_ts,
+                    sis.computed_at,
+                    sis.regime,
+                    sis.confidence_score,
+                    sis.confidence_components,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY sis.strategy_version_id
+                        ORDER BY sis.as_of_ts DESC
+                    ) AS rn
+                FROM strategy_intel_snapshots sis
+                JOIN active_versions av ON sis.strategy_version_id = av.version_id
+            )
+            SELECT
+                av.version_id,
+                av.strategy_id,
+                av.strategy_name,
+                av.version_number,
+                av.version_tag,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'as_of_ts', rs.as_of_ts,
+                            'computed_at', rs.computed_at,
+                            'regime', rs.regime,
+                            'confidence_score', rs.confidence_score,
+                            'confidence_components', rs.confidence_components
+                        ) ORDER BY rs.rn
+                    ) FILTER (WHERE rs.rn <= 5),
+                    '[]'::json
+                ) AS recent_snapshots
+            FROM active_versions av
+            LEFT JOIN recent_snapshots rs ON rs.strategy_version_id = av.version_id
+            GROUP BY av.version_id, av.strategy_id, av.strategy_name,
+                     av.version_number, av.version_tag
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, workspace_id)
+
+        result = []
+        for row in rows:
+            snapshots = row["recent_snapshots"] if row["recent_snapshots"] else []
+            # Parse JSON if needed
+            if isinstance(snapshots, str):
+                import json
+
+                snapshots = json.loads(snapshots)
+
+            result.append(
+                {
+                    "version_id": row["version_id"],
+                    "strategy_id": row["strategy_id"],
+                    "strategy_name": row["strategy_name"],
+                    "version_number": row["version_number"],
+                    "version_tag": row["version_tag"],
+                    "snapshots": snapshots,
+                }
+            )
+
+        return result
+
     async def _evaluate_rule(
         self, rule: OpsAlertRule, ctx: EvalContext
     ) -> AlertCondition:
@@ -335,6 +444,10 @@ class OpsAlertEvaluator:
 
         elif rule.rule_type == OpsRuleType.CONFIDENCE_DROP:
             return self._eval_confidence_drop(rule, ctx)
+
+        elif rule.rule_type == OpsRuleType.STRATEGY_CONFIDENCE_LOW:
+            # Returns list of conditions (one per version)
+            return await self._eval_strategy_confidence_low(rule, ctx)
 
         return AlertCondition(
             triggered=False,
@@ -580,6 +693,147 @@ class OpsAlertEvaluator:
 
         return AlertCondition(triggered=False, severity=rule.default_severity)
 
+    async def _eval_strategy_confidence_low(
+        self, rule: OpsAlertRule, ctx: EvalContext
+    ) -> list[AlertCondition]:
+        """
+        Evaluate strategy_confidence_low rule.
+
+        Returns a list of AlertConditions (one per active version with low confidence).
+
+        Triggers if:
+        - Version has >= persistence_count consecutive snapshots below threshold
+        - Warn: score < 0.35
+        - Critical: score < 0.20
+
+        Dedupe key format: strategy_confidence_low:{version_id}:{severity_bucket}:{date}
+        """
+        if ctx.strategy_intel is None:
+            return [
+                AlertCondition(
+                    triggered=False,
+                    severity=rule.default_severity,
+                    skip_reason="strategy_intel_unavailable",
+                )
+            ]
+
+        if not ctx.strategy_intel:
+            return [
+                AlertCondition(
+                    triggered=False,
+                    severity=rule.default_severity,
+                    skip_reason="no_active_versions",
+                )
+            ]
+
+        conditions: list[AlertCondition] = []
+        bucket_key = rule.get_bucket_key(ctx.now)
+        persistence_required = rule.persistence_count
+
+        for version_data in ctx.strategy_intel:
+            version_id = version_data["version_id"]
+            snapshots = version_data.get("snapshots", [])
+
+            # Skip if no snapshots
+            if not snapshots:
+                continue
+
+            # Check consecutive low scores
+            consecutive_warn = 0
+            consecutive_critical = 0
+
+            for snap in snapshots[: persistence_required + 1]:
+                score = snap.get("confidence_score")
+                if score is None:
+                    break
+
+                if score < self.STRATEGY_CONFIDENCE_CRITICAL:
+                    consecutive_critical += 1
+                    consecutive_warn += 1  # Critical also counts as warn
+                elif score < self.STRATEGY_CONFIDENCE_WARN:
+                    consecutive_warn += 1
+                    consecutive_critical = 0  # Reset critical streak
+                else:
+                    break  # Score is acceptable, stop counting
+
+            # Determine severity based on persistence
+            severity = None
+            severity_bucket = None
+
+            if consecutive_critical >= persistence_required:
+                severity = Severity.HIGH
+                severity_bucket = "critical"
+            elif consecutive_warn >= persistence_required:
+                severity = Severity.MEDIUM
+                severity_bucket = "warn"
+
+            if severity:
+                latest = snapshots[0]
+                components = latest.get("confidence_components", {})
+
+                # Find weakest components
+                weak_components = []
+                if components:
+                    sorted_components = sorted(
+                        components.items(), key=lambda x: x[1] if x[1] else 1.0
+                    )
+                    weak_components = [
+                        {"name": k, "score": v}
+                        for k, v in sorted_components[:3]
+                        if v is not None
+                    ]
+
+                dedupe_key = f"strategy_confidence_low:{version_id}:{severity_bucket}:{bucket_key}"
+
+                conditions.append(
+                    AlertCondition(
+                        triggered=True,
+                        severity=severity,
+                        dedupe_key=dedupe_key,
+                        payload={
+                            "strategy_id": str(version_data["strategy_id"]),
+                            "strategy_name": version_data["strategy_name"],
+                            "strategy_version_id": str(version_id),
+                            "version_number": version_data["version_number"],
+                            "version_tag": version_data.get("version_tag"),
+                            "regime": latest.get("regime"),
+                            "confidence_score": latest.get("confidence_score"),
+                            "as_of_ts": (
+                                latest["as_of_ts"].isoformat()
+                                if hasattr(latest.get("as_of_ts"), "isoformat")
+                                else str(latest.get("as_of_ts"))
+                            ),
+                            "computed_at": (
+                                latest["computed_at"].isoformat()
+                                if hasattr(latest.get("computed_at"), "isoformat")
+                                else str(latest.get("computed_at"))
+                            ),
+                            "weak_components": weak_components,
+                            "consecutive_low_count": (
+                                consecutive_critical
+                                if severity_bucket == "critical"
+                                else consecutive_warn
+                            ),
+                            "thresholds": {
+                                "warn": self.STRATEGY_CONFIDENCE_WARN,
+                                "critical": self.STRATEGY_CONFIDENCE_CRITICAL,
+                                "persistence_required": persistence_required,
+                            },
+                        },
+                    )
+                )
+
+        # Return at least one condition (even if nothing triggered)
+        if not conditions:
+            return [
+                AlertCondition(
+                    triggered=False,
+                    severity=rule.default_severity,
+                )
+            ]
+
+        return conditions
+
     async def _resolution_pass(
         self,
         workspace_id: UUID,
@@ -591,6 +845,9 @@ class OpsAlertEvaluator:
 
         For daily singleton rules (health, coverage), if the rule didn't trigger
         today, resolve any active alerts with today's dedupe key.
+
+        For strategy confidence alerts, resolve when:
+        - The dedupe key was not triggered this pass (score recovered)
         """
         resolved: list[OpsAlert] = []
         today = now.strftime("%Y-%m-%d")
@@ -614,6 +871,25 @@ class OpsAlertEvaluator:
                         workspace_id=str(workspace_id),
                         rule_type=rule_type.value,
                         dedupe_key=expected_key,
+                    )
+                    resolved.append(alert)
+
+        # Strategy confidence alerts - resolve any active that weren't triggered
+        # These have dedupe_key format: strategy_confidence_low:{version_id}:{severity}:{date}
+        active_strategy_keys = await self.repo.get_active_dedupe_keys(
+            workspace_id, rule_type_prefix="strategy_confidence_low"
+        )
+
+        for dedupe_key in active_strategy_keys:
+            if dedupe_key not in triggered_keys:
+                # This alert's condition cleared (score recovered above threshold)
+                alert = await self.repo.resolve_by_dedupe_key(workspace_id, dedupe_key)
+                if alert:
+                    logger.info(
+                        "ops_alert_auto_resolved",
+                        workspace_id=str(workspace_id),
+                        rule_type="strategy_confidence_low",
+                        dedupe_key=dedupe_key,
                     )
                     resolved.append(alert)
 
