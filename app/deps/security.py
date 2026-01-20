@@ -116,9 +116,20 @@ def get_current_user(request: Request) -> CurrentUser:
     - Check admin status
 
     For now: returns allow-all user for single-tenant mode.
+
+    Auth Integration Path:
+    1. Add Authorization header parsing (Bearer token)
+    2. Validate JWT via Supabase Auth API (use get_current_user_v2 as reference)
+    3. Query workspace_members table for user's workspace access
+    4. Return CurrentUser with populated workspace_ids list
+    5. Update require_workspace_access to enforce multi-tenant checks
+    6. Add integration tests for auth flow
+
+    Note: get_current_user_v2() (lines 205-251) provides the v2 implementation
+    with JWT validation. Migrate callers from v1 (this function) to v2 when
+    ready to enable multi-tenant authentication.
     """
-    # TODO: Integrate with auth provider (Supabase Auth, Auth0, etc.)
-    # For now, single-tenant allow-all
+    # Single-tenant mode: allow-all user
     return CurrentUser(
         user_id="single-tenant-user",
         workspace_ids=[],  # Empty = allow all (single-tenant mode)
