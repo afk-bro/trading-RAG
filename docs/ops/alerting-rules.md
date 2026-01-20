@@ -281,3 +281,87 @@ fingerprint:kb.* count() group by fingerprint
 # Errors by workspace
 tag:fingerprint:kb.* count() group by tag:workspace_id
 ```
+
+---
+
+## Internal Ops Alerts System
+
+The internal ops alerts system (`app/services/ops_alerts/`) provides business-level alerting with Telegram notifications. These are higher-level alerts that evaluate domain-specific conditions beyond infrastructure metrics.
+
+### Rule Types
+
+| Rule Type | Severity | Description | Data Source |
+|-----------|----------|-------------|-------------|
+| `health_degraded` | HIGH/CRITICAL | System health is degraded or in error state | Health snapshot |
+| `weak_coverage:P1` | HIGH | P1 priority coverage gaps exist | Coverage stats |
+| `weak_coverage:P2` | MEDIUM | P2 priority coverage gaps exist | Coverage stats |
+| `drift_spike` | MEDIUM | Match quality drifted from baseline | Match run stats |
+| `confidence_drop` | MEDIUM | Match confidence below threshold | Match run stats |
+| `strategy_confidence_low` | MEDIUM/HIGH | Strategy version confidence score low | Strategy intel |
+
+### Strategy Confidence Alert (`strategy_confidence_low`)
+
+Triggers when a strategy version's confidence score drops below thresholds for consecutive snapshots.
+
+**Thresholds:**
+- **Warn (MEDIUM)**: `confidence_score < 0.35`
+- **Critical (HIGH)**: `confidence_score < 0.20`
+
+**Persistence Gate:** Requires 2 consecutive snapshots below threshold to reduce noise from transient dips.
+
+**Auto-Resolution (Hysteresis):**
+- Clear warn: `confidence_score > 0.40`
+- Clear critical: `confidence_score > 0.25`
+
+**Dedupe Key Format:** `strategy_confidence_low:{version_id}:{severity_bucket}:{date}`
+
+**Alert Payload:**
+```json
+{
+  "version_id": "uuid",
+  "strategy_id": "uuid",
+  "strategy_name": "Strategy Name",
+  "version_number": 1,
+  "confidence_score": 0.28,
+  "regime": "trend-up|volatility-normal",
+  "as_of_ts": "2026-01-19T14:00:00Z",
+  "computed_at": "2026-01-19T14:05:00Z",
+  "weak_components": [
+    {"name": "drawdown", "score": 0.2},
+    {"name": "stability", "score": 0.3},
+    {"name": "data_freshness", "score": 0.4}
+  ],
+  "consecutive_low_count": 2,
+  "thresholds": {
+    "warn": 0.35,
+    "critical": 0.20,
+    "persistence_required": 2
+  }
+}
+```
+
+**Response Actions:**
+1. Review weak components to identify root cause
+2. Check recent market regime changes
+3. Review backtest performance vs live conditions
+4. Consider pausing version if critical persists
+
+### Telegram Notification Routing
+
+Alerts are routed to Telegram forum topics based on category:
+
+| Rule Category | Topic |
+|---------------|-------|
+| Health alerts | Health topic |
+| Strategy alerts (`strategy_confidence_low`) | Strategy topic |
+| Coverage alerts | Coverage topic |
+| Drift/Confidence alerts | Quality topic |
+
+### Admin Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /admin/ops-alerts` | List active alerts |
+| `POST /admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
+| `POST /admin/ops-alerts/{id}/resolve` | Mark alert resolved |
+| `POST /admin/ops-alerts/{id}/reopen` | Reopen resolved alert |

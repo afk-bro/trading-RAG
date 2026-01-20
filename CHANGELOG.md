@@ -52,6 +52,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Recompute returns existing snapshot on deduplication (no duplicate writes)
   - Unit tests: 13 tests for endpoint coverage
 
+- **Strategy Confidence Alert Rule (v1.5 Step 3 PR8)** - Ops alert for low confidence scores
+  - `STRATEGY_CONFIDENCE_LOW` rule type for detecting degraded strategy confidence
+  - Thresholds: MEDIUM severity when score < 0.35 (warn), HIGH severity when score < 0.20 (critical)
+  - Persistence gate: requires 2 consecutive snapshots below threshold to reduce noise
+  - Auto-resolution with hysteresis: clear warn > 0.40, clear critical > 0.25
+  - Dedupe key format: `strategy_confidence_low:{version_id}:{severity}:{date}`
+  - Alert payload includes weak components, regime, consecutive count, thresholds
+  - Multi-version support: each active version evaluated independently
+  - Integration with `_get_strategy_intel()` context fetcher for active versions
+  - Unit tests: 16 tests covering rule definition, evaluation, resolution, integration
+
 - **Idempotent Telegram Notification Delivery** - Race-safe notification system for ops alerts
   - Activation, recovery, and escalation notifications via Telegram
   - Delivery tracking columns: `notified_at`, `recovery_notified_at`, `escalation_notified_at`

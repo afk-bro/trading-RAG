@@ -198,7 +198,7 @@ trading-RAG/
 │   ├── routers/            # API endpoints
 │   ├── services/           # Business logic
 │   │   ├── intel/          # Regime classification + confidence scoring
-│   │   └── ops_alerts/     # Telegram notifications
+│   │   └── ops_alerts/     # Rule evaluation, deduplication, Telegram notifications
 │   ├── repositories/       # Data access layer
 │   └── jobs/               # Job handlers
 ├── tests/                  # Test suite
