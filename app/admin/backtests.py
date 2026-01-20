@@ -957,7 +957,13 @@ async def admin_backtest_run_detail(
     run = dict(run)
 
     # Convert UUID fields to strings for template
-    for field in ["id", "workspace_id", "strategy_entity_id", "strategy_spec_id", "tune_id"]:
+    for field in [
+        "id",
+        "workspace_id",
+        "strategy_entity_id",
+        "strategy_spec_id",
+        "tune_id",
+    ]:
         if run.get(field) is not None:
             run[field] = str(run[field])
 
@@ -973,7 +979,9 @@ async def admin_backtest_run_detail(
     run_json = _json_serializable(run)
 
     # Get admin token for API calls from template
-    admin_token = request.headers.get("X-Admin-Token", "") or os.environ.get("ADMIN_TOKEN", "")
+    admin_token = request.headers.get("X-Admin-Token", "") or os.environ.get(
+        "ADMIN_TOKEN", ""
+    )
 
     return templates.TemplateResponse(
         "backtest_run_detail.html",
