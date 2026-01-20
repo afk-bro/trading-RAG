@@ -42,6 +42,14 @@ class OpsAlert:
     acknowledged_at: Optional[datetime]
     acknowledged_by: Optional[str]
     occurrence_count: int = 1
+    # Delivery tracking
+    notified_at: Optional[datetime] = None
+    recovery_notified_at: Optional[datetime] = None
+    escalated_at: Optional[datetime] = None
+    escalation_notified_at: Optional[datetime] = None
+    telegram_message_id: Optional[str] = None
+    delivery_attempts: int = 0
+    last_delivery_error: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: dict) -> "OpsAlert":
@@ -67,6 +75,14 @@ class OpsAlert:
             acknowledged_at=row.get("acknowledged_at"),
             acknowledged_by=row.get("acknowledged_by"),
             occurrence_count=row.get("occurrence_count", 1),
+            # Delivery tracking
+            notified_at=row.get("notified_at"),
+            recovery_notified_at=row.get("recovery_notified_at"),
+            escalated_at=row.get("escalated_at"),
+            escalation_notified_at=row.get("escalation_notified_at"),
+            telegram_message_id=row.get("telegram_message_id"),
+            delivery_attempts=row.get("delivery_attempts", 0),
+            last_delivery_error=row.get("last_delivery_error"),
         )
 
 
@@ -101,7 +117,26 @@ class OpsAlertsRepository:
 
         Only updates active alerts - resolved alerts are not touched.
         """
-        query = """
+        # Severity rank helper (used in CASE expression for escalation detection)
+        # critical=4, high=3, medium=2, low=1
+        severity_rank = """
+            CASE severity
+                WHEN 'critical' THEN 4
+                WHEN 'high' THEN 3
+                WHEN 'medium' THEN 2
+                ELSE 1
+            END
+        """
+        excluded_severity_rank = """
+            CASE EXCLUDED.severity
+                WHEN 'critical' THEN 4
+                WHEN 'high' THEN 3
+                WHEN 'medium' THEN 2
+                ELSE 1
+            END
+        """
+
+        query = f"""
             INSERT INTO ops_alerts (
                 workspace_id, rule_type, severity, dedupe_key,
                 payload, source, job_run_id, rule_version
@@ -113,7 +148,16 @@ class OpsAlertsRepository:
                 severity = EXCLUDED.severity,
                 job_run_id = EXCLUDED.job_run_id,
                 source = EXCLUDED.source,
-                occurrence_count = ops_alerts.occurrence_count + 1
+                occurrence_count = ops_alerts.occurrence_count + 1,
+                -- Escalation tracking: set timestamp and CLEAR notified flag when severity increases
+                escalated_at = CASE
+                    WHEN ({excluded_severity_rank}) > ({severity_rank}) THEN NOW()
+                    ELSE ops_alerts.escalated_at
+                END,
+                escalation_notified_at = CASE
+                    WHEN ({excluded_severity_rank}) > ({severity_rank}) THEN NULL
+                    ELSE ops_alerts.escalation_notified_at
+                END
             WHERE ops_alerts.status = 'active'
             RETURNING
                 id,
@@ -436,3 +480,154 @@ class OpsAlertsRepository:
         if row:
             return OpsAlert.from_row(dict(row))
         return None
+
+    async def get_pending_notifications(
+        self, workspace_id: UUID
+    ) -> dict[str, list[OpsAlert]]:
+        """
+        Get alerts needing notification, grouped by type.
+
+        Returns:
+            {
+                "activations": [...],   # status=active, notified_at IS NULL
+                "recoveries": [...],    # status=resolved, recovery_notified_at IS NULL
+                "escalations": [...],   # escalated_at NOT NULL, escalation_notified_at IS NULL,
+                                        # notified_at NOT NULL (only already-activated)
+            }
+
+        Each list is ordered (newest first) and capped at 50 for backlog protection.
+        """
+        activations_query = """
+            SELECT * FROM ops_alerts
+            WHERE workspace_id = $1
+              AND status = 'active'
+              AND notified_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 50
+        """
+
+        recoveries_query = """
+            SELECT * FROM ops_alerts
+            WHERE workspace_id = $1
+              AND status = 'resolved'
+              AND recovery_notified_at IS NULL
+            ORDER BY resolved_at DESC
+            LIMIT 50
+        """
+
+        escalations_query = """
+            SELECT * FROM ops_alerts
+            WHERE workspace_id = $1
+              AND escalated_at IS NOT NULL
+              AND escalation_notified_at IS NULL
+              AND notified_at IS NOT NULL
+            ORDER BY escalated_at DESC
+            LIMIT 50
+        """
+
+        async with self.pool.acquire() as conn:
+            activations_rows = await conn.fetch(activations_query, workspace_id)
+            recoveries_rows = await conn.fetch(recoveries_query, workspace_id)
+            escalations_rows = await conn.fetch(escalations_query, workspace_id)
+
+        return {
+            "activations": [OpsAlert.from_row(dict(r)) for r in activations_rows],
+            "recoveries": [OpsAlert.from_row(dict(r)) for r in recoveries_rows],
+            "escalations": [OpsAlert.from_row(dict(r)) for r in escalations_rows],
+        }
+
+    async def mark_notified(
+        self,
+        alert_id: UUID,
+        notification_type: str,
+        telegram_message_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Conditionally mark alert as notified.
+
+        Args:
+            alert_id: The alert to mark
+            notification_type: "activation" | "recovery" | "escalation"
+            telegram_message_id: Optional message ID from Telegram
+
+        Returns:
+            True if this call won the race (updated the row).
+            False if another worker already marked it.
+
+        Uses WHERE *_notified_at IS NULL to prevent races.
+        """
+        column_map = {
+            "activation": "notified_at",
+            "recovery": "recovery_notified_at",
+            "escalation": "escalation_notified_at",
+        }
+
+        column = column_map.get(notification_type)
+        if not column:
+            raise ValueError(f"Invalid notification_type: {notification_type}")
+
+        # Conditional update - only succeeds if not already notified
+        query = f"""
+            UPDATE ops_alerts
+            SET {column} = NOW(),
+                telegram_message_id = COALESCE($2, telegram_message_id)
+            WHERE id = $1 AND {column} IS NULL
+            RETURNING id
+        """
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, alert_id, telegram_message_id)
+
+        if row:
+            logger.info(
+                "ops_alert_marked_notified",
+                alert_id=str(alert_id),
+                notification_type=notification_type,
+            )
+            return True
+        return False
+
+    async def mark_delivery_failed(
+        self,
+        alert_id: UUID,
+        notification_type: str,
+        error: str,
+    ) -> None:
+        """
+        Record delivery failure for an alert.
+
+        Increments delivery_attempts and stores last_delivery_error.
+        Only updates if the relevant *_notified_at IS NULL (don't stomp after success).
+
+        Args:
+            alert_id: The alert that failed
+            notification_type: "activation" | "recovery" | "escalation"
+            error: Error message for debugging
+        """
+        column_map = {
+            "activation": "notified_at",
+            "recovery": "recovery_notified_at",
+            "escalation": "escalation_notified_at",
+        }
+
+        column = column_map.get(notification_type)
+        if not column:
+            raise ValueError(f"Invalid notification_type: {notification_type}")
+
+        # Conditional update - only if not already notified
+        query = f"""
+            UPDATE ops_alerts
+            SET delivery_attempts = delivery_attempts + 1,
+                last_delivery_error = $2
+            WHERE id = $1 AND {column} IS NULL
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, alert_id, error)
+
+        logger.warning(
+            "ops_alert_delivery_failed",
+            alert_id=str(alert_id),
+            notification_type=notification_type,
+            error=error,
+        )

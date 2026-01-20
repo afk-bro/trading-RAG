@@ -17,7 +17,7 @@ import structlog
 from app.jobs.models import Job
 from app.jobs.registry import default_registry
 from app.jobs.types import JobType
-from app.repositories.ops_alerts import OpsAlertsRepository, OpsAlert
+from app.repositories.ops_alerts import OpsAlertsRepository
 from app.services.ops_alerts.evaluator import OpsAlertEvaluator
 from app.services.ops_alerts.telegram import get_telegram_notifier
 
@@ -119,12 +119,11 @@ async def handle_ops_alert_eval(job: Job, ctx: dict[str, Any]) -> dict[str, Any]
             if eval_result.errors:
                 result["errors"].extend([f"{ws_id}:{e}" for e in eval_result.errors])
 
-            # Collect alerts to notify
+            # Send pending notifications (idempotent - queries DB state)
             if notifier and not dry_run:
                 sent = await _send_notifications(
                     notifier=notifier,
                     repo=repo,
-                    eval_result=eval_result,
                     workspace_id=ws_id,
                 )
                 result["telegram_sent"] += sent
@@ -177,62 +176,68 @@ async def _get_active_workspaces(pool) -> list[UUID]:
 async def _send_notifications(
     notifier,
     repo: OpsAlertsRepository,
-    eval_result,
     workspace_id: UUID,
 ) -> int:
     """
-    Send Telegram notifications for new, resolved, and escalated alerts.
+    Send pending Telegram notifications for a workspace.
 
-    Returns count of messages sent.
+    Uses DB state as source of truth (not eval_result) for idempotency.
+    Conditional mark prevents duplicate notifications from concurrent workers.
+
+    Returns count of messages successfully sent and marked.
     """
     sent = 0
 
-    # Collect alerts to notify
-    alerts_to_notify: list[tuple[OpsAlert, bool, bool]] = (
-        []
-    )  # (alert, is_recovery, is_escalation)
+    # Query DB for all pending notifications
+    pending = await repo.get_pending_notifications(workspace_id)
 
-    for rule_type, details in eval_result.by_rule_type.items():
-        alert_id_str = details.get("alert_id")
-        if not alert_id_str:
-            continue
-
-        alert_id = UUID(alert_id_str)
-
-        # New alert
-        if details.get("new"):
-            alert = await repo.get(alert_id)
-            if alert:
-                alerts_to_notify.append((alert, False, False))
-
-        # Escalated alert
-        elif details.get("escalated"):
-            alert = await repo.get(alert_id)
-            if alert:
-                alerts_to_notify.append((alert, False, True))
-
-        # Resolved alert
-        if details.get("resolved"):
-            # For resolved, we need to find the alert that was resolved
-            # The alert_id in details is from the upsert, not the resolved one
-            # We need to look it up differently
-            pass
-
-    # Handle resolved alerts
-    for rule_type, details in eval_result.by_rule_type.items():
-        if details.get("resolved"):
-            # Find the most recently resolved alert for this rule type
-            alerts, _ = await repo.list_alerts(
-                workspace_id=workspace_id,
-                status=["resolved"],
-                rule_type=[rule_type],
-                limit=1,
+    # Process activations (new alerts)
+    for alert in pending["activations"]:
+        try:
+            result = await notifier.send_alert(alert, is_recovery=False, is_escalation=False)
+            if result.ok:
+                # Conditional mark - only count if we won the race
+                if await repo.mark_notified(alert.id, "activation", result.message_id):
+                    sent += 1
+        except Exception as e:
+            await repo.mark_delivery_failed(alert.id, "activation", str(e))
+            logger.warning(
+                "notification_delivery_error",
+                alert_id=str(alert.id),
+                notification_type="activation",
+                error=str(e),
             )
-            if alerts:
-                alerts_to_notify.append((alerts[0], True, False))
 
-    # Send notifications
-    if alerts_to_notify:
-        sent = await notifier.send_batch(alerts_to_notify)
+    # Process recoveries (resolved alerts)
+    for alert in pending["recoveries"]:
+        try:
+            result = await notifier.send_alert(alert, is_recovery=True, is_escalation=False)
+            if result.ok:
+                if await repo.mark_notified(alert.id, "recovery", result.message_id):
+                    sent += 1
+        except Exception as e:
+            await repo.mark_delivery_failed(alert.id, "recovery", str(e))
+            logger.warning(
+                "notification_delivery_error",
+                alert_id=str(alert.id),
+                notification_type="recovery",
+                error=str(e),
+            )
+
+    # Process escalations (severity bumped on already-activated alerts)
+    for alert in pending["escalations"]:
+        try:
+            result = await notifier.send_alert(alert, is_recovery=False, is_escalation=True)
+            if result.ok:
+                if await repo.mark_notified(alert.id, "escalation", result.message_id):
+                    sent += 1
+        except Exception as e:
+            await repo.mark_delivery_failed(alert.id, "escalation", str(e))
+            logger.warning(
+                "notification_delivery_error",
+                alert_id=str(alert.id),
+                notification_type="escalation",
+                error=str(e),
+            )
 
     return sent

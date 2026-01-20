@@ -353,8 +353,8 @@ class TestTelegramNotifier:
         assert notifier._escape_html("&test") == "&amp;test"
 
     @pytest.mark.asyncio
-    async def test_disabled_notifier_returns_false(self):
-        """Disabled notifier returns False without sending."""
+    async def test_disabled_notifier_returns_not_ok(self):
+        """Disabled notifier returns SendResult(ok=False) without sending."""
         notifier = TelegramNotifier(
             bot_token="test",
             chat_id="123",
@@ -364,7 +364,8 @@ class TestTelegramNotifier:
         # This would fail if it tried to actually send
         result = await notifier.send_alert(MagicMock(), is_recovery=False)
 
-        assert result is False
+        assert result.ok is False
+        assert result.message_id is None
 
 
 class TestUpsertResult:

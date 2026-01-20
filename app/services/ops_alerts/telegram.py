@@ -1,6 +1,7 @@
 """Telegram notifier for operational alerts."""
 
 import asyncio
+from dataclasses import dataclass
 from typing import Optional
 
 import httpx
@@ -9,6 +10,14 @@ import structlog
 from app.repositories.ops_alerts import OpsAlert
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class SendResult:
+    """Result from sending a Telegram notification."""
+
+    ok: bool
+    message_id: Optional[str] = None
 
 
 # Severity emoji mapping
@@ -85,7 +94,7 @@ class TelegramNotifier:
         alert: OpsAlert,
         is_recovery: bool = False,
         is_escalation: bool = False,
-    ) -> bool:
+    ) -> SendResult:
         """
         Send alert notification to Telegram.
 
@@ -95,11 +104,11 @@ class TelegramNotifier:
             is_escalation: True if severity escalated
 
         Returns:
-            True if message sent successfully, False otherwise
+            SendResult with ok=True and message_id if successful
         """
         if not self.enabled:
             logger.debug("telegram_disabled", alert_id=str(alert.id))
-            return False
+            return SendResult(ok=False)
 
         message = self._format_message(alert, is_recovery, is_escalation)
 
@@ -272,7 +281,7 @@ class TelegramNotifier:
 
     async def _send(
         self, message: str, alert_id, topic_id: Optional[int] = None
-    ) -> bool:
+    ) -> SendResult:
         """Send message to Telegram with retry."""
         payload = {
             "chat_id": self.chat_id,
@@ -292,11 +301,23 @@ class TelegramNotifier:
                     resp = await client.post(url, json=payload)
 
                     if resp.status_code == 200:
+                        # Extract message_id from response
+                        message_id = None
+                        try:
+                            data = resp.json()
+                            result = data.get("result", {})
+                            msg_id = result.get("message_id")
+                            if msg_id is not None:
+                                message_id = str(msg_id)
+                        except Exception:
+                            pass  # message_id is optional
+
                         logger.info(
                             "telegram_sent",
                             alert_id=str(alert_id),
+                            message_id=message_id,
                         )
-                        return True
+                        return SendResult(ok=True, message_id=message_id)
 
                     if resp.status_code == 400:
                         # Bad request - don't retry
@@ -305,7 +326,7 @@ class TelegramNotifier:
                             alert_id=str(alert_id),
                             response=resp.text[:200],
                         )
-                        return False
+                        return SendResult(ok=False)
 
                     # 429 or 5xx - retry
                     logger.warning(
@@ -327,7 +348,7 @@ class TelegramNotifier:
                 await asyncio.sleep(1)  # Brief backoff before retry
 
         logger.error("telegram_failed", alert_id=str(alert_id))
-        return False
+        return SendResult(ok=False)
 
 
 def get_telegram_notifier() -> Optional[TelegramNotifier]:
