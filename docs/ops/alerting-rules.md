@@ -365,3 +365,89 @@ Alerts are routed to Telegram forum topics based on category:
 | `POST /admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
 | `POST /admin/ops-alerts/{id}/resolve` | Mark alert resolved |
 | `POST /admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
+
+### Production Sanity Checks
+
+Run these checks in dev/staging with seeded intel snapshots to verify alert behavior:
+
+#### 1. Persistence Gate
+
+**Test:** First low snapshot should NOT trigger alert; second consecutive low should trigger.
+
+```bash
+# Seed first low snapshot (score=0.30)
+# Run evaluator → verify NO alert created
+
+# Seed second low snapshot (score=0.28)
+# Run evaluator → verify alert IS created with:
+#   - rule_type = "strategy_confidence_low"
+#   - severity = "medium"
+#   - payload.consecutive_low_count = 2
+```
+
+#### 2. Escalation (Warn → Critical)
+
+**Test:** Alert severity escalates when score drops below critical threshold.
+
+```bash
+# Start with warn-level alert (score=0.30, 0.28)
+# Seed two critical snapshots (score=0.18, 0.15)
+# Run evaluator → verify:
+#   - Existing alert updated (not new)
+#   - severity = "high"
+#   - dedupe_key changes to include ":critical:"
+#   - escalation_notified_at is NULL (ready for notification)
+```
+
+#### 3. Hysteresis (No Premature Clear)
+
+**Test:** Recovering to 0.36 should NOT clear warn (must exceed 0.40).
+
+```bash
+# With active warn alert (trigger at 0.35)
+# Seed recovery snapshot (score=0.36)
+# Run evaluator → verify:
+#   - Alert NOT resolved
+#   - Still in triggered_keys set
+
+# Seed recovery snapshot (score=0.41)
+# Run evaluator → verify:
+#   - Alert IS resolved
+#   - Recovery notification sent
+```
+
+#### 4. Resolution & Recovery Notification
+
+**Test:** When score recovers, alert resolves and recovery message is sent.
+
+```bash
+# With active alert
+# Seed two healthy snapshots (score=0.75, 0.80)
+# Run evaluator → verify:
+#   - Alert resolved_at is set
+#   - Recovery notification sent to Telegram (if enabled)
+#   - Prometheus metric: ops_alert_resolved_total incremented
+```
+
+#### 5. Dedupe Identity (No Spam)
+
+**Test:** Repeated runs with same condition don't spam new alerts.
+
+```bash
+# With triggered condition
+# Run evaluator 3x → verify:
+#   - Only 1 alert exists (same dedupe_key)
+#   - occurrence_count incremented
+#   - No duplicate Telegram messages
+```
+
+#### Automated Test Coverage
+
+These behaviors are covered by unit tests in:
+- `tests/unit/test_ops_alert_strategy_confidence.py`
+  - `test_single_low_score_no_trigger` - persistence gate
+  - `test_consecutive_warn_triggers` - basic trigger
+  - `test_consecutive_critical_triggers` - critical severity
+  - `test_escalation_warn_to_critical` - escalation
+  - `test_resolves_when_score_recovers` - resolution
+  - `test_no_resolve_when_still_triggered` - hysteresis

@@ -893,6 +893,135 @@ def record_pine_repo_scan(
         PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="deleted").inc(scripts_deleted)
 
 
+# =============================================================================
+# Ops Alerts Metrics
+# =============================================================================
+
+OPS_ALERT_EVALS = Counter(
+    "ops_alert_evals_total",
+    "Total ops alert rule evaluations",
+    ["rule_type", "result"],  # result: triggered, not_triggered, skipped
+)
+
+OPS_ALERT_TRIGGERED = Counter(
+    "ops_alert_triggered_total",
+    "Total ops alerts triggered (new or updated)",
+    ["rule_type", "severity"],
+)
+
+OPS_ALERT_RESOLVED = Counter(
+    "ops_alert_resolved_total",
+    "Total ops alerts resolved",
+    ["rule_type"],
+)
+
+OPS_ALERT_ACTIVE = Gauge(
+    "ops_alert_active",
+    "Currently active ops alerts",
+    ["rule_type", "severity"],
+)
+
+OPS_ALERT_NOTIFICATIONS = Counter(
+    "ops_alert_notifications_total",
+    "Total ops alert notifications sent",
+    [
+        "rule_type",
+        "notification_type",
+    ],  # notification_type: activation, recovery, escalation
+)
+
+# Strategy confidence specific metrics (for detailed observability)
+STRATEGY_CONFIDENCE_SCORE = Gauge(
+    "strategy_confidence_score",
+    "Current confidence score for active strategy versions",
+    ["version_id"],
+)
+
+STRATEGY_CONFIDENCE_ALERT_DURATION = Histogram(
+    "strategy_confidence_alert_duration_seconds",
+    "Duration of strategy confidence alerts (time to resolution)",
+    buckets=[300, 900, 1800, 3600, 7200, 14400, 28800, 86400],  # 5m to 24h
+)
+
+
+def record_ops_alert_eval(rule_type: str, triggered: bool, skipped: bool = False):
+    """Record ops alert rule evaluation.
+
+    Args:
+        rule_type: The rule type evaluated (e.g., "strategy_confidence_low")
+        triggered: Whether the rule triggered an alert
+        skipped: Whether evaluation was skipped (e.g., missing data)
+    """
+    if skipped:
+        result = "skipped"
+    elif triggered:
+        result = "triggered"
+    else:
+        result = "not_triggered"
+    OPS_ALERT_EVALS.labels(rule_type=rule_type, result=result).inc()
+
+
+def record_ops_alert_triggered(rule_type: str, severity: str):
+    """Record ops alert triggered (new or updated).
+
+    Args:
+        rule_type: The rule type (e.g., "strategy_confidence_low")
+        severity: Alert severity (low, medium, high, critical)
+    """
+    OPS_ALERT_TRIGGERED.labels(rule_type=rule_type, severity=severity).inc()
+
+
+def record_ops_alert_resolved(rule_type: str):
+    """Record ops alert resolved.
+
+    Args:
+        rule_type: The rule type resolved
+    """
+    OPS_ALERT_RESOLVED.labels(rule_type=rule_type).inc()
+
+
+def set_ops_alert_active(rule_type: str, severity: str, count: int):
+    """Set count of active ops alerts.
+
+    Args:
+        rule_type: The rule type
+        severity: Alert severity
+        count: Number of active alerts
+    """
+    OPS_ALERT_ACTIVE.labels(rule_type=rule_type, severity=severity).set(count)
+
+
+def record_ops_alert_notification(rule_type: str, notification_type: str):
+    """Record ops alert notification sent.
+
+    Args:
+        rule_type: The rule type
+        notification_type: Type of notification (activation, recovery, escalation)
+    """
+    OPS_ALERT_NOTIFICATIONS.labels(
+        rule_type=rule_type, notification_type=notification_type
+    ).inc()
+
+
+def set_strategy_confidence_score(version_id: str, score: float):
+    """Set current confidence score for a strategy version.
+
+    Args:
+        version_id: Strategy version UUID
+        score: Confidence score [0, 1]
+    """
+    STRATEGY_CONFIDENCE_SCORE.labels(version_id=version_id).set(score)
+
+
+def record_strategy_confidence_alert_duration(duration_seconds: float):
+    """Record duration of a strategy confidence alert (time to resolution).
+
+    Args:
+        duration_seconds: Time from alert trigger to resolution
+    """
+    STRATEGY_CONFIDENCE_ALERT_DURATION.observe(duration_seconds)
+
+
 @router.get("/metrics", include_in_schema=False)
 async def metrics():
     """Prometheus metrics endpoint.

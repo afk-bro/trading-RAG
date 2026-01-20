@@ -392,6 +392,78 @@ class TestStrategyConfidenceEvaluation:
         expected_key = f"strategy_confidence_low:{sample_version_id}:warn:2026-01-19"
         assert conditions[0].dedupe_key == expected_key
 
+    @pytest.mark.asyncio
+    async def test_weak_components_golden_contract(
+        self, evaluator, sample_version_id, sample_strategy_id
+    ):
+        """Golden test: weak_components format is sorted, capped to 3, has name+score."""
+        rule = get_rule(OpsRuleType.STRATEGY_CONFIDENCE_LOW)
+
+        # All 5 components with distinct scores for clear ordering
+        snapshots = [
+            {
+                "as_of_ts": datetime.now(timezone.utc),
+                "computed_at": datetime.now(timezone.utc),
+                "regime": "trend-down|volatility-high",
+                "confidence_score": 0.18,  # Critical level
+                "confidence_components": {
+                    "performance": 0.9,  # Strongest (excluded)
+                    "regime_fit": 0.7,  # Second strongest (excluded)
+                    "data_freshness": 0.5,  # Third (included as #3)
+                    "stability": 0.3,  # Fourth (included as #2)
+                    "drawdown": 0.1,  # Weakest (included as #1)
+                },
+            },
+            {
+                "as_of_ts": datetime.now(timezone.utc),
+                "computed_at": datetime.now(timezone.utc),
+                "regime": "trend-down|volatility-high",
+                "confidence_score": 0.15,
+                "confidence_components": {
+                    "performance": 0.9,
+                    "regime_fit": 0.7,
+                    "data_freshness": 0.5,
+                    "stability": 0.3,
+                    "drawdown": 0.1,
+                },
+            },
+        ]
+        intel_data = [make_intel_data(sample_version_id, sample_strategy_id, snapshots)]
+
+        ctx = EvalContext(
+            workspace_id=uuid4(),
+            now=datetime.now(timezone.utc),
+            strategy_intel=intel_data,
+        )
+
+        conditions = await evaluator._eval_strategy_confidence_low(rule, ctx)
+
+        assert conditions[0].triggered is True
+        weak = conditions[0].payload["weak_components"]
+
+        # Contract: exactly 3 components
+        assert len(weak) == 3, "weak_components must be capped to 3"
+
+        # Contract: sorted by score ascending (weakest first)
+        assert (
+            weak[0]["score"] <= weak[1]["score"] <= weak[2]["score"]
+        ), "weak_components must be sorted by score ascending"
+
+        # Contract: each entry has name and score keys
+        for entry in weak:
+            assert "name" in entry, "Each weak_component must have 'name'"
+            assert "score" in entry, "Each weak_component must have 'score'"
+            assert isinstance(entry["name"], str)
+            assert isinstance(entry["score"], (int, float))
+
+        # Contract: verify exact order for this test case
+        assert weak[0]["name"] == "drawdown"
+        assert weak[0]["score"] == 0.1
+        assert weak[1]["name"] == "stability"
+        assert weak[1]["score"] == 0.3
+        assert weak[2]["name"] == "data_freshness"
+        assert weak[2]["score"] == 0.5
+
 
 # =============================================================================
 # Resolution Tests

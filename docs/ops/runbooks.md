@@ -12,6 +12,7 @@ Standard operating procedures for Trading RAG service.
 6. [KB Trial Ingestion Operations](#kb-trial-ingestion-operations)
 7. [Service Restart Procedure](#service-restart-procedure)
 8. [Failure Modes & Recovery](#failure-modes--recovery)
+9. [Strategy Alerts](#strategy-alerts)
 
 ---
 
@@ -565,6 +566,121 @@ Recommended alert rules:
   for: 5m
   labels:
     severity: warning
+```
+
+---
+
+## Strategy Alerts
+
+Operational alerts for strategy intelligence monitoring.
+
+### STRATEGY_CONFIDENCE_LOW
+
+**Triggers when:** Strategy version's confidence score drops below thresholds for 2+ consecutive snapshots.
+
+| Severity | Threshold | Meaning |
+|----------|-----------|---------|
+| MEDIUM (warn) | `score < 0.35` | Confidence degraded, attention needed |
+| HIGH (critical) | `score < 0.20` | Confidence severely degraded, action required |
+
+**Auto-resolves when:** Score recovers above hysteresis threshold (warn: 0.40, critical: 0.25)
+
+### When STRATEGY_CONFIDENCE_LOW Fires
+
+#### 1. Confirm Snapshot Freshness
+
+Check that `as_of_ts` in the payload isn't stale:
+
+```bash
+# View alert payload
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "strategy_confidence_low")'
+```
+
+If `as_of_ts` is hours old, investigate why intel snapshots aren't being computed:
+- Check intel runner job status
+- Verify OHLCV data feed is current
+- Check for errors in intel computation logs
+
+#### 2. Analyze weak_components
+
+The alert payload includes the 3 weakest confidence components. Map each to action:
+
+| Component | Low Score Meaning | Action |
+|-----------|-------------------|--------|
+| `performance` | Strategy underperforming in recent window | Review recent trades, consider pause if persistent |
+| `drawdown` | Drawdown exceeds acceptable threshold | Check position sizing, verify risk limits |
+| `stability` | Inconsistent WFO results across folds | Widen parameter filters or reduce leverage |
+| `data_freshness` | Stale or missing data | Check OHLCV ingest, verify live data provider |
+| `regime_fit` | Current market regime doesn't match strategy's strength | Consider regime gating, may need to wait for regime change |
+
+#### 3. Review Regime Context
+
+```bash
+# Get latest intel snapshot for the version
+curl -s "http://localhost:8000/strategies/{id}/versions/{vid}/intel/latest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.regime, .confidence_components'
+```
+
+Check if regime has recently changed - a sudden regime shift can cause temporary confidence drops.
+
+#### 4. Action Ladder
+
+| Severity | Recommended Action |
+|----------|-------------------|
+| **MEDIUM (warn)** | Monitor closely. If persists >24h, consider pausing version. Review weak components for root cause. |
+| **HIGH (critical)** | Immediate attention. Strongly consider pausing version. Do NOT ignore - critical confidence indicates high risk. |
+
+#### 5. Pausing a Strategy Version
+
+```bash
+# Pause the affected version
+curl -X POST "http://localhost:8000/strategies/{strategy_id}/versions/{version_id}/pause" \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+After pausing, the alert will auto-resolve (version no longer active).
+
+### Prometheus Metrics
+
+Monitor alert patterns:
+
+```promql
+# Are confidence alerts noisy?
+rate(ops_alert_evals_total{rule_type="strategy_confidence_low", result="triggered"}[1h])
+
+# Warn vs critical ratio
+sum(ops_alert_triggered_total{rule_type="strategy_confidence_low", severity="medium"})
+/
+sum(ops_alert_triggered_total{rule_type="strategy_confidence_low", severity="high"})
+
+# Alert duration (time to resolution)
+histogram_quantile(0.95, sum(rate(strategy_confidence_alert_duration_seconds_bucket[24h])) by (le))
+
+# Currently active alerts
+ops_alert_active{rule_type="strategy_confidence_low"}
+```
+
+### Preventing Flapping
+
+If alerts are repeatedly triggering and resolving (flapping):
+
+1. **Check hysteresis gap** - Current gap is 5 points (trigger at 0.35, clear at 0.40). May need wider gap.
+2. **Check persistence count** - Currently requires 2 consecutive low snapshots. May need 3 for noisy data.
+3. **Review snapshot frequency** - If snapshots are too frequent, transient dips cause alerts.
+
+### Recovery Verification
+
+After addressing root cause, verify recovery:
+
+```bash
+# Check alert was resolved
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "strategy_confidence_low" and .resolved_at != null)'
+
+# Confirm score recovered
+curl -s "http://localhost:8000/strategies/{id}/versions/{vid}/intel/latest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.confidence_score'
 ```
 
 ---

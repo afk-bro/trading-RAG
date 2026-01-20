@@ -7,6 +7,11 @@ from uuid import UUID
 import structlog
 
 from app.repositories.ops_alerts import OpsAlertsRepository, OpsAlert
+from app.routers.metrics import (
+    record_ops_alert_eval,
+    record_ops_alert_resolved,
+    record_ops_alert_triggered,
+)
 from app.services.ops_alerts.models import (
     AlertCondition,
     EvalContext,
@@ -102,6 +107,12 @@ class OpsAlertEvaluator:
 
                     if condition.skip_reason:
                         rule_result["skipped"] = condition.skip_reason
+                        # Record metric: evaluation skipped
+                        record_ops_alert_eval(
+                            rule_type=rule.rule_type.value,
+                            triggered=False,
+                            skipped=True,
+                        )
                         log.debug(
                             "ops_alert_rule_skipped",
                             rule_type=rule.rule_type.value,
@@ -111,6 +122,13 @@ class OpsAlertEvaluator:
                         rule_result["triggered"] = True
                         rule_result["count"] = rule_result.get("count", 0) + 1
                         triggered_keys.add(condition.dedupe_key)
+
+                        # Record metric: evaluation triggered
+                        record_ops_alert_eval(
+                            rule_type=rule.rule_type.value,
+                            triggered=True,
+                            skipped=False,
+                        )
 
                         # Upsert the alert
                         upsert_result = await self.repo.upsert(
@@ -122,6 +140,12 @@ class OpsAlertEvaluator:
                             source="alert_evaluator",
                             job_run_id=job_run_id,
                             rule_version=rule.version,
+                        )
+
+                        # Record metric: alert triggered
+                        record_ops_alert_triggered(
+                            rule_type=rule.rule_type.value,
+                            severity=condition.severity.value,
                         )
 
                         result.alerts_triggered += 1
@@ -137,6 +161,13 @@ class OpsAlertEvaluator:
 
                         rule_result["alert_id"] = str(upsert_result.id)
                         rule_result["severity"] = condition.severity.value
+                    else:
+                        # Record metric: evaluation did not trigger
+                        record_ops_alert_eval(
+                            rule_type=rule.rule_type.value,
+                            triggered=False,
+                            skipped=False,
+                        )
 
                 result.by_rule_type[rule.rule_type.value] = rule_result
 
@@ -866,6 +897,8 @@ class OpsAlertEvaluator:
                     workspace_id, expected_key
                 )
                 if alert:
+                    # Record metric: alert resolved
+                    record_ops_alert_resolved(rule_type=rule_type.value)
                     logger.info(
                         "ops_alert_auto_resolved",
                         workspace_id=str(workspace_id),
@@ -885,6 +918,8 @@ class OpsAlertEvaluator:
                 # This alert's condition cleared (score recovered above threshold)
                 alert = await self.repo.resolve_by_dedupe_key(workspace_id, dedupe_key)
                 if alert:
+                    # Record metric: alert resolved
+                    record_ops_alert_resolved(rule_type="strategy_confidence_low")
                     logger.info(
                         "ops_alert_auto_resolved",
                         workspace_id=str(workspace_id),
