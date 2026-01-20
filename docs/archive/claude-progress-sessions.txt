@@ -1,5 +1,66 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 101 Summary
+Date: 2026-01-19
+Status: PR8 Strategy Confidence Alert Complete
+
+### Session Goals
+- Continue from previous context (PR8 implementation in progress)
+- Run and fix tests
+- Update documentation
+
+### Accomplished This Session
+
+**1. PR8 - Strategy Confidence Alert Rule (Complete)**
+- Fixed empty list vs None check bug in `_eval_strategy_confidence_low()`
+- All 16 unit tests passing for strategy confidence alerts
+- All 25 ops_alerts tests passing (no regressions)
+- Committed: `7655f39` feat(alerts): add strategy confidence low alert rule (PR8)
+
+**2. Documentation Updates**
+- CHANGELOG.md: Added v1.5 Step 3 PR8 entry with full feature details
+- docs/ops/alerting-rules.md: Added "Internal Ops Alerts System" section
+  - Documented all rule types with severity and data sources
+  - Detailed strategy_confidence_low thresholds, persistence, hysteresis
+  - Added example payload, response actions, Telegram routing
+- CLAUDE.md: Updated ops_alerts description
+- Committed: `c0ac21b` docs: update docs for strategy confidence alert rule (PR8)
+
+**3. Repository Cleanup**
+- Verified working tree clean
+- Confirmed gitignore properly configured
+- No stray files or cleanup needed
+
+### PR8 Implementation Summary
+- Rule type: `STRATEGY_CONFIDENCE_LOW`
+- Thresholds: warn < 0.35 (MEDIUM), critical < 0.20 (HIGH)
+- Persistence gate: 2 consecutive snapshots required
+- Auto-resolution with hysteresis: clear warn > 0.40, clear critical > 0.25
+- Dedupe key: `strategy_confidence_low:{version_id}:{severity}:{date}`
+- Payload: weak_components, regime, consecutive_low_count, thresholds
+
+### Files Modified
+- `app/services/ops_alerts/models.py` - Rule type, persistence_count field
+- `app/services/ops_alerts/evaluator.py` - Evaluation logic, context fetch, resolution
+- `tests/unit/test_ops_alert_strategy_confidence.py` - 16 new tests (created)
+- `CHANGELOG.md` - PR8 entry
+- `docs/ops/alerting-rules.md` - Internal ops alerts section
+- `CLAUDE.md` - ops_alerts description update
+
+### Commits This Session
+1. `7655f39` feat(alerts): add strategy confidence low alert rule (PR8)
+2. `c0ac21b` docs: update docs for strategy confidence alert rule (PR8)
+
+### v1.5 Progress
+- Step 1: Intel snapshots schema ✓
+- Step 2: Confidence computation + runner + API ✓
+- Step 3: Strategy alerts
+  - PR8: Confidence alerts ✓
+  - PR9: Drawdown alerts (deferred - needs equity storage)
+  - PR10: Admin UI affordance (optional)
+
+---
+
 ## Session 100 Summary
 Date: Session 100 (Fresh Context - Environment Still Blocked)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)
