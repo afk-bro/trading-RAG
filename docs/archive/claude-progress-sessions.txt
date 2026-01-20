@@ -1,7 +1,7 @@
 # Trading RAG Pipeline - Progress Notes
 
 ## Session 104 Summary
-Date: 2026-01-20
+Date: 2026-01-20 (evening, follows Session 103)
 Status: Backtest Chart Visualization MVP + CI Fixes
 
 ### Session Goals
@@ -11,18 +11,26 @@ Status: Backtest Chart Visualization MVP + CI Fixes
 
 ### Accomplished This Session
 
-**1. Backtest Chart Visualization MVP (app/routers/backtests/chart.py)**
+**1. Backtest Chart Visualization MVP**
+
+*API Endpoints (app/routers/backtests/chart.py):*
+- `GET /backtests/runs/{run_id}/chart-data` - Full chart payload
+- `GET /backtests/runs/{run_id}/export/json` - JSON snapshot
+- `GET /backtests/runs/{run_id}/export/trades.csv` - CSV export
+
+*Features:*
 - Plotly.js dual-axis chart (equity curve + drawdown overlay)
 - Summary stats display (return %, max DD, Sharpe, win rate, etc.)
 - Trades table with pagination
-- JSON and CSV export endpoints
 - JSONB string parsing for asyncpg edge cases
 
-**2. Admin UI Integration (app/admin/backtests.py)**
-- `GET /admin/backtests/runs/{run_id}` endpoint
+**2. Admin UI Integration**
+
+*Admin Page (app/admin/backtests.py):*
+- `GET /admin/backtests/runs/{run_id}` - Renders `backtest_run_detail.html`
 - Jinja2 template with Plotly visualization
 - Fixed UUID-to-string conversion for templates
-- Admin token authentication
+- Admin token authentication (X-Admin-Token header)
 
 **3. CI/CD Fixes**
 
@@ -73,10 +81,16 @@ Status: Backtest Chart Visualization MVP + CI Fixes
 4. `b5703cb` fix: resolve flake8 linting errors
 5. `f3dfa09` fix: resolve mypy type errors
 
+CI fixes split into separate commits to keep reviewable diffs.
+
 ### Key Technical Details
 
 **JSONB Parsing Issue**
-asyncpg sometimes returns JSONB as string instead of dict. Fixed by adding JSON string detection in `_parse_equity_curve()` and `_parse_trades()`:
+- **Symptom:** `equity_curve` returning empty despite DB having 1000 points
+- **Root cause:** asyncpg sometimes returns JSONB as string instead of dict
+- **Fix:** Added JSON string detection in `_parse_equity_curve()` and `_parse_trades()`
+- **Safety:** Only parses strings; dict/list pass through unchanged
+
 ```python
 if isinstance(raw, str):
     try:
