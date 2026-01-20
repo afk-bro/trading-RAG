@@ -1,0 +1,852 @@
+<project_specification>
+  <project_name>rag-core - Multi-Tenant RAG Pipeline</project_name>
+
+  <overview>
+    Build a multi-tenant Retrieval-Augmented Generation (RAG) pipeline with workspace-scoped
+    configuration. The system ingests documents (YouTube transcripts, PDFs, articles, web pages,
+    raw text) via n8n orchestration or direct API, processes them through a FastAPI service that
+    handles extraction, chunking, embedding, and storage. Documents and metadata are stored in
+    Supabase Postgres (source of truth), vectors in Qdrant (index). Embeddings are generated
+    locally via Ollama (zero cost, data stays local), while LLM generation uses OpenRouter API
+    (quality where it matters). The architecture prioritizes idempotency, workspace isolation,
+    swappable backends, and clean model migrations.
+  </overview>
+
+  <technology_stack>
+    <orchestration>
+      <platform>n8n (self-hosted, Docker)</platform>
+      <trigger>Google Sheets - YouTube Ingest Queue</trigger>
+      <pattern>State machine with lease-based locking</pattern>
+      <responsibilities>Watch queue, lock rows, call service, update status, fan out playlists</responsibilities>
+    </orchestration>
+    <backend>
+      <framework>Python FastAPI</framework>
+      <async>asyncio + httpx + asyncpg</async>
+      <validation>Pydantic v2 with strict types</validation>
+      <port>8000</port>
+    </backend>
+    <databases>
+      <primary>Supabase Postgres (cloud) - workspaces, documents, chunks, chunk_vectors</primary>
+      <vectors>Qdrant (local Docker) - embedding vectors with payload filtering</vectors>
+      <storage>Supabase Storage (recommended) - original files, extracted text</storage>
+      <connection>asyncpg for raw SQL, Supabase client for auth/management</connection>
+    </databases>
+    <embeddings>
+      <provider>Ollama (local, default) | OpenAI | Cohere | Voyage (future)</provider>
+      <model>nomic-embed-text (768 dimensions, default)</model>
+      <benefits>Zero marginal cost, data stays local, re-embed freely</benefits>
+    </embeddings>
+    <llm>
+      <provider>OpenRouter API (optional)</provider>
+      <model>anthropic/claude-sonnet-4 (configurable per workspace)</model>
+      <use_cases>Query answering, reranking, entity extraction</use_cases>
+      <graceful_degradation>
+        Service starts and runs without LLM configuration.
+        mode=retrieve always works (semantic search only).
+        mode=answer returns retrieved chunks with helpful message when LLM not configured.
+      </graceful_degradation>
+    </llm>
+    <extraction>
+      <pdf>PyMuPDF (default) | pdfplumber | MinerU (future) | StudyG (future)</pdf>
+      <text>Direct read with normalization</text>
+      <html>Readability-style boilerplate removal (future)</html>
+      <docx>Text + headings extraction (future)</docx>
+    </extraction>
+    <infrastructure>
+      <containerization>Docker Compose</containerization>
+      <network>rag-net (Qdrant, Ollama, trading-rag-svc)</network>
+      <external>n8n (separate compose, calls via localhost:8000)</external>
+    </infrastructure>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Docker and Docker Compose installed
+      - Supabase project with Postgres database
+      - Google Cloud project with Sheets API enabled (for n8n YouTube queue)
+      - n8n instance running (existing docker-compose in ~/dev/automation-infra/n8n)
+      - OpenRouter API key (optional - only required for mode=answer queries)
+      - YouTube Data API key (optional, for metadata enrichment)
+    </environment_setup>
+    <configuration>
+      - .env file with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (required)
+      - .env file with OPENROUTER_API_KEY (optional - enables LLM answer generation)
+      - Google Sheets OAuth credentials configured in n8n
+      - Ollama model pulled: `ollama pull nomic-embed-text`
+    </configuration>
+  </prerequisites>
+
+  <core_features>
+    <workspace_control_plane>
+      - Multi-tenant isolation via workspace_id on all tables
+      - Workspaces table with routing header columns (first-class, queryable)
+      - Configurable defaults: collection, embed_provider, embed_model, distance metric
+      - Control flags: is_active, ingestion_enabled
+      - Flexible config JSONB for chunking, retrieval, PDF settings
+      - Per-workspace quotas and rate limits (future)
+    </workspace_control_plane>
+
+    <ingestion_inputs>
+      <file_uploads>
+        - PDF extraction with swappable backends (pymupdf, pdfplumber)
+        - TXT/MD direct read with normalization
+        - DOCX text + headings extraction (future)
+        - HTML boilerplate removal (future)
+        - Multi-file batch upload support
+      </file_uploads>
+      <links>
+        - YouTube video transcript extraction
+        - YouTube playlist expansion (fan-out to individual videos)
+        - YouTube channel ingestion (future)
+        - Generic URL web page extraction (future)
+      </links>
+      <raw_text>
+        - Paste text ingestion via API
+        - JSON API ingestion (title + body + metadata)
+      </raw_text>
+      <batch_ingestion>
+        - Multi-file upload
+        - List of URLs
+        - CSV manifest (source_uri + metadata) (future)
+      </batch_ingestion>
+      <validation>
+        - Client-side type/size validation
+        - Server-side validation
+        - Duplicate detection warnings
+        - Preflight estimated cost/time (pages, tokens, chunks) (future)
+      </validation>
+    </ingestion_inputs>
+
+    <youtube_ingestion>
+      - Parse YouTube URLs (single video or playlist)
+      - Extract video metadata (title, channel, published_at, duration)
+      - Fetch transcripts with retry + exponential backoff
+      - Handle missing transcripts gracefully (mark as terminal error)
+      - Playlist expansion into individual video rows
+      - Timestamp-aware chunking with locator labels
+      - Normalize transcript artifacts ([Music], repeated phrases)
+    </youtube_ingestion>
+
+    <pdf_extraction>
+      - Swappable backend interface: extract_pdf(file_bytes, config) -> PDFExtractionResult
+      - Backends: pymupdf (default), pdfplumber, mineru (future), studyg (future)
+      - Page-aware extraction with character offsets
+      - Configurable: max_pages, min_chars_per_page, join_pages_with, enable_ocr (future)
+      - Quality scoring: chars/page, blank page detection, warnings
+      - Workspace-configurable extraction settings (workspaces.config.pdf)
+      - Per-job override support
+    </pdf_extraction>
+
+    <document_ingestion>
+      - Generic /ingest endpoint for non-YouTube sources
+      - Support for pdf, article, note, transcript source types
+      - Pre-chunked input support (caller provides chunks)
+      - Content hashing for deduplication
+      - Idempotency via idempotency_key or canonical_url
+      - Write-new-first pattern for safe updates
+      - Per-input metadata: title, tags, source label, visibility flags (future)
+    </document_ingestion>
+
+    <chunking_pipeline>
+      <strategies>
+        - Fixed-size token chunking (~512 tokens max, default)
+        - Recursive split (paragraph → sentence → token) (future)
+        - Section-aware chunking (headings) (future)
+        - Page-aware chunking (preserve page boundaries for PDFs)
+        - Table-aware chunking (future)
+        - Code-aware chunking (future)
+      </strategies>
+      <parameters>
+        - chunk_size (tokens), overlap_tokens
+        - min_chunk_size (drop tiny chunks)
+        - max_chunk_size (force split)
+        - join_pages_with separator
+        - Workspace defaults + per-job override
+      </parameters>
+      <features>
+        - Preserve timestamps for YouTube/podcast content
+        - Generate locator_label ("12:34", "p. 17", "pp. 17-19")
+        - Count tokens per chunk via tiktoken
+        - Remove duplicate/low-signal chunks
+      </features>
+    </chunking_pipeline>
+
+    <metadata_extraction>
+      - Symbols: regex + ticker allowlist, uppercase normalization
+      - Entities: keyword match (Fed, Powell, FOMC, central banks, companies)
+      - Topics: keyword classifier (macro, earnings, tech, rates, etc.)
+      - Speaker detection (for multi-speaker content)
+      - Quality score estimation (transcript confidence)
+      - Language detection (future)
+    </metadata_extraction>
+
+    <embedding_pipeline>
+      - Batch embedding via Ollama (default)
+      - Provider selection: ollama (local), openai (future), cohere (future)
+      - Model selection per workspace + override per job
+      - Dimension detection at startup
+      - Collection validation (dim + distance match)
+      - chunk_vectors table for model migration support
+      - Rate limiting / concurrency control
+      - Retry with exponential backoff
+    </embedding_pipeline>
+
+    <vector_storage>
+      - Qdrant collection per embedding model
+      - Lean payload (filter keys only, no content)
+      - Payload indexes on workspace_id, published_at, source_type, symbols, topics
+      - Point ID = chunk_id (UUID, clean 1:1 mapping)
+      - Write-new-first, delete-old-after-success pattern
+      - Multi-collection routing (per-workspace or per-doc-type)
+      - Create collection if missing on workspace create or first ingest
+      - Consistency checks: verify count in Qdrant matches chunk_vectors rows
+    </vector_storage>
+
+    <retrieval>
+      <query_modes>
+        - Semantic vector search (default)
+        - Hybrid search (BM25 + vector) (future)
+        - Metadata-only filter search (future)
+      </query_modes>
+      <features>
+        - Configurable retrieve_k and top_k
+        - Score threshold filtering
+        - Filter mapping: QueryFilters → Qdrant payload filters
+        - symbols_mode: "any" vs "all" matching
+        - Date range filtering (published_from, published_to)
+        - Hydration from Postgres with preserved ranking order
+        - Citation URL builder with timestamp/page locators
+        - Chunk grouping by document (future)
+        - Merge adjacent chunks (future)
+        - Highlight query terms (future)
+      </features>
+      <debug_tools>
+        - Explain search mode: embed model, collection, filters, scores
+        - Raw Qdrant response toggle (dev only)
+      </debug_tools>
+    </retrieval>
+
+    <reranking>
+      - Pluggable rerank providers (none, api, local)
+      - Over-fetch pattern: retrieve_k > top_k
+      - Optional LLM-as-reranker for top chunks
+      - Lightweight heuristic rerank (source bias, freshness) (future)
+      - Cross-encoder reranker (future)
+    </reranking>
+
+    <answer_generation>
+      - Mode: "retrieve" (chunks only) vs "answer" (LLM synthesis)
+      - Configurable answer_model and max_context_tokens
+      - Workspace routing header drives model selection
+      - Prompt templates: default system prompt, workspace custom override
+      - Citation format: [1], [2], etc.
+      - Source attribution with clickable URLs
+      - Guardrails: "I don't know" if evidence insufficient
+      - Markdown output, bullet summaries, quote blocks
+      - Graceful degradation: without OPENROUTER_API_KEY configured:
+        * mode=retrieve works normally (semantic search only)
+        * mode=answer returns retrieved chunks + helpful message
+        * Confirms system is working, shows retrieval results
+        * No vendor lock-in, service starts without external LLM
+    </answer_generation>
+
+    <conversation_support>
+      - Threaded chat sessions (future)
+      - Store: user messages, assistant responses, retrieved chunk ids
+      - "Regenerate" with same retrieval vs re-retrieve (future)
+      - Feedback buttons: 👍/👎, citation wrong, missing info (future)
+      - Golden questions per workspace for regression tests (future)
+    </conversation_support>
+
+    <model_migration>
+      - /reembed endpoint for re-embedding with new model
+      - Target collection naming: kb_{model}_{version}
+      - Async job execution with status tracking
+      - chunk_vectors table tracks embeddings per model/collection
+      - Swap active collection via env var or workspace config
+    </model_migration>
+
+    <background_jobs>
+      <job_types>
+        - ingest_upload, ingest_youtube, extract_pdf
+        - chunk, embed, upsert_qdrant
+        - reindex_document, delete_document
+      </job_types>
+      <job_states>
+        - queued, running, succeeded, failed, cancelled
+      </job_states>
+      <features>
+        - Progress reporting: percent complete, stage label, processed counts
+        - Automatic retries for transient failures
+        - Max retries + backoff
+        - Dead-letter queue for failed jobs with error details
+        - Polling endpoints for job/document status
+        - SSE stream for job updates (future)
+      </features>
+      <architecture>
+        - v1: in-process background tasks
+        - v2: separate worker container + queue (Redis) (future)
+        - Concurrency limits per workspace
+      </architecture>
+    </background_jobs>
+
+    <observability>
+      - Structured logging with request_id
+      - Timing spans for pipeline stages
+      - Health endpoint with latency_ms per dependency
+      - Service version in health response
+      - Error tracking with retryable flag
+      - Metrics: ingest throughput, embedding latency, search latency
+      - Error reporting integration (Sentry) (future)
+    </observability>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <workspaces>
+        - id (uuid pk), name (text), slug (text unique)
+        - owner_id (uuid, nullable for service-only)
+        - default_vector_store (text, default 'qdrant')
+        - default_collection (text), default_embed_provider (text, default 'ollama')
+        - default_embed_model (text, default 'nomic-embed-text')
+        - default_distance (text, default 'cosine', check cosine/dot/euclid)
+        - is_active (bool), ingestion_enabled (bool)
+        - config (jsonb) - chunking, retrieval, pdf, metadata rules
+        - created_at, updated_at
+      </workspaces>
+
+      <documents>
+        - id (uuid pk), workspace_id (uuid fk → workspaces)
+        - source_url, canonical_url (not null), source_type
+        - content_hash (indexed, not unique)
+        - title, author, channel, published_at, language, duration_secs
+        - video_id, playlist_id (YouTube-specific)
+        - status (active/superseded/deleted), version
+        - created_at, updated_at, last_indexed_at
+        - unique (workspace_id, source_type, canonical_url)
+      </documents>
+
+      <chunks>
+        - id (uuid pk), doc_id (fk → documents), workspace_id (fk → workspaces)
+        - chunk_index, content, content_hash, token_count, section
+        - time_start_secs, time_end_secs (YouTube/podcast)
+        - page_start, page_end (PDF)
+        - locator_label ("12:34", "p. 17")
+        - speaker, symbols[], entities[], topics[]
+        - quality_score
+        - created_at, updated_at
+        - unique (doc_id, chunk_index)
+      </chunks>
+
+      <chunk_vectors>
+        - id (uuid pk), chunk_id (fk → chunks), workspace_id (fk → workspaces)
+        - embed_provider, embed_model, collection, vector_dim
+        - qdrant_point_id (text)
+        - status (pending/indexed/failed), indexed_at, error
+        - created_at
+        - unique (chunk_id, embed_provider, embed_model, collection)
+      </chunk_vectors>
+    </tables>
+
+    <indexes>
+      <workspaces>
+        - (slug)
+        - (owner_id) WHERE owner_id IS NOT NULL
+        - (is_active) WHERE is_active = true
+      </workspaces>
+      <documents>
+        - (workspace_id, published_at desc)
+        - (workspace_id, source_type)
+        - (content_hash)
+        - (workspace_id, source_url)
+        - (video_id) WHERE video_id IS NOT NULL
+      </documents>
+      <chunks>
+        - (workspace_id, doc_id)
+        - (doc_id)
+        - gin(symbols), gin(topics), gin(entities)
+      </chunks>
+      <chunk_vectors>
+        - (chunk_id)
+        - (workspace_id, collection, status)
+      </chunk_vectors>
+    </indexes>
+
+    <workspace_config_schema>
+      <example>
+        {
+          "chunking": { "size": 512, "overlap": 50, "strategy": "fixed" },
+          "retrieval": { "top_k": 8, "min_score": 0.18 },
+          "pdf": { "backend": "pymupdf", "max_pages": 250, "min_chars_per_page": 10 },
+          "metadata": { "allow": ["source", "title", "author", "published_at", "tags"] }
+        }
+      </example>
+    </workspace_config_schema>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <health>
+      - GET /health
+        Response: { status, qdrant, supabase, ollama, active_collection, embed_model, latency_ms, version }
+    </health>
+
+    <ingestion>
+      - POST /ingest
+        Request: { workspace_id, idempotency_key?, content_hash?, source, content, metadata, chunks? }
+        Response: { doc_id, chunks_created, vectors_created, status }
+    </ingestion>
+
+    <youtube>
+      - POST /sources/youtube/ingest
+        Request: { workspace_id, url, idempotency_key? }
+        Response: { doc_id, video_id, playlist_id, status, retryable, chunks_created, is_playlist, video_urls? }
+    </youtube>
+
+    <pdf>
+      - POST /sources/pdf/ingest (multipart form)
+        Form: file, workspace_id, idempotency_key?, title?, author?, backend?, max_pages?, min_chars_per_page?
+        Response: { doc_id, status, chunks_created, vectors_created, pages_extracted, total_pages, warnings }
+    </pdf>
+
+    <query>
+      - POST /query
+        Request: { workspace_id, question, mode, filters, retrieve_k, top_k, rerank, answer_model?, max_context_tokens? }
+        Response: { results: [ChunkResult], answer? }
+        Filters: { source_types[], symbols[], symbols_mode, topics[], entities[], authors[], published_from, published_to }
+    </query>
+
+    <reembed>
+      - POST /reembed
+        Request: { workspace_id, target_collection, embed_provider, embed_model, doc_ids? }
+        Response: { job_id, chunks_queued, status: "started" }
+    </reembed>
+
+    <jobs>
+      - GET /jobs/{job_id}
+        Response: { job_id, status, progress, error? }
+    </jobs>
+
+    <metrics>
+      - GET /metrics
+        Response: Prometheus format metrics
+    </metrics>
+  </api_endpoints_summary>
+
+  <n8n_workflow>
+    <google_sheet_schema>
+      - url (string): YouTube URL
+      - status (enum): queued, processing, ingested, error, retry, queued_children
+      - run_id (uuid): Current execution ID
+      - attempt_count (int): Retry tracking
+      - started_at, finished_at, lease_expires_at (timestamps)
+      - video_id, playlist_id (strings)
+      - doc_id (uuid): Returned from service
+      - error_reason (string): no_transcript, rate_limited, network_error
+    </google_sheet_schema>
+
+    <workflow_nodes>
+      - Trigger: Google Sheets Trigger (watch for new/updated rows)
+      - Lock Row: Code node (set status=processing, lease_expires_at)
+      - Call Service: HTTP Request (POST /sources/youtube/ingest)
+      - Handle Response: Switch node (success vs playlist vs error)
+      - Update Sheet: Google Sheets (write status, doc_id, error_reason)
+      - Fan Out Playlist: Code node (create child rows with status=queued)
+      - Error Handler: Error Trigger (catch failures, update sheet)
+    </workflow_nodes>
+
+    <state_machine>
+      - queued → processing (lock acquired)
+      - processing → ingested (success)
+      - processing → error (terminal failure)
+      - processing → retry (retryable failure)
+      - processing → queued_children (playlist expanded)
+      - retry → processing (lease expired or manual retry)
+    </state_machine>
+
+    <lock_pattern>
+      - Eligible: status IN (queued, retry) OR (status=processing AND lease_expires_at < now)
+      - Lock: set status=processing, run_id, attempt_count++, started_at, lease_expires_at (now + 15min)
+      - Self-healing: expired leases can be reprocessed
+    </lock_pattern>
+
+    <playlist_handling>
+      - Service returns is_playlist=true with video_urls[]
+      - n8n writes child rows with status=queued, playlist_id set
+      - Parent row marked as queued_children
+      - Idempotent: check existing video_ids before inserting
+    </playlist_handling>
+  </n8n_workflow>
+
+  <qdrant_configuration>
+    <collection_naming>
+      - Pattern: kb_{embed_model}_{version}
+      - Example: kb_nomic_embed_text_v1
+      - Switch models by creating new collection, running /reembed, swapping QDRANT_COLLECTION_ACTIVE
+    </collection_naming>
+
+    <collection_settings>
+      - vectors.size: 768 (nomic-embed-text)
+      - vectors.distance: Cosine
+      - Detect dimension at startup, validate match
+    </collection_settings>
+
+    <payload_structure>
+      - workspace_id (string)
+      - doc_id (string)
+      - source_type (string)
+      - published_at (int, unix timestamp)
+      - author, channel (strings)
+      - symbols, topics, entities (string arrays)
+      - time_start_secs (int, for timestamp links)
+      - Total: ~200-400 bytes per point
+    </payload_structure>
+
+    <payload_indexes>
+      - workspace_id (keyword) - critical
+      - published_at (integer)
+      - source_type (keyword)
+      - symbols (keyword array)
+      - topics (keyword array)
+      - entities (keyword array)
+    </payload_indexes>
+  </qdrant_configuration>
+
+  <data_flows>
+    <ingest_flow>
+      1. Dedupe check: hash content, check idempotency_key or (workspace, canonical_url)
+      2. Extract: PDF → text pages, YouTube → transcript, etc.
+      3. Chunk: split by tokens, preserve timestamps/pages, compute locator_label
+      4. Extract metadata: symbols (regex), entities (keywords), topics (classifier)
+      5. Embed: batch embed via Ollama, validate dimension
+      6. Store: insert doc → insert chunks → upsert Qdrant → insert chunk_vectors
+      7. Cleanup: if update, delete/supersede old chunks after success
+      8. Return: { doc_id, chunks_created, vectors_created, status }
+    </ingest_flow>
+
+    <query_flow>
+      1. Embed query: same embedder as ingestion (workspace config)
+      2. Qdrant search: retrieve_k results with filters
+      3. Rerank: optional, re-sort by rerank score
+      4. Truncate: take top_k
+      5. Hydrate: SELECT from Postgres, preserve ranking with array_position
+      6. Format citations: build URL with timestamp/page locator
+      7. Generate answer: if mode="answer", pass to LLM
+      8. Return: { results, answer }
+    </query_flow>
+
+    <youtube_flow>
+      1. Parse URL: detect video vs playlist, extract IDs
+      2. If playlist: fetch video list, return video_urls for fan-out
+      3. Fetch metadata: title, channel, published_at, duration
+      4. Fetch transcript: with retry + backoff, handle missing
+      5. Normalize: clean artifacts, collapse whitespace
+      6. Chunk: by tokens, preserve timestamps
+      7. Ingest: via standard pipeline
+      8. Return: { doc_id, video_id, status }
+    </youtube_flow>
+
+    <pdf_flow>
+      1. Validate: file type, size limits
+      2. Extract: call pdf_extractor with workspace config
+      3. Get pages: text per page with char offsets, metadata
+      4. Chunk: by tokens, assign page numbers to chunks
+      5. Ingest: via standard pipeline with page_start/page_end
+      6. Return: { doc_id, pages_extracted, chunks_created, warnings }
+    </pdf_flow>
+  </data_flows>
+
+  <control_panel_ui>
+    <workspace_management>
+      - Workspace selector (by slug)
+      - Workspace settings: routing header fields, config JSON editor
+      - Toggle ingestion_enabled / is_active
+      - Collection stats: docs count, chunks count, vectors count, last ingest time
+    </workspace_management>
+
+    <ingestion_ux>
+      - Upload widget: file list, per-file status, error display + retry
+      - YouTube form: paste link, auto-detect playlist vs video
+      - Batch URL input (future)
+    </ingestion_ux>
+
+    <documents_ux>
+      - Documents table: title, source_type, status, created_at, page_count, tags
+      - Actions: view, reindex, delete, download original
+      - Document detail: extraction warnings, chunk count, view extracted text, view chunks
+    </documents_ux>
+
+    <verification_ux>
+      - Search tab: query input, filters, results with scores + citations
+      - Ask tab: answer + citations, expandable context used, feedback buttons
+      - Debug view (dev): show prompt + retrieved chunk ids
+    </verification_ux>
+  </control_panel_ui>
+
+  <guardrails>
+    <security>
+      - Auth: API key header (dev), Supabase Auth / JWT (prod)
+      - Workspace-level access control: owner_id checks
+      - Storage access: signed URLs for raw files
+    </security>
+
+    <safety>
+      - File size limits, mime type allowlist
+      - Rate limits per IP/workspace/user
+      - Idempotency keys for ingest endpoints
+      - Input sanitization for URLs
+      - Timeout limits for extraction/embedding
+    </safety>
+
+    <quotas>
+      - Max docs per workspace
+      - Max pages per document
+      - Max chunks per document
+      - Concurrent jobs per workspace
+    </quotas>
+
+    <data_integrity>
+      - Transaction boundaries: doc → chunks → vectors
+      - Mark doc failed if stage fails
+      - Cleanup on failure: delete partial or keep with status flags
+      - Reconciliation tools: compare DB vectors vs Qdrant points
+    </data_integrity>
+  </guardrails>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Infrastructure Setup</title>
+      <status>DONE</status>
+      <tasks>
+        - Create docker-compose.rag.yml with Qdrant, Ollama, service placeholder
+        - Start Qdrant and Ollama containers
+        - Pull nomic-embed-text model in Ollama
+        - Create rag-net Docker network
+        - Verify connectivity between containers
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>Supabase Schema</title>
+      <status>DONE</status>
+      <tasks>
+        - Create workspaces table with routing header columns
+        - Create documents table with indexes
+        - Create chunks table with FK constraints
+        - Create chunk_vectors table
+        - Add updated_at trigger function
+        - Add FK constraints from all tables to workspaces
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>Service Scaffold</title>
+      <status>DONE</status>
+      <tasks>
+        - Initialize FastAPI project structure
+        - Create config.py with Pydantic Settings
+        - Create schemas.py with request/response models
+        - Implement GET /health endpoint
+        - Set up asyncpg connection pool
+        - Set up Qdrant client
+        - Add structured logging
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>Core Ingestion Pipeline</title>
+      <status>DONE</status>
+      <tasks>
+        - Implement content hasher
+        - Implement chunker with token counting
+        - Implement metadata extractor (symbols, entities, topics)
+        - Create Ollama embedder with batch support
+        - Implement repositories (documents, chunks, vectors)
+        - Implement Qdrant operations (upsert, delete)
+        - Wire up POST /ingest endpoint
+        - Add idempotency and dedupe logic
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>YouTube Module</title>
+      <status>DONE</status>
+      <tasks>
+        - Implement URL parser (video vs playlist detection)
+        - Implement metadata fetcher
+        - Implement transcript fetcher with retry
+        - Implement transcript normalizer
+        - Implement timestamp-aware chunker
+        - Wire up POST /sources/youtube/ingest
+        - Handle playlist expansion
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>PDF Module</title>
+      <status>DONE</status>
+      <tasks>
+        - Create swappable PDF extractor interface
+        - Implement PyMuPDF backend
+        - Implement pdfplumber backend
+        - Add page-aware chunking with locator labels
+        - Wire up POST /sources/pdf/ingest endpoint
+        - Add unit tests (21 tests passing)
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>Query Pipeline</title>
+      <status>DONE</status>
+      <tasks>
+        - Implement query embedding
+        - Implement Qdrant search with filter mapping
+        - Implement Postgres hydration with array_position
+        - Implement citation URL builder
+        - Add optional LLM answer generation
+        - Wire up POST /query endpoint
+      </tasks>
+    </step>
+
+    <step number="8">
+      <title>n8n Workflow</title>
+      <status>PENDING</status>
+      <tasks>
+        - Create Google Sheet with schema columns
+        - Build workflow: trigger → lock → call service → update sheet
+        - Implement lock pattern with lease_expires_at
+        - Implement playlist fan-out logic
+        - Add error handling and retry logic
+        - Test end-to-end with sample videos
+      </tasks>
+    </step>
+
+    <step number="9">
+      <title>Reembed and Jobs</title>
+      <status>PARTIAL</status>
+      <tasks>
+        - Implement job models and in-memory runner
+        - Wire up POST /reembed endpoint
+        - Implement GET /jobs/{job_id} endpoint
+        - Test model migration workflow
+      </tasks>
+    </step>
+
+    <step number="10">
+      <title>Workspace API</title>
+      <status>PENDING</status>
+      <tasks>
+        - Create workspace CRUD endpoints
+        - Implement workspace config validation
+        - Add workspace lookup by slug
+        - Wire workspace routing into ingestion/query pipelines
+        - Add workspace-scoped quotas
+      </tasks>
+    </step>
+
+    <step number="11">
+      <title>Control Panel UI</title>
+      <status>PENDING</status>
+      <tasks>
+        - Create workspace selector and settings editor
+        - Build upload widget with progress
+        - Build documents table with actions
+        - Create search and ask tabs
+        - Add debug view for developers
+      </tasks>
+    </step>
+
+    <step number="12">
+      <title>Additional Extractors</title>
+      <status>PENDING</status>
+      <tasks>
+        - Add TXT/MD direct reader
+        - Add HTML boilerplate removal
+        - Add DOCX extraction
+        - Add generic URL web page extraction
+        - Add batch ingestion support
+      </tasks>
+    </step>
+
+    <step number="13">
+      <title>Advanced Features</title>
+      <status>PENDING</status>
+      <tasks>
+        - Add hybrid search (BM25 + vector)
+        - Add cross-encoder reranking
+        - Add conversation sessions
+        - Add feedback collection
+        - Add golden questions for regression
+      </tasks>
+    </step>
+
+    <step number="14">
+      <title>Polish and Testing</title>
+      <status>ONGOING</status>
+      <tasks>
+        - Add comprehensive error handling
+        - Add request ID middleware
+        - Add timing spans to observability
+        - Write integration tests for key flows
+        - Document API with examples
+        - Performance testing with larger corpus
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - YouTube transcript ingestion works end-to-end
+      - PDF extraction with page-aware chunking works
+      - Playlist expansion creates correct child rows
+      - Deduplication prevents duplicate documents
+      - Query returns relevant chunks with correct ranking
+      - Citations include clickable timestamp/page links
+      - Model migration via /reembed works correctly
+      - Workspace config controls pipeline behavior
+    </functionality>
+
+    <reliability>
+      - Idempotent operations (re-running same URL is safe)
+      - Self-healing via lease expiration
+      - Graceful handling of missing transcripts / extraction errors
+      - Write-new-first prevents data loss on failures
+      - Retryable vs terminal errors clearly distinguished
+      - Job status accurately tracks async operations
+      - Graceful degradation when optional services unavailable (LLM)
+    </reliability>
+
+    <performance>
+      - Embedding batch processing efficient
+      - Qdrant queries fast with payload indexes
+      - Postgres hydration minimal (single query)
+      - Health endpoint latency < 100ms
+      - Ingest pipeline < 30s for typical video
+      - PDF extraction < 5s for 100-page document
+    </performance>
+
+    <observability>
+      - All requests have request_id
+      - Structured logs for debugging
+      - Health endpoint shows all dependency status
+      - Error reasons clear and actionable
+      - Job status trackable
+      - Metrics available for monitoring
+    </observability>
+
+    <maintainability>
+      - Clean separation: n8n orchestrates, service processes
+      - Pluggable providers (embed, llm, rerank, pdf_extractor)
+      - Configuration via environment variables and workspace config
+      - chunk_vectors table supports model evolution
+      - Collection naming convention enables clean migrations
+      - Swappable backends without pipeline changes
+    </maintainability>
+
+    <multi_tenancy>
+      - Workspace isolation enforced at data layer
+      - Per-workspace configuration effective
+      - Cross-workspace queries impossible
+      - Quotas and rate limits per workspace
+    </multi_tenancy>
+  </success_criteria>
+</project_specification>

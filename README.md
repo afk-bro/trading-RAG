@@ -46,7 +46,9 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Auto-Strategy Discovery**: Generate parameter specs from Pine Script inputs for backtesting
 - **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
 - **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
-- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard
+- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts management
+- **Ops Alerts**: Automated evaluation via pg_cron, Telegram delivery with activation/recovery/escalation notifications
+- **Idempotent Notifications**: Race-safe delivery with conditional mark pattern, delivery tracking columns
 - **Idempotency Hygiene**: Auto-prune via pg_cron, health page monitoring, Prometheus metrics
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
 - **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules (28 alerts across 10 subsystems)
@@ -221,6 +223,11 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/system/health.json` | System health (machine-readable) |
 | `/admin/coverage/cockpit` | Coverage triage cockpit UI |
 | `/admin/coverage/cockpit/{run_id}` | Deep link to specific run |
+| `/admin/ops-alerts` | Ops alerts management |
+| `/admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
+| `/admin/ops-alerts/{id}/resolve` | Resolve alert |
+| `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
+| `/admin/ingest` | Ingest UI (YouTube, PDF, Pine) |
 
 ### Pine Script Registry CLI
 
@@ -260,53 +267,55 @@ python -m app.services.pine --build ./scripts -q
 ```
 trading-RAG/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI application
-│   ├── config.py            # Configuration management
-│   ├── schemas.py           # Pydantic models
+│   ├── main.py               # FastAPI application
+│   ├── config.py             # Configuration management
+│   ├── schemas.py            # Pydantic models
 │   ├── deps/
-│   │   ├── __init__.py
-│   │   └── security.py      # Auth, rate limiting, concurrency
-│   ├── routers/
-│   │   ├── health.py        # /health and /ready endpoints
+│   │   └── security.py       # Auth, rate limiting, concurrency
+│   ├── routers/              # API endpoints
+│   │   ├── health.py         # /health and /ready endpoints
 │   │   ├── ingest.py
 │   │   ├── youtube.py
 │   │   ├── query.py
-│   │   ├── reembed.py
-│   │   ├── jobs.py
 │   │   ├── backtests.py
-│   │   └── trading_kb.py    # KB recommend endpoint
+│   │   └── trading_kb.py
 │   ├── admin/
-│   │   ├── router.py        # Admin UI and ops snapshot
-│   │   └── templates/
+│   │   ├── router.py         # Admin UI and ops snapshot
+│   │   └── templates/        # HTML templates
 │   ├── services/
 │   │   ├── chunker.py
 │   │   ├── embedder.py
-│   │   ├── extractor.py
 │   │   ├── llm.py
-│   │   └── pine/              # Pine Script registry module
-│   │       ├── models.py      # Data models (PineRegistry, PineScriptEntry)
-│   │       ├── parser.py      # Regex-based Pine Script parser
-│   │       ├── linter.py      # Static analysis rules
-│   │       ├── registry.py    # Build orchestration + CLI
-│   │       └── adapters/      # File system adapter
-│   └── repositories/
-│       ├── documents.py
-│       ├── chunks.py
-│       └── vectors.py
-├── docs/
-│   ├── ops/
-│   │   ├── alerting-rules.md  # Sentry alert configuration
-│   │   └── runbooks.md        # Operational procedures
-│   └── plans/
+│   │   ├── pine/             # Pine Script registry module
+│   │   └── ops_alerts/       # Telegram notifications
+│   │       ├── evaluator.py  # Alert evaluation rules
+│   │       └── telegram.py   # Telegram delivery
+│   ├── repositories/
+│   │   ├── documents.py
+│   │   ├── chunks.py
+│   │   └── ops_alerts.py     # Delivery tracking
+│   └── jobs/
+│       └── handlers/         # Job handlers
 ├── tests/
-│   ├── unit/
-│   └── integration/
-├── migrations/
+│   ├── unit/                 # Unit tests
+│   ├── integration/          # Integration tests
+│   └── fixtures/             # Test data
+├── scripts/                  # Utility scripts
+├── migrations/               # SQL migrations
+├── docs/
+│   ├── ops/                  # Operations docs
+│   │   ├── alerting-rules.md
+│   │   ├── runbooks.md
+│   │   └── hardening.md
+│   ├── plans/                # Design documents
+│   └── archive/              # Archived specs
+├── dashboards/               # Grafana dashboards
+├── ops/                      # Prometheus configs
 ├── docker-compose.rag.yml
 ├── Dockerfile
 ├── requirements.txt
-├── init.sh
+├── app_spec.txt              # Application specification
+├── feature_list.json         # Test feature list
 └── README.md
 ```
 
@@ -336,6 +345,13 @@ trading-RAG/
 - Individual trials within a tune
 - IS/OOS metrics and scores
 - Composite objective scoring
+
+### ops_alerts
+- Operational alerts with severity levels (critical, high, medium, low)
+- Status lifecycle: active, acknowledged, resolved
+- Delivery tracking: `notified_at`, `recovery_notified_at`, `escalation_notified_at`
+- Deduplication via `dedupe_key`
+- Telegram message ID for audit trail
 
 ## Environment Variables
 

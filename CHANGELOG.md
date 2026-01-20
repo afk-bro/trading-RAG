@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Idempotent Telegram Notification Delivery** - Race-safe notification system for ops alerts
+  - Activation, recovery, and escalation notifications via Telegram
+  - Delivery tracking columns: `notified_at`, `recovery_notified_at`, `escalation_notified_at`
+  - Conditional mark pattern: `WHERE column IS NULL RETURNING id` prevents duplicate sends
+  - Severity escalation resets `escalation_notified_at` for new notification
+  - Partial indexes for efficient pending notification queries
+  - `SendResult` dataclass captures message IDs for audit trail
+  - Migration 074: `ops_alerts_delivery_tracking.sql`
+
+- **Per-Category Topic Routing for Forum Supergroups** - Telegram notifications routed to appropriate topics
+  - Health alerts → health topic, strategy alerts → strategy topic
+  - `RULE_TOPIC_MAP` configuration for routing rules
+
+- **Ops Alerts Reopen Endpoint** - Allow reopening resolved alerts
+  - `POST /admin/ops-alerts/{id}/reopen` clears resolved state
+
+- **Application Specification** - `app_spec.txt` documents current platform state
+  - XML-format specification covering all features
+  - Updated from RAG-only to full trading research platform
+
+- **Feature Test List Expansion** - 52 new test cases in `feature_list.json`
+  - Backtesting: tuning, WFO, leaderboard, determinism
+  - Ops alerts: evaluation, notifications, idempotency
+  - Admin UI: endpoints, authentication
+  - Job system: status tracking, retries
+
+- **Repository Cleanup** - Organized stray files into appropriate directories
+  - Archived specs → `docs/archive/`
+  - Test files → `tests/`, `tests/fixtures/`
+  - Scripts → `scripts/`
+  - Planning docs → `docs/plans/`
+
 - **Idempotency Hygiene Monitoring** - Full observability for idempotency key lifecycle
   - Health page card: total keys, expired pending, pending requests, oldest ages
   - Prometheus metrics: `idempotency_keys_total`, `idempotency_expired_pending_total`, etc.

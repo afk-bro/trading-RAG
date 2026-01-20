@@ -95,6 +95,11 @@ PostgreSQL tables (via Supabase):
 | `documents` | Source metadata, content hash, status lifecycle |
 | `chunks` | Text segments, token counts, metadata arrays |
 | `chunk_vectors` | Maps chunks to embedding model/collection |
+| `backtest_runs` | Strategy backtest results with metrics |
+| `tune_sessions` | Parameter sweep sessions |
+| `wfo_runs` | Walk-forward optimization results |
+| `ops_alerts` | Operational alerts with delivery tracking |
+| `jobs` | Async job queue with status tracking |
 
 All tables FK to workspaces for multi-tenant isolation. Migrations in `migrations/`.
 
@@ -130,6 +135,11 @@ All tables FK to workspaces for multi-tenant isolation. Migrations in `migration
 | GET | `/admin/system/health` | System health dashboard |
 | GET | `/admin/coverage/cockpit` | Coverage triage UI |
 | GET | `/admin/backtests/*` | Backtest admin UI |
+| GET | `/admin/ops-alerts` | List ops alerts |
+| POST | `/admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
+| POST | `/admin/ops-alerts/{id}/resolve` | Resolve alert |
+| POST | `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
+| GET | `/admin/ingest` | Ingest UI (YouTube, PDF, Pine) |
 
 All admin endpoints require `X-Admin-Token` header.
 
@@ -162,6 +172,30 @@ export SUPABASE_SERVICE_ROLE_KEY=test-key
 
 `mypy.ini` has per-module ignores. Ratchet script fails CI if ignore count exceeds baseline (53). To fix: remove entry, fix errors, decrease baseline.
 
+## Project Structure
+
+```
+trading-RAG/
+├── app/                    # Main application code
+│   ├── routers/            # API endpoints
+│   ├── services/           # Business logic
+│   │   └── ops_alerts/     # Telegram notifications
+│   ├── repositories/       # Data access layer
+│   └── jobs/               # Job handlers
+├── tests/                  # Test suite
+│   ├── unit/               # Unit tests
+│   ├── integration/        # Integration tests
+│   └── fixtures/           # Test data
+├── migrations/             # SQL migrations
+├── scripts/                # Utility scripts
+├── docs/                   # Documentation
+│   ├── ops/                # Operations docs
+│   ├── plans/              # Design documents
+│   └── archive/            # Archived specs
+├── dashboards/             # Grafana dashboards
+└── ops/                    # Prometheus configs
+```
+
 ## Detailed Documentation
 
 | Topic | Location |
@@ -174,6 +208,7 @@ export SUPABASE_SERVICE_ROLE_KEY=test-key
 | Alerting rules | [docs/ops/alerting-rules.md](docs/ops/alerting-rules.md) |
 | Runbooks | [docs/ops/runbooks.md](docs/ops/runbooks.md) |
 | Tech debt | [docs/tech-debt.md](docs/tech-debt.md) |
+| PRD v0.1 | [docs/plans/v.01-PRD.md](docs/plans/v.01-PRD.md) |
 
 ## Roadmap Context
 

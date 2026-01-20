@@ -2370,5 +2370,532 @@
       "Step 3: Verify no connection exhaustion"
     ],
     "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "POST /backtests/tune starts parameter sweep job",
+    "steps": [
+      "Step 1: Prepare tune request with strategy_id and parameter_grid",
+      "Step 2: POST to /backtests/tune",
+      "Step 3: Verify response contains tune_session_id",
+      "Step 4: Verify response status is 'started'",
+      "Step 5: Verify job is queued for processing"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "GET /backtests/tunes returns list of tune sessions",
+    "steps": [
+      "Step 1: Create multiple tune sessions",
+      "Step 2: GET /backtests/tunes with workspace_id",
+      "Step 3: Verify response contains sessions array",
+      "Step 4: Verify each session has id, status, strategy_id",
+      "Step 5: Verify results are workspace-scoped"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Backtest tuning generates parameter combinations",
+    "steps": [
+      "Step 1: Define parameter grid with multiple values per parameter",
+      "Step 2: Start tune session",
+      "Step 3: Wait for completion",
+      "Step 4: Verify all parameter combinations were tested",
+      "Step 5: Verify metrics recorded for each combination"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Backtest tuning selects best parameters",
+    "steps": [
+      "Step 1: Run tune session with multiple parameter sets",
+      "Step 2: Wait for completion",
+      "Step 3: Verify best_params field is populated",
+      "Step 4: Verify best_metrics contains performance data",
+      "Step 5: Verify selection based on configured objective"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "POST /backtests/wfo starts walk-forward optimization",
+    "steps": [
+      "Step 1: Prepare WFO request with strategy and window config",
+      "Step 2: POST to /backtests/wfo",
+      "Step 3: Verify response contains wfo_run_id",
+      "Step 4: Verify job queued for processing"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "WFO creates correct number of rolling windows",
+    "steps": [
+      "Step 1: Configure WFO with specific window size and step",
+      "Step 2: Run WFO job",
+      "Step 3: Verify expected number of folds created",
+      "Step 4: Verify each fold has train and test segments"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "WFO stores per-fold metrics",
+    "steps": [
+      "Step 1: Run WFO job",
+      "Step 2: Query WFO run results",
+      "Step 3: Verify folds array contains metrics per fold",
+      "Step 4: Verify each fold has train_metrics and test_metrics"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "WFO computes aggregate metrics",
+    "steps": [
+      "Step 1: Run WFO job to completion",
+      "Step 2: Query WFO results",
+      "Step 3: Verify aggregate_metrics field populated",
+      "Step 4: Verify aggregate includes mean and std across folds"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "GET /backtests/leaderboard returns strategy rankings",
+    "steps": [
+      "Step 1: Run backtests for multiple strategies",
+      "Step 2: GET /backtests/leaderboard",
+      "Step 3: Verify response contains ranked strategies",
+      "Step 4: Verify ranking based on performance metrics"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Backtest runs are deterministic",
+    "steps": [
+      "Step 1: Run backtest with specific parameters",
+      "Step 2: Record all metrics",
+      "Step 3: Run identical backtest again",
+      "Step 4: Verify metrics match exactly"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Backtest metrics include required fields",
+    "steps": [
+      "Step 1: Run backtest",
+      "Step 2: Query backtest results",
+      "Step 3: Verify total_return present",
+      "Step 4: Verify max_drawdown present",
+      "Step 5: Verify sharpe_ratio present",
+      "Step 6: Verify win_rate present",
+      "Step 7: Verify profit_factor present",
+      "Step 8: Verify trade_count present"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Ops alert evaluator creates alerts for health degradation",
+    "steps": [
+      "Step 1: Simulate service health degradation condition",
+      "Step 2: Run ops alert evaluation job",
+      "Step 3: Verify alert created with rule_type='health_degraded'",
+      "Step 4: Verify alert has appropriate severity"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Ops alert evaluator uses dedupe_key for idempotency",
+    "steps": [
+      "Step 1: Trigger condition that creates alert",
+      "Step 2: Run evaluation again with same condition",
+      "Step 3: Verify no duplicate alert created",
+      "Step 4: Verify occurrence_count incremented"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Ops alert severity levels are enforced",
+    "steps": [
+      "Step 1: Create alert with severity='critical'",
+      "Step 2: Verify alert stored with critical severity",
+      "Step 3: Test all severity levels (critical, high, medium, low)",
+      "Step 4: Verify validation rejects invalid severity"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Ops alert status transitions work correctly",
+    "steps": [
+      "Step 1: Create new alert (status='active')",
+      "Step 2: Acknowledge alert",
+      "Step 3: Verify status changes and acknowledged_at set",
+      "Step 4: Resolve alert",
+      "Step 5: Verify status='resolved' and resolved_at set"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "POST /admin/ops-alerts/{id}/acknowledge acknowledges alert",
+    "steps": [
+      "Step 1: Create active alert",
+      "Step 2: POST to acknowledge endpoint with admin token",
+      "Step 3: Verify response indicates success",
+      "Step 4: Verify alert acknowledged_at is set",
+      "Step 5: Verify acknowledged_by contains identifier"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "POST /admin/ops-alerts/{id}/resolve resolves alert",
+    "steps": [
+      "Step 1: Create active alert",
+      "Step 2: POST to resolve endpoint with admin token",
+      "Step 3: Verify response indicates success",
+      "Step 4: Verify alert status='resolved'",
+      "Step 5: Verify resolved_at is set"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "POST /admin/ops-alerts/{id}/reopen reopens resolved alert",
+    "steps": [
+      "Step 1: Create and resolve alert",
+      "Step 2: POST to reopen endpoint with admin token",
+      "Step 3: Verify response indicates success",
+      "Step 4: Verify alert status='active'",
+      "Step 5: Verify resolved_at is cleared"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Telegram notifier sends activation notification",
+    "steps": [
+      "Step 1: Create new active alert with notified_at=NULL",
+      "Step 2: Run notification delivery",
+      "Step 3: Verify send_alert called with is_recovery=False, is_escalation=False",
+      "Step 4: Verify notified_at is set after successful send"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Telegram notifier sends recovery notification",
+    "steps": [
+      "Step 1: Create resolved alert with notified_at set, recovery_notified_at=NULL",
+      "Step 2: Run notification delivery",
+      "Step 3: Verify send_alert called with is_recovery=True",
+      "Step 4: Verify recovery_notified_at is set after successful send"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Telegram notifier sends escalation notification",
+    "steps": [
+      "Step 1: Create alert with escalated_at set, escalation_notified_at=NULL",
+      "Step 2: Ensure alert was previously activated (notified_at set)",
+      "Step 3: Run notification delivery",
+      "Step 4: Verify send_alert called with is_escalation=True",
+      "Step 5: Verify escalation_notified_at is set"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Telegram notification delivery is idempotent",
+    "steps": [
+      "Step 1: Create alert and send notification",
+      "Step 2: Run notification delivery again",
+      "Step 3: Verify no duplicate notification sent",
+      "Step 4: Verify notified_at prevents resend"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Concurrent notification workers only one wins",
+    "steps": [
+      "Step 1: Create pending notification",
+      "Step 2: Simulate two workers calling mark_notified",
+      "Step 3: Verify first call returns True (won race)",
+      "Step 4: Verify second call returns False (lost race)",
+      "Step 5: Verify only one notification counted"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Severity escalation clears escalation_notified_at",
+    "steps": [
+      "Step 1: Create alert at medium severity",
+      "Step 2: Send escalation notification",
+      "Step 3: Bump severity to critical via upsert",
+      "Step 4: Verify escalation_notified_at cleared",
+      "Step 5: Verify new escalation notification can be sent"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Telegram topic routing by rule category",
+    "steps": [
+      "Step 1: Create health_degraded alert",
+      "Step 2: Verify notification routed to health topic",
+      "Step 3: Create strategy-related alert",
+      "Step 4: Verify notification routed to strategy topic"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Notification delivery failure records error",
+    "steps": [
+      "Step 1: Create alert",
+      "Step 2: Configure notifier to fail",
+      "Step 3: Run notification delivery",
+      "Step 4: Verify mark_delivery_failed called",
+      "Step 5: Verify delivery_attempts incremented",
+      "Step 6: Verify last_delivery_error populated"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "GET /admin/ops-alerts returns filtered alerts list",
+    "steps": [
+      "Step 1: Create alerts with various severities and statuses",
+      "Step 2: GET /admin/ops-alerts with severity filter",
+      "Step 3: Verify only matching severity alerts returned",
+      "Step 4: Test status filter",
+      "Step 5: Test workspace_id filter"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Admin endpoints require X-Admin-Token header",
+    "steps": [
+      "Step 1: GET /admin/ops-alerts without token",
+      "Step 2: Verify 401 or 403 response",
+      "Step 3: GET /admin/ops-alerts with valid token",
+      "Step 4: Verify success response"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "GET /admin/system/health returns system health dashboard data",
+    "steps": [
+      "Step 1: GET /admin/system/health with admin token",
+      "Step 2: Verify response contains service status",
+      "Step 3: Verify response contains dependency health",
+      "Step 4: Verify response contains recent metrics"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "GET /admin/coverage/cockpit returns coverage triage data",
+    "steps": [
+      "Step 1: GET /admin/coverage/cockpit with admin token",
+      "Step 2: Verify response contains coverage stats",
+      "Step 3: Verify response contains workspace breakdown",
+      "Step 4: Verify data is workspace-scoped"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Jobs table tracks all job types",
+    "steps": [
+      "Step 1: Create jobs of different types",
+      "Step 2: Query jobs table",
+      "Step 3: Verify job_type stored correctly",
+      "Step 4: Verify status, payload, result fields present"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Job status transitions are tracked",
+    "steps": [
+      "Step 1: Create job (status='queued')",
+      "Step 2: Start job processing (status='running')",
+      "Step 3: Verify started_at timestamp set",
+      "Step 4: Complete job (status='succeeded')",
+      "Step 5: Verify completed_at timestamp set"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Job retries are bounded",
+    "steps": [
+      "Step 1: Create job that will fail",
+      "Step 2: Process and fail job multiple times",
+      "Step 3: Verify retries field incremented",
+      "Step 4: Verify job marked as failed after max retries"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "pg_cron schedules ops alert evaluation",
+    "steps": [
+      "Step 1: Check pg_cron job configuration",
+      "Step 2: Verify ops_alert_eval job scheduled",
+      "Step 3: Verify correct schedule interval"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Ops alert priority_score computed correctly",
+    "steps": [
+      "Step 1: Create alerts with different severities",
+      "Step 2: Query alerts with priority_score",
+      "Step 3: Verify critical > high > medium > low",
+      "Step 4: Verify occurrence_count affects score"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Pine Script ingestion via /sources/pine/ingest",
+    "steps": [
+      "Step 1: POST pine script content to endpoint",
+      "Step 2: Verify document created with source_type='pine'",
+      "Step 3: Verify chunks created",
+      "Step 4: Verify vectors indexed"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Admin ingest UI accessible",
+    "steps": [
+      "Step 1: GET /admin/ingest with admin token",
+      "Step 2: Verify HTML page returned",
+      "Step 3: Verify page contains upload form",
+      "Step 4: Verify page contains YouTube input"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Backtest detail page shows run information",
+    "steps": [
+      "Step 1: Run backtest",
+      "Step 2: GET /admin/backtests/{run_id}",
+      "Step 3: Verify response contains strategy info",
+      "Step 4: Verify response contains parameters",
+      "Step 5: Verify response contains metrics"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Tune session detail shows all parameter results",
+    "steps": [
+      "Step 1: Run tune session",
+      "Step 2: GET /admin/backtests/tunes/{session_id}",
+      "Step 3: Verify all parameter combinations listed",
+      "Step 4: Verify metrics shown for each combination",
+      "Step 5: Verify best parameters highlighted"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Execution endpoints require workspace scope",
+    "steps": [
+      "Step 1: POST /execute/intents without workspace_id",
+      "Step 2: Verify validation error",
+      "Step 3: POST with valid workspace_id",
+      "Step 4: Verify workspace isolation enforced"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Paper trading state endpoint returns position info",
+    "steps": [
+      "Step 1: Execute paper trades",
+      "Step 2: GET /execute/paper/state/{workspace_id}",
+      "Step 3: Verify response contains positions",
+      "Step 4: Verify response contains balance"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Ops alerts delivery tracking columns exist",
+    "steps": [
+      "Step 1: Query ops_alerts table schema",
+      "Step 2: Verify notified_at column exists",
+      "Step 3: Verify recovery_notified_at column exists",
+      "Step 4: Verify escalated_at column exists",
+      "Step 5: Verify escalation_notified_at column exists",
+      "Step 6: Verify telegram_message_id column exists"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Partial indexes for pending notifications exist",
+    "steps": [
+      "Step 1: Query database indexes",
+      "Step 2: Verify idx_ops_alerts_pending_activation exists",
+      "Step 3: Verify idx_ops_alerts_pending_recovery exists",
+      "Step 4: Verify idx_ops_alerts_pending_escalation exists"
+    ],
+    "passes": true
+  },
+  {
+    "category": "style",
+    "description": "Admin UI pages use consistent layout",
+    "steps": [
+      "Step 1: Access multiple admin pages",
+      "Step 2: Verify consistent navigation",
+      "Step 3: Verify consistent styling",
+      "Step 4: Verify consistent error handling"
+    ],
+    "passes": true
+  },
+  {
+    "category": "style",
+    "description": "Ops alert notification messages are informative",
+    "steps": [
+      "Step 1: Review notification message templates",
+      "Step 2: Verify messages include rule_type",
+      "Step 3: Verify messages include severity",
+      "Step 4: Verify messages include relevant payload info"
+    ],
+    "passes": true
+  },
+  {
+    "category": "style",
+    "description": "Backtest configuration uses standard patterns",
+    "steps": [
+      "Step 1: Review backtest configuration schemas",
+      "Step 2: Verify parameter_grid follows standard format",
+      "Step 3: Verify window_config follows standard format"
+    ],
+    "passes": true
   }
 ]

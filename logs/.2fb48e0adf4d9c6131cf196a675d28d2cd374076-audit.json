@@ -6,16 +6,6 @@
     "auditLog": "/home/x/dev/automation-infra/trading-RAG/logs/.2fb48e0adf4d9c6131cf196a675d28d2cd374076-audit.json",
     "files": [
         {
-            "date": 1767475903874,
-            "name": "/home/x/dev/automation-infra/trading-RAG/logs/mcp-puppeteer-2026-01-03.log",
-            "hash": "f233192af208267d435e2b3f811e9c08e27df063603b127ef4d14da80ac51484"
-        },
-        {
-            "date": 1767558217198,
-            "name": "/home/x/dev/automation-infra/trading-RAG/logs/mcp-puppeteer-2026-01-04.log",
-            "hash": "acba94a13ed79f0a76bfbeabdcd82f7d92c78318c542b6cbd7d2c5ffc3e09031"
-        },
-        {
             "date": 1767747339622,
             "name": "/home/x/dev/automation-infra/trading-RAG/logs/mcp-puppeteer-2026-01-06.log",
             "hash": "5d55c95514ce1e64e1e916d2f33b50bbb2f4787b6863ff852c2d5a1fa48e920b"
@@ -24,6 +14,11 @@
             "date": 1767772866916,
             "name": "/home/x/dev/automation-infra/trading-RAG/logs/mcp-puppeteer-2026-01-07.log",
             "hash": "4314b69dc243e2fe21eafaf7b1778b25aabdb4c4c7a1c7b12dcc3eb074179ce7"
+        },
+        {
+            "date": 1768870433529,
+            "name": "/home/x/dev/automation-infra/trading-RAG/logs/mcp-puppeteer-2026-01-19.log",
+            "hash": "e8c0e16e432667ee12775298fac170f5787b798ed2d7c8c957110698d1b98108"
         }
     ],
     "hashType": "sha256"

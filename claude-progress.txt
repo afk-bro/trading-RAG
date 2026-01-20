@@ -1,5 +1,55 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 65 Summary
+Date: Session 65 (Bug Fix Session)
+Status: Services Degraded (Qdrant Down) - 177/217 Tests Passing (81.6%)
+
+### Session Goals
+- Verify core functionality after fresh context window
+- Identify and fix any bugs found
+- Document infrastructure issues
+
+### Infrastructure Status
+- **Qdrant**: DOWN - "All connection attempts failed"
+- **Supabase**: OK (~332ms latency)
+- **Ollama**: OK (~28ms latency)
+- Overall status: "degraded"
+
+Docker commands are blocked in this environment, so Qdrant cannot be restarted.
+
+### Bug Fix: SQL Syntax Error in Debug Endpoints
+
+**Discovered Bug**: The `/debug/documents` endpoint was returning a PostgresSyntaxError:
+```
+syntax error at or near ":"
+```
+
+**Root Cause**: `# noqa: E501` comments were accidentally placed INSIDE multi-line SQL strings. The `:` character in `# noqa: E501` was being interpreted by PostgreSQL as a parameter placeholder.
+
+**Files Fixed**:
+1. `app/routers/health.py` (line 667) - `/debug/documents` endpoint
+2. `app/repositories/kb.py` (line 792) - claim search query
+3. `app/repositories/duration_stats.py` (lines 226-228) - global stats aggregation
+
+**Solution**: Removed the noqa comments from inside SQL strings and reformatted the queries for readability.
+
+**Verification**: After fix, `/debug/documents` returns `{"success": true, ...}` with document data.
+
+### Commits Made
+1. `ca57c72` - fix(sql): remove noqa comments from inside SQL strings
+
+### Blocked Tests Analysis (40 remaining)
+All 40 failing tests remain blocked by external dependencies that cannot be resolved without:
+- Docker access (container manipulation)
+- External API access (YouTube, OpenRouter)
+- Database migrations (migration 003)
+- n8n workflow setup
+
+### Key Finding
+Infrastructure issues (Qdrant down) prevented full verification testing, but a real bug was discovered and fixed that was causing SQL syntax errors in debug endpoints.
+
+---
+
 ## Session 64 Summary
 Date: Session 64 (Verification Session)
 Status: Services Running - 177/217 Tests Passing (81.6%)
