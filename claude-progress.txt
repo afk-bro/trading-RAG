@@ -1,5 +1,132 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 98 Summary
+Date: Session 98 (Code Review & Implementation Verification)
+Status: Server Not Running - 228/263 Tests Passing (86.7%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Analyze all 35 failing tests with detailed classification
+- Verify code implementations via code review
+- Document findings for future sessions
+
+### Infrastructure Status (Unchanged - Session 25 of Blocked Sequence)
+- **Server**: NOT RUNNING (port 8000 not listening)
+- **Docker**: Commands blocked ("docker not in allowed commands")
+- **Python/uvicorn/pytest/curl**: Commands blocked
+- **Supabase MCP**: Available but requires permission grant
+- **Browser automation**: Available but no server to test
+
+### 35 Failing Tests - Complete Classification
+
+#### A. Container Control Tests (3 tests) - BLOCKED by Docker
+Cannot pass without Docker container start/stop:
+1. **Health endpoint Qdrant connectivity status** (line 31) - Need to stop/start Qdrant container
+2. **Health endpoint Supabase connectivity status** (line 43) - Need to invalidate/restore credentials
+3. **Health endpoint Ollama connectivity status** (line 54) - Need to stop/start Ollama container
+
+#### B. YouTube External API Tests (5 tests) - BLOCKED by YouTube API + runtime
+Require real YouTube API calls:
+1. **POST /sources/youtube/ingest processes single video URL** (line 240)
+2. **POST /sources/youtube/ingest extracts video metadata** (line 254)
+3. **POST /sources/youtube/ingest handles playlist URLs** (line 266)
+4. **Transcript fetch supports multiple languages** (line 2052)
+5. **Transcript fallback to auto-generated** (line 2062)
+
+**Code Status**: Multi-language transcript support FULLY IMPLEMENTED in `app/routers/youtube.py:145-287`:
+- `preferred_languages` parameter with default ["en", "en-US", "en-GB"]
+- Tries manual transcripts first, then auto-generated fallback
+- Returns `language` and `is_auto_generated` fields
+
+#### C. OpenRouter/LLM Tests (4 tests) - BLOCKED by OPENROUTER_API_KEY + runtime
+Require LLM API access:
+1. **POST /query mode='answer' returns LLM-generated answer** (line 433)
+2. **POST /query answer includes source attribution with URLs** (line 444)
+3. **OpenRouter API integration for answer generation** (line 768)
+4. **Answer model is configurable per request** (line 1325)
+
+**Code Status**: All FULLY IMPLEMENTED:
+- `answer_model` parameter in `app/schemas/query.py:68`
+- Model override wired in `app/routers/query.py:640`
+- `max_context_tokens` truncation in `app/services/llm_base.py:237-246`
+
+#### D. n8n Workflow Tests (8 tests) - BLOCKED by n8n setup
+Require n8n and Google Sheets integration:
+1. **n8n workflow lock pattern** (line 967)
+2. **n8n workflow lease expiration** (line 978)
+3. **n8n workflow state transitions for success** (line 990)
+4. **n8n workflow state transitions for error** (line 1001)
+5. **n8n workflow playlist fan-out creates child rows** (line 1013)
+6. **n8n workflow fan-out is idempotent** (line 1024)
+7. **n8n workflow retry logic** (line 1036)
+8. **Google Sheet schema verification** (line 1055)
+
+#### E. Runtime Verification Tests (7 tests) - IMPLEMENTED, need running server
+Code is complete, awaiting runtime verification:
+
+| Test | Line | Implementation | Code Location |
+|------|------|----------------|---------------|
+| max_context_tokens truncation | 779 | COMPLETE | `app/services/llm_base.py:237-246` |
+| Reranking improves relevance | 791 | COMPLETE | `app/services/reranker.py:83-210` |
+| Multiple embedding providers | 1137 | COMPLETE | `app/repositories/vectors.py` ON CONFLICT |
+| Composite FK constraint | 1281 | COMPLETE | `migrations/075_chunks_composite_fk.sql` |
+| GIN indexes for filters | 1292 | COMPLETE | `migrations/001_initial_schema.sql:93-101` |
+| Published_at index | 1303 | COMPLETE | `migrations/001_initial_schema.sql:38` |
+| Query timeout (504) | 2000 | COMPLETE | `app/routers/query.py:446-448` with asyncio.wait_for |
+
+#### F. Service Recovery Tests (2 tests) - BLOCKED by container control
+1. **Service recovers from temporary Qdrant outage** (line 1238)
+2. **Service recovers from temporary Supabase outage** (line 1250)
+
+#### G. Infrastructure/Build Tests (3 tests) - BLOCKED by Docker/runtime
+1. **Docker image size <1GB** (line 1960) - Known: >1GB due to sentence-transformers dependency
+2. **Memory usage bounded under load** (line 1702) - Needs load testing
+3. **Test coverage >70%** (line 2275) - Needs pytest --cov
+
+#### H. Design Decision Tests (2 tests) - May need clarification
+1. **Partial failure during ingest is handled atomically** (line 1890) - Current design is RESILIENT not ATOMIC (intentional for operational recovery)
+2. **Large playlist handling (100+ videos)** (line 2332) - Needs YouTube API
+
+### Code Verification Summary
+
+All 7 "runtime verification" tests have been confirmed via code review as CORRECTLY IMPLEMENTED:
+
+1. **Query timeout**: `asyncio.wait_for(timeout=settings.query_timeout_s)` in query.py
+2. **max_context_tokens**: Token counting + truncation in llm_base.py:237-246
+3. **Reranking**: CrossEncoderReranker with semaphore, lazy loading, timeout handling
+4. **Multi-provider embedding**: ON CONFLICT clause handles coexistence
+5. **Composite FK**: Migration 075 creates FK on (doc_id, workspace_id)
+6. **GIN indexes**: idx_chunks_symbols_gin, idx_chunks_topics_gin, idx_chunks_entities_gin
+7. **Published_at index**: Composite index on (workspace_id, published_at DESC)
+
+### Test Count Summary
+- **Passing**: 228/263 (86.7%)
+- **Failing**: 35/263 (13.3%)
+  - Blocked by Docker: 3
+  - Blocked by YouTube API: 5
+  - Blocked by LLM API: 4
+  - Blocked by n8n: 8
+  - Blocked by runtime: 7 (code complete)
+  - Blocked by container control: 2
+  - Blocked by infrastructure: 3
+  - Design clarification: 2
+
+### What's Needed to Progress
+
+**Immediate actions that would unlock tests:**
+1. **Docker access**: 3 health tests + 2 recovery tests + 1 image size test = 6 tests
+2. **Server runtime**: 7 tests with complete code implementation
+3. **YouTube API test videos**: 5 tests
+4. **OPENROUTER_API_KEY**: 4 LLM tests
+5. **n8n configuration**: 8 workflow tests
+
+**Total potentially unlockable with Docker + server**: 13 tests (would reach 241/263 = 91.6%)
+
+### Commits Made This Session
+None - documentation only session
+
+---
+
 ## Session 96 Summary
 Date: Session 96 (Coverage Configuration & CI Improvements)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)
