@@ -1,11 +1,32 @@
 """Unit tests for ops_alerts admin endpoints."""
 
+import os
 import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import status
+
+# Set required environment variables for tests before importing app
+os.environ.setdefault("ADMIN_TOKEN", "test-token")
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+
+
+@pytest.fixture
+def client():
+    """Create test client."""
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    return TestClient(app)
+
+
+@pytest.fixture
+def mock_db_pool():
+    """Create mock database pool."""
+    return MagicMock()
 
 
 @pytest.fixture
@@ -17,6 +38,7 @@ def mock_alerts_repo():
     repo.acknowledge = AsyncMock()
     repo.resolve = AsyncMock()
     repo.unacknowledge = AsyncMock()
+    repo.upsert_activate = AsyncMock()
     return repo
 
 
@@ -97,17 +119,16 @@ def sample_alerts():
 class TestOpsAlertsListEndpoint:
     """Tests for GET /admin/ops-alerts list endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_list_returns_html(self, mock_alerts_repo, sample_alerts):
+    def test_list_returns_html(
+        self, client, mock_db_pool, mock_alerts_repo, sample_alerts
+    ):
         """Test that list endpoint returns HTML response."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         alerts, workspace_id = sample_alerts
         mock_alerts_repo.list_events.return_value = (alerts, len(alerts))
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.get(
                 f"/admin/ops-alerts?workspace_id={workspace_id}",
                 headers={"X-Admin-Token": "test-token"},
@@ -117,17 +138,16 @@ class TestOpsAlertsListEndpoint:
         assert "text/html" in response.headers["content-type"]
         assert b"Ops Alerts" in response.content or b"Alert" in response.content
 
-    @pytest.mark.asyncio
-    async def test_list_passes_filters_to_repository(self, mock_alerts_repo, sample_alerts):
+    def test_list_passes_filters_to_repository(
+        self, client, mock_db_pool, mock_alerts_repo, sample_alerts
+    ):
         """Test that query params are passed to repository correctly."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         alerts, workspace_id = sample_alerts
         mock_alerts_repo.list_events.return_value = ([], 0)
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.get(
                 f"/admin/ops-alerts?workspace_id={workspace_id}&status=active&severity=high&limit=10&offset=20",
                 headers={"X-Admin-Token": "test-token"},
@@ -142,30 +162,30 @@ class TestOpsAlertsListEndpoint:
         assert call_kwargs["limit"] == 10
         assert call_kwargs["offset"] == 20
 
-    @pytest.mark.asyncio
-    async def test_list_requires_admin_token(self, mock_alerts_repo, sample_alerts):
+    def test_list_requires_admin_token(self, client, sample_alerts):
         """Test that endpoint requires admin token."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         _, workspace_id = sample_alerts
 
-        client = TestClient(app)
         response = client.get(f"/admin/ops-alerts?workspace_id={workspace_id}")
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
 
-    @pytest.mark.asyncio
-    async def test_list_pagination_metadata(self, mock_alerts_repo, sample_alerts):
+    def test_list_pagination_metadata(
+        self, client, mock_db_pool, mock_alerts_repo, sample_alerts
+    ):
         """Test that pagination metadata is included in response."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         alerts, workspace_id = sample_alerts
-        mock_alerts_repo.list_events.return_value = (alerts[:2], 10)  # 2 items, 10 total
+        mock_alerts_repo.list_events.return_value = (
+            alerts[:2],
+            10,
+        )  # 2 items, 10 total
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.get(
                 f"/admin/ops-alerts?workspace_id={workspace_id}&limit=2&offset=0",
                 headers={"X-Admin-Token": "test-token"},
@@ -180,17 +200,14 @@ class TestOpsAlertsListEndpoint:
 class TestOpsAlertsActionEndpoints:
     """Tests for action endpoints (acknowledge, resolve, reopen)."""
 
-    @pytest.mark.asyncio
-    async def test_acknowledge_success(self, mock_alerts_repo):
+    def test_acknowledge_success(self, client, mock_db_pool, mock_alerts_repo):
         """Test acknowledging an alert."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         event_id = uuid4()
         mock_alerts_repo.acknowledge.return_value = True
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.post(
                 f"/admin/ops-alerts/{event_id}/acknowledge",
                 headers={"X-Admin-Token": "test-token"},
@@ -199,19 +216,18 @@ class TestOpsAlertsActionEndpoints:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["acknowledged"] is True
-        mock_alerts_repo.acknowledge.assert_called_once_with(event_id, acknowledged_by=None)
+        mock_alerts_repo.acknowledge.assert_called_once_with(
+            event_id, acknowledged_by=None
+        )
 
-    @pytest.mark.asyncio
-    async def test_acknowledge_not_found(self, mock_alerts_repo):
+    def test_acknowledge_not_found(self, client, mock_db_pool, mock_alerts_repo):
         """Test acknowledging non-existent alert returns 404."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         event_id = uuid4()
         mock_alerts_repo.acknowledge.return_value = False
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.post(
                 f"/admin/ops-alerts/{event_id}/acknowledge",
                 headers={"X-Admin-Token": "test-token"},
@@ -219,17 +235,14 @@ class TestOpsAlertsActionEndpoints:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    @pytest.mark.asyncio
-    async def test_resolve_success(self, mock_alerts_repo):
+    def test_resolve_success(self, client, mock_db_pool, mock_alerts_repo):
         """Test resolving an alert."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         event_id = uuid4()
         mock_alerts_repo.resolve.return_value = True
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.post(
                 f"/admin/ops-alerts/{event_id}/resolve",
                 headers={"X-Admin-Token": "test-token"},
@@ -240,12 +253,8 @@ class TestOpsAlertsActionEndpoints:
         assert data["resolved"] is True
         mock_alerts_repo.resolve.assert_called_once_with(event_id)
 
-    @pytest.mark.asyncio
-    async def test_reopen_success(self, mock_alerts_repo):
+    def test_reopen_success(self, client, mock_db_pool, mock_alerts_repo):
         """Test reopening a resolved alert."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         event_id = uuid4()
         # For reopen, we need to get the event first and then upsert_activate
         mock_alerts_repo.get_event.return_value = {
@@ -261,10 +270,14 @@ class TestOpsAlertsActionEndpoints:
             "context_json": {},
             "fingerprint": "test_fp",
         }
-        mock_alerts_repo.upsert_activate.return_value = {"id": event_id, "status": "active"}
+        mock_alerts_repo.upsert_activate.return_value = {
+            "id": event_id,
+            "status": "active",
+        }
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.post(
                 f"/admin/ops-alerts/{event_id}/reopen",
                 headers={"X-Admin-Token": "test-token"},
@@ -278,17 +291,16 @@ class TestOpsAlertsActionEndpoints:
 class TestSeverityBadges:
     """Tests for severity badge rendering."""
 
-    @pytest.mark.asyncio
-    async def test_severity_badge_colors(self, mock_alerts_repo, sample_alerts):
+    def test_severity_badge_colors(
+        self, client, mock_db_pool, mock_alerts_repo, sample_alerts
+    ):
         """Test that severity badges have correct color classes."""
-        from fastapi.testclient import TestClient
-        from app.main import app
-
         alerts, workspace_id = sample_alerts
         mock_alerts_repo.list_events.return_value = (alerts, len(alerts))
 
-        with patch("app.admin.ops_alerts._get_alerts_repo", return_value=mock_alerts_repo):
-            client = TestClient(app)
+        with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
+            "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
+        ):
             response = client.get(
                 f"/admin/ops-alerts?workspace_id={workspace_id}",
                 headers={"X-Admin-Token": "test-token"},

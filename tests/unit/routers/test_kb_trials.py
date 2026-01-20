@@ -113,15 +113,15 @@ class TestRecommendValidation:
             data = response.json()
             assert "INVALID_OBJECTIVE" in str(data)
 
-    def test_both_ohlcv_source_and_regime_tags_allowed(self, client, mock_recommender):
-        """Should allow dataset_id with regime_tags (they serve different purposes)."""
+    def test_dataset_id_returns_501_not_implemented(self, client, mock_recommender):
+        """dataset_id parameter returns 501 since dataset storage not implemented."""
         with patch(
             "app.routers.kb_trials._get_recommender",
             return_value=mock_recommender,
         ):
-            # dataset_id references historical data
+            # dataset_id references historical data (future feature)
             # regime_tags override computed regime
-            # Both can be provided together
+            # When dataset storage is implemented, both can be provided together
             response = client.post(
                 "/kb/trials/recommend",
                 json={
@@ -133,8 +133,11 @@ class TestRecommendValidation:
                 },
             )
 
-            # Should succeed (or at least not fail validation)
-            assert response.status_code == 200
+            # Should return 501 Not Implemented
+            assert response.status_code == 501
+            data = response.json()
+            assert data["detail"]["code"] == "DATASET_STORAGE_NOT_IMPLEMENTED"
+            assert "regime_tags" in data["detail"]["error"]
 
     def test_retrieve_k_too_large_returns_422(self, client):
         """Should return 422 for retrieve_k > MAX_RETRIEVE_K."""
