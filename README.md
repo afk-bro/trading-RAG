@@ -48,6 +48,10 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
 - **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts management
 - **Ops Alerts**: Automated evaluation via pg_cron, Telegram delivery with activation/recovery/escalation notifications
+- **Paper Equity Snapshots**: Append-only equity time series with drawdown computation
+- **Workspace Drawdown Alerts**: WARN at 12%, CRITICAL at 20% with hysteresis (clear at 10%/16%)
+- **Auto-Pause Guardrail**: Config-gated safety feature that pauses active strategies on CRITICAL alerts
+- **Read-Only Dashboards**: Equity curve, intel timeline, alerts summary endpoints for trust-building UIs
 - **Idempotent Notifications**: Race-safe delivery with conditional mark pattern, delivery tracking columns
 - **Idempotency Hygiene**: Auto-prune via pg_cron, health page monitoring, Prometheus metrics
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
@@ -228,6 +232,10 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/ops-alerts/{id}/resolve` | Resolve alert |
 | `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
 | `/admin/ingest` | Ingest UI (YouTube, PDF, Pine) |
+| `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
+| `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
+| `/dashboards/{ws}/alerts` | Active alerts by severity |
+| `/dashboards/{ws}/summary` | Combined overview for dashboard cards |
 
 ### Pine Script Registry CLI
 
@@ -353,6 +361,13 @@ trading-RAG/
 - Deduplication via `dedupe_key`
 - Telegram message ID for audit trail
 
+### paper_equity_snapshots
+- Append-only equity time series for drawdown computation
+- Workspace-level tracking with optional strategy_version_id
+- Dual time axes: `snapshot_ts` (market time), `computed_at` (wall clock)
+- Components: equity, cash, positions_value, realized_pnl
+- Deduplication via `inputs_hash` (SHA256)
+
 ## Environment Variables
 
 | Variable | Description | Required |
@@ -366,6 +381,7 @@ trading-RAG/
 | `OLLAMA_PORT` | Ollama port (default: 11434) | No |
 | `EMBED_MODEL` | Embedding model (default: nomic-embed-text) | No |
 | `SERVICE_PORT` | Service port (default: 8000) | No |
+| `AUTO_PAUSE_ENABLED` | Auto-pause strategies on CRITICAL alerts (default: false) | No |
 
 **Note:** Without `OPENROUTER_API_KEY`, semantic search (`mode=retrieve`) works fully. LLM answer generation (`mode=answer`) will return retrieved chunks with a message indicating generation is disabled.
 

@@ -8,6 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Paper Equity Snapshots & Drawdown Alerts (PR9)** - Equity tracking with automated drawdown monitoring
+  - `paper_equity_snapshots` table: append-only equity time series per workspace
+  - Dual time axes: `snapshot_ts` (market time), `computed_at` (wall clock)
+  - Equity components: cash, positions_value, realized_pnl
+  - Deduplication via SHA256 `inputs_hash` to prevent snapshot spam
+  - `PaperEquityRepository` with insert_snapshot, list_window, compute_drawdown
+  - Paper broker integration: automatic equity snapshot recording after executions
+  - `WORKSPACE_DRAWDOWN_HIGH` alert rule: WARN at 12%, CRITICAL at 20%
+  - Hysteresis to prevent flapping: clear WARN at 10%, clear CRITICAL at 16%
+  - Prometheus gauge `workspace_drawdown_pct` for Grafana dashboards
+  - Runbook for drawdown alert response
+  - Migration: 081_paper_equity_snapshots.sql
+
+- **Auto-Pause Guardrail (PR9b)** - Safety feature for CRITICAL alerts
+  - `auto_pause_enabled` config flag (default: false)
+  - Auto-pauses active strategy versions when CRITICAL drawdown (>20%) fires
+  - Auto-pauses specific version when CRITICAL confidence (<0.20) fires
+  - Prometheus counter `ops_alert_auto_pause_total` for tracking
+  - `EvalResult` extended with `versions_auto_paused`, `auto_paused_version_ids`
+  - Manual unpause required via API
+
+- **Read-Only Dashboard Endpoints (PR9b)** - Trust-building visualization data
+  - `GET /dashboards/{workspace_id}/equity` - Equity curve with drawdown overlay
+    - Rolling peak calculation, max drawdown tracking
+    - Summary stats: current equity, current/max drawdown, total return
+  - `GET /dashboards/{workspace_id}/intel-timeline` - Confidence & regime history
+    - Per-version grouping with latest snapshot details
+    - Filter by version_id or show all active versions
+  - `GET /dashboards/{workspace_id}/alerts` - Active alerts by severity
+    - Summary counts by status, severity, rule_type
+    - Optional include_resolved parameter
+  - `GET /dashboards/{workspace_id}/summary` - Combined overview for dashboard cards
+    - Single call for equity + intel + alerts summary
+    - Optimized for dashboard landing pages
+
 - **Strategy Lifecycle v0.5** - Version management and state machine for strategies
   - `strategy_versions` table with immutable config snapshots (SHA256 hash)
   - State machine: `draft` → `active` ↔ `paused` → `retired` (retired is terminal)

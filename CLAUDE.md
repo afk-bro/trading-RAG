@@ -99,6 +99,7 @@ PostgreSQL tables (via Supabase):
 | `strategy_versions` | Immutable config snapshots with state machine (draft→active↔paused→retired) |
 | `strategy_version_transitions` | Audit log for version state changes |
 | `strategy_intel_snapshots` | Append-only time series of regime + confidence per version |
+| `paper_equity_snapshots` | Append-only equity time series for drawdown computation |
 | `backtest_runs` | Strategy backtest results with metrics |
 | `tune_sessions` | Parameter sweep sessions |
 | `wfo_runs` | Walk-forward optimization results |
@@ -146,6 +147,14 @@ All tables FK to workspaces for multi-tenant isolation. Migrations in `migration
 |--------|----------|-------------|
 | POST | `/execute/intents` | Execute trade intent (paper) |
 | GET | `/execute/paper/state/{ws}` | Paper trading state |
+
+### Dashboards (read-only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
+| GET | `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
+| GET | `/dashboards/{ws}/alerts` | Active alerts by severity |
+| GET | `/dashboards/{ws}/summary` | Combined overview for dashboard cards |
 
 ### Admin
 | Method | Endpoint | Description |
