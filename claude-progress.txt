@@ -1,5 +1,103 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 79 Summary
+Date: Session 79 (Code Review - No Runtime)
+Status: Server Not Running - 223/263 Tests Passing (84.8%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Start server and run verification tests
+- Progress remaining tests
+
+### Infrastructure Status (Same as Sessions 74-78)
+- **Server**: NOT RUNNING (port 8000 not listening)
+- **Puppeteer**: Confirmed connection refused on localhost:8000
+- **Commands Blocked**: python, uvicorn, docker, curl, wget, source, echo
+- **Ollama**: Running (confirmed via ps aux)
+- **Chrome/Puppeteer**: Running (MCP server active)
+
+### What Was Accomplished (Session 79)
+
+#### 1. Verified Code Implementation Quality
+Performed thorough code review of failing test implementations to confirm
+they are correctly implemented and just need runtime verification:
+
+**Document Supersede Flow (IMPLEMENTED CORRECTLY):**
+- `app/repositories/documents.py`: `supersede_and_create()` method
+  - Uses database transaction (`async with conn.transaction()`)
+  - Write-new-first pattern: creates new doc, then marks old as superseded
+  - Properly increments version number
+  - Returns (new_doc_id, new_version) tuple
+
+**Qdrant Vector Deletion (IMPLEMENTED CORRECTLY):**
+- `app/routers/ingest.py` lines 449-464
+  - After successful update, calls `vector_repo.delete_batch(old_chunk_ids)`
+  - Has proper error handling (logs warning, doesn't fail operation)
+  - Old vectors cleaned up post-success
+
+**Version Tracking (IMPLEMENTED CORRECTLY):**
+- Version starts at 1 for new documents
+- Increments correctly in `supersede_and_create()` via `old_version + 1`
+- Tracked across document updates
+
+#### 2. Test Page Verification
+Confirmed `tests/fixtures/test_page.html` has comprehensive `testDocumentVersioning()`
+function that tests:
+- Step 1: Create initial document (version 1)
+- Step 2: Get chunks for version 1
+- Step 3: Update document to version 2 with `update_existing: true`
+- Step 4: Verify version incremented
+- Step 5: Verify old document status is 'superseded'
+- Step 6: Verify supersede linkage correct
+- Step 7: Test update to version 3
+
+#### 3. Tests Ready for Runtime Verification
+The following tests have correct implementations and just need runtime to pass:
+- Write-new-first pattern prevents data loss on update failure
+- Document supersede flow marks old version correctly
+- Document version tracking increments correctly
+- Qdrant delete removes vectors on document supersede
+
+### Test Counts (Unchanged)
+- Passing: 223 (84.8%)
+- Failing: 40 (15.2%)
+- Total: 263
+
+### Failing Test Categories Analysis
+| Category | Count | Notes |
+|----------|-------|-------|
+| Docker/Container control | 3 | Need to stop/restart containers |
+| YouTube external API | 4 | Network access to YouTube APIs |
+| OpenRouter/LLM answer mode | 5 | Requires API key |
+| n8n workflow tests | 8 | n8n service not setup |
+| Document versioning | 4 | Code correct, needs runtime |
+| Service recovery | 2 | Container control needed |
+| Index/Performance | 4 | 1000+ documents or GIN index testing |
+| Multiple embed providers | 1 | Need Qdrant + re-embed |
+| Reranking | 1 | Feature may not be implemented |
+| Migration safety | 1 | Fresh DB required |
+| Query timeout | 1 | Needs runtime testing |
+| Transcript languages | 2 | YouTube API needed |
+| Docker image size | 1 | Docker build blocked |
+| Partial failure/atomicity | 1 | Complex setup needed |
+| Composite FK constraint | 1 | By design (app-level, not schema) |
+| Test coverage >70% | 1 | pytest --cov blocked |
+
+### Recommendations for Next Session
+1. **CRITICAL**: Start the FastAPI server before testing
+   - Command: `.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000`
+   - Or via init.sh if Docker is available
+2. Once server is running, run document versioning test via browser
+3. Mark passing tests: Document supersede, version tracking, Qdrant delete
+
+### Session Summary
+This session performed a code review confirming the document versioning, supersede flow,
+and vector deletion implementations are correct. The code is ready for runtime
+verification. No changes were made to the codebase. The server startup is still
+blocked by command restrictions.
+
+---
+
 ## Session 78 Summary
 Date: Session 78 (Environment Still Blocked)
 Status: Server Not Running - 223/263 Tests Passing (84.8%)
