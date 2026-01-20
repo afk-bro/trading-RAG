@@ -436,7 +436,7 @@ async def _fetch_tune_for_compare(tune_id: UUID) -> Optional[dict[str, Any]]:
     """Fetch a tune's full detail for comparison."""
     tune_repo = _get_tune_repo()
 
-    tune = await tune_repo.get_tune_by_id(tune_id)
+    tune = await tune_repo.get_tune(tune_id)
     if not tune:
         return None
 
@@ -868,7 +868,7 @@ async def admin_tune_detail(
     """View tune details with runs."""
     tune_repo = _get_tune_repo()
 
-    tune = await tune_repo.get_tune_by_id(tune_id)
+    tune = await tune_repo.get_tune(tune_id)
     if not tune:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
