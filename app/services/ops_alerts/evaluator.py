@@ -542,7 +542,7 @@ class OpsAlertEvaluator:
 
     async def _evaluate_rule(
         self, rule: OpsAlertRule, ctx: EvalContext
-    ) -> AlertCondition:
+    ) -> AlertCondition | list[AlertCondition]:
         """Evaluate a single rule against context."""
 
         if rule.rule_type == OpsRuleType.HEALTH_DEGRADED:

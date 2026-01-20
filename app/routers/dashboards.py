@@ -208,7 +208,7 @@ async def get_intel_timeline(
         )
 
     # Build version metadata
-    versions = []
+    versions: list[dict[str, Any]] = []
     for row in rows:
         vid = str(row["strategy_version_id"])
         # Only add once per version

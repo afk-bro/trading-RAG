@@ -17,7 +17,7 @@ logger = structlog.get_logger(__name__)
 
 
 # Valid state transitions
-VALID_TRANSITIONS = {
+VALID_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"active", "retired"},
     "active": {"paused", "retired"},
     "paused": {"active", "retired"},

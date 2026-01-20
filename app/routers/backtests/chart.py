@@ -124,7 +124,10 @@ def _normalize_timestamp(ts: Any) -> str:
     return s
 
 
-def _parse_equity_curve(raw: Any) -> tuple[list[EquityPoint], str]:
+EquitySource = Literal["jsonb", "csv", "missing"]
+
+
+def _parse_equity_curve(raw: Any) -> tuple[list[EquityPoint], EquitySource]:
     """Parse equity curve from JSONB, return (points, source)."""
     if not raw:
         return [], "missing"
