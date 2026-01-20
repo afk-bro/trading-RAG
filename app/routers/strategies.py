@@ -1,5 +1,6 @@
 """Strategy registry API endpoints."""
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -7,7 +8,9 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.deps.security import require_admin_token
+from app.repositories.strategy_intel import StrategyIntelRepository, IntelSnapshot
 from app.repositories.strategy_versions import StrategyVersionsRepository
+from app.services.intel import IntelRunner
 from app.schemas import (
     BacktestSummary,
     BacktestSummaryStatus,
@@ -32,6 +35,10 @@ from app.schemas import (
     StrategyVersionListResponse,
     VersionTransitionRequest,
     VersionTransitionResponse,
+    # Intel Snapshots
+    IntelSnapshotResponse,
+    IntelSnapshotListItem,
+    IntelSnapshotListResponse,
 )
 from app.services.strategy import StrategyRepository
 
@@ -701,3 +708,196 @@ async def get_version_transitions(
     transitions = await version_repo.get_transitions(version_id, limit=limit)
 
     return [_transition_to_response(t) for t in transitions]
+
+
+# =============================================================================
+# Strategy Intel Snapshots (v1.5)
+# =============================================================================
+
+
+def _snapshot_to_response(snapshot: IntelSnapshot) -> IntelSnapshotResponse:
+    """Convert IntelSnapshot dataclass to response schema."""
+    return IntelSnapshotResponse(
+        id=snapshot.id,
+        workspace_id=snapshot.workspace_id,
+        strategy_version_id=snapshot.strategy_version_id,
+        as_of_ts=snapshot.as_of_ts,
+        computed_at=snapshot.computed_at,
+        regime=snapshot.regime,
+        confidence_score=snapshot.confidence_score,
+        confidence_components=snapshot.confidence_components,
+        features=snapshot.features,
+        explain=snapshot.explain,
+        engine_version=snapshot.engine_version,
+        inputs_hash=snapshot.inputs_hash,
+        run_id=snapshot.run_id,
+    )
+
+
+def _snapshot_to_list_item(snapshot: IntelSnapshot) -> IntelSnapshotListItem:
+    """Convert IntelSnapshot to list item (lighter response)."""
+    return IntelSnapshotListItem(
+        id=snapshot.id,
+        strategy_version_id=snapshot.strategy_version_id,
+        as_of_ts=snapshot.as_of_ts,
+        computed_at=snapshot.computed_at,
+        regime=snapshot.regime,
+        confidence_score=snapshot.confidence_score,
+    )
+
+
+@router.get(
+    "/{strategy_id}/versions/{version_id}/intel/latest",
+    response_model=IntelSnapshotResponse,
+    summary="Get latest intel snapshot",
+    description="Get the most recent intelligence snapshot for a strategy version.",
+)
+async def get_latest_intel(
+    strategy_id: UUID,
+    version_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> IntelSnapshotResponse:
+    """Get the latest intel snapshot for a strategy version."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    # Verify version exists and belongs to this strategy
+    version_repo = StrategyVersionsRepository(pool)
+    version = await version_repo.get_version(version_id, strategy_id=strategy_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    # Get latest snapshot
+    intel_repo = StrategyIntelRepository(pool)
+    snapshot = await intel_repo.get_latest_snapshot(version_id)
+    if not snapshot:
+        raise HTTPException(404, "No intel snapshot found for this version")
+
+    return _snapshot_to_response(snapshot)
+
+
+@router.get(
+    "/{strategy_id}/versions/{version_id}/intel",
+    response_model=IntelSnapshotListResponse,
+    summary="List intel snapshots",
+    description="List intel snapshots for a version with cursor-based pagination.",
+)
+async def list_intel_snapshots(
+    strategy_id: UUID,
+    version_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    limit: int = Query(50, ge=1, le=200, description="Max results"),
+    cursor: Optional[datetime] = Query(None, description="Cursor (as_of_ts) for pagination"),
+    _: bool = Depends(require_admin_token),
+) -> IntelSnapshotListResponse:
+    """List intel snapshots for a strategy version (newest first)."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    # Verify version exists and belongs to this strategy
+    version_repo = StrategyVersionsRepository(pool)
+    version = await version_repo.get_version(version_id, strategy_id=strategy_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    # List snapshots
+    intel_repo = StrategyIntelRepository(pool)
+    snapshots = await intel_repo.list_snapshots(
+        strategy_version_id=version_id,
+        limit=limit + 1,  # Fetch one extra to check for more pages
+        cursor=cursor,
+    )
+
+    # Determine if there are more results
+    has_more = len(snapshots) > limit
+    if has_more:
+        snapshots = snapshots[:limit]
+
+    items = [_snapshot_to_list_item(s) for s in snapshots]
+
+    # Set next cursor to oldest item's as_of_ts
+    next_cursor = snapshots[-1].as_of_ts if has_more else None
+
+    return IntelSnapshotListResponse(
+        items=items,
+        total=len(items),  # Note: this is page size, not total count
+        limit=limit,
+        next_cursor=next_cursor,
+    )
+
+
+@router.post(
+    "/{strategy_id}/versions/{version_id}/intel/recompute",
+    response_model=IntelSnapshotResponse,
+    summary="Recompute intel snapshot",
+    description="Trigger recomputation of intel for a strategy version at current time.",
+)
+async def recompute_intel(
+    strategy_id: UUID,
+    version_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    force: bool = Query(False, description="Force even if inputs unchanged"),
+    _: bool = Depends(require_admin_token),
+) -> IntelSnapshotResponse:
+    """Recompute intel for a strategy version."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    # Verify version exists and belongs to this strategy
+    version_repo = StrategyVersionsRepository(pool)
+    version = await version_repo.get_version(version_id, strategy_id=strategy_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    # Run intel computation
+    as_of_ts = datetime.now(timezone.utc)
+    runner = IntelRunner(pool)
+
+    try:
+        snapshot = await runner.run_for_version(
+            version_id=version_id,
+            as_of_ts=as_of_ts,
+            workspace_id=workspace_id,
+            force=force,
+        )
+    except Exception as e:
+        logger.error(
+            "intel_recompute_failed",
+            version_id=str(version_id),
+            error=str(e),
+        )
+        raise HTTPException(500, f"Intel computation failed: {e}")
+
+    if snapshot is None:
+        # Deduplication kicked in - return the existing latest
+        intel_repo = StrategyIntelRepository(pool)
+        existing = await intel_repo.get_latest_snapshot(version_id)
+        if existing:
+            return _snapshot_to_response(existing)
+        raise HTTPException(500, "Computation returned None but no existing snapshot found")
+
+    logger.info(
+        "intel_recompute_success",
+        version_id=str(version_id),
+        snapshot_id=str(snapshot.id),
+        regime=snapshot.regime,
+        confidence=snapshot.confidence_score,
+    )
+
+    return _snapshot_to_response(snapshot)
