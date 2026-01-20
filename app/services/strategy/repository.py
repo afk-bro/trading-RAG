@@ -49,6 +49,7 @@ class StrategyRepository:
         status: str = "draft",
         risk_level: Optional[str] = None,
         tags: Optional[dict] = None,
+        strategy_entity_id: Optional[UUID] = None,
     ) -> dict:
         """
         Create a new strategy.
@@ -80,8 +81,8 @@ class StrategyRepository:
                 """
                 INSERT INTO strategies (
                     workspace_id, name, slug, description, engine,
-                    source_ref, status, risk_level, tags
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    source_ref, status, risk_level, tags, strategy_entity_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING *
                 """,
                 workspace_id,
@@ -93,6 +94,7 @@ class StrategyRepository:
                 status,
                 risk_level,
                 json.dumps(tags) if tags else "{}",
+                strategy_entity_id,
             )
 
         logger.info(
@@ -256,6 +258,7 @@ class StrategyRepository:
                 "review_status",
                 "risk_level",
                 "engine",
+                "strategy_entity_id",
             ):
                 set_parts.append(f"{field} = ${param_idx}")
                 params.append(value)
