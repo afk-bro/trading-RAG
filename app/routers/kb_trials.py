@@ -848,8 +848,22 @@ async def recommend(
 
     ohlcv_data = None
     if has_dataset_id:
-        # TODO: Load dataset from storage by ID
-        pass
+        # Dataset storage not implemented
+        # Implementation path:
+        # 1. Add ohlcv_datasets table (workspace_id, dataset_id, name, bars JSONB, created_at)
+        # 2. Add POST /kb/trials/datasets endpoint to upload and store OHLCV
+        # 3. Add GET /kb/trials/datasets/{id} to retrieve stored dataset
+        # 4. Query here: SELECT bars FROM ohlcv_datasets WHERE id = $1 AND workspace_id = $2
+        # 5. Parse bars into ohlcv_data format (list of OHLCV dicts)
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "error": "Dataset storage not implemented. Use regime_tags parameter to specify regime explicitly, "
+                "or upload OHLCV file via /kb/trials/recommend/upload endpoint (future).",
+                "code": "DATASET_STORAGE_NOT_IMPLEMENTED",
+                "dataset_id": request.dataset_id,
+            },
+        )
     elif False:  # Placeholder for file handling
         try:
             content = b""  # Would be file content
