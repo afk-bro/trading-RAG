@@ -697,3 +697,100 @@ class StrategyCard(BaseModel):
     )
     best_oos_score: Optional[float] = Field(None, description="Best OOS score")
     max_drawdown: Optional[float] = Field(None, description="Max drawdown percentage")
+
+
+# =============================================================================
+# Strategy Versions (Lifecycle v0.5)
+# =============================================================================
+
+
+class StrategyVersionState(str, Enum):
+    """Strategy version lifecycle state."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    RETIRED = "retired"
+
+
+class StrategyVersionCreateRequest(BaseModel):
+    """Request for POST /strategies/{id}/versions."""
+
+    config_snapshot: dict = Field(..., description="Immutable strategy configuration")
+    version_tag: Optional[str] = Field(
+        None, min_length=1, max_length=50, description="Optional version tag (e.g., v1.0-beta)"
+    )
+    regime_awareness: Optional[dict] = Field(
+        default_factory=dict, description="Regime-specific behavior config"
+    )
+    created_by: Optional[str] = Field(
+        None, description="Actor creating version (admin:<token> or system)"
+    )
+
+
+class StrategyVersionResponse(BaseModel):
+    """Response for strategy version endpoints."""
+
+    id: UUID = Field(..., description="Version UUID")
+    strategy_id: UUID = Field(..., description="Parent strategy UUID")
+    strategy_entity_id: UUID = Field(..., description="Legacy entity ID for FK compatibility")
+    version_number: int = Field(..., description="Auto-incremented version number")
+    version_tag: Optional[str] = Field(None, description="Optional version tag")
+    config_snapshot: dict = Field(..., description="Immutable strategy configuration")
+    config_hash: str = Field(..., description="SHA256 hash of config for deduplication")
+    state: StrategyVersionState = Field(..., description="Current lifecycle state")
+    regime_awareness: dict = Field(default_factory=dict, description="Regime config")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    created_by: Optional[str] = Field(None, description="Actor who created version")
+    activated_at: Optional[datetime] = Field(None, description="When activated")
+    paused_at: Optional[datetime] = Field(None, description="When paused")
+    retired_at: Optional[datetime] = Field(None, description="When retired")
+    kb_strategy_spec_id: Optional[UUID] = Field(None, description="Source spec ID")
+
+
+class StrategyVersionListItem(BaseModel):
+    """Single item in version list response."""
+
+    id: UUID = Field(..., description="Version UUID")
+    version_number: int = Field(..., description="Version number")
+    version_tag: Optional[str] = Field(None, description="Version tag")
+    state: StrategyVersionState = Field(..., description="Lifecycle state")
+    config_hash: str = Field(..., description="Config hash (first 16 chars)")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    created_by: Optional[str] = Field(None, description="Creator")
+    activated_at: Optional[datetime] = Field(None, description="When activated")
+
+
+class StrategyVersionListResponse(BaseModel):
+    """Response for GET /strategies/{id}/versions."""
+
+    items: list[StrategyVersionListItem] = Field(..., description="Version list")
+    total: int = Field(..., description="Total count")
+    limit: int = Field(..., description="Page size")
+    offset: int = Field(..., description="Page offset")
+    has_more: bool = Field(..., description="More results available")
+
+
+class VersionTransitionRequest(BaseModel):
+    """Request for state transition endpoints (activate, pause, retire)."""
+
+    reason: Optional[str] = Field(
+        None, max_length=500, description="Reason for transition"
+    )
+    triggered_by: str = Field(
+        ..., min_length=1, max_length=100, description="Actor triggering transition"
+    )
+
+
+class VersionTransitionResponse(BaseModel):
+    """Response for version transition audit."""
+
+    id: UUID = Field(..., description="Transition record UUID")
+    version_id: UUID = Field(..., description="Version UUID")
+    from_state: Optional[StrategyVersionState] = Field(
+        None, description="Previous state (None for creation)"
+    )
+    to_state: StrategyVersionState = Field(..., description="New state")
+    triggered_by: str = Field(..., description="Actor who triggered")
+    triggered_at: datetime = Field(..., description="When triggered")
+    reason: Optional[str] = Field(None, description="Reason for transition")

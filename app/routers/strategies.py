@@ -7,6 +7,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.deps.security import require_admin_token
+from app.repositories.strategy_versions import StrategyVersionsRepository
 from app.schemas import (
     BacktestSummary,
     BacktestSummaryStatus,
@@ -23,6 +24,14 @@ from app.schemas import (
     StrategyStatus,
     StrategyTags,
     StrategyUpdateRequest,
+    # Strategy Versions
+    StrategyVersionState,
+    StrategyVersionCreateRequest,
+    StrategyVersionResponse,
+    StrategyVersionListItem,
+    StrategyVersionListResponse,
+    VersionTransitionRequest,
+    VersionTransitionResponse,
 )
 from app.services.strategy import StrategyRepository
 
@@ -351,3 +360,344 @@ async def get_candidates_by_intent(
         )
         for c in candidates
     ]
+
+
+# =============================================================================
+# Strategy Versions (Lifecycle v0.5)
+# =============================================================================
+
+
+def _version_to_response(version) -> StrategyVersionResponse:
+    """Convert StrategyVersion dataclass to response schema."""
+    return StrategyVersionResponse(
+        id=version.id,
+        strategy_id=version.strategy_id,
+        strategy_entity_id=version.strategy_entity_id,
+        version_number=version.version_number,
+        version_tag=version.version_tag,
+        config_snapshot=version.config_snapshot,
+        config_hash=version.config_hash,
+        state=StrategyVersionState(version.state),
+        regime_awareness=version.regime_awareness,
+        created_at=version.created_at,
+        created_by=version.created_by,
+        activated_at=version.activated_at,
+        paused_at=version.paused_at,
+        retired_at=version.retired_at,
+        kb_strategy_spec_id=version.kb_strategy_spec_id,
+    )
+
+
+def _version_to_list_item(version) -> StrategyVersionListItem:
+    """Convert StrategyVersion to list item (lighter response)."""
+    return StrategyVersionListItem(
+        id=version.id,
+        version_number=version.version_number,
+        version_tag=version.version_tag,
+        state=StrategyVersionState(version.state),
+        config_hash=version.config_hash[:16],  # Truncate for list view
+        created_at=version.created_at,
+        created_by=version.created_by,
+        activated_at=version.activated_at,
+    )
+
+
+def _transition_to_response(transition) -> VersionTransitionResponse:
+    """Convert VersionTransition dataclass to response schema."""
+    return VersionTransitionResponse(
+        id=transition.id,
+        version_id=transition.version_id,
+        from_state=(
+            StrategyVersionState(transition.from_state)
+            if transition.from_state
+            else None
+        ),
+        to_state=StrategyVersionState(transition.to_state),
+        triggered_by=transition.triggered_by,
+        triggered_at=transition.triggered_at,
+        reason=transition.reason,
+    )
+
+
+@router.post(
+    "/{strategy_id}/versions",
+    response_model=StrategyVersionResponse,
+    status_code=201,
+    summary="Create strategy version",
+    description="Create a new draft version with immutable config snapshot.",
+)
+async def create_version(
+    strategy_id: UUID,
+    request: StrategyVersionCreateRequest,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> StrategyVersionResponse:
+    """Create a new strategy version in draft state."""
+    pool = _get_pool()
+
+    # Verify strategy exists and belongs to workspace
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    if not strategy.get("strategy_entity_id"):
+        raise HTTPException(
+            400, "Strategy has no entity_id mapping; cannot create versions"
+        )
+
+    version_repo = StrategyVersionsRepository(pool)
+
+    try:
+        version = await version_repo.create_version(
+            strategy_id=strategy_id,
+            config_snapshot=request.config_snapshot,
+            created_by=request.created_by or "system",
+            version_tag=request.version_tag,
+            regime_awareness=request.regime_awareness or {},
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    logger.info(
+        "strategy_version_created",
+        strategy_id=str(strategy_id),
+        version_id=str(version.id),
+        version_number=version.version_number,
+    )
+
+    return _version_to_response(version)
+
+
+@router.get(
+    "/{strategy_id}/versions",
+    response_model=StrategyVersionListResponse,
+    summary="List strategy versions",
+    description="List all versions for a strategy, newest first.",
+)
+async def list_versions(
+    strategy_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    state: Optional[str] = Query(None, description="Filter by state"),
+    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    _: bool = Depends(require_admin_token),
+) -> StrategyVersionListResponse:
+    """List versions for a strategy."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    version_repo = StrategyVersionsRepository(pool)
+    versions, total = await version_repo.list_versions(
+        strategy_id=strategy_id,
+        state=state,
+        limit=limit,
+        offset=offset,
+    )
+
+    items = [_version_to_list_item(v) for v in versions]
+
+    return StrategyVersionListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(items) < total,
+    )
+
+
+@router.get(
+    "/{strategy_id}/versions/{version_id}",
+    response_model=StrategyVersionResponse,
+    summary="Get strategy version",
+    description="Get full details for a specific version.",
+)
+async def get_version(
+    strategy_id: UUID,
+    version_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> StrategyVersionResponse:
+    """Get a specific version by ID."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    version_repo = StrategyVersionsRepository(pool)
+    version = await version_repo.get_version(version_id, strategy_id=strategy_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    return _version_to_response(version)
+
+
+@router.post(
+    "/{strategy_id}/versions/{version_id}/activate",
+    response_model=StrategyVersionResponse,
+    summary="Activate version",
+    description="Activate a draft or paused version. Pauses any currently active version.",
+)
+async def activate_version(
+    strategy_id: UUID,
+    version_id: UUID,
+    request: VersionTransitionRequest,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> StrategyVersionResponse:
+    """Activate a version (transitions from draft/paused to active)."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    version_repo = StrategyVersionsRepository(pool)
+
+    try:
+        version = await version_repo.activate(
+            version_id=version_id,
+            triggered_by=request.triggered_by,
+            reason=request.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    logger.info(
+        "strategy_version_activated",
+        strategy_id=str(strategy_id),
+        version_id=str(version_id),
+        triggered_by=request.triggered_by,
+    )
+
+    return _version_to_response(version)
+
+
+@router.post(
+    "/{strategy_id}/versions/{version_id}/pause",
+    response_model=StrategyVersionResponse,
+    summary="Pause version",
+    description="Pause an active version. Clears the active_version_id pointer.",
+)
+async def pause_version(
+    strategy_id: UUID,
+    version_id: UUID,
+    request: VersionTransitionRequest,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> StrategyVersionResponse:
+    """Pause an active version."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    version_repo = StrategyVersionsRepository(pool)
+
+    try:
+        version = await version_repo.pause(
+            version_id=version_id,
+            triggered_by=request.triggered_by,
+            reason=request.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    logger.info(
+        "strategy_version_paused",
+        strategy_id=str(strategy_id),
+        version_id=str(version_id),
+        triggered_by=request.triggered_by,
+    )
+
+    return _version_to_response(version)
+
+
+@router.post(
+    "/{strategy_id}/versions/{version_id}/retire",
+    response_model=StrategyVersionResponse,
+    summary="Retire version",
+    description="Retire a version (terminal state). Cannot be undone.",
+)
+async def retire_version(
+    strategy_id: UUID,
+    version_id: UUID,
+    request: VersionTransitionRequest,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    _: bool = Depends(require_admin_token),
+) -> StrategyVersionResponse:
+    """Retire a version (terminal state)."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    version_repo = StrategyVersionsRepository(pool)
+
+    try:
+        version = await version_repo.retire(
+            version_id=version_id,
+            triggered_by=request.triggered_by,
+            reason=request.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    logger.info(
+        "strategy_version_retired",
+        strategy_id=str(strategy_id),
+        version_id=str(version_id),
+        triggered_by=request.triggered_by,
+    )
+
+    return _version_to_response(version)
+
+
+@router.get(
+    "/{strategy_id}/versions/{version_id}/transitions",
+    response_model=list[VersionTransitionResponse],
+    summary="Get version transitions",
+    description="Get audit trail of state transitions for a version.",
+)
+async def get_version_transitions(
+    strategy_id: UUID,
+    version_id: UUID,
+    workspace_id: UUID = Query(..., description="Workspace ID"),
+    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    _: bool = Depends(require_admin_token),
+) -> list[VersionTransitionResponse]:
+    """Get state transition history for a version."""
+    pool = _get_pool()
+
+    # Verify strategy exists
+    strategy_repo = StrategyRepository(pool)
+    strategy = await strategy_repo.get_by_id(strategy_id, workspace_id)
+    if not strategy:
+        raise HTTPException(404, "Strategy not found")
+
+    version_repo = StrategyVersionsRepository(pool)
+
+    # Verify version exists and belongs to this strategy
+    version = await version_repo.get_version(version_id, strategy_id=strategy_id)
+    if not version:
+        raise HTTPException(404, "Version not found")
+
+    transitions = await version_repo.get_transitions(version_id, limit=limit)
+
+    return [_transition_to_response(t) for t in transitions]

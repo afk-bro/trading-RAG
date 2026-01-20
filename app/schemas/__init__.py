@@ -137,6 +137,14 @@ from app.schemas.trading import (
     StrategyDetailResponse,
     CandidateStrategy,
     StrategyCard,
+    # Strategy Versions (Lifecycle v0.5)
+    StrategyVersionState,
+    StrategyVersionCreateRequest,
+    StrategyVersionResponse,
+    StrategyVersionListItem,
+    StrategyVersionListResponse,
+    VersionTransitionRequest,
+    VersionTransitionResponse,
 )
 
 # ===========================================
@@ -287,6 +295,14 @@ __all__ = [
     "StrategyDetailResponse",
     "CandidateStrategy",
     "StrategyCard",
+    # Strategy Versions (Lifecycle v0.5)
+    "StrategyVersionState",
+    "StrategyVersionCreateRequest",
+    "StrategyVersionResponse",
+    "StrategyVersionListItem",
+    "StrategyVersionListResponse",
+    "VersionTransitionRequest",
+    "VersionTransitionResponse",
     # Sources
     "PineScriptType",
     "PineVersionType",
