@@ -145,6 +145,11 @@ from app.schemas.trading import (
     StrategyVersionListResponse,
     VersionTransitionRequest,
     VersionTransitionResponse,
+    # Strategy Intelligence (v1.5)
+    IntelSnapshotCreateRequest,
+    IntelSnapshotResponse,
+    IntelSnapshotListItem,
+    IntelSnapshotListResponse,
 )
 
 # ===========================================
@@ -303,6 +308,11 @@ __all__ = [
     "StrategyVersionListResponse",
     "VersionTransitionRequest",
     "VersionTransitionResponse",
+    # Strategy Intelligence (v1.5)
+    "IntelSnapshotCreateRequest",
+    "IntelSnapshotResponse",
+    "IntelSnapshotListItem",
+    "IntelSnapshotListResponse",
     # Sources
     "PineScriptType",
     "PineVersionType",

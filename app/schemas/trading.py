@@ -794,3 +794,78 @@ class VersionTransitionResponse(BaseModel):
     triggered_by: str = Field(..., description="Actor who triggered")
     triggered_at: datetime = Field(..., description="When triggered")
     reason: Optional[str] = Field(None, description="Reason for transition")
+
+
+# =============================================================================
+# Strategy Intelligence Snapshots (v1.5)
+# =============================================================================
+
+
+class IntelSnapshotCreateRequest(BaseModel):
+    """Request for creating an intelligence snapshot."""
+
+    strategy_version_id: UUID = Field(..., description="Strategy version this intel is for")
+    as_of_ts: datetime = Field(..., description="Market time the intel refers to")
+    regime: str = Field(..., min_length=1, max_length=100, description="Regime classification")
+    confidence_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Aggregated confidence [0, 1]"
+    )
+    confidence_components: Optional[dict] = Field(
+        default_factory=dict,
+        description="Breakdown of confidence factors (e.g., regime_fit, backtest_oos)",
+    )
+    features: Optional[dict] = Field(
+        default_factory=dict, description="Raw feature values used for computation"
+    )
+    explain: Optional[dict] = Field(
+        default_factory=dict, description="Human-readable explanation"
+    )
+    engine_version: Optional[str] = Field(
+        None, max_length=50, description="Version of computation engine"
+    )
+    inputs_hash: Optional[str] = Field(
+        None, min_length=64, max_length=64, description="SHA256 of inputs for deduplication"
+    )
+    run_id: Optional[UUID] = Field(None, description="Link to job/workflow run")
+
+
+class IntelSnapshotResponse(BaseModel):
+    """Response for intel snapshot endpoints."""
+
+    id: UUID = Field(..., description="Snapshot UUID")
+    workspace_id: UUID = Field(..., description="Workspace scope")
+    strategy_version_id: UUID = Field(..., description="Strategy version UUID")
+    as_of_ts: datetime = Field(..., description="Market time the intel refers to")
+    computed_at: datetime = Field(..., description="When intel was computed")
+    regime: str = Field(..., description="Regime classification")
+    confidence_score: float = Field(..., description="Aggregated confidence [0, 1]")
+    confidence_components: dict = Field(
+        default_factory=dict, description="Confidence breakdown"
+    )
+    features: dict = Field(default_factory=dict, description="Feature values")
+    explain: dict = Field(default_factory=dict, description="Human-readable explanation")
+    engine_version: Optional[str] = Field(None, description="Computation engine version")
+    inputs_hash: Optional[str] = Field(None, description="Input hash for deduplication")
+    run_id: Optional[UUID] = Field(None, description="Job/run link")
+
+
+class IntelSnapshotListItem(BaseModel):
+    """Single item in intel snapshot list."""
+
+    id: UUID = Field(..., description="Snapshot UUID")
+    strategy_version_id: UUID = Field(..., description="Strategy version UUID")
+    as_of_ts: datetime = Field(..., description="Market time")
+    computed_at: datetime = Field(..., description="Computation time")
+    regime: str = Field(..., description="Regime")
+    confidence_score: float = Field(..., description="Confidence [0, 1]")
+
+
+class IntelSnapshotListResponse(BaseModel):
+    """Response for GET /strategies/{id}/versions/{vid}/intel."""
+
+    items: list[IntelSnapshotListItem] = Field(..., description="Snapshot list")
+    total: int = Field(..., description="Total count")
+    limit: int = Field(..., description="Page size")
+    next_cursor: Optional[datetime] = Field(
+        None, description="Cursor for next page (as_of_ts)"
+    )
