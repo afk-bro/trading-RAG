@@ -1,5 +1,76 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 74 Summary
+Date: Session 74 (Environment Blocked)
+Status: Server Not Running - 223/263 Tests Passing (84.8%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Start server and run verification tests
+- Progress remaining tests
+
+### Infrastructure Status
+- **Server**: NOT RUNNING (port 8000 not listening)
+- **Docker**: NOT AVAILABLE (WSL2 Docker integration not configured)
+- **Commands Blocked**: python, uvicorn, docker, bash, curl, rm, ss, netstat, which
+
+### Attempted Actions
+1. Tried to start server via `./init.sh` - Failed (Docker not available in WSL2)
+2. Tried to start via `.venv/bin/uvicorn` - Failed (uvicorn command blocked)
+3. Tried to start via bash script - Failed (bash command blocked)
+4. Verified no process listening on port 8000
+
+### Code State Verified
+- Session 73 ops_alerts UI fix is committed (42c1e88)
+- Line 181 in `app/admin/ops_alerts.py` correctly passes `"items": active_alerts`
+- No uncommitted code changes (only untracked `start_server.sh` from failed attempt)
+
+### Environment Constraints
+This session has extremely limited command access. The following are blocked:
+- Process control: python, uvicorn, bash, docker, docker-compose
+- System inspection: ss, netstat, which, pgrep, curl
+- File operations: rm, source
+
+### Test Status
+- **Passing**: 223 tests
+- **Failing**: 40 tests
+- **Completion**: 84.8%
+
+### Failing Tests Analysis (unchanged from Session 73)
+All 40 failing tests remain blocked by infrastructure/environmental constraints:
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Docker container control | 3 | Docker commands blocked |
+| YouTube external API | 6 | Network access to YouTube |
+| OpenRouter/LLM answer mode | 5 | Qdrant down (needs vectors) |
+| n8n workflow tests | 8 | n8n setup required |
+| Document versioning | 4 | Qdrant for vector deletion |
+| Service recovery tests | 2 | Container control needed |
+| Index performance | 3 | 1000+ documents required |
+| Memory profiling | 1 | Profiling tools blocked |
+| Test coverage | 1 | pytest-cov blocked |
+| Docker image size | 1 | Docker build blocked |
+| Migration safety | 1 | Fresh DB required |
+| Query timeout | 1 | Qdrant needed |
+| Transcript languages | 2 | YouTube API needed |
+| Large playlist | 1 | YouTube API needed |
+| Partial failure atomicity | 1 | Complex setup needed |
+
+### Recommendations for Next Session
+1. **PRIORITY**: Configure Docker for WSL2 or run in a different environment
+2. Once Docker available, run: `docker compose -f docker-compose.rag.yml up -d`
+3. Alternatively, start uvicorn directly: `.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000`
+4. Once server running:
+   - Verify ops-alerts UI fix from session 73
+   - Start Qdrant to unblock ~15+ tests
+   - Test YouTube ingestion (if external network available)
+
+### Files to Clean Up
+- `/home/x/dev/automation-infra/trading-RAG/start_server.sh` - Created but not needed
+
+---
+
 ## Session 73 Summary
 Date: Session 73 (Bug Fix Session)
 Status: Services Degraded (Qdrant Down) - 223/263 Tests Passing (84.8%)
