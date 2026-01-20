@@ -1,5 +1,88 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 102 Summary
+Date: 2026-01-20
+Status: PR8.1 Observability & Runbook Complete
+
+### Session Goals
+- Add observability (Prometheus metrics) for strategy confidence alerts
+- Add runbook snippet for STRATEGY_CONFIDENCE_LOW
+- Add golden test for payload contract
+- Document production sanity checks
+- PR9 prep: identify equity storage source
+
+### Accomplished This Session
+
+**1. Prometheus Metrics (app/routers/metrics.py)**
+- `ops_alert_evals_total{rule_type, result}` - track evaluations
+- `ops_alert_triggered_total{rule_type, severity}` - alerts triggered
+- `ops_alert_resolved_total{rule_type}` - alerts resolved
+- `ops_alert_active{rule_type, severity}` - gauge of active alerts
+- `ops_alert_notifications_total{rule_type, notification_type}` - notifications
+- `strategy_confidence_score{version_id}` - per-version score gauge
+- `strategy_confidence_alert_duration_seconds` - time to resolution histogram
+- Integrated metrics recording in evaluator.py
+
+**2. Runbook (docs/ops/runbooks.md)**
+- Added "Strategy Alerts" section with STRATEGY_CONFIDENCE_LOW runbook
+- weak_components → action mapping table
+- Action ladder (warn: monitor, critical: pause)
+- Prometheus queries for monitoring patterns
+- Flapping prevention guidance
+- Recovery verification steps
+
+**3. Production Sanity Checks (docs/ops/alerting-rules.md)**
+- Persistence gate verification
+- Escalation testing (warn → critical)
+- Hysteresis validation (0.36 doesn't clear, 0.41 does)
+- Resolution & recovery notification check
+- Dedupe identity verification
+- Cross-reference to unit test coverage
+
+**4. Golden Test (tests/unit/test_ops_alert_strategy_confidence.py)**
+- `test_weak_components_golden_contract` validates:
+  - Capped to exactly 3 components
+  - Sorted by score ascending (weakest first)
+  - Each entry has `name` and `score` keys
+- Prevents regressions in payload format
+
+**5. PR9 Prep: Equity Storage Discovery**
+- Analyzed paper_broker.py - equity is in-memory only
+- No time series storage exists
+- Recommended: `paper_equity_snapshots` append-only table
+- Same pattern as `strategy_intel_snapshots`
+
+### Files Modified
+- `app/routers/metrics.py` - 129 lines added (ops alert metrics)
+- `app/services/ops_alerts/evaluator.py` - 35 lines added (metrics integration)
+- `docs/ops/runbooks.md` - 116 lines added (Strategy Alerts section)
+- `docs/ops/alerting-rules.md` - 86 lines added (sanity checks)
+- `tests/unit/test_ops_alert_strategy_confidence.py` - 72 lines added (golden test)
+
+### Test Results
+- 62 ops alert tests passing (17 strategy confidence + 45 others)
+- All 11 skipped tests are external dependency tests
+
+### Commits This Session
+1. `06183ba` feat(alerts): add observability and runbook for strategy confidence (PR8.1)
+
+### v1.5 Progress
+- Step 1: Intel snapshots schema ✓
+- Step 2: Confidence computation + runner + API ✓
+- Step 3: Strategy alerts
+  - PR8: Confidence alerts ✓
+  - PR8.1: Observability + runbook ✓
+  - PR9: Drawdown alerts (needs equity storage - schema identified)
+  - PR10: Admin UI affordance (optional)
+
+### Next Steps for PR9
+1. Create migration for `paper_equity_snapshots` table
+2. Add snapshot recording after each trade in paper_broker
+3. Implement drawdown computation (rolling peak → current)
+4. Add `STRATEGY_DRAWDOWN_EXCESSIVE` alert rule
+
+---
+
 ## Session 101 Summary
 Date: 2026-01-19
 Status: PR8 Strategy Confidence Alert Complete
