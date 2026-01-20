@@ -9,7 +9,6 @@ import pytest
 
 from app.services.intel.confidence import (
     compute_regime,
-    compute_components,
     compute_confidence,
     ConfidenceContext,
     ConfidenceResult,

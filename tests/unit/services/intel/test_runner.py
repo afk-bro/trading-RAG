@@ -1,7 +1,7 @@
 """Unit tests for intel runner module."""
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -597,7 +597,7 @@ class TestConvenienceFunction:
             mock_runner_instance.run_for_version = AsyncMock(return_value=None)
             MockRunner.return_value = mock_runner_instance
 
-            result = await compute_and_store_snapshot(
+            await compute_and_store_snapshot(
                 pool=pool,
                 version_id=version_id,
                 as_of_ts=datetime.now(timezone.utc),

@@ -6,7 +6,7 @@ Handles data fetching, deduplication, and batch processing.
 v1.5 Step 2B - Runner + Persistence
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
@@ -17,7 +17,6 @@ from app.repositories.strategy_intel import StrategyIntelRepository, IntelSnapsh
 from app.services.intel.confidence import (
     compute_confidence,
     ConfidenceContext,
-    ConfidenceResult,
 )
 
 logger = structlog.get_logger(__name__)

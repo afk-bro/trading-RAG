@@ -1,7 +1,6 @@
 """Tests for strategy versions repository."""
 
 import json
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, AsyncMock
 from uuid import uuid4

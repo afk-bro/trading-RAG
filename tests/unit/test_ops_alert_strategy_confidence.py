@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 
 from app.services.ops_alerts.models import (
-    AlertCondition,
     EvalContext,
     OpsRuleType,
     Severity,
@@ -487,7 +486,7 @@ class TestStrategyConfidenceResolution:
         # Score has recovered - key not in triggered set
         triggered_keys = set()
 
-        resolved = await evaluator._resolution_pass(workspace_id, triggered_keys, now)
+        await evaluator._resolution_pass(workspace_id, triggered_keys, now)
 
         mock_repo.resolve_by_dedupe_key.assert_called_with(workspace_id, dedupe_key)
 

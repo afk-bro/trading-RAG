@@ -8,7 +8,6 @@ import pytest
 
 from app.services.ops_alerts.evaluator import OpsAlertEvaluator
 from app.services.ops_alerts.models import (
-    AlertCondition,
     EvalContext,
     OpsRuleType,
     Severity,
@@ -299,7 +298,7 @@ class TestWorkspaceDrawdownResolution:
         now = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
         # Triggered keys include the drawdown alert
-        resolved = await evaluator._resolution_pass(
+        await evaluator._resolution_pass(
             sample_workspace_id,
             triggered_keys={"workspace_drawdown_high:warn:2024-01-15"},
             now=now,

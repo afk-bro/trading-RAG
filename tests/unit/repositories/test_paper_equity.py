@@ -10,7 +10,6 @@ from app.repositories.paper_equity import (
     EquitySnapshot,
     PaperEquityRepository,
     compute_inputs_hash,
-    DrawdownResult,
 )
 
 

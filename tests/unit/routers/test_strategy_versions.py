@@ -1,6 +1,5 @@
 """Unit tests for strategy version API endpoints."""
 
-import os
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4

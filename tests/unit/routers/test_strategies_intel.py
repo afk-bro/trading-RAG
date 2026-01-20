@@ -157,8 +157,10 @@ class TestGetLatestIntel:
                     "app.routers.strategies.StrategyIntelRepository",
                     return_value=mock_intel_repo,
                 ):
+                    strat_id = sample_strategy["id"]
+                    ver_id = sample_version.id
                     response = client.get(
-                        f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/latest",
+                        f"/strategies/{strat_id}/versions/{ver_id}/intel/latest",
                         params={"workspace_id": str(sample_strategy["workspace_id"])},
                         headers={"X-Admin-Token": "test-token"},
                     )
@@ -243,8 +245,10 @@ class TestGetLatestIntel:
                     "app.routers.strategies.StrategyIntelRepository",
                     return_value=mock_intel_repo,
                 ):
+                    strat_id = sample_strategy["id"]
+                    ver_id = sample_version.id
                     response = client.get(
-                        f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/latest",
+                        f"/strategies/{strat_id}/versions/{ver_id}/intel/latest",
                         params={"workspace_id": str(sample_strategy["workspace_id"])},
                         headers={"X-Admin-Token": "test-token"},
                     )
@@ -430,8 +434,10 @@ class TestRecomputeIntel:
                     "app.routers.strategies.IntelRunner",
                     return_value=mock_runner,
                 ):
+                    strat_id = sample_strategy["id"]
+                    ver_id = sample_version.id
                     response = client.post(
-                        f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/recompute",
+                        f"/strategies/{strat_id}/versions/{ver_id}/intel/recompute",
                         params={"workspace_id": str(sample_strategy["workspace_id"])},
                         headers={"X-Admin-Token": "test-token"},
                     )
@@ -473,8 +479,10 @@ class TestRecomputeIntel:
                     "app.routers.strategies.IntelRunner",
                     return_value=mock_runner,
                 ):
+                    strat_id = sample_strategy["id"]
+                    ver_id = sample_version.id
                     response = client.post(
-                        f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/recompute",
+                        f"/strategies/{strat_id}/versions/{ver_id}/intel/recompute",
                         params={
                             "workspace_id": str(sample_strategy["workspace_id"]),
                             "force": True,
@@ -520,11 +528,12 @@ class TestRecomputeIntel:
                         "app.routers.strategies.StrategyIntelRepository",
                         return_value=mock_intel_repo,
                     ):
+                        strat_id = sample_strategy["id"]
+                        ver_id = sample_version.id
+                        ws_id = str(sample_strategy["workspace_id"])
                         response = client.post(
-                            f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/recompute",
-                            params={
-                                "workspace_id": str(sample_strategy["workspace_id"])
-                            },
+                            f"/strategies/{strat_id}/versions/{ver_id}/intel/recompute",
+                            params={"workspace_id": ws_id},
                             headers={"X-Admin-Token": "test-token"},
                         )
 
@@ -557,9 +566,12 @@ class TestRecomputeIntel:
                     "app.routers.strategies.IntelRunner",
                     return_value=mock_runner,
                 ):
+                    strat_id = sample_strategy["id"]
+                    ver_id = sample_version.id
+                    ws_id = str(sample_strategy["workspace_id"])
                     response = client.post(
-                        f"/strategies/{sample_strategy['id']}/versions/{sample_version.id}/intel/recompute",
-                        params={"workspace_id": str(sample_strategy["workspace_id"])},
+                        f"/strategies/{strat_id}/versions/{ver_id}/intel/recompute",
+                        params={"workspace_id": ws_id},
                         headers={"X-Admin-Token": "test-token"},
                     )
 
