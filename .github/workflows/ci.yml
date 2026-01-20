@@ -56,6 +56,8 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run unit tests with coverage
+        # Coverage temporarily lowered due to legacy code paths and infra adapters.
+        # Target: raise to 65% post-v1.0 with focused test passes.
         run: pytest tests/unit/ -v --tb=short --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=57
         env:
           SUPABASE_URL: https://test.supabase.co
