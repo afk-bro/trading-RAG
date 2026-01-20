@@ -1,5 +1,111 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 72 Summary
+Date: Session 72 (Verification Session)
+Status: Services Degraded (Qdrant Down) - 223/263 Tests Passing (84.8%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Attempt to progress any tests possible
+- Document constraints
+
+### Infrastructure Status (via /health)
+- **Overall status**: "degraded"
+- **Qdrant**: "error" - "All connection attempts failed" (~45ms to error)
+- **Supabase**: "ok" (~1723ms latency)
+- **Ollama**: "ok" (~30ms latency)
+- **active_collection**: "kb_nomic_embed_text_v1"
+- **embed_model**: "nomic-embed-text"
+- **version**: "0.1.0"
+
+### Verification Performed via Browser Automation
+1. **Health Endpoint** (/health) - PASSED
+   - Status: degraded (correctly reports Qdrant down)
+   - Supabase and Ollama healthy
+   - All required fields present with latency_ms
+
+2. **API Documentation** (/docs) - PASSED
+   - Swagger UI loads correctly at http://localhost:8000/docs
+   - All endpoints documented and organized by section
+   - Shows version 0.1.0, OAS 3.1
+
+3. **Debug Workspaces** (/debug/workspaces) - PASSED
+   - Returns 7 workspaces with full metadata
+   - Database connectivity confirmed healthy
+   - All workspaces have is_active: true, ingestion_enabled: true
+
+4. **Metrics Endpoint** (/metrics) - PASSED
+   - Prometheus format data returned
+   - Per-endpoint breakdown working correctly
+   - Shows request counts by endpoint and status code
+   - Process metrics: ~1GB virtual memory, ~269MB resident
+   - 22 open file descriptors
+
+5. **Admin Endpoints** - Correctly secured
+   - /admin/system/health returns 401 without X-Admin-Token
+   - Authentication working as expected
+
+6. **Ready Endpoint** (/ready) - Returns 503
+   - Correctly indicates service not ready (Qdrant down)
+   - Proper health check behavior
+
+### Test Count Status
+- **Passing**: 223 tests
+- **Failing**: 40 tests
+- **Total**: 263 tests
+- **Completion**: 84.8%
+
+### Blocked Tests Analysis (40 remaining)
+All 40 failing tests remain blocked by infrastructure/environmental constraints:
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Docker container control | 3 | Docker commands blocked |
+| YouTube external API | 6 | Network access to YouTube |
+| OpenRouter/LLM answer mode | 5 | Qdrant down (needs vectors) |
+| n8n workflow tests | 8 | n8n setup required |
+| Document versioning | 4 | Qdrant for vector deletion |
+| Service recovery tests | 2 | Container control needed |
+| Index performance | 3 | 1000+ documents required |
+| Memory profiling | 1 | Profiling tools blocked |
+| Test coverage | 1 | pytest-cov blocked |
+| Docker image size | 1 | Docker build blocked |
+| Migration safety | 1 | Fresh DB required |
+| Query timeout | 1 | Qdrant needed |
+| Transcript languages | 2 | YouTube API needed |
+| Large playlist | 1 | YouTube API needed |
+| Partial failure atomicity | 1 | Complex setup needed |
+
+### No Code Changes This Session
+- Verified system state matches previous sessions
+- Qdrant still down, no way to restart without Docker commands
+- All 223 passing tests presumed stable (no regressions detected)
+
+### Key Constraint
+Docker commands (docker, docker-compose) and pytest commands are not in the allowed
+commands list. This prevents:
+- Restarting Qdrant to restore vector search functionality
+- Running unit tests to verify code quality
+- Container manipulation tests
+- Docker image size verification
+
+### Recommendations
+1. **Restart Qdrant** (requires Docker access):
+   ```bash
+   docker compose -f docker-compose.rag.yml up -d qdrant
+   ```
+2. **Alternative**: Run Qdrant directly or use a cloud instance
+3. **Priority**: Once Qdrant is up, ~15+ tests become testable immediately
+
+### Next Steps When Infrastructure Available
+1. Start Qdrant container
+2. Run YouTube ingestion tests (if network access available)
+3. Test LLM answer mode with OpenRouter (API key is configured)
+4. Verify document versioning workflow
+5. Run remaining blocked tests
+
+---
+
 ## Session 71 Summary
 Date: Session 71 (Verification Session)
 Status: Services Degraded (Qdrant Down) - 223/263 Tests Passing (84.8%)
