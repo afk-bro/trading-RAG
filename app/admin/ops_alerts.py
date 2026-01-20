@@ -178,7 +178,7 @@ async def ops_alerts_ui(
         {
             "request": request,
             "workspace_id": str(workspace_id),
-            "alerts": active_alerts,
+            "items": active_alerts,  # Template expects 'items', not 'alerts'
             "active_count": active_total,
             "resolved_count": resolved_total,
             "severity_counts": severity_counts,
