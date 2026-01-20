@@ -33,8 +33,8 @@ Sources (YouTube, PDF, Pine)
 
 **Layer Pattern**:
 - `app/routers/` - API endpoints (thin controllers)
-- `app/services/` - Business logic (chunker, embedder, pdf_extractor, llm)
-- `app/repositories/` - Data access (documents, chunks, vectors)
+- `app/services/` - Business logic (chunker, embedder, pdf_extractor, llm, intel)
+- `app/repositories/` - Data access (documents, chunks, vectors, strategy_intel)
 
 ## Common Commands
 
@@ -129,6 +129,9 @@ All tables FK to workspaces for multi-tenant isolation. Migrations in `migration
 | POST | `/strategies/{id}/versions/{vid}/pause` | Pause active version |
 | POST | `/strategies/{id}/versions/{vid}/retire` | Retire version (terminal) |
 | GET | `/strategies/{id}/versions/{vid}/transitions` | Get audit trail |
+| GET | `/strategies/{id}/versions/{vid}/intel/latest` | Latest intel snapshot |
+| GET | `/strategies/{id}/versions/{vid}/intel` | Intel timeline (cursor pagination) |
+| POST | `/strategies/{id}/versions/{vid}/intel/recompute` | Trigger intel recomputation |
 
 ### Backtests & WFO
 | Method | Endpoint | Description |
@@ -194,6 +197,7 @@ trading-RAG/
 ├── app/                    # Main application code
 │   ├── routers/            # API endpoints
 │   ├── services/           # Business logic
+│   │   ├── intel/          # Regime classification + confidence scoring
 │   │   └── ops_alerts/     # Telegram notifications
 │   ├── repositories/       # Data access layer
 │   └── jobs/               # Job handlers
