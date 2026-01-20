@@ -194,6 +194,7 @@ class BaseLLMClient(ABC):
         question: str,
         chunks: list[dict],
         max_context_tokens: int = 8000,
+        model: str | None = None,
     ) -> LLMResponse:
         """
         Generate an answer with citations from context chunks.
@@ -205,6 +206,7 @@ class BaseLLMClient(ABC):
             question: User's question
             chunks: List of chunks with 'content' and optional 'title'/'source_url'
             max_context_tokens: Maximum tokens for context
+            model: Override model for answer generation (defaults to answer_model)
 
         Returns:
             LLMResponse with answer text
@@ -242,11 +244,12 @@ Provide your response in this format:
 **Not specified in context:**
 - [Aspects of the question the context does not address, if any]"""
 
+        effective_model = model or self.answer_model
         logger.info(
             "Generating grounded answer",
             question=question[:50],
             num_chunks=len(chunks),
-            model=self.answer_model,
+            model=effective_model,
         )
 
         return await self.generate(
@@ -254,7 +257,7 @@ Provide your response in this format:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            model=self.answer_model,
+            model=effective_model,
         )
 
     async def rerank(

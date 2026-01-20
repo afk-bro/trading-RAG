@@ -1,5 +1,61 @@
 # Trading RAG Pipeline - Progress Notes
 
+## Session 89 Summary
+Date: Session 89 (Feature Implementation - answer_model per-request override)
+Status: Server Not Running - 228/263 Tests Passing (86.7%)
+
+### Session Goals
+- Fresh context window - verify current state
+- Implement the "Answer model is configurable per request" feature (test line 1325)
+- Make code changes to wire up request.answer_model to LLM
+
+### Infrastructure Status (Unchanged)
+- **Server**: NOT RUNNING (port 8000 not listening - confirmed via lsof)
+- **Docker**: NOT AVAILABLE - "docker could not be found in WSL 2 distro"
+- **init.sh**: Fails due to Docker unavailability
+- **Browser automation**: Available but no server to test
+
+### Code Changes Made
+
+#### Fixed: "Answer model is configurable per request" (test line 1320-1325)
+
+**Problem identified:** `QueryRequest.answer_model` field existed but was never passed to the LLM.
+
+**Files modified:**
+
+1. **app/services/llm_base.py** - `generate_answer` method
+   - Added `model: str | None = None` parameter (line 197)
+   - Added `effective_model = model or self.answer_model` logic
+   - Updated logging to show effective model
+   - Updated `self.generate()` call to use `effective_model`
+
+2. **app/routers/query.py** - Query endpoint
+   - Line 612: Added `model=request.answer_model` to first `generate_answer` call
+   - Line 834: Added `model=request.answer_model` to second `generate_answer` call (KB fallback)
+
+**How it works:**
+- `QueryRequest.answer_model` (schemas/query.py:68) allows per-request model override
+- When `answer_model` is provided in request, it overrides the default `settings.answer_model`
+- When `answer_model` is None, falls back to `self.answer_model` (configured at startup)
+
+### Test Status
+- 228 tests passing (86.7%) - no change in count
+- Test "Answer model is configurable per request" now has code support
+- Still requires runtime verification with actual LLM calls
+
+### What's Still Needed
+1. **Runtime verification**: Need server running to test with real LLM
+2. **Docker availability**: Required to start Qdrant, Ollama, and the app
+3. **API key**: Need OPENROUTER_API_KEY or ANTHROPIC_API_KEY configured
+
+### Next Steps When Environment Available
+1. Start services via init.sh
+2. POST /query with `answer_model="anthropic/claude-3-haiku"`
+3. Verify response uses specified model (check logs or response metadata)
+4. Mark test as passing if verified
+
+---
+
 ## Session 88 Summary
 Date: Session 88 (Deep Code Review - Verification of Implementations)
 Status: Server Not Running - 228/263 Tests Passing (86.7%)

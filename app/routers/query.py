@@ -609,6 +609,7 @@ async def query(
                     chunks=context_chunks,
                     max_context_tokens=request.max_context_tokens
                     or settings.max_context_tokens,
+                    model=request.answer_model,
                 )
                 answer = response.text
 
@@ -830,6 +831,7 @@ async def query(
                             chunks=context_chunks,
                             max_context_tokens=request.max_context_tokens
                             or settings.max_context_tokens,
+                            model=request.answer_model,
                         )
                         answer = response.text
 
