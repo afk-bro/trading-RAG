@@ -17,6 +17,8 @@ class OpsRuleType(str, Enum):
     CONFIDENCE_DROP = "confidence_drop"
     # Strategy intelligence alerts (v1.5)
     STRATEGY_CONFIDENCE_LOW = "strategy_confidence_low"
+    # Paper trading equity alerts
+    WORKSPACE_DRAWDOWN_HIGH = "workspace_drawdown_high"
 
 
 class Severity(str, Enum):
@@ -50,6 +52,7 @@ class OpsAlertRule:
     requires_coverage: bool = False
     requires_match_runs: bool = False
     requires_strategy_intel: bool = False
+    requires_equity_data: bool = False
 
     # Volume gating (for drift/confidence rules)
     min_sample_count: int = 0
@@ -99,6 +102,7 @@ class EvalContext:
     coverage_stats: Optional[dict] = None  # Coverage counts by priority
     match_run_stats: Optional[dict] = None  # Recent match run aggregates
     strategy_intel: Optional[list[dict]] = None  # Active versions with intel snapshots
+    equity_data: Optional[dict] = None  # Paper equity drawdown data per workspace
 
 
 @dataclass
@@ -174,6 +178,14 @@ RULES: dict[OpsRuleType, OpsAlertRule] = {
         default_severity=Severity.MEDIUM,  # Escalates to HIGH for critical
         requires_strategy_intel=True,
         persistence_count=2,  # Require 2 consecutive low snapshots
+    ),
+    OpsRuleType.WORKSPACE_DRAWDOWN_HIGH: OpsAlertRule(
+        rule_type=OpsRuleType.WORKSPACE_DRAWDOWN_HIGH,
+        description="Paper trading drawdown exceeds threshold",
+        dedupe_period=DedupePeriod.DAILY,
+        default_severity=Severity.MEDIUM,  # Escalates to HIGH for critical
+        requires_equity_data=True,
+        persistence_count=2,  # Require 2 consecutive breaches
     ),
 }
 

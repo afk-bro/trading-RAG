@@ -11,6 +11,7 @@ from app.routers.metrics import (
     record_ops_alert_eval,
     record_ops_alert_resolved,
     record_ops_alert_triggered,
+    set_workspace_drawdown,
 )
 from app.services.ops_alerts.models import (
     AlertCondition,
@@ -54,6 +55,13 @@ class OpsAlertEvaluator:
     STRATEGY_CONFIDENCE_CRITICAL = 0.20  # Critical if score < this
     STRATEGY_CONFIDENCE_CLEAR_WARN = 0.40  # Clear warn when score >= this
     STRATEGY_CONFIDENCE_CLEAR_CRITICAL = 0.25  # Clear critical when score >= this
+
+    # Thresholds for workspace drawdown alerts
+    DRAWDOWN_WARN = 0.12  # Warn if DD > 12%
+    DRAWDOWN_CRITICAL = 0.20  # Critical if DD > 20%
+    DRAWDOWN_CLEAR_WARN = 0.10  # Clear warn when DD < 10%
+    DRAWDOWN_CLEAR_CRITICAL = 0.16  # Clear critical when DD < 16%
+    DRAWDOWN_WINDOW_DAYS = 30  # Rolling window for peak calculation
 
     def __init__(self, repo: OpsAlertsRepository, pool: Any):
         """Initialize evaluator with repository and DB pool."""
@@ -238,6 +246,17 @@ class OpsAlertEvaluator:
             ctx.strategy_intel = await self._get_strategy_intel(workspace_id)
         except Exception as e:
             logger.warning("ops_alert_strategy_intel_fetch_failed", error=str(e))
+
+        # Load equity data for drawdown alerts
+        try:
+            ctx.equity_data = await self._get_equity_data(workspace_id)
+            # Record drawdown metric for Grafana dashboards
+            if ctx.equity_data and ctx.equity_data.get("drawdown_pct") is not None:
+                set_workspace_drawdown(
+                    str(workspace_id), ctx.equity_data["drawdown_pct"]
+                )
+        except Exception as e:
+            logger.warning("ops_alert_equity_fetch_failed", error=str(e))
 
         return ctx
 
@@ -456,6 +475,48 @@ class OpsAlertEvaluator:
 
         return result
 
+    async def _get_equity_data(self, workspace_id: UUID) -> Optional[dict]:
+        """
+        Get equity drawdown data for a workspace.
+
+        Uses the PaperEquityRepository to compute drawdown from equity snapshots.
+
+        Returns:
+            {
+                "drawdown_pct": current drawdown percentage,
+                "peak_equity": highest equity in window,
+                "current_equity": current equity,
+                "peak_ts": timestamp of peak,
+                "current_ts": timestamp of current,
+                "window_days": window used,
+                "snapshot_count": number of snapshots in window,
+            }
+            or None if no equity data available
+        """
+        try:
+            from app.repositories.paper_equity import PaperEquityRepository
+
+            repo = PaperEquityRepository(self.pool)
+            result = await repo.compute_drawdown(
+                workspace_id, window_days=self.DRAWDOWN_WINDOW_DAYS
+            )
+
+            if result is None:
+                return None
+
+            return {
+                "drawdown_pct": result.drawdown_pct,
+                "peak_equity": result.peak_equity,
+                "current_equity": result.current_equity,
+                "peak_ts": result.peak_ts,
+                "current_ts": result.current_ts,
+                "window_days": result.window_days,
+                "snapshot_count": result.snapshot_count,
+            }
+        except Exception as e:
+            logger.warning("equity_data_unavailable", error=str(e))
+            return None
+
     async def _evaluate_rule(
         self, rule: OpsAlertRule, ctx: EvalContext
     ) -> AlertCondition:
@@ -479,6 +540,9 @@ class OpsAlertEvaluator:
         elif rule.rule_type == OpsRuleType.STRATEGY_CONFIDENCE_LOW:
             # Returns list of conditions (one per version)
             return await self._eval_strategy_confidence_low(rule, ctx)
+
+        elif rule.rule_type == OpsRuleType.WORKSPACE_DRAWDOWN_HIGH:
+            return self._eval_workspace_drawdown_high(rule, ctx)
 
         return AlertCondition(
             triggered=False,
@@ -865,6 +929,88 @@ class OpsAlertEvaluator:
 
         return conditions
 
+    def _eval_workspace_drawdown_high(
+        self, rule: OpsAlertRule, ctx: EvalContext
+    ) -> AlertCondition:
+        """
+        Evaluate workspace_drawdown_high rule.
+
+        Triggers if:
+        - Drawdown exceeds DRAWDOWN_WARN (12%) for warn severity
+        - Drawdown exceeds DRAWDOWN_CRITICAL (20%) for critical (HIGH) severity
+
+        Hysteresis:
+        - Clear warn when DD < DRAWDOWN_CLEAR_WARN (10%)
+        - Clear critical when DD < DRAWDOWN_CLEAR_CRITICAL (16%)
+
+        Dedupe key format: workspace_drawdown_high:{severity_bucket}:{date}
+        """
+        if ctx.equity_data is None:
+            return AlertCondition(
+                triggered=False,
+                severity=rule.default_severity,
+                skip_reason="equity_data_unavailable",
+            )
+
+        drawdown_pct = ctx.equity_data.get("drawdown_pct", 0.0)
+        snapshot_count = ctx.equity_data.get("snapshot_count", 0)
+
+        # Skip if insufficient data
+        if snapshot_count < 2:
+            return AlertCondition(
+                triggered=False,
+                severity=rule.default_severity,
+                skip_reason=f"insufficient_snapshots:{snapshot_count}<2",
+            )
+
+        bucket_key = rule.get_bucket_key(ctx.now)
+
+        # Determine severity based on drawdown level
+        severity = None
+        severity_bucket = None
+
+        if drawdown_pct >= self.DRAWDOWN_CRITICAL:
+            severity = Severity.HIGH
+            severity_bucket = "critical"
+        elif drawdown_pct >= self.DRAWDOWN_WARN:
+            severity = Severity.MEDIUM
+            severity_bucket = "warn"
+
+        if severity:
+            dedupe_key = f"workspace_drawdown_high:{severity_bucket}:{bucket_key}"
+
+            return AlertCondition(
+                triggered=True,
+                severity=severity,
+                dedupe_key=dedupe_key,
+                payload={
+                    "workspace_id": str(ctx.workspace_id),
+                    "drawdown_pct": drawdown_pct,
+                    "peak_equity": ctx.equity_data.get("peak_equity"),
+                    "current_equity": ctx.equity_data.get("current_equity"),
+                    "peak_ts": (
+                        ctx.equity_data["peak_ts"].isoformat()
+                        if hasattr(ctx.equity_data.get("peak_ts"), "isoformat")
+                        else str(ctx.equity_data.get("peak_ts"))
+                    ),
+                    "current_ts": (
+                        ctx.equity_data["current_ts"].isoformat()
+                        if hasattr(ctx.equity_data.get("current_ts"), "isoformat")
+                        else str(ctx.equity_data.get("current_ts"))
+                    ),
+                    "window_days": ctx.equity_data.get("window_days"),
+                    "snapshot_count": snapshot_count,
+                    "thresholds": {
+                        "warn": self.DRAWDOWN_WARN,
+                        "critical": self.DRAWDOWN_CRITICAL,
+                        "clear_warn": self.DRAWDOWN_CLEAR_WARN,
+                        "clear_critical": self.DRAWDOWN_CLEAR_CRITICAL,
+                    },
+                },
+            )
+
+        return AlertCondition(triggered=False, severity=rule.default_severity)
+
     async def _resolution_pass(
         self,
         workspace_id: UUID,
@@ -879,6 +1025,9 @@ class OpsAlertEvaluator:
 
         For strategy confidence alerts, resolve when:
         - The dedupe key was not triggered this pass (score recovered)
+
+        For workspace drawdown alerts, resolve when:
+        - The dedupe key was not triggered (DD recovered below threshold)
         """
         resolved: list[OpsAlert] = []
         today = now.strftime("%Y-%m-%d")
@@ -924,6 +1073,27 @@ class OpsAlertEvaluator:
                         "ops_alert_auto_resolved",
                         workspace_id=str(workspace_id),
                         rule_type="strategy_confidence_low",
+                        dedupe_key=dedupe_key,
+                    )
+                    resolved.append(alert)
+
+        # Workspace drawdown alerts - resolve any active that weren't triggered
+        # These have dedupe_key format: workspace_drawdown_high:{severity}:{date}
+        active_drawdown_keys = await self.repo.get_active_dedupe_keys(
+            workspace_id, rule_type_prefix="workspace_drawdown_high"
+        )
+
+        for dedupe_key in active_drawdown_keys:
+            if dedupe_key not in triggered_keys:
+                # This alert's condition cleared (DD recovered below threshold)
+                alert = await self.repo.resolve_by_dedupe_key(workspace_id, dedupe_key)
+                if alert:
+                    # Record metric: alert resolved
+                    record_ops_alert_resolved(rule_type="workspace_drawdown_high")
+                    logger.info(
+                        "ops_alert_auto_resolved",
+                        workspace_id=str(workspace_id),
+                        rule_type="workspace_drawdown_high",
                         dedupe_key=dedupe_key,
                     )
                     resolved.append(alert)

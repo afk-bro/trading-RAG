@@ -943,6 +943,18 @@ STRATEGY_CONFIDENCE_ALERT_DURATION = Histogram(
     buckets=[300, 900, 1800, 3600, 7200, 14400, 28800, 86400],  # 5m to 24h
 )
 
+# Workspace equity/drawdown metrics (for Grafana dashboards)
+WORKSPACE_DRAWDOWN_PCT = Gauge(
+    "workspace_drawdown_pct",
+    "Current drawdown percentage for paper trading workspace",
+    ["workspace_id"],
+)
+
+
+def set_workspace_drawdown(workspace_id: str, drawdown_pct: float) -> None:
+    """Set current drawdown percentage for a workspace."""
+    WORKSPACE_DRAWDOWN_PCT.labels(workspace_id=workspace_id).set(drawdown_pct)
+
 
 def record_ops_alert_eval(rule_type: str, triggered: bool, skipped: bool = False):
     """Record ops alert rule evaluation.
