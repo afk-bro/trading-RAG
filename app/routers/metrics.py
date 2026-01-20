@@ -255,6 +255,38 @@ IDEMPOTENCY_OLDEST_PENDING_AGE = Gauge(
     "Age of oldest pending idempotency request in minutes",
 )
 
+# =============================================================================
+# Resilience metrics (retry + circuit breaker)
+# =============================================================================
+
+RESILIENCE_RETRIES = Counter(
+    "resilience_retries_total",
+    "Total retry attempts for transient failures",
+    ["service"],  # db, qdrant
+)
+
+CIRCUIT_BREAKER_STATE = Gauge(
+    "circuit_breaker_state",
+    "Circuit breaker state (0=closed, 1=open, 2=half_open)",
+    ["service"],  # db, qdrant
+)
+
+CIRCUIT_BREAKER_FAILURES = Counter(
+    "circuit_breaker_failures_total",
+    "Total failures recorded by circuit breaker",
+    ["service"],
+)
+
+CIRCUIT_BREAKER_TRIPS = Counter(
+    "circuit_breaker_trips_total",
+    "Total times circuit breaker tripped open",
+    ["service"],
+)
+
+# =============================================================================
+# Idempotency metrics
+# =============================================================================
+
 IDEMPOTENCY_OLDEST_EXPIRED_AGE = Gauge(
     "idempotency_oldest_expired_age_hours",
     "Age of oldest expired idempotency key in hours (indicates pg_cron health)",

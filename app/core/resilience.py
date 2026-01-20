@@ -27,6 +27,71 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 
 logger = structlog.get_logger(__name__)
 
+# Lazy import metrics to avoid circular imports
+_metrics_imported = False
+_RESILIENCE_RETRIES = None
+_CIRCUIT_BREAKER_STATE = None
+_CIRCUIT_BREAKER_FAILURES = None
+_CIRCUIT_BREAKER_TRIPS = None
+
+
+def _get_metrics():
+    """Lazy import metrics to avoid circular imports at module load."""
+    global _metrics_imported, _RESILIENCE_RETRIES, _CIRCUIT_BREAKER_STATE
+    global _CIRCUIT_BREAKER_FAILURES, _CIRCUIT_BREAKER_TRIPS
+    if not _metrics_imported:
+        try:
+            from app.routers.metrics import (
+                CIRCUIT_BREAKER_FAILURES,
+                CIRCUIT_BREAKER_STATE,
+                CIRCUIT_BREAKER_TRIPS,
+                RESILIENCE_RETRIES,
+            )
+
+            _RESILIENCE_RETRIES = RESILIENCE_RETRIES
+            _CIRCUIT_BREAKER_STATE = CIRCUIT_BREAKER_STATE
+            _CIRCUIT_BREAKER_FAILURES = CIRCUIT_BREAKER_FAILURES
+            _CIRCUIT_BREAKER_TRIPS = CIRCUIT_BREAKER_TRIPS
+            _metrics_imported = True
+        except ImportError:
+            pass  # Metrics not available (e.g., in tests)
+    return (
+        _RESILIENCE_RETRIES,
+        _CIRCUIT_BREAKER_STATE,
+        _CIRCUIT_BREAKER_FAILURES,
+        _CIRCUIT_BREAKER_TRIPS,
+    )
+
+
+def _record_retry_metric(service: str) -> None:
+    """Record a retry attempt metric."""
+    retries, _, _, _ = _get_metrics()
+    if retries:
+        retries.labels(service=service).inc()
+
+
+def _update_circuit_state_metric(service: str, state: str) -> None:
+    """Update circuit breaker state gauge (0=closed, 1=open, 2=half_open)."""
+    _, state_gauge, _, _ = _get_metrics()
+    if state_gauge:
+        state_map = {"closed": 0, "open": 1, "half_open": 2}
+        state_gauge.labels(service=service).set(state_map.get(state, 0))
+
+
+def _record_circuit_failure_metric(service: str) -> None:
+    """Record a circuit breaker failure metric."""
+    _, _, failures, _ = _get_metrics()
+    if failures:
+        failures.labels(service=service).inc()
+
+
+def _record_circuit_trip_metric(service: str) -> None:
+    """Record a circuit breaker trip (open) event."""
+    _, _, _, trips = _get_metrics()
+    if trips:
+        trips.labels(service=service).inc()
+
+
 T = TypeVar("T")
 
 
@@ -121,9 +186,7 @@ def _is_transient_db_error(error: Exception) -> bool:
     # Query errors, constraint violations, etc. are NOT transient
     if isinstance(
         error,
-        (
-            asyncpg.PostgresError,  # Base class for Postgres errors
-        ),
+        (asyncpg.PostgresError,),  # Base class for Postgres errors
     ):
         # Check specific error codes for transient issues
         error_code = getattr(error, "sqlstate", None)
@@ -196,6 +259,7 @@ def _check_circuit(circuit: CircuitState, service_name: str) -> bool:
                 service=service_name,
                 failures=circuit.failures,
             )
+            _update_circuit_state_metric(service_name, "half_open")
             return True  # Allow one request through to test
         else:
             return False  # Circuit still open
@@ -215,6 +279,7 @@ def _record_success(circuit: CircuitState, service_name: str) -> None:
     circuit.last_failure = None
     circuit.is_open = False
     circuit.open_until = None
+    _update_circuit_state_metric(service_name, "closed")
 
 
 def _record_failure(circuit: CircuitState, service_name: str) -> None:
@@ -222,6 +287,7 @@ def _record_failure(circuit: CircuitState, service_name: str) -> None:
     now = datetime.now(timezone.utc)
     circuit.failures += 1
     circuit.last_failure = now
+    _record_circuit_failure_metric(service_name)
 
     if circuit.failures >= circuit.failure_threshold:
         circuit.is_open = True
@@ -235,6 +301,8 @@ def _record_failure(circuit: CircuitState, service_name: str) -> None:
             failures=circuit.failures,
             reset_at=circuit.open_until.isoformat(),
         )
+        _update_circuit_state_metric(service_name, "open")
+        _record_circuit_trip_metric(service_name)
 
 
 async def with_db_retry(
@@ -259,7 +327,7 @@ async def with_db_retry(
         config = RetryConfig()
 
     # Check circuit breaker
-    if not _check_circuit(_db_circuit, "supabase"):
+    if not _check_circuit(_db_circuit, "db"):
         raise RuntimeError(
             "Database circuit breaker is open - service recovering from outage"
         )
@@ -270,7 +338,7 @@ async def with_db_retry(
         try:
             async with pool.acquire() as conn:
                 result = await operation(conn)
-                _record_success(_db_circuit, "supabase")
+                _record_success(_db_circuit, "db")
                 return result
 
         except Exception as e:
@@ -285,8 +353,9 @@ async def with_db_retry(
                 )
                 raise
 
-            # Log retry attempt
+            # Log retry attempt and record metric
             delay = _calculate_backoff(attempt, config)
+            _record_retry_metric("db")
             logger.warning(
                 "db_retry_attempt",
                 attempt=attempt + 1,
@@ -300,7 +369,7 @@ async def with_db_retry(
                 await asyncio.sleep(delay)
 
     # All retries exhausted
-    _record_failure(_db_circuit, "supabase")
+    _record_failure(_db_circuit, "db")
     logger.error(
         "db_retries_exhausted",
         attempts=config.max_attempts,
@@ -356,8 +425,9 @@ async def with_qdrant_retry(
                 )
                 raise
 
-            # Log retry attempt
+            # Log retry attempt and record metric
             delay = _calculate_backoff(attempt, config)
+            _record_retry_metric("qdrant")
             logger.warning(
                 "qdrant_retry_attempt",
                 attempt=attempt + 1,
@@ -395,7 +465,7 @@ async def resilient_db_connection(
         config = RetryConfig()
 
     # Check circuit breaker
-    if not _check_circuit(_db_circuit, "supabase"):
+    if not _check_circuit(_db_circuit, "db"):
         raise RuntimeError(
             "Database circuit breaker is open - service recovering from outage"
         )
@@ -405,7 +475,7 @@ async def resilient_db_connection(
     for attempt in range(config.max_attempts):
         try:
             async with pool.acquire() as conn:
-                _record_success(_db_circuit, "supabase")
+                _record_success(_db_circuit, "db")
                 yield conn
                 return
 

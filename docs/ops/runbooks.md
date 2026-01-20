@@ -11,6 +11,7 @@ Standard operating procedures for Trading RAG service.
 5. [Handling KB Status: Degraded](#handling-kb-status-degraded)
 6. [KB Trial Ingestion Operations](#kb-trial-ingestion-operations)
 7. [Service Restart Procedure](#service-restart-procedure)
+8. [Failure Modes & Recovery](#failure-modes--recovery)
 
 ---
 
@@ -461,6 +462,109 @@ curl -X POST "http://localhost:8000/kb/trials/recommend" \
 # If new version is broken, roll back to previous image
 docker compose pull trading-rag-svc:previous-tag
 docker compose up -d trading-rag-svc
+```
+
+---
+
+## Failure Modes & Recovery
+
+The service implements circuit breakers and retry logic for transient failures.
+
+### Circuit Breaker Status
+
+Check circuit breaker state via health endpoint:
+
+```bash
+curl -s http://localhost:8000/health | jq '.circuit_breakers'
+# Returns: {"supabase": {"failures": 0, "is_open": false}, "qdrant": {...}}
+```
+
+### Circuit Breaker States
+
+| State | Meaning | Behavior |
+|-------|---------|----------|
+| Closed | Healthy | Normal operation |
+| Open | Service down | Requests fail-fast (no retry) |
+| Half-Open | Testing recovery | One request allowed through |
+
+### Thresholds
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Failure threshold | 5 | Consecutive failures to open circuit |
+| Reset timeout | 30s | Time before half-open test |
+| Max retry attempts | 3 | Retries per operation |
+| Backoff | exponential | 0.5s base, 2x multiplier, 10s max |
+
+### Prometheus Metrics
+
+```
+# Retry attempts by service
+resilience_retries_total{service="db"}
+resilience_retries_total{service="qdrant"}
+
+# Circuit breaker state (0=closed, 1=open, 2=half_open)
+circuit_breaker_state{service="db"}
+circuit_breaker_state{service="qdrant"}
+
+# Failure counts and trip events
+circuit_breaker_failures_total{service="db|qdrant"}
+circuit_breaker_trips_total{service="db|qdrant"}
+```
+
+### When Circuit Opens
+
+**Symptoms:**
+- Requests return 500 with "circuit breaker is open"
+- `circuit_breaker_trips_total` counter increments
+- `/health` shows `is_open: true`
+
+**Diagnosis:**
+```bash
+# Check which service tripped
+curl -s http://localhost:8000/health | jq '.circuit_breakers | to_entries | map(select(.value.is_open)) | .[].key'
+
+# Check recent errors
+docker compose logs trading-rag-svc --since 5m | grep -E "(db_retry|qdrant_retry|circuit_opened)"
+```
+
+**Resolution:**
+1. **Wait for auto-recovery** - Circuit resets after 30s
+2. **Fix underlying issue** - Check database/Qdrant connectivity
+3. **Manual reset** (via service restart if circuit stuck)
+
+### Transient vs Non-Transient Errors
+
+**Retried (transient):**
+- Connection refused/reset
+- Timeouts
+- Pool exhaustion
+- Network errors
+
+**Not retried (non-transient):**
+- SQL syntax errors
+- Constraint violations
+- Authentication failures
+- Missing collections
+
+### Alert Thresholds
+
+Recommended alert rules:
+
+```yaml
+# Circuit breaker opened
+- alert: CircuitBreakerOpen
+  expr: circuit_breaker_state > 0
+  for: 1m
+  labels:
+    severity: warning
+
+# High retry rate
+- alert: HighRetryRate
+  expr: rate(resilience_retries_total[5m]) > 0.5
+  for: 5m
+  labels:
+    severity: warning
 ```
 
 ---

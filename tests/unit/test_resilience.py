@@ -147,9 +147,7 @@ class TestDatabaseRetry:
         conn = AsyncMock()
 
         # Fail first, succeed second
-        conn.fetchrow = AsyncMock(
-            side_effect=[ConnectionRefusedError(), {"id": 1}]
-        )
+        conn.fetchrow = AsyncMock(side_effect=[ConnectionRefusedError(), {"id": 1}])
 
         pool.acquire = MagicMock()
         pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
@@ -246,9 +244,7 @@ class TestQdrantRetry:
     async def test_retry_on_connection_error(self):
         """Test retry on Qdrant connection error."""
         client = AsyncMock()
-        client.search = AsyncMock(
-            side_effect=[ConnectionRefusedError(), [{"id": 1}]]
-        )
+        client.search = AsyncMock(side_effect=[ConnectionRefusedError(), [{"id": 1}]])
 
         config = RetryConfig(base_delay_seconds=0.01)
         result = await with_qdrant_retry(client, lambda c: c.search(), config)
