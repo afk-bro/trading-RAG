@@ -80,6 +80,8 @@ Code is fully implemented, just needs running server to verify:
 - Reranking: CrossEncoderReranker and LLMReranker fully implemented
 - Multi-provider embedding: reembed.py accepts embed_provider param
 - Document versioning: supersede_and_create() uses transactions
+- GIN indexes: Migration 001 creates idx_chunks_symbols_gin, idx_chunks_topics_gin, idx_chunks_entities_gin
+- Published_at index: Migration 001 creates composite index (workspace_id, published_at DESC)
 
 **Test count by status:**
 - Passing: 228/263 (86.7%)
