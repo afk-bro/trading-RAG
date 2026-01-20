@@ -18,6 +18,7 @@ from app.schemas.common import (
     RerankState,
     PineIngestStatus,
     # Health & Error
+    CircuitBreakerStatus,
     DependencyHealth,
     HealthResponse,
     ReadinessResponse,
@@ -193,6 +194,7 @@ __all__ = [
     "JobStatus",
     "RerankState",
     "PineIngestStatus",
+    "CircuitBreakerStatus",
     "DependencyHealth",
     "HealthResponse",
     "ReadinessResponse",

@@ -102,6 +102,14 @@ class DependencyHealth(BaseModel):
     error: Optional[str] = Field(None, description="Error message if unhealthy")
 
 
+class CircuitBreakerStatus(BaseModel):
+    """Status of a circuit breaker."""
+
+    failures: int = Field(..., description="Consecutive failure count")
+    is_open: bool = Field(..., description="True if circuit is open (blocking requests)")
+    last_failure: Optional[str] = Field(None, description="ISO timestamp of last failure")
+
+
 class HealthResponse(BaseModel):
     """Response for health endpoint."""
 
@@ -113,6 +121,9 @@ class HealthResponse(BaseModel):
     embed_model: str = Field(..., description="Active embedding model")
     latency_ms: dict[str, float] = Field(..., description="Latency per dependency")
     version: str = Field(..., description="Service version")
+    circuit_breakers: Optional[dict[str, CircuitBreakerStatus]] = Field(
+        None, description="Circuit breaker status for recovery tracking"
+    )
 
 
 class ReadinessResponse(BaseModel):

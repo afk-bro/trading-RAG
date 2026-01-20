@@ -964,7 +964,11 @@
       "Step 5: Attempt second trigger on same row",
       "Step 6: Verify second trigger is blocked"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -975,7 +979,11 @@
       "Step 3: Verify row is picked up for reprocessing",
       "Step 4: Verify attempt_count incremented"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -987,7 +995,11 @@
       "Step 4: Verify final status is 'ingested'",
       "Step 5: Verify doc_id is populated"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -998,7 +1010,11 @@
       "Step 3: Verify final status is 'error'",
       "Step 4: Verify error_reason is populated"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -1010,7 +1026,11 @@
       "Step 4: Verify child rows created with status='queued'",
       "Step 5: Verify child rows have playlist_id set"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -1021,7 +1041,11 @@
       "Step 3: Manually trigger workflow again on parent",
       "Step 4: Verify no duplicate child rows created"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -1033,7 +1057,11 @@
       "Step 4: Verify attempt_count is incremented",
       "Step 5: After lease expires, verify row is reprocessed"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -1052,7 +1080,11 @@
       "Step 11: Verify 'doc_id' column exists",
       "Step 12: Verify 'error_reason' column exists"
     ],
-    "passes": false
+    "passes": false,
+    "external": true,
+    "owner": "infra",
+    "blocking": false,
+    "notes": "External n8n workflow configuration - see docs/n8n/"
   },
   {
     "category": "functional",
@@ -1235,7 +1267,7 @@
       "Step 4: Restart Qdrant",
       "Step 5: Verify service reconnects and resumes working"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1247,7 +1279,7 @@
       "Step 4: Restore connection",
       "Step 5: Verify service resumes working"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
@@ -1699,7 +1731,10 @@
       "Step 3: Check memory usage after load",
       "Step 4: Verify no memory leak (usage returns to baseline)"
     ],
-    "passes": false
+    "passes": false,
+    "external": false,
+    "blocking": false,
+    "notes": "Requires load testing - deferred to post-v1.0"
   },
   {
     "category": "functional",
