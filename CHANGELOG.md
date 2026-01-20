@@ -29,6 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pydantic schemas: IntelSnapshotCreateRequest, IntelSnapshotResponse, list schemas
   - Migration: 080_strategy_intel_snapshots.sql
 
+- **Live Intelligence Confidence Computation (v1.5 Step 2)** - Regime classification and confidence scoring
+  - `app/services/intel/confidence.py` - Core computation module
+    - `compute_regime()`: OHLCV-based regime classification (trend-up/down/range + volatility level)
+    - `compute_components()`: 5-factor confidence breakdown (performance, drawdown, stability, data_freshness, regime_fit)
+    - `compute_confidence()`: Aggregates components with configurable weights
+    - `ConfidenceContext` dataclass for input bundling
+    - `ConfidenceResult` dataclass with regime, score, components, features, explain, inputs_hash
+  - `app/services/intel/runner.py` - Orchestration layer
+    - `IntelRunner` class coordinates data fetching and persistence
+    - `run_for_version()`: Single version computation with deduplication via inputs_hash
+    - `run_for_workspace_active()`: Batch processing for all active versions
+    - Backtest metrics fallback: version-linked → entity-linked
+    - `compute_and_store_snapshot()` convenience function
+  - Unit tests: 44 tests for confidence (27) and runner (17) modules
+
+- **Intel Snapshot API Endpoints (v1.5 Step 2 PR7)** - Admin endpoints for intelligence queries
+  - `GET /strategies/{id}/versions/{vid}/intel/latest` - Most recent snapshot
+  - `GET /strategies/{id}/versions/{vid}/intel` - Timeline with cursor pagination
+  - `POST /strategies/{id}/versions/{vid}/intel/recompute` - Trigger recomputation with force flag
+  - All endpoints validate strategy/version existence, require admin token
+  - Recompute returns existing snapshot on deduplication (no duplicate writes)
+  - Unit tests: 13 tests for endpoint coverage
+
 - **Idempotent Telegram Notification Delivery** - Race-safe notification system for ops alerts
   - Activation, recovery, and escalation notifications via Telegram
   - Delivery tracking columns: `notified_at`, `recovery_notified_at`, `escalation_notified_at`
