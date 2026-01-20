@@ -10,7 +10,7 @@ Run with: pytest tests/integration/test_ops_alert_telegram_flow.py -v
 
 import sys
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -108,9 +108,6 @@ class TestActivationNotificationFlow:
     @pytest.mark.asyncio
     async def test_already_notified_alert_not_resent(self, mock_notifier, mock_repo):
         """Alert with notified_at set is not resent on rerun."""
-        # Alert was already notified
-        alert = make_alert(status="active", notified_at=datetime.now(timezone.utc))
-
         # Repository returns no pending activations (because notified_at IS NOT NULL)
         mock_repo.get_pending_notifications.return_value = {
             "activations": [],  # Already notified, not returned

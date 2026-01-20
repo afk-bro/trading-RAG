@@ -16,7 +16,7 @@ Usage:
 import asyncio
 import random
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, TypeVar
 

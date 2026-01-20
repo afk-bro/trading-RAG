@@ -11,7 +11,7 @@ Run with: pytest tests/unit/test_ops_alert_telegram_delivery.py -v
 
 import os
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -20,8 +20,8 @@ import pytest
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-key")
 
-from app.repositories.ops_alerts import OpsAlert, OpsAlertsRepository
-from app.services.ops_alerts.telegram import SendResult, TelegramNotifier
+from app.repositories.ops_alerts import OpsAlert, OpsAlertsRepository  # noqa: E402
+from app.services.ops_alerts.telegram import SendResult, TelegramNotifier  # noqa: E402
 
 # Try to import handler - may fail if ccxt not installed
 try:

@@ -149,7 +149,7 @@ class OpsAlertsRepository:
                 job_run_id = EXCLUDED.job_run_id,
                 source = EXCLUDED.source,
                 occurrence_count = ops_alerts.occurrence_count + 1,
-                -- Escalation tracking: set timestamp and CLEAR notified flag when severity increases
+                -- Escalation: set timestamp, clear notified flag on severity increase
                 escalated_at = CASE
                     WHEN ({excluded_severity_rank}) > ({severity_rank}) THEN NOW()
                     ELSE ops_alerts.escalated_at

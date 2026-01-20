@@ -1,12 +1,11 @@
 """Tests for connection resilience and recovery logic."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.core.resilience import (
-    CircuitState,
     RetryConfig,
     _calculate_backoff,
     _is_transient_db_error,
