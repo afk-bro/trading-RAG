@@ -58,6 +58,7 @@ async def ingest_pipeline(
     settings: Settings = None,
     update_existing: bool = False,
     pine_metadata: Optional[dict[str, Any]] = None,
+    is_auto_generated: bool = False,
 ) -> IngestResponse:
     """
     Core ingestion pipeline.
@@ -252,6 +253,9 @@ async def ingest_pipeline(
         )
 
     # Extract metadata and prepare chunk records
+    # Apply quality penalty for auto-generated transcripts (typically lower quality)
+    auto_generated_penalty = 0.3 if is_auto_generated else 0.0
+
     chunk_records = []
     for chunk in chunks:
         metadata = extractor.extract(chunk.content)
@@ -268,6 +272,9 @@ async def ingest_pipeline(
                 else:
                     locator_label = f"p. {chunk.page_start}"
 
+        # Apply auto-generated penalty to quality score
+        adjusted_quality = max(0.0, metadata.quality_score - auto_generated_penalty)
+
         chunk_records.append(
             {
                 "content": chunk.content,
@@ -283,7 +290,7 @@ async def ingest_pipeline(
                 "symbols": metadata.symbols,
                 "entities": metadata.entities,
                 "topics": metadata.topics,
-                "quality_score": metadata.quality_score,
+                "quality_score": adjusted_quality,
                 "speaker": metadata.speaker,
             }
         )

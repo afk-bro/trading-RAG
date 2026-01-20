@@ -167,7 +167,8 @@ async def youtube_match_pine(
             channel = metadata.get("channel")
 
             # Fetch transcript
-            transcript_segments = await fetch_transcript(video_id)
+            transcript_result = await fetch_transcript(video_id)
+            transcript_segments = transcript_result["segments"]
             if not transcript_segments:
                 raise HTTPException(404, "No transcript available for this video")
 

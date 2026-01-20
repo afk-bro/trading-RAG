@@ -146,11 +146,25 @@ async def fetch_transcript(
     video_id: str,
     max_retries: int = 3,
     initial_delay: float = 1.0,
-) -> list[dict]:
+    preferred_languages: list[str] | None = None,
+) -> dict:
     """
     Fetch transcript for a YouTube video using youtube-transcript-api.
 
-    Returns list of segments with 'text', 'start', 'end' keys.
+    Supports multiple languages with fallback to auto-generated transcripts.
+
+    Args:
+        video_id: YouTube video ID
+        max_retries: Number of retry attempts
+        initial_delay: Initial delay for exponential backoff
+        preferred_languages: List of language codes in preference order.
+                           Defaults to ["en", "en-US", "en-GB"] if not specified.
+
+    Returns:
+        dict with keys:
+        - segments: list of dicts with 'text', 'start', 'end'
+        - language: str, the language code of the fetched transcript
+        - is_auto_generated: bool, True if auto-generated transcript was used
     """
     from youtube_transcript_api import (
         NoTranscriptFound,
@@ -164,16 +178,92 @@ async def fetch_transcript(
 
     delay = initial_delay
 
+    # Default to English variants if no preference specified
+    if preferred_languages is None:
+        preferred_languages = ["en", "en-US", "en-GB"]
+
     # Create API instance (v1.2+ is instance-based)
     api = YouTubeTranscriptApi()
 
     for attempt in range(max_retries):
         try:
-            # Fetch transcript directly (API handles language preference)
-            transcript_data = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+            # First, try to fetch manually created transcripts in preferred languages
+            is_auto_generated = False
+            transcript_data = None
+            fetched_language = None
+
+            try:
+                # Try manual transcripts first (higher quality)
+                transcript_data = api.fetch(video_id, languages=preferred_languages)
+                # Determine language from the transcript metadata if available
+                fetched_language = (
+                    getattr(transcript_data, "language_code", None)
+                    or preferred_languages[0]
+                )
+            except NoTranscriptFound:
+                # No manual transcript found, try auto-generated
+                logger.info(
+                    "No manual transcript, trying auto-generated",
+                    video_id=video_id,
+                    preferred_languages=preferred_languages,
+                )
+                try:
+                    # Try auto-generated transcripts for preferred languages
+                    # The API automatically handles this when we list transcripts
+                    transcript_list = api.list(video_id)
+
+                    # Find the best available transcript
+                    best_transcript = None
+
+                    # First, look for manual transcripts in any language
+                    for lang in preferred_languages:
+                        try:
+                            best_transcript = transcript_list.find_transcript([lang])
+                            if not best_transcript.is_generated:
+                                fetched_language = lang
+                                break
+                        except NoTranscriptFound:
+                            continue
+
+                    # If no manual transcript, look for auto-generated
+                    if best_transcript is None or best_transcript.is_generated:
+                        for lang in preferred_languages:
+                            try:
+                                best_transcript = transcript_list.find_generated_transcript(
+                                    [lang]
+                                )
+                                fetched_language = lang
+                                is_auto_generated = True
+                                break
+                            except NoTranscriptFound:
+                                continue
+
+                    # Last resort: any available transcript
+                    if best_transcript is None:
+                        available = list(transcript_list)
+                        if available:
+                            best_transcript = available[0]
+                            fetched_language = best_transcript.language_code
+                            is_auto_generated = best_transcript.is_generated
+
+                    if best_transcript:
+                        transcript_data = best_transcript.fetch()
+                    else:
+                        raise NoTranscriptFound(video_id)
+
+                except Exception as fallback_error:
+                    logger.warning(
+                        "Auto-generated transcript fallback failed",
+                        video_id=video_id,
+                        error=str(fallback_error),
+                    )
+                    raise NoTranscriptFound(video_id) from fallback_error
+
+            if transcript_data is None:
+                raise NoTranscriptFound(video_id)
 
             # New API returns FetchedTranscript with snippets
-            return [
+            segments = [
                 {
                     "text": snippet.text,
                     "start": snippet.start,
@@ -181,6 +271,20 @@ async def fetch_transcript(
                 }
                 for snippet in transcript_data.snippets
             ]
+
+            logger.info(
+                "Transcript fetched successfully",
+                video_id=video_id,
+                language=fetched_language,
+                is_auto_generated=is_auto_generated,
+                segment_count=len(segments),
+            )
+
+            return {
+                "segments": segments,
+                "language": fetched_language,
+                "is_auto_generated": is_auto_generated,
+            }
 
         except VideoUnavailable as e:
             # Terminal error - video is unavailable (private, deleted, age-restricted)
@@ -413,13 +517,21 @@ async def ingest_youtube(
             error_reason=f"Failed to fetch metadata: {str(e)}",
         )
 
-    # Fetch transcript
+    # Fetch transcript with preferred languages
     try:
-        segments = await fetch_transcript(video_id)
+        transcript_result = await fetch_transcript(
+            video_id,
+            preferred_languages=request.preferred_languages,
+        )
+        segments = transcript_result["segments"]
+        transcript_language = transcript_result["language"]
+        is_auto_generated = transcript_result["is_auto_generated"]
         logger.info(
             "Fetched transcript",
             video_id=video_id,
             segments=len(segments),
+            language=transcript_language,
+            is_auto_generated=is_auto_generated,
         )
     except ValueError as e:
         # Terminal error - parse error reason from exception
@@ -497,6 +609,8 @@ async def ingest_youtube(
     ]
 
     # Run through ingestion pipeline
+    # Use transcript language (defaults to "en" if somehow None)
+    ingest_language = transcript_language or "en"
     try:
         response = await ingest_pipeline(
             workspace_id=request.workspace_id,
@@ -509,12 +623,13 @@ async def ingest_youtube(
             title=metadata.get("title"),
             author=metadata.get("channel"),
             published_at=published_at,
-            language="en",
+            language=ingest_language,
             duration_secs=metadata.get("duration_secs"),
             video_id=video_id,
             playlist_id=playlist_id,
             pre_chunks=pre_chunks,  # Pass pre-chunked content with timestamps
             settings=settings,
+            is_auto_generated=is_auto_generated,  # Track transcript quality
         )
 
         logger.info(
@@ -522,6 +637,8 @@ async def ingest_youtube(
             video_id=video_id,
             doc_id=str(response.doc_id),
             chunks_created=response.chunks_created,
+            language=transcript_language,
+            is_auto_generated=is_auto_generated,
         )
 
         return YouTubeIngestResponse(
@@ -530,6 +647,8 @@ async def ingest_youtube(
             playlist_id=playlist_id,
             status="ingested" if response.status == "indexed" else response.status,
             chunks_created=response.chunks_created,
+            language=transcript_language,
+            is_auto_generated=is_auto_generated,
         )
 
     except HTTPException as e:
