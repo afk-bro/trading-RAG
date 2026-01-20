@@ -6718,3 +6718,130 @@ Reviewed code and confirmed these features ARE implemented:
    - YouTube ingestion (requires YouTube API access)
    - OpenRouter answer mode (requires API key)
    - Docker container tests (require Docker control)
+
+---
+
+## Session 97 Summary
+Date: Session 97 (Code Review and Implementation Verification)
+Status: 228/263 Tests Passing (86.7%)
+
+## What Was Accomplished (Session 97)
+
+### 1. Environment Assessment
+- Confirmed that server commands (uvicorn, docker, curl, python, echo) are blocked by security policy
+- Server is not running (port 8000 not in use)
+- Cannot start services without Docker/uvicorn access
+
+### 2. Comprehensive Code Review
+Performed thorough code analysis of the remaining 35 failing tests and verified implementations:
+
+**A. Query Timeout Implementation (VERIFIED)**
+- Location: `app/routers/query.py` lines 159-174
+- Uses `asyncio.wait_for(timeout=settings.query_timeout_s)`
+- Returns 504 Gateway Timeout on timeout
+- Configurable via `settings.query_timeout_s`
+
+**B. Composite FK Constraint (VERIFIED)**
+- Migration: `migrations/075_chunks_composite_fk.sql`
+- Creates `fk_chunks_document_workspace` constraint
+- References `documents(id, workspace_id)` for workspace isolation
+- Enforced at database schema level (not just application level as previously noted)
+
+**C. GIN Indexes on Arrays (VERIFIED)**
+- Location: `migrations/001_initial_schema.sql` lines 94-101
+- Creates: `idx_chunks_symbols_gin`, `idx_chunks_topics_gin`, `idx_chunks_entities_gin`
+- All use `USING GIN` for efficient array containment queries
+
+**D. Published_at Index (VERIFIED)**
+- Location: `migrations/001_initial_schema.sql` lines 37-38
+- Creates: `idx_documents_workspace_published` composite index
+- Supports efficient date range queries with workspace isolation
+
+**E. Reranking Implementation (VERIFIED)**
+- Location: `app/services/reranker.py` and `app/routers/query.py`
+- CrossEncoderReranker: Uses sentence-transformers with `BAAI/bge-reranker-v2-m3`
+- LLMReranker: Uses existing LLM client for reranking
+- Supports timeout with fail-open to vector fallback (lines 446-485)
+- Comprehensive unit tests in `tests/unit/test_reranker.py`
+
+**F. Multiple Embedding Providers (VERIFIED)**
+- Location: `app/routers/reembed.py`
+- Creates separate records in `chunk_vectors` table per provider/model/collection
+- Unique constraint allows multiple embeddings per chunk: `(chunk_id, embed_provider, embed_model, collection)`
+
+**G. Test Coverage Configuration (VERIFIED)**
+- Location: `.coveragerc`
+- Configured with `fail_under = 70`
+- CI will fail if coverage drops below 70%
+
+### 3. Test Classification Update
+
+**Tests requiring runtime verification (cannot mark passing without server):**
+1. Query timeout prevents runaway queries - Code verified, needs runtime test
+2. Composite FK constraint enforced - Migration exists, needs runtime test
+3. GIN indexes improve performance - Indexes exist, needs EXPLAIN verification
+4. Published_at index improves queries - Index exists, needs EXPLAIN verification
+5. Reranking improves relevance - Implementation complete, needs runtime test
+6. Multiple embedding providers coexist - Implementation complete, needs runtime test
+7. Test coverage above 70% - Config exists, needs pytest --cov execution
+
+**Tests that cannot pass (external dependencies):**
+- Docker container control tests (5 tests) - requires stopping/starting containers
+- YouTube network tests (5 tests) - requires YouTube API access
+- OpenRouter/LLM tests (5 tests) - requires API key
+- n8n workflow tests (7 tests) - requires n8n setup
+
+### 4. Key Findings
+
+**Document Transaction Handling:**
+- `supersede_and_create()` uses `async with conn.transaction()` for atomic supersede
+- Chunk batch creation uses separate transaction
+- Overall ingest flow is NOT fully atomic (document → chunks → vectors are separate)
+- "Partial failure during ingest is handled atomically" test may NOT pass as written
+
+**Reranker Architecture:**
+- Singleton pattern with lazy initialization
+- Supports cross-encoder (default) and LLM reranking methods
+- Configurable timeout with graceful fallback to vector ordering
+- Comprehensive test coverage in unit tests
+
+### 5. Test Status
+- Previous session: 228 passing / 263 total
+- This session: 228 passing / 263 total (no change)
+- Cannot mark additional tests passing without runtime verification
+
+### 6. Remaining Tests by Category
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Docker container control | 5 | Need container management |
+| YouTube network | 5 | Need YouTube API access |
+| OpenRouter/LLM | 5 | Need API key configured |
+| n8n workflow | 8 | Need n8n setup |
+| Performance verification | 4 | Need runtime + large dataset |
+| Runtime verification | 7 | Need server running |
+| Code implementation | 1 | Partial atomicity issue |
+
+### 7. Recommendations for Future Sessions
+
+**With Server Access:**
+1. Start FastAPI with `uvicorn app.main:app --port 8000`
+2. Run pytest with coverage: `pytest --cov=app --cov-fail-under=70`
+3. Test query timeout by sending slow queries
+4. Test reranking with `/query/compare` endpoint
+5. Verify FK constraint with invalid insert attempt
+
+**Implementation Fix Needed:**
+- Consider wrapping full ingest (document + chunks + vectors) in single transaction
+- Or implement cleanup on partial failure
+
+### 8. Files Reviewed This Session
+- `app/routers/query.py` - Query timeout and reranking
+- `app/routers/reembed.py` - Multiple embedding providers
+- `app/services/reranker.py` - Reranker implementation
+- `app/repositories/documents.py` - Supersede transaction
+- `app/repositories/chunks.py` - Chunk batch transaction
+- `migrations/001_initial_schema.sql` - GIN indexes, published_at index
+- `migrations/075_chunks_composite_fk.sql` - Composite FK constraint
+- `.coveragerc` - Coverage configuration
+- `tests/unit/test_reranker.py` - Reranker tests
