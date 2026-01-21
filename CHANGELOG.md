@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Ops Alerts Admin UI** - Admin page for viewing and managing operational alerts
+  - `GET /admin/ops/alerts` - HTML list page with filtering, pagination, severity badges
+  - `POST /admin/ops/alerts/{id}/acknowledge` - Mark alert as acknowledged
+  - `POST /admin/ops/alerts/{id}/resolve` - Mark alert as resolved
+  - `POST /admin/ops/alerts/{id}/reopen` - Reopen a resolved alert
+  - Status workflow: `firing` → `acknowledged` → `resolved`
+  - Styled table with severity colors (critical=red, warning=yellow, info=blue)
+
+- **Webhook Sinks for Alerts** - Deliver alerts to external services
+  - `SlackWebhookSink` - Format alerts as Slack messages with severity colors
+  - `GenericWebhookSink` - POST JSON payload to any HTTP endpoint
+  - Retry logic with exponential backoff (3 attempts, 1s/2s/4s delays)
+  - Fire-and-forget delivery (non-blocking)
+  - Configuration via `SLACK_WEBHOOK_URL`, `ALERT_WEBHOOK_URL`, `ALERT_WEBHOOK_HEADERS`
+  - Integrated with `AlertTransitionManager` for automatic delivery on state changes
+
+- **Documentation Refactor** - CLAUDE.md reduced from 1060 to 148 lines (86% reduction)
+  - Detailed feature docs extracted to `docs/features/`:
+    - `backtests.md` - Backtest tuning, WFO, test generator
+    - `pine-scripts.md` - Pine registry, ingest, auto-strategy
+    - `execution.md` - Paper execution, strategy runner
+    - `coverage.md` - Coverage triage workflow
+    - `kb-recommend.md` - KB pipeline, regime fingerprints
+    - `ops.md` - System health, security, v1.0.0 hardening
+  - CLAUDE.md now contains essential quick-reference with pointers to detailed docs
+
 - **Idempotency Hygiene Monitoring** - Full observability for idempotency key lifecycle
   - Health page card: total keys, expired pending, pending requests, oldest ages
   - Prometheus metrics: `idempotency_keys_total`, `idempotency_expired_pending_total`, etc.

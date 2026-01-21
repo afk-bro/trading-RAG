@@ -46,7 +46,8 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Auto-Strategy Discovery**: Generate parameter specs from Pine Script inputs for backtesting
 - **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
 - **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
-- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard
+- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts
+- **Ops Alerts**: Admin page for alert management with webhook delivery (Slack, generic HTTP)
 - **Idempotency Hygiene**: Auto-prune via pg_cron, health page monitoring, Prometheus metrics
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
 - **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules (28 alerts across 10 subsystems)
@@ -217,6 +218,7 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/backtests/leaderboard` | Global ranking (CSV export) |
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
 | `/admin/ops/snapshot` | Go-live verification (release, config, health) |
+| `/admin/ops/alerts` | Operational alerts list (acknowledge, resolve, reopen) |
 | `/admin/system/health` | System health dashboard (status cards) |
 | `/admin/system/health.json` | System health (machine-readable) |
 | `/admin/coverage/cockpit` | Coverage triage cockpit UI |
@@ -278,12 +280,15 @@ trading-RAG/
 │   │   └── trading_kb.py    # KB recommend endpoint
 │   ├── admin/
 │   │   ├── router.py        # Admin UI and ops snapshot
+│   │   ├── ops_alerts.py    # Ops alerts admin page
 │   │   └── templates/
 │   ├── services/
 │   │   ├── chunker.py
 │   │   ├── embedder.py
 │   │   ├── extractor.py
 │   │   ├── llm.py
+│   │   ├── ops_alerts/        # Operational alerts service
+│   │   │   └── webhook_sink.py  # Slack/generic webhook delivery
 │   │   └── pine/              # Pine Script registry module
 │   │       ├── models.py      # Data models (PineRegistry, PineScriptEntry)
 │   │       ├── parser.py      # Regex-based Pine Script parser
@@ -295,6 +300,13 @@ trading-RAG/
 │       ├── chunks.py
 │       └── vectors.py
 ├── docs/
+│   ├── features/              # Detailed feature documentation
+│   │   ├── backtests.md       # Backtest tuning, WFO, test generator
+│   │   ├── coverage.md        # Coverage triage workflow
+│   │   ├── execution.md       # Paper execution, strategy runner
+│   │   ├── kb-recommend.md    # KB pipeline, regime fingerprints
+│   │   ├── ops.md             # System health, security, hardening
+│   │   └── pine-scripts.md    # Pine registry, ingest, auto-strategy
 │   ├── ops/
 │   │   ├── alerting-rules.md  # Sentry alert configuration
 │   │   └── runbooks.md        # Operational procedures
@@ -379,6 +391,15 @@ trading-RAG/
 | `SENTRY_DSN` | Sentry error tracking DSN |
 | `SENTRY_ENVIRONMENT` | Environment tag for Sentry |
 | `SENTRY_TRACES_SAMPLE_RATE` | Performance tracing sample rate (0.0-1.0) |
+
+### Webhook Configuration (Alerts)
+
+| Variable | Description |
+|----------|-------------|
+| `WEBHOOK_ENABLED` | Enable webhook delivery for alerts (`true`/`false`) |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL for alert delivery |
+| `ALERT_WEBHOOK_URL` | Generic webhook URL for alert delivery |
+| `ALERT_WEBHOOK_HEADERS` | JSON string of headers for generic webhook |
 
 ### Health Probes
 
