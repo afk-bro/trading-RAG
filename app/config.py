@@ -331,6 +331,58 @@ class Settings(BaseSettings):
         description="Max backoff multiplier for failed scans (16x = 4h at 15min base)",
     )
 
+    # Live Price Polling Configuration
+    live_price_poll_enabled: bool = Field(
+        default=False,
+        description="Enable automatic polling of OHLCV candles for enabled symbols",
+    )
+    live_price_poll_interval_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="Base interval between polls in seconds",
+    )
+    live_price_poll_tick_seconds: int = Field(
+        default=15,
+        ge=5,
+        le=300,
+        description="Frequency of checking for due pairs in seconds",
+    )
+    live_price_poll_jitter_seconds: int = Field(
+        default=5,
+        ge=0,
+        le=30,
+        description="Random jitter added to intervals to prevent thundering herd",
+    )
+    live_price_poll_backoff_max_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=3600,
+        description="Maximum backoff time on failures (15 min default)",
+    )
+    live_price_poll_max_concurrency_per_exchange: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Max concurrent fetches per exchange",
+    )
+    live_price_poll_max_pairs_per_tick: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Max (exchange,symbol,timeframe) tuples to poll per tick",
+    )
+    live_price_poll_lookback_candles: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Fallback lookback candle count when no last_candle_ts",
+    )
+    live_price_poll_timeframes: list[str] = Field(
+        default=["1m"],
+        description="Default timeframes to poll if symbol has no specific config",
+    )
+
     # Job System Configuration
     ccxt_rate_limit_ms: int = Field(
         default=100,

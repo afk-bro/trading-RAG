@@ -27,6 +27,10 @@ from app.admin import set_db_pool as set_admin_db_pool
 from app.admin import set_qdrant_client as set_admin_qdrant_client
 from app.admin.data import set_db_pool as set_admin_data_db_pool
 from app.services.pine.poller import PineRepoPoller, set_poller
+from app.services.market_data.poller import (
+    LivePricePoller,
+    set_poller as set_price_poller,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -34,6 +38,7 @@ logger = structlog.get_logger(__name__)
 _db_pool: Optional[asyncpg.Pool] = None
 _qdrant_client: Optional[AsyncQdrantClient] = None
 _pine_poller: Optional[PineRepoPoller] = None
+_price_poller: Optional[LivePricePoller] = None
 
 
 def get_db_pool() -> Optional[asyncpg.Pool]:
@@ -49,6 +54,11 @@ def get_qdrant_client() -> Optional[AsyncQdrantClient]:
 def get_pine_poller() -> Optional[PineRepoPoller]:
     """Get the Pine repo poller instance."""
     return _pine_poller
+
+
+def get_price_poller() -> Optional[LivePricePoller]:
+    """Get the live price poller instance."""
+    return _price_poller
 
 
 async def _init_qdrant(settings) -> Optional[AsyncQdrantClient]:
@@ -292,7 +302,7 @@ async def _shutdown_reranker() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
-    global _db_pool, _qdrant_client, _pine_poller
+    global _db_pool, _qdrant_client, _pine_poller, _price_poller
 
     settings = get_settings()
     logger.info(
@@ -334,12 +344,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     elif not settings.pine_repo_poll_enabled:
         logger.info("Pine repo polling disabled (PINE_REPO_POLL_ENABLED=false)")
 
+    # Start live price poller (if enabled and DB available)
+    if _db_pool and settings.live_price_poll_enabled:
+        _price_poller = LivePricePoller(_db_pool, settings)
+        set_price_poller(_price_poller)
+        await _price_poller.start()
+    elif not settings.live_price_poll_enabled:
+        logger.info("Live price polling disabled (LIVE_PRICE_POLL_ENABLED=false)")
+
     yield
 
     # Cleanup on shutdown
     logger.info("Shutting down Trading RAG Service")
 
-    # Stop Pine repo poller first (before DB pool closes)
+    # Stop pollers first (before DB pool closes)
+    if _price_poller:
+        await _price_poller.stop()
+        set_price_poller(None)
+        logger.info("Live price poller stopped")
+
     if _pine_poller:
         await _pine_poller.stop()
         set_poller(None)
