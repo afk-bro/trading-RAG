@@ -800,3 +800,46 @@ class TestStrategyVersionsRepository:
         version = await repo.get_active_version(uuid4())
 
         assert version is None
+
+    @pytest.mark.asyncio
+    async def test_is_entity_active_true(self, mock_pool):
+        """Test is_entity_active returns True when strategy has active version."""
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchval.return_value = 1  # Row exists
+
+        repo = StrategyVersionsRepository(mock_pool)
+        entity_id = uuid4()
+        result = await repo.is_entity_active(entity_id)
+
+        assert result is True
+        # Verify correct query was made
+        mock_conn.fetchval.assert_called_once()
+        call_args = mock_conn.fetchval.call_args
+        assert "strategy_entity_id" in call_args[0][0]
+        assert "active_version_id IS NOT NULL" in call_args[0][0]
+        assert call_args[0][1] == entity_id
+
+    @pytest.mark.asyncio
+    async def test_is_entity_active_false_paused(self, mock_pool):
+        """Test is_entity_active returns False when strategy is paused (no active version)."""
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchval.return_value = None  # No row = no active version
+
+        repo = StrategyVersionsRepository(mock_pool)
+        result = await repo.is_entity_active(uuid4())
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_is_entity_active_false_no_strategy(self, mock_pool):
+        """Test is_entity_active returns False when strategy doesn't exist."""
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchval.return_value = None  # Strategy not found
+
+        repo = StrategyVersionsRepository(mock_pool)
+        result = await repo.is_entity_active(uuid4())
+
+        assert result is False

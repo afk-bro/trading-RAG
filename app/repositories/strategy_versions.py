@@ -665,3 +665,28 @@ class StrategyVersionsRepository:
             row = await conn.fetchrow(query, strategy_id, config_hash)
 
         return StrategyVersion.from_row(dict(row)) if row else None
+
+    async def is_entity_active(self, strategy_entity_id: UUID) -> bool:
+        """
+        Check if a strategy entity has an active version.
+
+        Used by execution gating to block orders when strategy is paused.
+        This is the LAST DECISION POINT before order submission.
+
+        Args:
+            strategy_entity_id: The KB entity ID (not the strategy.id)
+
+        Returns:
+            True if strategy has an active version, False if paused/none
+        """
+        query = """
+            SELECT 1 FROM strategies
+            WHERE strategy_entity_id = $1
+              AND active_version_id IS NOT NULL
+            LIMIT 1
+        """
+
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval(query, strategy_entity_id)
+
+        return result is not None

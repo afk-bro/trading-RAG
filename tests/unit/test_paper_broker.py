@@ -531,6 +531,87 @@ class TestPaperBrokerReconciliation:
         assert "no position" in result.errors[0].lower()
 
 
+class TestPaperBrokerStrategyGating:
+    """Tests for strategy state gating (paused means zero orders)."""
+
+    @pytest.fixture
+    def mock_version_repo(self):
+        """Create mock version repository."""
+        repo = MagicMock()
+        repo.is_entity_active = AsyncMock(return_value=True)
+        return repo
+
+    @pytest.fixture
+    def gated_broker(self, mock_events_repo, mock_version_repo):
+        """Create paper broker with strategy gating enabled."""
+        return PaperBroker(mock_events_repo, version_repo=mock_version_repo)
+
+    @pytest.mark.asyncio
+    async def test_blocks_execution_when_strategy_paused(
+        self, gated_broker, sample_intent, mock_events_repo
+    ):
+        """Blocks execution when strategy has no active version (paused)."""
+        # Mock version repo to return is_entity_active=False (paused)
+        gated_broker._version_repo.is_entity_active = AsyncMock(return_value=False)
+
+        with patch.object(gated_broker, "_check_idempotency", return_value=None):
+            result = await gated_broker.execute_intent(sample_intent, fill_price=50000.0)
+
+        assert not result.success
+        assert result.error_code == "STRATEGY_PAUSED"
+        assert "paused" in result.error.lower()
+        assert result.events_recorded == 1  # Rejection journaled
+
+        # Verify rejection event was journaled
+        mock_events_repo.insert.assert_called_once()
+        rejection_event = mock_events_repo.insert.call_args[0][0]
+        assert rejection_event.event_type == TradeEventType.INTENT_REJECTED
+        assert rejection_event.payload["reason"] == "STRATEGY_PAUSED"
+
+    @pytest.mark.asyncio
+    async def test_allows_execution_when_strategy_active(
+        self, gated_broker, sample_intent, mock_events_repo
+    ):
+        """Allows execution when strategy has an active version."""
+        # Mock version repo to return is_entity_active=True (active)
+        gated_broker._version_repo.is_entity_active = AsyncMock(return_value=True)
+
+        with patch.object(gated_broker, "_check_idempotency", return_value=None):
+            result = await gated_broker.execute_intent(sample_intent, fill_price=50000.0)
+
+        assert result.success
+        assert result.position_action == "opened"
+
+    @pytest.mark.asyncio
+    async def test_backward_compatible_without_version_repo(
+        self, paper_broker, sample_intent, mock_events_repo
+    ):
+        """Executes without gating when version_repo is None (backward compatible)."""
+        # paper_broker fixture doesn't have version_repo
+        assert paper_broker._version_repo is None
+
+        with patch.object(paper_broker, "_check_idempotency", return_value=None):
+            result = await paper_broker.execute_intent(sample_intent, fill_price=50000.0)
+
+        assert result.success
+        assert result.position_action == "opened"
+
+    @pytest.mark.asyncio
+    async def test_strategy_check_uses_correct_entity_id(
+        self, gated_broker, sample_intent, mock_events_repo
+    ):
+        """Strategy check queries with the intent's strategy_entity_id."""
+        gated_broker._version_repo.is_entity_active = AsyncMock(return_value=True)
+
+        with patch.object(gated_broker, "_check_idempotency", return_value=None):
+            await gated_broker.execute_intent(sample_intent, fill_price=50000.0)
+
+        # Verify is_entity_active was called with the correct entity ID
+        gated_broker._version_repo.is_entity_active.assert_called_once_with(
+            sample_intent.strategy_entity_id
+        )
+
+
 class TestPaperBrokerState:
     """Tests for state management."""
 

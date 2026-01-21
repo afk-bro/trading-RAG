@@ -25,7 +25,18 @@ from app.services.execution.base import BrokerAdapter
 from app.services.policy_engine import PolicyEngine
 from app.repositories.trade_events import TradeEventsRepository, EventFilters
 from app.repositories.paper_equity import PaperEquityRepository
+from app.repositories.strategy_versions import StrategyVersionsRepository
 
+try:
+    from prometheus_client import Counter
+
+    EXECUTION_BLOCKED_COUNTER = Counter(
+        "execution_intents_blocked_total",
+        "Intents blocked at execution gate",
+        ["reason"],
+    )
+except ImportError:
+    EXECUTION_BLOCKED_COUNTER = None  # type: ignore[assignment]
 
 logger = structlog.get_logger(__name__)
 
@@ -56,6 +67,7 @@ class PaperBroker(BrokerAdapter):
         self,
         events_repo: TradeEventsRepository,
         equity_repo: Optional[PaperEquityRepository] = None,
+        version_repo: Optional[StrategyVersionsRepository] = None,
     ):
         """
         Initialize paper broker.
@@ -63,9 +75,11 @@ class PaperBroker(BrokerAdapter):
         Args:
             events_repo: Trade events repository for journaling
             equity_repo: Optional equity snapshots repository for drawdown tracking
+            version_repo: Optional strategy versions repository for state gating
         """
         self._events_repo = events_repo
         self._equity_repo = equity_repo
+        self._version_repo = version_repo
         self._states: dict[UUID, PaperState] = {}  # workspace_id -> state
         self._settings = get_settings()
         self._policy_engine = PolicyEngine()
@@ -110,7 +124,47 @@ class PaperBroker(BrokerAdapter):
                 correlation_id=existing.correlation_id,
             )
 
-        # 3. Re-evaluate policy internally
+        # 3. CRITICAL SAFETY CHECK: Verify strategy is not paused
+        # This is the LAST DECISION POINT before order submission.
+        # "Paused means zero orders" - enforced here regardless of how intent arrived.
+        if self._version_repo is not None:
+            is_active = await self._version_repo.is_entity_active(
+                intent.strategy_entity_id
+            )
+            if not is_active:
+                log.warning(
+                    "strategy_paused_execution_blocked",
+                    strategy_entity_id=str(intent.strategy_entity_id),
+                )
+                if EXECUTION_BLOCKED_COUNTER:
+                    EXECUTION_BLOCKED_COUNTER.labels(reason="strategy_paused").inc()
+                # Journal the rejection for audit trail
+                rejection_event = TradeEvent(
+                    correlation_id=intent.correlation_id,
+                    workspace_id=intent.workspace_id,
+                    event_type=TradeEventType.INTENT_REJECTED,
+                    strategy_entity_id=intent.strategy_entity_id,
+                    symbol=intent.symbol,
+                    timeframe=intent.timeframe,
+                    intent_id=intent.id,
+                    payload={
+                        "reason": "STRATEGY_PAUSED",
+                        "reason_details": "Strategy has no active version - execution blocked",
+                        "mode": self.mode,
+                    },
+                )
+                await self._events_repo.insert(rejection_event)
+
+                return ExecutionResult(
+                    success=False,
+                    intent_id=intent.id,
+                    error="Strategy is paused - no active version",
+                    error_code="STRATEGY_PAUSED",
+                    correlation_id=intent.correlation_id,
+                    events_recorded=1,
+                )
+
+        # 4. Re-evaluate policy internally
         state = self._get_or_create_state(intent.workspace_id)
         current_state = self._build_current_state(state, intent.workspace_id)
         decision = self._policy_engine.evaluate(intent, current_state)

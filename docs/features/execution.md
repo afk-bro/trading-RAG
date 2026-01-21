@@ -27,6 +27,41 @@ TradeIntent (approved by PolicyEngine)
 - **Supported actions**: `OPEN_LONG`, `CLOSE_LONG` only
 - **Full close only**: SELL qty must == position.qty
 
+## Execution Gating (Safety)
+
+The paper broker enforces "paused means zero orders" at the last possible decision point.
+
+**Gating Flow**:
+```
+execute_intent()
+    ├─ 1. Validate action supported
+    ├─ 2. Idempotency check
+    ├─ 3. STRATEGY STATE CHECK ← blocks if no active version
+    ├─ 4. Re-evaluate policy
+    └─ 5. Execute fill
+```
+
+**Strategy State Check** (`paper_broker.py:117-153`):
+- Queries `strategies` table by `strategy_entity_id`
+- Returns `STRATEGY_PAUSED` error if `active_version_id IS NULL`
+- Journals `INTENT_REJECTED` event for audit trail
+
+**Integration with Auto-Pause**:
+When `AUTO_PAUSE_ENABLED=true` and a CRITICAL alert fires (drawdown >20%, confidence <0.20):
+1. Auto-pause sets `strategy_versions.state = 'paused'`
+2. This clears `strategies.active_version_id`
+3. Next execution attempt is blocked with `STRATEGY_PAUSED`
+
+**Error Codes**:
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `STRATEGY_PAUSED` | 200 (success=false) | Strategy has no active version |
+| `POLICY_REJECTED` | 200 (success=false) | Policy rule rejected intent |
+| `ALREADY_EXECUTED` | 409 | Idempotency hit |
+
+**Backward Compatibility**:
+If `version_repo` is not passed to PaperBroker, the check is skipped (legacy mode).
+
 **Event Flow**:
 ```
 INTENT_EMITTED → POLICY_EVALUATED → INTENT_APPROVED → ORDER_FILLED

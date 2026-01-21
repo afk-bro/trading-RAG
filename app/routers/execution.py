@@ -17,6 +17,7 @@ from app.schemas import (
 from app.deps.security import require_admin_token
 from app.services.execution.factory import get_paper_broker
 from app.repositories.trade_events import TradeEventsRepository
+from app.repositories.strategy_versions import StrategyVersionsRepository
 
 
 router = APIRouter(prefix="/execute", tags=["execution"])
@@ -40,6 +41,16 @@ def _get_events_repo() -> TradeEventsRepository:
             detail="Database connection not available",
         )
     return TradeEventsRepository(_db_pool)
+
+
+def _get_version_repo() -> StrategyVersionsRepository:
+    """Get strategy versions repository."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return StrategyVersionsRepository(_db_pool)
 
 
 @router.post(
@@ -90,9 +101,10 @@ async def execute_intent(
             },
         )
 
-    # Get paper broker
+    # Get paper broker with strategy gating enabled
     events_repo = _get_events_repo()
-    broker = get_paper_broker(events_repo)
+    version_repo = _get_version_repo()
+    broker = get_paper_broker(events_repo, version_repo=version_repo)
 
     # Execute
     result = await broker.execute_intent(
@@ -125,9 +137,14 @@ async def execute_intent(
                     "error_code": result.error_code,
                 },
             )
-        elif result.error_code == "POLICY_REJECTED":
-            # Policy rejection is not an HTTP error - return success=false
-            log.info("policy_rejected", error=result.error)
+        elif result.error_code in {"POLICY_REJECTED", "STRATEGY_PAUSED"}:
+            # Policy rejection and strategy paused are not HTTP errors - return success=false
+            # Caller should inspect error_code to determine next action
+            log.info(
+                "execution_rejected",
+                error_code=result.error_code,
+                error=result.error,
+            )
             return result
         else:
             # Catch-all for unhandled error codes
