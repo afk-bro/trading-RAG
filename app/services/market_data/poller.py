@@ -16,6 +16,10 @@ from prometheus_client import Counter, Gauge, Histogram
 from app.config import Settings
 from app.repositories.core_symbols import CoreSymbolsRepository
 from app.repositories.ohlcv import Candle, OHLCVRepository
+from app.repositories.price_poll_state import (
+    PollKey as RepoPollKey,
+    PricePollStateRepository,
+)
 from app.services.market_data.ccxt_provider import CcxtMarketDataProvider
 
 logger = structlog.get_logger(__name__)
@@ -159,11 +163,9 @@ class LivePricePoller:
     - CCXT provider for exchange data fetching (LP2)
     - Smart lookback from last_candle_ts (LP2)
     - Staleness metrics per PollKey (LP2)
+    - DB-backed scheduling with backoff (LP3)
     - Exposes Prometheus metrics
     - Can be started/stopped gracefully
-
-    Future (LP3):
-    - DB-backed scheduling with backoff
     """
 
     def __init__(
@@ -182,6 +184,12 @@ class LivePricePoller:
         self._settings = settings
         self._symbols_repo = CoreSymbolsRepository(pool)
         self._ohlcv_repo = OHLCVRepository(pool)
+        self._state_repo = PricePollStateRepository(
+            pool,
+            interval_seconds=settings.live_price_poll_interval_seconds,
+            jitter_seconds=settings.live_price_poll_jitter_seconds,
+            backoff_max_seconds=settings.live_price_poll_backoff_max_seconds,
+        )
 
         # Per-exchange semaphores for rate limiting
         self._semaphores: dict[str, asyncio.Semaphore] = {}
@@ -291,16 +299,24 @@ class LivePricePoller:
             for sym in symbols
         )
 
-        # LP1: Simple counts - LP3 will add DB-backed counting
-        pairs_due = pairs_enabled  # All pairs considered "due" in LP1
+        # Get counts from state repository (LP3)
+        try:
+            pairs_due = await self._state_repo.count_due_pairs()
+            pairs_never_polled = await self._state_repo.count_never_polled()
+            worst_staleness = await self._state_repo.get_worst_staleness()
+        except Exception as e:
+            logger.warning("Failed to get health counts from state repo", error=str(e))
+            pairs_due = 0
+            pairs_never_polled = 0
+            worst_staleness = None
 
         return PollerHealth(
             enabled=self._settings.live_price_poll_enabled,
             running=self._running,
             pairs_enabled=pairs_enabled,
             pairs_due=pairs_due,
-            pairs_never_polled=0,  # LP3 will track this
-            worst_staleness_seconds=None,  # LP3 will track this
+            pairs_never_polled=pairs_never_polled,
+            worst_staleness_seconds=worst_staleness,
             last_run_at=self._last_run_at,
             last_run_pairs_fetched=(
                 self._last_run_result.pairs_fetched if self._last_run_result else 0
@@ -386,17 +402,28 @@ class LivePricePoller:
 
         fetch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Process results
+        # Process results and update scheduling state
         for (pair, state), fetch_result in zip(due_pairs, fetch_results):
             result.pairs_fetched += 1
+            repo_key = RepoPollKey(pair.exchange_id, pair.symbol, pair.timeframe)
 
             if isinstance(fetch_result, Exception):
                 result.pairs_failed += 1
-                result.errors.append(f"{pair}: {fetch_result}")
+                error_msg = str(fetch_result)
+                result.errors.append(f"{pair}: {error_msg}")
                 POLL_PAIRS_FETCHED_TOTAL.labels(
                     exchange_id=pair.exchange_id,
                     status="failure",
                 ).inc()
+                # Update state with failure (exponential backoff)
+                try:
+                    await self._state_repo.mark_failure(repo_key, error_msg)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to mark_failure in state repo",
+                        pair=str(pair),
+                        error=str(e),
+                    )
             else:
                 count, latest_ts = fetch_result
                 result.pairs_succeeded += 1
@@ -410,6 +437,16 @@ class LivePricePoller:
                         exchange_id=pair.exchange_id,
                         timeframe=pair.timeframe,
                     ).inc(count)
+                # Update state with success (schedule next poll)
+                if latest_ts:
+                    try:
+                        await self._state_repo.mark_success(repo_key, latest_ts)
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to mark_success in state repo",
+                            pair=str(pair),
+                            error=str(e),
+                        )
 
         result.duration_ms = int((time.time() - start_time) * 1000)
 
@@ -428,25 +465,78 @@ class LivePricePoller:
         self, limit: int
     ) -> list[tuple[PollKey, Optional[PollState]]]:
         """
-        Get pairs due for polling (LP1: simple expansion).
+        Get pairs due for polling (DB-first approach - LP3).
 
-        LP3 will replace this with DB-first approach.
+        1. Query due pairs from state table (ordered by next_poll_at NULLS FIRST)
+        2. Validate against currently enabled symbols
+        3. Seed new pairs for newly-enabled symbols missing state rows
         """
-        # 1. Fetch enabled symbols
+        # 1. Get due pairs from state table
+        due_states = await self._state_repo.list_due_pairs(limit=limit * 2)
+
+        # 2. Fetch enabled symbols to validate
         symbols = await self._symbols_repo.list_symbols(enabled_only=True)
+        enabled_map = {(s.exchange_id, s.canonical_symbol): s for s in symbols}
 
-        # 2. Expand to (exchange, symbol, timeframe) pairs
-        all_pairs: list[tuple[PollKey, Optional[PollState]]] = []
-        for sym in symbols:
-            # Use symbol's timeframes or fall back to config defaults
+        # 3. Filter to still-enabled symbols with valid timeframes
+        valid_due: list[tuple[PollKey, Optional[PollState]]] = []
+        for state in due_states:
+            sym = enabled_map.get((state.exchange_id, state.symbol))
+            if not sym:
+                continue  # Symbol disabled since last poll
             symbol_tfs = sym.timeframes or self._settings.live_price_poll_timeframes
-            for tf in symbol_tfs:
-                if tf in self._active_timeframes:
-                    pair = PollKey(sym.exchange_id, sym.canonical_symbol, tf)
-                    all_pairs.append((pair, None))  # LP1: No state yet
+            if state.timeframe not in symbol_tfs:
+                continue  # Timeframe no longer enabled for this symbol
+            if state.timeframe not in self._active_timeframes:
+                continue  # Timeframe not in global active set
+            poll_state = PollState(
+                exchange_id=state.exchange_id,
+                symbol=state.symbol,
+                timeframe=state.timeframe,
+                next_poll_at=state.next_poll_at,
+                failure_count=state.failure_count,
+                last_success_at=state.last_success_at,
+                last_candle_ts=state.last_candle_ts,
+                last_error=state.last_error,
+            )
+            valid_due.append(
+                (PollKey(state.exchange_id, state.symbol, state.timeframe), poll_state)
+            )
 
-        # LP1: All pairs are "due" - LP3 will filter by next_poll_at
-        return all_pairs[:limit]
+        # 4. Top up with newly-enabled symbols missing state rows
+        if len(valid_due) < limit:
+            existing_keys = {
+                (p.exchange_id, p.symbol, p.timeframe) for p, _ in valid_due
+            }
+            for sym in symbols:
+                tfs = sym.timeframes or self._settings.live_price_poll_timeframes
+                for tf in tfs:
+                    if tf not in self._active_timeframes:
+                        continue
+                    key = (sym.exchange_id, sym.canonical_symbol, tf)
+                    if key not in existing_keys:
+                        # Seed state row (next_poll_at=NULL = due immediately)
+                        repo_key = RepoPollKey(
+                            sym.exchange_id, sym.canonical_symbol, tf
+                        )
+                        try:
+                            await self._state_repo.upsert_state_if_missing(repo_key)
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to seed state row",
+                                key=key,
+                                error=str(e),
+                            )
+                        valid_due.append(
+                            (PollKey(sym.exchange_id, sym.canonical_symbol, tf), None)
+                        )
+                        existing_keys.add(key)
+                    if len(valid_due) >= limit:
+                        break
+                if len(valid_due) >= limit:
+                    break
+
+        return valid_due[:limit]
 
     async def _fetch_with_semaphore(
         self,
