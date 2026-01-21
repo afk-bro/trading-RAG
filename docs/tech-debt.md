@@ -41,12 +41,14 @@ Tracked technical debt and planned improvements.
 
 ### Minor TODOs in code
 
-| Location | Issue | Priority |
-|----------|-------|----------|
-| `app/deps/security.py:120` | Auth provider integration placeholder | Low |
-| `app/services/kb/status_service.py:358` | Trigger re-ingestion not wired | Low |
-| `app/routers/kb_trials.py:851` | Dataset loading from storage by ID | Low |
-| `app/routers/query.py:212` | Workspace config fetch from DB | Low |
+**Status:** All resolved as of 2026-01-20
+
+| Location | Resolution | Commit |
+|----------|------------|--------|
+| `app/deps/security.py:120` | Documented comprehensive auth integration path with 6-step guide | 7ee4e94 |
+| `app/services/kb/status_service.py:358` | Documented re-ingestion deferral with implementation path and warning log | 4500fa0 |
+| `app/routers/kb_trials.py:851` | Added HTTP 501 error with clear guidance for dataset storage feature | 79da114 |
+| `app/routers/query.py:212` | Wired workspace config fetch from database with fallback defaults | 79736e5 |
 
 ### Test coverage
 

@@ -355,10 +355,23 @@ class KBStatusService:
             if unarchived:
                 log.info("trial_unarchived")
 
-            # TODO: Trigger re-ingestion if trigger_ingest is True
-            # This would call the ingestion pipeline to re-add to Qdrant
+            # Re-ingestion deferred: Requires async job infrastructure
+            # Implementation path:
+            # 1. Queue async job (jobs table) with source_type + source_id
+            # 2. Job handler fetches tune_run/test_variant from DB
+            # 3. Extract trial params + metrics (reuse kb_trials.py logic)
+            # 4. Call kb_trials.ingest_trials() with single trial payload
+            # 5. Update trial record with new vector IDs
+            # Note: Unarchive already makes trial queryable. Re-ingest adds
+            # embeddings back to Qdrant for similarity search.
             if trigger_ingest:
-                log.info("trigger_ingest_requested", status="not_implemented")
+                log.warning(
+                    "reingest_deferred",
+                    msg="Trial unarchived but re-ingestion requires job queue. "
+                    "Trial is now promoted but not in vector store.",
+                    source_type=source_type,
+                    source_id=str(source_id),
+                )
 
         log.info(
             "status_transition_completed",

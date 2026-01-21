@@ -1,10 +1,11 @@
 """Alert evaluator job - scheduled evaluation of alert rules."""
 
-from typing import Any
+from typing import Any  # noqa: F401
 from uuid import UUID
 
 import structlog
 
+from app.config import get_settings
 from app.repositories.alerts import AlertsRepository
 from app.services.alerts.evaluators import RuleEvaluator
 from app.services.alerts.models import (
@@ -75,7 +76,14 @@ class AlertEvaluatorJob:
 
                 # Initialize components
                 evaluator = RuleEvaluator()
-                transition_mgr = AlertTransitionManager(repo)
+                settings = get_settings()
+                transition_mgr = AlertTransitionManager(
+                    repo=repo,
+                    webhook_enabled=settings.webhook_enabled,
+                    slack_webhook_url=settings.slack_webhook_url,
+                    alert_webhook_url=settings.alert_webhook_url,
+                    alert_webhook_headers=settings.alert_webhook_headers,
+                )
 
                 # Process each rule
                 for rule in rules:

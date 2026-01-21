@@ -1,0 +1,378 @@
+{% extends "layout.html" %}
+
+{% block title %}Ops Alerts - Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Operational Alerts</h2>
+        <span class="pagination-info">{{ total }} total</span>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+
+        <select name="status" onchange="this.form.submit()">
+            <option value="">All Statuses</option>
+            <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+            <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>Resolved</option>
+        </select>
+
+        <select name="severity" onchange="this.form.submit()">
+            <option value="">All Severities</option>
+            <option value="low" {% if severity_filter == 'low' %}selected{% endif %}>Low</option>
+            <option value="medium" {% if severity_filter == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="high" {% if severity_filter == 'high' %}selected{% endif %}>High</option>
+        </select>
+
+        <select name="rule_type" onchange="this.form.submit()">
+            <option value="">All Rule Types</option>
+            <option value="drift_spike" {% if rule_type_filter == 'drift_spike' %}selected{% endif %}>Drift Spike</option>
+            <option value="confidence_drop" {% if rule_type_filter == 'confidence_drop' %}selected{% endif %}>Confidence Drop</option>
+            <option value="combo" {% if rule_type_filter == 'combo' %}selected{% endif %}>Combo</option>
+        </select>
+
+        {% if status_filter or severity_filter or rule_type_filter %}
+        <a href="?workspace_id={{ workspace_id }}&limit={{ limit }}" class="btn btn-secondary" style="font-size: 13px;">Clear Filters</a>
+        {% endif %}
+    </form>
+
+    {% if alerts %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Rule Type</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Created At</th>
+                <th>Workspace</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alert in alerts %}
+            <tr>
+                <td>
+                    <code class="alert-id" title="{{ alert.id }}">{{ (alert.id | string)[:8] }}...</code>
+                </td>
+                <td>
+                    <span class="badge badge-type">{{ alert.rule_type }}</span>
+                </td>
+                <td>
+                    {% if alert.severity == 'low' %}
+                    <span class="badge badge-severity-low">LOW</span>
+                    {% elif alert.severity == 'medium' %}
+                    <span class="badge badge-severity-medium">MEDIUM</span>
+                    {% elif alert.severity == 'high' %}
+                    <span class="badge badge-severity-high">HIGH</span>
+                    {% elif alert.severity == 'critical' %}
+                    <span class="badge badge-severity-critical">CRITICAL</span>
+                    {% else %}
+                    <span class="badge">{{ alert.severity | upper }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if alert.status == 'active' %}
+                    <span class="badge badge-status-active">ACTIVE</span>
+                    {% elif alert.status == 'resolved' %}
+                    <span class="badge badge-status-resolved">RESOLVED</span>
+                    {% else %}
+                    <span class="badge">{{ alert.status | upper }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if alert.created_at %}
+                    <span title="{{ alert.created_at.isoformat() }}">
+                        {{ alert.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <code class="workspace-id">{{ (alert.workspace_id | string)[:8] }}...</code>
+                </td>
+                <td>
+                    <div class="row-actions">
+                        {% if alert.status == 'active' and not alert.acknowledged %}
+                        <button class="btn btn-sm btn-acknowledge"
+                                onclick="acknowledgeAlert('{{ alert.id }}')"
+                                title="Acknowledge">
+                            Acknowledge
+                        </button>
+                        {% endif %}
+
+                        {% if alert.status == 'active' %}
+                        <button class="btn btn-sm btn-resolve"
+                                onclick="resolveAlert('{{ alert.id }}')"
+                                title="Resolve">
+                            Resolve
+                        </button>
+                        {% endif %}
+
+                        {% if alert.status == 'resolved' %}
+                        <button class="btn btn-sm btn-reopen"
+                                onclick="reopenAlert('{{ alert.id }}')"
+                                title="Reopen">
+                            Reopen
+                        </button>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ (status_filter or '') | urlencode }}&severity={{ (severity_filter or '') | urlencode }}&rule_type={{ (rule_type_filter or '') | urlencode }}&limit={{ limit }}&offset={{ prev_offset }}"
+               class="btn btn-secondary">Previous</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ (status_filter or '') | urlencode }}&severity={{ (severity_filter or '') | urlencode }}&rule_type={{ (rule_type_filter or '') | urlencode }}&limit={{ limit }}&offset={{ next_offset }}"
+               class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <h3>No alerts found</h3>
+        <p>{% if status_filter or severity_filter or rule_type_filter %}No alerts match the current filters.{% else %}No operational alerts have been recorded yet.{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .filters {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .filters select {
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .filters select:hover {
+        border-color: var(--link);
+    }
+
+    .alert-id, .workspace-id {
+        font-size: 12px;
+        background: var(--bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'Courier New', monospace;
+    }
+
+    .text-muted {
+        color: var(--text-muted);
+    }
+
+    .badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .badge-type {
+        background: rgba(88, 166, 255, 0.2);
+        color: var(--link);
+    }
+
+    /* Severity badges */
+    .badge-severity-low {
+        background: rgba(139, 148, 158, 0.3);
+        color: #8b949e;
+    }
+
+    .badge-severity-medium {
+        background: rgba(210, 153, 34, 0.2);
+        color: #d29922;
+    }
+
+    .badge-severity-high {
+        background: rgba(248, 81, 73, 0.2);
+        color: #f85149;
+    }
+
+    .badge-severity-critical {
+        background: rgba(163, 113, 247, 0.2);
+        color: #a371f7;
+    }
+
+    /* Status badges */
+    .badge-status-active {
+        background: rgba(248, 81, 73, 0.2);
+        color: #f85149;
+    }
+
+    .badge-status-resolved {
+        background: rgba(63, 185, 80, 0.2);
+        color: #3fb950;
+    }
+
+    .row-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+    }
+
+    .btn-sm {
+        font-size: 12px;
+        padding: 4px 10px;
+    }
+
+    .btn-acknowledge {
+        background: rgba(88, 166, 255, 0.2);
+        border: 1px solid var(--link);
+        color: var(--link);
+    }
+
+    .btn-acknowledge:hover {
+        background: rgba(88, 166, 255, 0.3);
+    }
+
+    .btn-resolve {
+        background: rgba(63, 185, 80, 0.2);
+        border: 1px solid var(--success);
+        color: var(--success);
+    }
+
+    .btn-resolve:hover {
+        background: rgba(63, 185, 80, 0.3);
+    }
+
+    .btn-reopen {
+        background: rgba(210, 153, 34, 0.2);
+        border: 1px solid var(--warning);
+        color: var(--warning);
+    }
+
+    .btn-reopen:hover {
+        background: rgba(210, 153, 34, 0.3);
+    }
+
+    .pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+    }
+
+    .pagination-info {
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+
+    .pagination-buttons {
+        display: flex;
+        gap: 8px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-muted);
+    }
+
+    .empty-state h3 {
+        font-size: 18px;
+        margin-bottom: 8px;
+        color: var(--text);
+    }
+</style>
+
+<script>
+// Action handlers
+async function acknowledgeAlert(eventId) {
+    if (!confirm('Acknowledge this alert?')) return;
+
+    try {
+        const response = await fetch(`/admin/ops-alerts/${eventId}/acknowledge`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': {{ admin_token | tojson }},
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to acknowledge: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+async function resolveAlert(eventId) {
+    if (!confirm('Resolve this alert?')) return;
+
+    try {
+        const response = await fetch(`/admin/ops-alerts/${eventId}/resolve`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': {{ admin_token | tojson }},
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to resolve: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+async function reopenAlert(eventId) {
+    if (!confirm('Reopen this alert?')) return;
+
+    try {
+        const response = await fetch(`/admin/ops-alerts/${eventId}/reopen`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': {{ admin_token | tojson }},
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            alert('Failed to reopen: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

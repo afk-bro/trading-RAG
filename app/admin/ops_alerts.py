@@ -1,475 +1,224 @@
-"""Admin endpoints for operational alerts.
-
-Provides read-only access to ops alerts with filtering,
-plus acknowledge/resolve actions, and a management UI.
-"""
+"""Admin endpoints for operational alerts management."""
 
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
-from app.repositories.ops_alerts import OpsAlertsRepository, OpsAlert
+from app.services.alerts.models import AlertStatus, RuleType, Severity
 
-# Templates
-_template_dir = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(_template_dir))
+router = APIRouter(prefix="/ops-alerts", tags=["ops-alerts"])
 
-router = APIRouter(prefix="/ops-alerts", tags=["admin-ops-alerts"])
+# Templates setup
+templates_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
 logger = structlog.get_logger(__name__)
 
-# Global pool reference (set during app startup)
+# Global connection pool (set during app startup via set_db_pool)
 _db_pool = None
 
 
 def set_db_pool(pool):
-    """Set the database pool for this router."""
+    """Set the database pool for ops_alerts routes."""
     global _db_pool
     _db_pool = pool
 
 
-def get_repo() -> OpsAlertsRepository:
-    """Get repository instance."""
-    if not _db_pool:
-        raise HTTPException(status_code=503, detail="Database not initialized")
-    return OpsAlertsRepository(_db_pool)
+def _json_serializable(obj: Any) -> Any:
+    """Convert object to JSON-serializable form."""
+    from datetime import datetime
+    from uuid import UUID
+
+    if isinstance(obj, dict):
+        return {k: _json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_json_serializable(v) for v in obj]
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, UUID):
+        return str(obj)
+    return obj
 
 
-# =============================================================================
-# Response Models
-# =============================================================================
+def _get_alerts_repo():
+    """Get AlertsRepository instance."""
+    from app.repositories.alerts import AlertsRepository
 
-
-class OpsAlertResponse(BaseModel):
-    """Single ops alert response."""
-
-    id: UUID
-    workspace_id: UUID
-    rule_type: str
-    severity: str
-    status: str
-    rule_version: str
-    dedupe_key: str
-    payload: dict
-    source: str
-    job_run_id: Optional[UUID] = None
-    created_at: str
-    last_seen_at: str
-    resolved_at: Optional[str] = None
-    acknowledged_at: Optional[str] = None
-    acknowledged_by: Optional[str] = None
-    occurrence_count: int = 1
-
-    @classmethod
-    def from_model(cls, alert: OpsAlert) -> "OpsAlertResponse":
-        """Create from OpsAlert model."""
-        return cls(
-            id=alert.id,
-            workspace_id=alert.workspace_id,
-            rule_type=alert.rule_type,
-            severity=alert.severity,
-            status=alert.status,
-            rule_version=alert.rule_version,
-            dedupe_key=alert.dedupe_key,
-            payload=alert.payload,
-            source=alert.source,
-            job_run_id=alert.job_run_id,
-            created_at=alert.created_at.isoformat(),
-            last_seen_at=alert.last_seen_at.isoformat(),
-            resolved_at=alert.resolved_at.isoformat() if alert.resolved_at else None,
-            acknowledged_at=(
-                alert.acknowledged_at.isoformat() if alert.acknowledged_at else None
-            ),
-            acknowledged_by=alert.acknowledged_by,
-            occurrence_count=alert.occurrence_count,
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
         )
-
-
-class OpsAlertListResponse(BaseModel):
-    """List of ops alerts with pagination."""
-
-    items: list[OpsAlertResponse]
-    total: int
-    limit: int
-    offset: int
-
-
-class AcknowledgeResponse(BaseModel):
-    """Response for acknowledge action."""
-
-    id: UUID
-    acknowledged_at: Optional[str] = None
-    acknowledged_by: Optional[str] = None
-    was_already_acknowledged: bool
-
-
-class ResolveResponse(BaseModel):
-    """Response for resolve action."""
-
-    id: UUID
-    resolved_at: Optional[str] = None
-    was_already_resolved: bool
-
-
-class ReopenResponse(BaseModel):
-    """Response for reopen action."""
-
-    id: UUID
-    status: str
-    was_already_active: bool
+    return AlertsRepository(_db_pool)
 
 
 # =============================================================================
-# Endpoints
+# Admin List Page
 # =============================================================================
 
 
-# =============================================================================
-# UI Endpoint
-# =============================================================================
-
-
-@router.get("/ui", response_class=HTMLResponse)
-async def ops_alerts_ui(
+@router.get("", response_class=HTMLResponse)
+async def ops_alerts_list_page(
     request: Request,
     workspace_id: UUID = Query(..., description="Workspace ID (required)"),
-    _: bool = Depends(require_admin_token),
-) -> HTMLResponse:
-    """
-    Ops alerts management UI.
+    status_filter: Optional[AlertStatus] = Query(
+        None,
+        alias="status",
+        description="Filter by status (active, resolved)",
+    ),
+    severity: Optional[Severity] = Query(None, description="Filter by severity"),
+    rule_type: Optional[RuleType] = Query(None, description="Filter by rule type"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    token: Optional[str] = Query(None, description="Admin token (dev convenience)"),
+    _: str = Depends(require_admin_token),
+):
+    """Render ops alerts list page with filters and actions."""
+    # Get admin token from header or query param (query param for dev convenience)
+    admin_token = request.headers.get("X-Admin-Token", "") or token or ""
 
-    Two-panel layout with queue list and detail panel.
-    """
-    repo = get_repo()
+    repo = _get_alerts_repo()
 
-    # Get active alerts for initial load
-    active_alerts, active_total = await repo.list_alerts(
+    # Fetch alerts
+    events, total = await repo.list_events(
         workspace_id=workspace_id,
-        status=["active"],
-        limit=50,
+        status=status_filter,
+        severity=severity,
+        rule_type=rule_type,
+        limit=limit,
+        offset=offset,
     )
 
-    # Get resolved alerts count
-    _resolved_alerts, resolved_total = await repo.list_alerts(
-        workspace_id=workspace_id,
-        status=["resolved"],
-        limit=1,
-    )
-
-    # Build severity counts for badges
-    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-    for alert in active_alerts:
-        if alert.severity in severity_counts:
-            severity_counts[alert.severity] += 1
-
-    # Build rule type counts
-    rule_type_counts: dict[str, int] = {}
-    for alert in active_alerts:
-        rule_type_counts[alert.rule_type] = rule_type_counts.get(alert.rule_type, 0) + 1
+    # Calculate pagination
+    has_prev = offset > 0
+    has_next = offset + limit < total
+    prev_offset = max(0, offset - limit)
+    next_offset = offset + limit
 
     return templates.TemplateResponse(
-        "ops_alerts.html",
+        "ops_alerts_list.html",
         {
             "request": request,
             "workspace_id": str(workspace_id),
-            "items": active_alerts,  # Template expects 'items', not 'alerts'
-            "active_count": active_total,
-            "resolved_count": resolved_total,
-            "severity_counts": severity_counts,
-            "rule_type_counts": rule_type_counts,
-            "selected_status": "active",
+            "admin_token": admin_token,
+            "alerts": events,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_prev": has_prev,
+            "has_next": has_next,
+            "prev_offset": prev_offset,
+            "next_offset": next_offset,
+            "status_filter": status_filter.value if status_filter else None,
+            "severity_filter": severity.value if severity else None,
+            "rule_type_filter": rule_type.value if rule_type else None,
         },
     )
 
 
-@router.get("", response_model=OpsAlertListResponse)
-async def list_ops_alerts(
-    workspace_id: UUID = Query(..., description="Workspace ID (required)"),
-    status: Optional[str] = Query(
-        None,
-        description="Comma-separated status filter: active,resolved",
-    ),
-    severity: Optional[str] = Query(
-        None,
-        description="Comma-separated severity filter: critical,high,medium,low",
-    ),
-    rule_type: Optional[str] = Query(
-        None,
-        description="Comma-separated rule type filter",
-    ),
-    limit: int = Query(50, ge=1, le=100, description="Max results"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
-    _: bool = Depends(require_admin_token),
-) -> OpsAlertListResponse:
-    """
-    List operational alerts with filters.
-
-    Ordering:
-    - If status=active only: ordered by last_seen_at DESC (still happening first)
-    - Otherwise: ordered by created_at DESC
-    """
-    repo = get_repo()
-
-    # Parse comma-separated filters
-    status_list = [s.strip() for s in status.split(",")] if status else None
-    severity_list = [s.strip() for s in severity.split(",")] if severity else None
-    rule_type_list = [r.strip() for r in rule_type.split(",")] if rule_type else None
-
-    alerts, total = await repo.list_alerts(
-        workspace_id=workspace_id,
-        status=status_list,
-        severity=severity_list,
-        rule_type=rule_type_list,
-        limit=limit,
-        offset=offset,
-    )
-
-    return OpsAlertListResponse(
-        items=[OpsAlertResponse.from_model(a) for a in alerts],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+# =============================================================================
+# Action Endpoints
+# =============================================================================
 
 
-@router.get("/{alert_id}", response_model=OpsAlertResponse)
-async def get_ops_alert(
-    alert_id: UUID,
-    _: bool = Depends(require_admin_token),
-) -> OpsAlertResponse:
-    """Get a single ops alert by ID."""
-    repo = get_repo()
-
-    alert = await repo.get(alert_id)
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    return OpsAlertResponse.from_model(alert)
-
-
-@router.post("/{alert_id}/acknowledge", response_model=AcknowledgeResponse)
+@router.post("/{event_id}/acknowledge")
 async def acknowledge_ops_alert(
-    alert_id: UUID,
-    acknowledged_by: Optional[str] = Query(None, description="Who acknowledged"),
-    _: bool = Depends(require_admin_token),
-) -> AcknowledgeResponse:
+    event_id: UUID,
+    acknowledged_by: Optional[str] = None,
+    _: str = Depends(require_admin_token),
+):
     """
-    Acknowledge an ops alert.
+    Acknowledge an operational alert.
 
-    Idempotent: returns 200 even if already acknowledged.
+    Marks the alert as acknowledged, optionally recording who acknowledged it.
     """
-    repo = get_repo()
+    repo = _get_alerts_repo()
+    success = await repo.acknowledge(event_id, acknowledged_by=acknowledged_by)
 
-    # First check if alert exists
-    alert = await repo.get(alert_id)
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found or already acknowledged",
+        )
 
-    success, was_already = await repo.acknowledge(alert_id, acknowledged_by)
-
-    # Fetch updated alert
-    alert = await repo.get(alert_id)
-
-    return AcknowledgeResponse(
-        id=alert_id,
-        acknowledged_at=(
-            alert.acknowledged_at.isoformat()
-            if alert and alert.acknowledged_at
-            else None
-        ),
-        acknowledged_by=alert.acknowledged_by if alert else acknowledged_by,
-        was_already_acknowledged=was_already,
+    logger.info(
+        "ops_alert_acknowledged",
+        event_id=str(event_id),
+        acknowledged_by=acknowledged_by,
     )
 
+    return {"acknowledged": True, "event_id": str(event_id)}
 
-@router.post("/{alert_id}/resolve", response_model=ResolveResponse)
+
+@router.post("/{event_id}/resolve")
 async def resolve_ops_alert(
-    alert_id: UUID,
-    _: bool = Depends(require_admin_token),
-) -> ResolveResponse:
+    event_id: UUID,
+    _: str = Depends(require_admin_token),
+):
     """
-    Resolve an ops alert.
+    Resolve an operational alert.
 
-    Idempotent: returns 200 even if already resolved.
+    Marks the alert as resolved. Resolved alerts are hidden from active views.
     """
-    repo = get_repo()
+    repo = _get_alerts_repo()
+    success = await repo.resolve(event_id)
 
-    # First check if alert exists
-    alert = await repo.get(alert_id)
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found or already resolved",
+        )
 
-    was_already = alert.status == "resolved"
+    logger.info("ops_alert_resolved", event_id=str(event_id))
 
-    if not was_already:
-        alert = await repo.resolve(alert_id)
-
-    return ResolveResponse(
-        id=alert_id,
-        resolved_at=(
-            alert.resolved_at.isoformat() if alert and alert.resolved_at else None
-        ),
-        was_already_resolved=was_already,
-    )
+    return {"resolved": True, "event_id": str(event_id)}
 
 
-@router.post("/{alert_id}/reopen", response_model=ReopenResponse)
+@router.post("/{event_id}/reopen")
 async def reopen_ops_alert(
-    alert_id: UUID,
-    _: bool = Depends(require_admin_token),
-) -> ReopenResponse:
+    event_id: UUID,
+    _: str = Depends(require_admin_token),
+):
     """
-    Reopen a resolved ops alert.
+    Reopen a resolved operational alert.
 
-    Sets status back to 'active', clears resolved_at.
-    Keeps acknowledged_at/acknowledged_by for history.
-
-    Idempotent: returns 200 even if already active.
+    Reactivates a resolved alert, returning it to active status.
     """
-    repo = get_repo()
+    repo = _get_alerts_repo()
 
-    # First check if alert exists
-    alert = await repo.get(alert_id)
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
+    # Get the existing event to extract necessary fields
+    event = await repo.get_event(event_id)
 
-    was_already_active = alert.status == "active"
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found",
+        )
 
-    if not was_already_active:
-        alert = await repo.reopen(alert_id)
+    if event["status"] != "resolved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Alert is not resolved, cannot reopen",
+        )
 
-    return ReopenResponse(
-        id=alert_id,
-        status=alert.status if alert else "active",
-        was_already_active=was_already_active,
+    # Reactivate by upserting with active status
+    await repo.upsert_activate(
+        workspace_id=event["workspace_id"],
+        rule_id=event["rule_id"],
+        strategy_entity_id=event["strategy_entity_id"],
+        regime_key=event["regime_key"],
+        timeframe=event["timeframe"],
+        rule_type=RuleType(event["rule_type"]),
+        severity=Severity(event["severity"]),
+        context_json=event["context_json"],
+        fingerprint=event["fingerprint"],
     )
 
+    logger.info("ops_alert_reopened", event_id=str(event_id))
 
-# =============================================================================
-# Trigger endpoint (for manual/cron invocation)
-# =============================================================================
-
-
-class EvaluateRequest(BaseModel):
-    """Request to trigger alert evaluation."""
-
-    workspace_id: Optional[UUID] = Field(
-        None, description="Evaluate single workspace, or all if not provided"
-    )
-    dry_run: bool = Field(False, description="Evaluate without writing alerts")
-
-
-class EvaluateResponse(BaseModel):
-    """Response from alert evaluation."""
-
-    workspaces_evaluated: int
-    total_conditions: int
-    total_triggered: int
-    total_new: int
-    total_resolved: int
-    total_escalated: int
-    telegram_sent: int
-    errors: list[str]
-
-
-@router.post("/evaluate", response_model=EvaluateResponse)
-async def evaluate_ops_alerts(
-    request: EvaluateRequest,
-    _: bool = Depends(require_admin_token),
-) -> EvaluateResponse:
-    """
-    Trigger ops alert evaluation.
-
-    This is the manual/cron entrypoint for alert evaluation.
-    For production, use the job queue instead.
-
-    If workspace_id is provided, evaluates just that workspace.
-    Otherwise, iterates all active workspaces.
-    """
-    from app.services.ops_alerts.evaluator import OpsAlertEvaluator
-    from app.services.ops_alerts.telegram import get_telegram_notifier
-
-    if not _db_pool:
-        raise HTTPException(status_code=503, detail="Database not initialized")
-
-    repo = get_repo()
-    evaluator = OpsAlertEvaluator(repo, _db_pool)
-    notifier = get_telegram_notifier() if not request.dry_run else None
-
-    # Get workspaces to evaluate
-    if request.workspace_id:
-        workspace_ids = [request.workspace_id]
-    else:
-        query = "SELECT id FROM workspaces WHERE is_active = true ORDER BY created_at"
-        async with _db_pool.acquire() as conn:
-            rows = await conn.fetch(query)
-        workspace_ids = [r["id"] for r in rows]
-
-    # Aggregate results
-    result: dict[str, Any] = {
-        "workspaces_evaluated": 0,
-        "total_conditions": 0,
-        "total_triggered": 0,
-        "total_new": 0,
-        "total_resolved": 0,
-        "total_escalated": 0,
-        "telegram_sent": 0,
-        "errors": [],
-    }
-
-    for ws_id in workspace_ids:
-        try:
-            eval_result = await evaluator.evaluate(workspace_id=ws_id)
-
-            result["workspaces_evaluated"] += 1
-            result["total_conditions"] += eval_result.conditions_evaluated
-            result["total_triggered"] += eval_result.alerts_triggered
-            result["total_new"] += eval_result.alerts_new
-            result["total_resolved"] += eval_result.alerts_resolved
-            result["total_escalated"] += eval_result.alerts_escalated
-
-            if eval_result.errors:
-                result["errors"].extend([f"{ws_id}:{e}" for e in eval_result.errors])
-
-            # Send notifications
-            if notifier and not request.dry_run:
-                alerts_to_notify = []
-                for rule_type, details in eval_result.by_rule_type.items():
-                    alert_id_str = details.get("alert_id")
-                    if alert_id_str:
-                        alert = await repo.get(UUID(alert_id_str))
-                        if alert:
-                            is_new = details.get("new", False)
-                            is_escalated = details.get("escalated", False)
-                            if is_new or is_escalated:
-                                alerts_to_notify.append((alert, False, is_escalated))
-
-                # Handle resolved alerts
-                for rule_type, details in eval_result.by_rule_type.items():
-                    if details.get("resolved"):
-                        alerts, _total = await repo.list_alerts(
-                            workspace_id=ws_id,
-                            status=["resolved"],
-                            rule_type=[rule_type],
-                            limit=1,
-                        )
-                        if alerts:
-                            alerts_to_notify.append((alerts[0], True, False))
-
-                if alerts_to_notify:
-                    sent = await notifier.send_batch(alerts_to_notify)
-                    result["telegram_sent"] += sent
-
-        except Exception as e:
-            logger.error(
-                "evaluate_workspace_error", workspace_id=str(ws_id), error=str(e)
-            )
-            result["errors"].append(f"{ws_id}:error:{str(e)}")
-
-    return EvaluateResponse(**result)
+    return {"reopened": True, "event_id": str(event_id)}

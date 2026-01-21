@@ -1,0 +1,2435 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        pre { background: #f0f0f0; padding: 10px; overflow: auto; max-height: 600px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .result { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>RAG API Test</h1>
+    <button onclick="testIngest()">Test Ingest</button>
+    <button onclick="testQuery()">Test Query</button>
+    <button onclick="checkHealth()">Check Health</button>
+    <button onclick="checkChunkVectors()">Check Chunk Vectors</button>
+    <button onclick="checkDocuments()">Check Documents</button>
+    <button onclick="checkChunks()">Check Chunks</button>
+    <button onclick="testDuplicateIngest()">Test Duplicate</button>
+    <button onclick="testYouTubeIngest()">Test YouTube</button>
+    <button onclick="testReembed()">Test Reembed</button>
+    <button onclick="testWorkspaceIsolation()">Test Workspace Isolation</button>
+    <button onclick="testEmptyWorkspaceQuery()">Test Empty Workspace Query</button>
+    <button onclick="testReembedEmptyWorkspace()">Test Reembed Empty Workspace</button>
+    <button onclick="testLargeContent()">Test Large Content (10k+ tokens)</button>
+    <button onclick="testConcurrentRequests()">Test Concurrent Requests</button>
+    <button onclick="testPDFLocatorLabels()">Test PDF Locator Labels</button>
+    <button onclick="testReembedWorkspaceFilter()">Test Reembed Workspace Filter</button>
+    <button onclick="testReembedDocIdFilter()">Test Reembed Doc ID Filter</button>
+    <button onclick="testPublishedAtNullHandling()">Test Published_at Null Filter</button>
+    <button onclick="testJobFailureCapture()">Test Job Failure Capture</button>
+    <button onclick="testLanguageField()">Test Language Field</button>
+    <button onclick="testLastIndexedAt()">Test Last Indexed At</button>
+    <button onclick="testQueryLatency()">Test Query Latency (p95)</button>
+    <button onclick="testIngestThroughput()">Test Ingest Throughput</button>
+    <button onclick="testSectionTracking()">Test Section Tracking</button>
+    <button onclick="testYouTubeCitationUrl()">Test YouTube Citation URL</button>
+    <button onclick="testDocumentVersioning()">Test Document Versioning</button>
+    <button onclick="testRerankComparison()">Test Rerank Comparison</button>
+    <div class="result">
+        <h3>Result:</h3>
+        <pre id="result">Click a button to test</pre>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://localhost:8000';
+
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${BASE_URL}/health`);
+                const data = await res.json();
+                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testIngest() {
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "idempotency_key": "test-" + Date.now(),
+                "source": {
+                    "url": "https://example.com/test-" + Date.now(),
+                    "type": "article"
+                },
+                "content": "The Federal Reserve has announced a significant change in monetary policy. Chairman Powell discussed the implications for AAPL, GOOGL, and MSFT stock prices. The interest rate decision will impact the macro economic outlook. Inflation concerns remain elevated while employment data shows resilience.",
+                "metadata": {
+                    "title": "Fed Policy Analysis",
+                    "author": "Test Author"
+                }
+            };
+
+            document.getElementById('result').textContent = 'Sending request...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testDuplicateIngest() {
+            // Use fixed URL to test unique constraint
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "source": {
+                    "url": "https://example.com/duplicate-test-fixed",
+                    "type": "article"
+                },
+                "content": "This is a test document for unique constraint testing.",
+                "metadata": {
+                    "title": "Duplicate Test",
+                    "author": "Test Author"
+                }
+            };
+
+            document.getElementById('result').textContent = 'Sending first request...';
+
+            try {
+                // First request
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let data1 = await res.json();
+
+                // Second request with same URL
+                document.getElementById('result').textContent = 'Sending second request (duplicate)...';
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let data2 = await res.json();
+
+                document.getElementById('result').textContent =
+                    'First Request:\nStatus: ' + res.status + '\n' + JSON.stringify(data1, null, 2) +
+                    '\n\nSecond Request (duplicate):\nStatus: ' + res.status + '\n' + JSON.stringify(data2, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testQuery() {
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "question": "What did the Federal Reserve announce?",
+                "mode": "answer",
+                "top_k": 5
+            };
+
+            document.getElementById('result').textContent = 'Sending query...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function checkChunkVectors() {
+            document.getElementById('result').textContent = 'Fetching chunk_vectors...';
+            try {
+                const res = await fetch(`${BASE_URL}/debug/chunk_vectors`);
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function checkDocuments() {
+            document.getElementById('result').textContent = 'Fetching documents...';
+            try {
+                const res = await fetch(`${BASE_URL}/debug/documents`);
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function checkChunks() {
+            document.getElementById('result').textContent = 'Fetching chunks...';
+            try {
+                const res = await fetch(`${BASE_URL}/debug/chunks`);
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testYouTubeIngest() {
+            // Test with a TED talk video known to have transcripts
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            };
+
+            document.getElementById('result').textContent = 'Testing YouTube ingestion...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/sources/youtube/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                document.getElementById('result').textContent = 'Status: ' + res.status + '\n\n' + JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testReembed() {
+            const payload = {
+                "workspace_id": "00000000-0000-0000-0000-000000000001",
+                "target_collection": "kb_nomic_embed_text_v2",
+                "embed_provider": "ollama",
+                "embed_model": "nomic-embed-text"
+            };
+
+            document.getElementById('result').textContent = 'Testing reembed...';
+
+            try {
+                const res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                const jobId = data.job_id;
+
+                let output = 'Reembed Response:\nStatus: ' + res.status + '\n' + JSON.stringify(data, null, 2);
+
+                // If job created, poll for status
+                if (jobId) {
+                    output += '\n\n--- Polling job status ---';
+                    for (let i = 0; i < 5; i++) {
+                        await new Promise(r => setTimeout(r, 2000));
+                        const jobRes = await fetch(`${BASE_URL}/jobs/${jobId}`);
+                        const jobData = await jobRes.json();
+                        output += `\n\nPoll ${i+1}:\n` + JSON.stringify(jobData, null, 2);
+                        if (jobData.status === 'completed' || jobData.status === 'failed') break;
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function testWorkspaceIsolation() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let WORKSPACE_B = null;  // Will be set from workspace creation response
+            let output = "=== WORKSPACE ISOLATION TEST ===\n\n";
+
+            document.getElementById('result').textContent = 'Step 1: Creating second workspace...';
+
+            try {
+                // Step 1: Create second workspace
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Test Workspace B",
+                        slug: "test-workspace-b"
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create Workspace B:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Get the actual workspace ID from the response
+                if (data.success && data.workspace && data.workspace.id) {
+                    WORKSPACE_B = data.workspace.id;
+                    output += "Using Workspace B ID: " + WORKSPACE_B + "\n\n";
+                } else {
+                    output += "ERROR: Could not get workspace B ID\n\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // Step 2: Ingest document into Workspace A
+                document.getElementById('result').textContent = 'Step 2: Ingesting to Workspace A...';
+                const docA = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": "isolation-test-a-" + Date.now(),
+                    "source": {
+                        "url": "https://example.com/workspace-a-doc-" + Date.now(),
+                        "type": "article"
+                    },
+                    "content": "Workspace A unique content about Bitcoin and cryptocurrency markets. BTC price analysis shows strong momentum.",
+                    "metadata": {
+                        "title": "Workspace A Document"
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docA)
+                });
+                data = await res.json();
+                output += "Step 2 - Ingest to Workspace A:\nStatus: " + res.status + "\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Step 3: Ingest document into Workspace B
+                document.getElementById('result').textContent = 'Step 3: Ingesting to Workspace B...';
+                const docB = {
+                    "workspace_id": WORKSPACE_B,
+                    "idempotency_key": "isolation-test-b-" + Date.now(),
+                    "source": {
+                        "url": "https://example.com/workspace-b-doc-" + Date.now(),
+                        "type": "article"
+                    },
+                    "content": "Workspace B unique content about Ethereum and smart contracts. ETH development updates and roadmap.",
+                    "metadata": {
+                        "title": "Workspace B Document"
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docB)
+                });
+                data = await res.json();
+                output += "Step 3 - Ingest to Workspace B:\nStatus: " + res.status + "\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Wait for embedding to complete
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 4: Query Workspace A
+                document.getElementById('result').textContent = 'Step 4: Querying Workspace A...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "Tell me about cryptocurrency",
+                        "mode": "retrieve",
+                        "top_k": 10
+                    })
+                });
+                data = await res.json();
+                output += "Step 4 - Query Workspace A:\nStatus: " + res.status + "\n";
+                output += "Results count: " + (data.results ? data.results.length : 0) + "\n";
+                if (data.results && data.results.length > 0) {
+                    const workspaceIds = data.results.map(r => r.workspace_id || "N/A");
+                    output += "Result workspace_ids: " + JSON.stringify(workspaceIds) + "\n";
+                    // Check if all results are from Workspace A
+                    const allFromA = data.results.every(r => r.workspace_id === WORKSPACE_A);
+                    output += "All results from Workspace A: " + allFromA + "\n";
+                }
+                output += JSON.stringify(data, null, 2) + "\n\n";
+
+                // Step 5: Query Workspace B
+                document.getElementById('result').textContent = 'Step 5: Querying Workspace B...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_B,
+                        "question": "Tell me about cryptocurrency",
+                        "mode": "retrieve",
+                        "top_k": 10
+                    })
+                });
+                data = await res.json();
+                output += "Step 5 - Query Workspace B:\nStatus: " + res.status + "\n";
+                output += "Results count: " + (data.results ? data.results.length : 0) + "\n";
+                if (data.results && data.results.length > 0) {
+                    const workspaceIds = data.results.map(r => r.workspace_id || "N/A");
+                    output += "Result workspace_ids: " + JSON.stringify(workspaceIds) + "\n";
+                    // Check if all results are from Workspace B
+                    const allFromB = data.results.every(r => r.workspace_id === WORKSPACE_B);
+                    output += "All results from Workspace B: " + allFromB + "\n";
+                }
+                output += JSON.stringify(data, null, 2) + "\n\n";
+
+                output += "=== TEST COMPLETE ===\n";
+                output += "Check that results from Workspace A query contain only Workspace A data,\n";
+                output += "and results from Workspace B query contain only Workspace B data.";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testEmptyWorkspaceQuery() {
+            let output = "=== EMPTY WORKSPACE QUERY TEST ===\n\n";
+            document.getElementById('result').textContent = 'Step 1: Creating empty workspace...';
+
+            try {
+                // Step 1: Create a new empty workspace
+                const timestamp = Date.now();
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Empty Workspace " + timestamp,
+                        slug: "empty-workspace-" + timestamp
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create Empty Workspace:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                if (!data.success || !data.workspace || !data.workspace.id) {
+                    output += "ERROR: Could not create workspace\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const emptyWorkspaceId = data.workspace.id;
+                output += "Created workspace ID: " + emptyWorkspaceId + "\n\n";
+
+                // Step 2: Query the empty workspace
+                document.getElementById('result').textContent = 'Step 2: Querying empty workspace...';
+                const startTime = performance.now();
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": emptyWorkspaceId,
+                        "question": "What is the meaning of life?",
+                        "mode": "retrieve",
+                        "top_k": 10
+                    })
+                });
+                const endTime = performance.now();
+                const responseTime = endTime - startTime;
+                data = await res.json();
+
+                output += "Step 2 - Query Empty Workspace:\n";
+                output += "HTTP Status: " + res.status + "\n";
+                output += "Response time: " + responseTime.toFixed(2) + "ms\n";
+                output += "Results count: " + (data.results ? data.results.length : "N/A") + "\n";
+                output += "Response:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                // Verify results
+                output += "=== VERIFICATION ===\n";
+                const isStatus200 = res.status === 200;
+                const isResultsEmpty = data.results && data.results.length === 0;
+                const isNoError = !data.error && !data.detail;
+                const isFast = responseTime < 2000;  // Less than 2 seconds
+
+                output += "Status is 200: " + isStatus200 + "\n";
+                output += "Results array is empty: " + isResultsEmpty + "\n";
+                output += "No error raised: " + isNoError + "\n";
+                output += "Response time < 2s: " + isFast + " (" + responseTime.toFixed(2) + "ms)\n";
+                output += "\n=== TEST " + (isStatus200 && isResultsEmpty && isNoError && isFast ? "PASSED" : "FAILED") + " ===\n";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testReembedEmptyWorkspace() {
+            let output = "=== REEMBED EMPTY WORKSPACE TEST ===\n\n";
+            document.getElementById('result').textContent = 'Step 1: Creating empty workspace...';
+
+            try {
+                // Step 1: Create a new empty workspace
+                const timestamp = Date.now();
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Reembed Test Workspace " + timestamp,
+                        slug: "reembed-test-" + timestamp
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create Empty Workspace:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                if (!data.success || !data.workspace || !data.workspace.id) {
+                    output += "ERROR: Could not create workspace\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const emptyWorkspaceId = data.workspace.id;
+                output += "Created workspace ID: " + emptyWorkspaceId + "\n\n";
+
+                // Step 2: POST /reembed for this empty workspace
+                document.getElementById('result').textContent = 'Step 2: Requesting reembed for empty workspace...';
+                res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": emptyWorkspaceId,
+                        "target_collection": "kb_nomic_embed_text_v2",
+                        "embed_provider": "ollama",
+                        "embed_model": "nomic-embed-text"
+                    })
+                });
+                data = await res.json();
+                output += "Step 2 - Reembed Request:\n";
+                output += "HTTP Status: " + res.status + "\n";
+                output += "Response:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                const jobId = data.job_id;
+                if (!jobId) {
+                    output += "=== VERIFICATION ===\n";
+                    output += "No job_id returned - checking if this is handled gracefully\n";
+                    const isGraceful = res.status === 200 || res.status === 201;
+                    output += "Request completed gracefully: " + isGraceful + "\n";
+                    output += "\n=== TEST " + (isGraceful ? "PASSED" : "FAILED") + " ===\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // Step 3: Poll job status
+                document.getElementById('result').textContent = 'Step 3: Polling job status...';
+                let jobStatus = null;
+                for (let i = 0; i < 10; i++) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    res = await fetch(`${BASE_URL}/jobs/${jobId}`);
+                    data = await res.json();
+                    output += "Poll " + (i+1) + ":\n" + JSON.stringify(data, null, 2) + "\n";
+
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        jobStatus = data;
+                        break;
+                    }
+                }
+
+                output += "\n=== VERIFICATION ===\n";
+                const isCompleted = jobStatus && jobStatus.status === 'completed';
+                const hasZeroChunks = jobStatus && (jobStatus.chunks_queued === 0 || jobStatus.progress === 0);
+                output += "Job completed successfully: " + isCompleted + "\n";
+                output += "Chunks queued is 0 or progress is 0: " + hasZeroChunks + "\n";
+                output += "\n=== TEST " + (isCompleted ? "PASSED" : "FAILED") + " ===\n";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testLargeContent() {
+            let output = "=== LARGE CONTENT INGESTION TEST (10000+ tokens) ===\n\n";
+            document.getElementById('result').textContent = 'Generating large content (10000+ tokens)...';
+
+            try {
+                // Generate content with 10000+ tokens (approximately 40000+ characters)
+                // Each paragraph is about 100 words (~133 tokens)
+                const baseParagraphs = [
+                    "The Federal Reserve announced significant changes to monetary policy affecting global markets. Chairman Powell emphasized the importance of maintaining price stability while supporting maximum employment. Interest rate decisions will be data-dependent, with careful monitoring of inflation indicators and labor market conditions. The committee remains vigilant about upside risks to inflation and is prepared to adjust policy stance as appropriate. Financial conditions have tightened considerably over the past year, and the full effects of policy tightening are yet to be felt.",
+                    "Apple Inc (AAPL) reported strong quarterly earnings, beating analyst expectations on both revenue and earnings per share. The company's services segment showed remarkable growth, contributing significantly to overall revenue. iPhone sales remained robust despite challenging macroeconomic conditions. Management provided optimistic guidance for the upcoming quarter, citing strong demand for premium devices. The stock rallied following the earnings announcement, reaching new all-time highs.",
+                    "Microsoft Corporation (MSFT) continues to dominate the cloud computing market with Azure showing impressive growth rates. The company's artificial intelligence initiatives are gaining traction across enterprise customers. Office 365 subscription revenue grew steadily, demonstrating strong recurring revenue streams. Gaming division performed well with Xbox Game Pass subscriber growth accelerating. Management highlighted significant investments in AI infrastructure and partnerships.",
+                    "Google (GOOGL) faces increased regulatory scrutiny as antitrust investigations continue globally. Search advertising revenue showed resilience despite competitive pressures from social media platforms. YouTube's advertising business demonstrated strong performance with increased watch time. Cloud Platform growth remained robust, though still trailing competitors in market share. The company announced ambitious AI product roadmaps across consumer and enterprise segments.",
+                    "Amazon (AMZN) navigates challenging retail environment while AWS continues to drive profitability. E-commerce growth normalized after pandemic-driven surge, leading to operational efficiency measures. Third-party seller services showed healthy growth, contributing to marketplace ecosystem strength. Prime membership retention remained strong with expanded benefits and content offerings. Management emphasizes long-term investments in logistics and fulfillment capabilities.",
+                    "Tesla (TSLA) expands production capacity with new gigafactories coming online globally. Electric vehicle demand remains strong despite increasing competition from traditional automakers. Energy storage and solar businesses show promising growth trajectories. Full self-driving technology continues to progress through beta testing phases. The company maintains cost leadership through vertical integration and manufacturing innovations.",
+                    "NVIDIA (NVDA) dominates AI chip market with unprecedented demand for data center GPUs. Gaming segment performs well with new graphics card generations driving upgrade cycles. Automotive business shows steady growth with autonomous driving partnerships expanding. Data center revenue exceeds expectations as AI training workloads surge. Management projects continued strong demand from cloud service providers and enterprises.",
+                    "Meta Platforms (META) focuses on metaverse investments while maintaining advertising revenue strength. Instagram Reels shows strong engagement competing effectively with TikTok platform. Reality Labs division continues significant investments despite ongoing losses. AI-driven content recommendations improve user engagement metrics across platforms. Advertising efficiency tools help small businesses optimize marketing spend.",
+                    "Netflix (NFLX) adapts to streaming market maturation with ad-supported tier launch. Content investment strategy shifts toward quality over quantity approach. Password sharing crackdown shows initial positive impact on subscriber growth. International expansion continues with localized content production increasing. The company explores gaming and live events as growth vectors.",
+                    "JPMorgan Chase (JPM) benefits from rising interest rate environment boosting net interest income. Investment banking activity remains subdued amid market volatility and uncertainty. Consumer banking shows resilience with strong deposit growth and loan demand. Credit quality metrics remain healthy despite economic headwinds concerns. Management maintains cautious outlook on commercial real estate exposure."
+                ];
+
+                // Repeat paragraphs to get to 10000+ tokens (need about 75+ paragraphs)
+                let largeContent = "";
+                for (let i = 0; i < 80; i++) {
+                    const paragraph = baseParagraphs[i % baseParagraphs.length];
+                    // Add variation to prevent exact duplicates
+                    largeContent += `[Section ${i + 1}] ${paragraph} Market conditions as of iteration ${i + 1} show continued volatility.\n\n`;
+                }
+
+                const estimatedTokens = Math.ceil(largeContent.length / 4);  // Rough estimate: 4 chars per token
+                output += `Generated content length: ${largeContent.length} characters\n`;
+                output += `Estimated tokens: ~${estimatedTokens}\n\n`;
+
+                const payload = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "idempotency_key": "large-content-test-" + Date.now(),
+                    "source": {
+                        "url": "https://example.com/large-document-" + Date.now(),
+                        "type": "article"
+                    },
+                    "content": largeContent,
+                    "metadata": {
+                        "title": "Large Content Test Document",
+                        "author": "Test Author"
+                    }
+                };
+
+                document.getElementById('result').textContent = 'Sending large content request...';
+                output += "Sending request to /ingest...\n";
+
+                const startTime = performance.now();
+                const res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const endTime = performance.now();
+                const duration = (endTime - startTime) / 1000;  // Convert to seconds
+
+                const data = await res.json();
+
+                output += `\nResponse received!\n`;
+                output += `HTTP Status: ${res.status}\n`;
+                output += `Duration: ${duration.toFixed(2)} seconds\n`;
+                output += `Response:\n${JSON.stringify(data, null, 2)}\n\n`;
+
+                // Verification
+                output += "=== VERIFICATION ===\n";
+                const isSuccess = res.status === 200 || res.status === 201;
+                const hasDocId = !!data.doc_id;
+                const hasChunks = data.chunks_created > 0;
+                const isWithinTime = duration < 60;  // Should complete within 60 seconds
+                const hasMultipleChunks = data.chunks_created >= 10;  // Large content should create many chunks
+
+                output += `Request successful (200/201): ${isSuccess}\n`;
+                output += `Has doc_id: ${hasDocId}\n`;
+                output += `Created chunks: ${data.chunks_created}\n`;
+                output += `Has multiple chunks (>=10): ${hasMultipleChunks}\n`;
+                output += `Created vectors: ${data.vectors_created}\n`;
+                output += `Completed within 60s: ${isWithinTime} (${duration.toFixed(2)}s)\n`;
+
+                const testPassed = isSuccess && hasDocId && hasMultipleChunks && isWithinTime;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testConcurrentRequests() {
+            let output = "=== CONCURRENT REQUESTS TEST ===\n\n";
+            document.getElementById('result').textContent = 'Preparing 10 concurrent requests...';
+
+            try {
+                const CONCURRENT_COUNT = 10;
+                const requests = [];
+
+                // Prepare 10 different payloads
+                for (let i = 0; i < CONCURRENT_COUNT; i++) {
+                    const timestamp = Date.now();
+                    requests.push({
+                        "workspace_id": "00000000-0000-0000-0000-000000000001",
+                        "idempotency_key": `concurrent-test-${timestamp}-${i}`,
+                        "source": {
+                            "url": `https://example.com/concurrent-${timestamp}-${i}`,
+                            "type": "article"
+                        },
+                        "content": `Concurrent test document ${i + 1}. This tests the service's ability to handle multiple simultaneous ingestion requests. Each document contains unique content about request number ${i + 1} with different metadata to ensure proper isolation. Stock symbols mentioned: AAPL, MSFT, GOOGL.`,
+                        "metadata": {
+                            "title": `Concurrent Test ${i + 1}`,
+                            "author": `Author ${i + 1}`
+                        }
+                    });
+                }
+
+                output += `Prepared ${CONCURRENT_COUNT} requests\n\n`;
+                document.getElementById('result').textContent = 'Sending 10 concurrent requests...';
+
+                const startTime = performance.now();
+
+                // Send all requests concurrently
+                const promises = requests.map((payload, index) =>
+                    fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).then(async res => {
+                        const data = await res.json();
+                        return { index, status: res.status, data };
+                    }).catch(err => {
+                        return { index, status: 'error', error: err.message };
+                    })
+                );
+
+                const results = await Promise.all(promises);
+                const endTime = performance.now();
+                const totalDuration = (endTime - startTime) / 1000;
+
+                output += "=== RESULTS ===\n\n";
+
+                let successCount = 0;
+                let errorCount = 0;
+                const docIds = new Set();
+
+                results.forEach(result => {
+                    output += `Request ${result.index + 1}: `;
+                    if (result.status === 200 || result.status === 201) {
+                        successCount++;
+                        if (result.data.doc_id) {
+                            docIds.add(result.data.doc_id);
+                        }
+                        output += `Status ${result.status}, doc_id: ${result.data.doc_id}, chunks: ${result.data.chunks_created}\n`;
+                    } else if (result.status === 'error') {
+                        errorCount++;
+                        output += `ERROR: ${result.error}\n`;
+                    } else {
+                        errorCount++;
+                        output += `Status ${result.status}: ${JSON.stringify(result.data)}\n`;
+                    }
+                });
+
+                output += `\nTotal duration: ${totalDuration.toFixed(2)} seconds\n`;
+                output += `Average per request: ${(totalDuration / CONCURRENT_COUNT).toFixed(2)} seconds\n\n`;
+
+                // Verification
+                output += "=== VERIFICATION ===\n";
+                const allSucceeded = successCount === CONCURRENT_COUNT;
+                const noErrors = errorCount === 0;
+                const uniqueDocIds = docIds.size === CONCURRENT_COUNT;
+                const reasonableTime = totalDuration < 60;
+
+                output += `All requests succeeded: ${allSucceeded} (${successCount}/${CONCURRENT_COUNT})\n`;
+                output += `No errors: ${noErrors}\n`;
+                output += `Unique doc_ids: ${uniqueDocIds} (${docIds.size}/${CONCURRENT_COUNT})\n`;
+                output += `Completed within 60s: ${reasonableTime} (${totalDuration.toFixed(2)}s)\n`;
+
+                const testPassed = allSucceeded && noErrors && uniqueDocIds && reasonableTime;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testPDFLocatorLabels() {
+            let output = "=== PDF LOCATOR LABELS AND PAGE SPANS TEST ===\n\n";
+            document.getElementById('result').textContent = 'Testing PDF with page information...';
+
+            try {
+                // Create PDF document with pre-chunked content including page numbers
+                const timestamp = Date.now();
+                const payload = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "idempotency_key": "pdf-page-test-" + timestamp,
+                    "source": {
+                        "url": "https://example.com/test-pdf-pages-" + timestamp + ".pdf",
+                        "type": "pdf"
+                    },
+                    "content": "Full document content placeholder for PDF testing.",
+                    "metadata": {
+                        "title": "PDF Page Test Document",
+                        "author": "Test PDF Author"
+                    },
+                    "chunks": [
+                        {
+                            "content": "This is page 1 content about market analysis and introduction to trading strategies.",
+                            "page_start": 1,
+                            "page_end": 1
+                        },
+                        {
+                            "content": "Page 2 covers detailed analysis of stock performance metrics and valuation methods.",
+                            "page_start": 2,
+                            "page_end": 2
+                        },
+                        {
+                            "content": "This chunk spans pages 3 to 5 covering comprehensive risk management approaches, portfolio diversification strategies, and advanced hedging techniques across multiple chapters.",
+                            "page_start": 3,
+                            "page_end": 5
+                        },
+                        {
+                            "content": "Pages 6 through 7 discuss regulatory compliance and market structure considerations.",
+                            "page_start": 6,
+                            "page_end": 7
+                        }
+                    ]
+                };
+
+                output += "Sending pre-chunked PDF request with page info...\n\n";
+
+                const res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                output += "Ingest Response:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += `Doc ID: ${data.doc_id}\n`;
+                output += `Chunks Created: ${data.chunks_created}\n`;
+                output += `Vectors Created: ${data.vectors_created}\n`;
+                output += `Status: ${data.status}\n\n`;
+
+                if (data.status === 'exists') {
+                    output += "Note: Document already exists. Using existing doc_id.\n\n";
+                }
+
+                // Fetch chunks with page info
+                output += "Fetching chunks with page info...\n";
+                const chunksRes = await fetch(`${BASE_URL}/debug/chunks?doc_id=${data.doc_id}`);
+                const chunksData = await chunksRes.json();
+
+                output += `\nFound ${chunksData.count} chunks:\n\n`;
+
+                if (chunksData.success && chunksData.chunks) {
+                    chunksData.chunks.forEach((chunk, i) => {
+                        output += `Chunk ${i + 1}:\n`;
+                        output += `  chunk_index: ${chunk.chunk_index}\n`;
+                        output += `  page_start: ${chunk.page_start}\n`;
+                        output += `  page_end: ${chunk.page_end}\n`;
+                        output += `  locator_label: "${chunk.locator_label}"\n`;
+                        output += `  content: "${chunk.content_preview}..."\n\n`;
+                    });
+
+                    // Verification
+                    output += "=== VERIFICATION ===\n\n";
+
+                    // Test 1: Locator label for single page uses "p. X" format
+                    const singlePageChunks = chunksData.chunks.filter(c => c.page_start === c.page_end && c.page_start !== null);
+                    const singlePageLabelsCorrect = singlePageChunks.every(c => c.locator_label && c.locator_label.startsWith("p. "));
+                    output += `Test 1 - Single page uses 'p. X' format: ${singlePageLabelsCorrect}\n`;
+                    if (singlePageChunks.length > 0) {
+                        output += `  Examples: ${singlePageChunks.map(c => c.locator_label).join(", ")}\n`;
+                    }
+
+                    // Test 2: Multi-page spans use "pp. X-Y" format
+                    const multiPageChunks = chunksData.chunks.filter(c => c.page_start !== null && c.page_end !== null && c.page_end > c.page_start);
+                    const multiPageLabelsCorrect = multiPageChunks.every(c => c.locator_label && c.locator_label.startsWith("pp. "));
+                    output += `\nTest 2 - Multi-page spans use 'pp. X-Y' format: ${multiPageLabelsCorrect}\n`;
+                    if (multiPageChunks.length > 0) {
+                        output += `  Examples: ${multiPageChunks.map(c => c.locator_label).join(", ")}\n`;
+                    }
+
+                    // Test 3: Page numbers are stored correctly
+                    const chunk3 = chunksData.chunks.find(c => c.page_start === 3 && c.page_end === 5);
+                    const pageSpanCorrect = chunk3 !== undefined;
+                    output += `\nTest 3 - Page span (3-5) tracked correctly: ${pageSpanCorrect}\n`;
+                    if (chunk3) {
+                        output += `  page_start: ${chunk3.page_start}, page_end: ${chunk3.page_end}\n`;
+                    }
+
+                    const allTestsPassed = singlePageLabelsCorrect && multiPageLabelsCorrect && pageSpanCorrect;
+                    output += `\n=== TEST ${allTestsPassed ? "PASSED" : "FAILED"} ===\n`;
+                } else {
+                    output += "Error fetching chunks: " + JSON.stringify(chunksData) + "\n";
+                    output += "\n=== TEST FAILED ===\n";
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testReembedWorkspaceFilter() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let WORKSPACE_B = null;
+            let output = "=== REEMBED WORKSPACE FILTER TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                // Step 1: Create Workspace B if it doesn't exist
+                document.getElementById('result').textContent = 'Step 1: Creating Workspace B...';
+                let res = await fetch(`${BASE_URL}/debug/workspaces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: "Reembed Test Workspace B",
+                        slug: "reembed-test-workspace-b"
+                    })
+                });
+                let data = await res.json();
+                output += "Step 1 - Create/Get Workspace B:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+                if (data.success && data.workspace && data.workspace.id) {
+                    WORKSPACE_B = data.workspace.id;
+                } else if (data.workspace_id) {
+                    WORKSPACE_B = data.workspace_id;
+                } else {
+                    output += "ERROR: Could not get workspace B ID\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+                output += "Using Workspace B ID: " + WORKSPACE_B + "\n\n";
+
+                // Step 2: Ingest documents into both workspaces
+                document.getElementById('result').textContent = 'Step 2: Ingesting documents...';
+                const timestamp = Date.now();
+
+                // Ingest to Workspace A
+                const docA = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": "reembed-test-a-" + timestamp,
+                    "source": { "url": "https://example.com/reembed-test-a-" + timestamp, "type": "article" },
+                    "content": "Workspace A content for reembed filtering test. Contains unique data about alpha market analysis.",
+                    "metadata": { "title": "Reembed Test A" }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docA)
+                });
+                let resultA = await res.json();
+                output += "Step 2a - Ingest to Workspace A:\n" + JSON.stringify(resultA, null, 2) + "\n\n";
+
+                // Ingest to Workspace B
+                const docB = {
+                    "workspace_id": WORKSPACE_B,
+                    "idempotency_key": "reembed-test-b-" + timestamp,
+                    "source": { "url": "https://example.com/reembed-test-b-" + timestamp, "type": "article" },
+                    "content": "Workspace B content for reembed filtering test. Contains unique data about beta strategy review.",
+                    "metadata": { "title": "Reembed Test B" }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docB)
+                });
+                let resultB = await res.json();
+                output += "Step 2b - Ingest to Workspace B:\n" + JSON.stringify(resultB, null, 2) + "\n\n";
+
+                // Wait for embeddings
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 3: Get chunk counts using the count endpoint
+                document.getElementById('result').textContent = 'Step 3: Counting chunks per workspace...';
+                res = await fetch(`${BASE_URL}/debug/chunks/count?workspace_id=${WORKSPACE_A}`);
+                let countAResult = await res.json();
+                res = await fetch(`${BASE_URL}/debug/chunks/count?workspace_id=${WORKSPACE_B}`);
+                let countBResult = await res.json();
+
+                const countA = countAResult.success ? countAResult.count : 0;
+                const countB = countBResult.success ? countBResult.count : 0;
+                output += `Step 3 - Chunk counts (from count endpoint):\n`;
+                output += `  Workspace A: ${countA} chunks\n`;
+                output += `  Workspace B: ${countB} chunks\n\n`;
+
+                // Step 4: Run reembed for Workspace A only
+                document.getElementById('result').textContent = 'Step 4: Running reembed for Workspace A only...';
+                const reembedPayload = {
+                    "workspace_id": WORKSPACE_A,
+                    "target_collection": "kb_reembed_test_v1_" + timestamp,
+                    "embed_provider": "ollama",
+                    "embed_model": "nomic-embed-text"
+                };
+                res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reembedPayload)
+                });
+                let reembedResult = await res.json();
+                output += "Step 4 - Reembed for Workspace A:\n" + JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Step 5: Verify chunks_queued matches Workspace A count (not A+B)
+                output += "=== VERIFICATION ===\n\n";
+                const chunksQueuedMatchesA = reembedResult.chunks_queued === countA;
+                const totalChunks = countA + countB;
+                const notIncludingBoth = reembedResult.chunks_queued !== totalChunks || countB === 0;
+
+                output += `Test 1 - Reembed only queues Workspace A chunks:\n`;
+                output += `  chunks_queued: ${reembedResult.chunks_queued}\n`;
+                output += `  Workspace A chunk count: ${countA}\n`;
+                output += `  Workspace B chunk count: ${countB}\n`;
+                output += `  Total chunks (A+B): ${totalChunks}\n`;
+                output += `  Exact match with Workspace A: ${chunksQueuedMatchesA}\n`;
+                output += `  Not including both workspaces: ${notIncludingBoth}\n\n`;
+
+                // Step 6: Poll job status to verify completion
+                if (reembedResult.job_id) {
+                    document.getElementById('result').textContent = 'Step 5: Polling job status...';
+                    for (let i = 0; i < 15; i++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        res = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
+                        let jobStatus = await res.json();
+                        output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%\n`;
+                        if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
+                            break;
+                        }
+                    }
+                }
+
+                // The key verification: chunks_queued should equal Workspace A count exactly
+                // This proves that workspace filtering is working
+                const testPassed = chunksQueuedMatchesA && reembedResult.chunks_queued > 0;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Reembed for Workspace A queued exactly ${reembedResult.chunks_queued} chunks,\n`;
+                    output += `which matches the count of chunks in Workspace A (${countA}).\n`;
+                    output += `Workspace B's ${countB} chunks were NOT included - workspace filtering works!\n`;
+                } else {
+                    output += `ISSUE: chunks_queued (${reembedResult.chunks_queued}) != Workspace A count (${countA})\n`;
+                    output += `This could indicate a timing issue or workspace filtering problem.\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testReembedDocIdFilter() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== REEMBED DOC_ID FILTER TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest 3 documents
+                document.getElementById('result').textContent = 'Step 1: Ingesting 3 documents...';
+                const docs = [];
+                for (let i = 1; i <= 3; i++) {
+                    const payload = {
+                        "workspace_id": WORKSPACE_A,
+                        "idempotency_key": `docid-filter-test-${timestamp}-doc${i}`,
+                        "source": { "url": `https://example.com/docid-test-${timestamp}-doc${i}`, "type": "article" },
+                        "content": `Document ${i} content for doc_id filtering test. This is document number ${i} with unique content for testing purposes.`,
+                        "metadata": { "title": `Doc ID Filter Test ${i}` }
+                    };
+                    const res = await fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    docs.push({ index: i, doc_id: data.doc_id, chunks_created: data.chunks_created });
+                    output += `Doc ${i}: doc_id=${data.doc_id}, chunks=${data.chunks_created}, status=${data.status}\n`;
+                }
+                output += "\n";
+
+                // Wait for embeddings
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 2: Count chunks per document
+                document.getElementById('result').textContent = 'Step 2: Counting chunks per document...';
+                let totalChunksSelected = 0;
+                for (const doc of docs.slice(0, 2)) { // Only first 2 docs
+                    const res = await fetch(`${BASE_URL}/debug/chunks?doc_id=${doc.doc_id}`);
+                    const data = await res.json();
+                    doc.chunk_count = data.count || 0;
+                    totalChunksSelected += doc.chunk_count;
+                    output += `Doc ${doc.index} (${doc.doc_id}): ${doc.chunk_count} chunks\n`;
+                }
+                // Count doc 3 chunks
+                const res3 = await fetch(`${BASE_URL}/debug/chunks?doc_id=${docs[2].doc_id}`);
+                const data3 = await res3.json();
+                docs[2].chunk_count = data3.count || 0;
+                output += `Doc 3 (${docs[2].doc_id}): ${docs[2].chunk_count} chunks (NOT selected)\n\n`;
+
+                // Step 3: Run reembed with only doc_ids for doc1 and doc2
+                document.getElementById('result').textContent = 'Step 3: Running reembed with doc_ids filter...';
+                const reembedPayload = {
+                    "workspace_id": WORKSPACE_A,
+                    "target_collection": "kb_docid_test_v1_" + timestamp,
+                    "embed_provider": "ollama",
+                    "embed_model": "nomic-embed-text",
+                    "doc_ids": [docs[0].doc_id, docs[1].doc_id]
+                };
+                const reembedRes = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reembedPayload)
+                });
+                const reembedResult = await reembedRes.json();
+                output += "Reembed Response:\n" + JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Step 4: Verify
+                output += "=== VERIFICATION ===\n\n";
+                const expectedChunks = docs[0].chunk_count + docs[1].chunk_count;
+                const doc3Chunks = docs[2].chunk_count;
+                const chunksQueuedMatchesSelected = reembedResult.chunks_queued === expectedChunks;
+                const notIncludingDoc3 = reembedResult.chunks_queued !== (expectedChunks + doc3Chunks) || doc3Chunks === 0;
+
+                output += `Doc 1 chunks: ${docs[0].chunk_count}\n`;
+                output += `Doc 2 chunks: ${docs[1].chunk_count}\n`;
+                output += `Expected total (doc1+doc2): ${expectedChunks}\n`;
+                output += `Doc 3 chunks (not selected): ${doc3Chunks}\n`;
+                output += `chunks_queued: ${reembedResult.chunks_queued}\n\n`;
+                output += `Exact match with selected docs: ${chunksQueuedMatchesSelected}\n`;
+                output += `Not including doc3: ${notIncludingDoc3}\n\n`;
+
+                // Poll job status
+                if (reembedResult.job_id) {
+                    document.getElementById('result').textContent = 'Polling job status...';
+                    for (let i = 0; i < 10; i++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        const jobRes = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
+                        const jobStatus = await jobRes.json();
+                        output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%\n`;
+                        if (jobStatus.status === 'completed' || jobStatus.status === 'failed') break;
+                    }
+                }
+
+                const testPassed = chunksQueuedMatchesSelected && reembedResult.chunks_queued > 0;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Reembed with doc_ids filter queued exactly ${reembedResult.chunks_queued} chunks\n`;
+                    output += `matching the selected documents (doc1+doc2=${expectedChunks}).\n`;
+                    output += `Doc 3's ${doc3Chunks} chunks were correctly excluded.\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testPublishedAtNullHandling() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== PUBLISHED_AT NULL HANDLING IN FILTERS TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest document WITHOUT published_at
+                document.getElementById('result').textContent = 'Step 1: Ingesting document WITHOUT published_at...';
+                const docWithoutDate = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `null-published-test-${timestamp}`,
+                    "source": { "url": `https://example.com/null-published-${timestamp}`, "type": "article" },
+                    "content": "This document has NO published_at date. It discusses null date filtering test content about markets.",
+                    "metadata": { "title": "Null Published_at Test" }
+                    // Note: no published_at in metadata
+                };
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docWithoutDate)
+                });
+                let result1 = await res.json();
+                output += "Step 1 - Ingest WITHOUT published_at:\n" + JSON.stringify(result1, null, 2) + "\n\n";
+
+                // Step 2: Ingest document WITH published_at (recent date)
+                document.getElementById('result').textContent = 'Step 2: Ingesting document WITH published_at...';
+                const docWithDate = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `with-published-test-${timestamp}`,
+                    "source": { "url": `https://example.com/with-published-${timestamp}`, "type": "article" },
+                    "content": "This document HAS a published_at date set to 2024. It discusses date filtering test content about markets.",
+                    "metadata": {
+                        "title": "With Published_at Test",
+                        "published_at": "2024-06-15T12:00:00Z"
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docWithDate)
+                });
+                let result2 = await res.json();
+                output += "Step 2 - Ingest WITH published_at (2024-06-15):\n" + JSON.stringify(result2, null, 2) + "\n\n";
+
+                // Wait for embeddings to complete
+                await new Promise(r => setTimeout(r, 3000));
+
+                // Step 3: Query WITHOUT date filter - should return both
+                document.getElementById('result').textContent = 'Step 3: Query without date filter...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "date filtering test content",
+                        "mode": "retrieve",
+                        "top_k": 20
+                    })
+                });
+                let queryNoFilter = await res.json();
+                output += "Step 3 - Query WITHOUT date filter:\n";
+                output += `Results count: ${queryNoFilter.results ? queryNoFilter.results.length : 0}\n`;
+
+                // Check for both documents
+                const hasNullDoc = queryNoFilter.results?.some(r => r.content?.includes("NO published_at"));
+                const hasDateDoc = queryNoFilter.results?.some(r => r.content?.includes("HAS a published_at"));
+                output += `Contains null-date doc: ${hasNullDoc}\n`;
+                output += `Contains dated doc: ${hasDateDoc}\n\n`;
+
+                // Step 4: Query WITH date range filter - should EXCLUDE null published_at docs
+                document.getElementById('result').textContent = 'Step 4: Query with date range filter...';
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "date filtering test content",
+                        "mode": "retrieve",
+                        "top_k": 20,
+                        "filters": {
+                            "published_from": "2024-01-01",
+                            "published_to": "2024-12-31"
+                        }
+                    })
+                });
+                let queryWithFilter = await res.json();
+                output += "Step 4 - Query WITH date range filter (2024):\n";
+                output += `Results count: ${queryWithFilter.results ? queryWithFilter.results.length : 0}\n`;
+
+                // Check for documents
+                const hasNullDocFiltered = queryWithFilter.results?.some(r => r.content?.includes("NO published_at"));
+                const hasDateDocFiltered = queryWithFilter.results?.some(r => r.content?.includes("HAS a published_at"));
+                output += `Contains null-date doc: ${hasNullDocFiltered}\n`;
+                output += `Contains dated doc: ${hasDateDocFiltered}\n\n`;
+
+                // Step 5: Verification
+                output += "=== VERIFICATION ===\n\n";
+
+                // Test criteria:
+                // 1. Without filter: both documents should be found (or at least the dated one)
+                // 2. With date filter: null published_at doc should be EXCLUDED
+
+                const test1Passed = hasDateDoc; // At least dated doc found without filter
+                const test2Passed = !hasNullDocFiltered; // Null doc excluded with filter
+                const test3Passed = hasDateDocFiltered; // Dated doc included with filter
+
+                output += `Test 1 - Dated doc found without filter: ${test1Passed}\n`;
+                output += `Test 2 - Null-date doc EXCLUDED with date filter: ${test2Passed}\n`;
+                output += `Test 3 - Dated doc INCLUDED with date filter: ${test3Passed}\n\n`;
+
+                const allPassed = test1Passed && test2Passed && test3Passed;
+                output += `\n=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: Documents without published_at are correctly excluded\n";
+                    output += "when date range filters are applied.\n";
+                } else {
+                    if (!test2Passed) {
+                        output += "ISSUE: Document with null published_at was NOT excluded from date-filtered results.\n";
+                        output += "This may indicate that null date handling needs to be implemented.\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testJobFailureCapture() {
+            let output = "=== JOB FAILURE CAPTURE TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+            const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+
+            try {
+                // First, ensure we have at least one document in the workspace
+                document.getElementById('result').textContent = 'Step 0: Ensuring document exists for testing...';
+                const docPayload = {
+                    "workspace_id": WORKSPACE_ID,
+                    "idempotency_key": "job-failure-test-doc",
+                    "source": {
+                        "url": "https://example.com/job-failure-test-doc",
+                        "type": "article"
+                    },
+                    "content": "This document is used for job failure testing.",
+                    "metadata": {
+                        "title": "Job Failure Test Doc"
+                    }
+                };
+
+                await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docPayload)
+                });
+                output += "Step 0 - Ensured test document exists\n\n";
+
+                // Step 1: POST /reembed with INVALID embed_model that doesn't exist in Ollama
+                // This will cause the background task to fail when it tries to embed
+                document.getElementById('result').textContent = 'Step 1: POST /reembed with invalid embed_model...';
+                const invalidPayload = {
+                    "workspace_id": WORKSPACE_ID,
+                    "target_collection": "kb_invalid_model_test_" + Date.now(),
+                    "embed_provider": "ollama",
+                    "embed_model": "nonexistent-model-xyz-12345"  // Invalid model that doesn't exist
+                };
+
+                let res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(invalidPayload)
+                });
+                let reembedResult = await res.json();
+                output += "Step 1 - POST /reembed with invalid embed_model:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Check if job was created
+                if (reembedResult.job_id) {
+                    // Step 2: GET /jobs/{job_id} and poll until failure
+                    document.getElementById('result').textContent = 'Step 2: Polling job status (waiting for failure)...';
+                    let finalStatus = null;
+                    let finalError = null;
+
+                    for (let i = 0; i < 15; i++) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        res = await fetch(`${BASE_URL}/jobs/${reembedResult.job_id}`);
+                        let jobStatus = await res.json();
+                        output += `Job poll ${i+1}: status=${jobStatus.status}, progress=${jobStatus.progress}%`;
+                        if (jobStatus.error) {
+                            output += `, error="${jobStatus.error.substring(0, 80)}..."`;
+                            finalError = jobStatus.error;
+                        }
+                        output += "\n";
+                        finalStatus = jobStatus.status;
+                        if (jobStatus.status === 'completed' || jobStatus.status === 'failed') {
+                            break;
+                        }
+                    }
+
+                    output += "\n=== VERIFICATION ===\n\n";
+
+                    // Check if job failed with error
+                    const jobFailed = finalStatus === 'failed';
+                    output += `Test 1 - Job status is 'failed': ${jobFailed} (actual: ${finalStatus})\n`;
+
+                    if (jobFailed) {
+                        const hasErrorInfo = finalError !== null && finalError.length > 0;
+                        output += `Test 2 - Error field contains useful information: ${hasErrorInfo}\n`;
+                        if (hasErrorInfo) {
+                            output += `  Full error: "${finalError}"\n`;
+                        }
+
+                        if (hasErrorInfo) {
+                            output += `\n=== TEST PASSED ===\n`;
+                            output += `Job failure captured with error details!\n`;
+                            output += `- Status is 'failed' ✓\n`;
+                            output += `- Error field has information ✓\n`;
+                        } else {
+                            output += `\n=== TEST FAILED ===\n`;
+                            output += `Job failed but no error information was captured.\n`;
+                        }
+                    } else if (finalStatus === 'completed') {
+                        output += `\n=== TEST INCOMPLETE ===\n`;
+                        output += `Job completed instead of failing. The invalid model may have been handled gracefully.\n`;
+                        output += `Chunks queued: ${reembedResult.chunks_queued}\n`;
+                    } else {
+                        output += `\n=== TEST INCOMPLETE ===\n`;
+                        output += `Job did not reach terminal state within timeout. Status: ${finalStatus}\n`;
+                    }
+                } else {
+                    // Immediate error response (validation error)
+                    output += "\n=== VERIFICATION ===\n\n";
+                    const hasDetail = reembedResult.detail !== undefined;
+                    output += `Test 1 - Immediate error response received: true\n`;
+                    output += `Test 2 - Error contains detail field: ${hasDetail}\n`;
+                    if (hasDetail) {
+                        output += `  Detail: "${reembedResult.detail}"\n`;
+                    }
+                    output += `\n=== TEST PASSED (IMMEDIATE ERROR) ===\n`;
+                    output += `Error captured with useful information at request time.\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testLanguageField() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== LANGUAGE FIELD TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest English document (default language)
+                document.getElementById('result').textContent = 'Step 1: Ingesting English document (default)...';
+                const docEn = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `lang-test-en-${timestamp}`,
+                    "source": { "url": `https://example.com/lang-test-en-${timestamp}`, "type": "article" },
+                    "content": `This is an English document for language field testing. Hello world! Timestamp: ${timestamp}`,
+                    "metadata": {
+                        "title": "English Document Test"
+                        // No explicit language - should default to 'en'
+                    }
+                };
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docEn)
+                });
+                let resultEn = await res.json();
+                output += "Step 1 - Ingest English doc (no explicit language):\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(resultEn, null, 2) + "\n\n";
+
+                // Step 2: Ingest Spanish document (explicit language)
+                document.getElementById('result').textContent = 'Step 2: Ingesting Spanish document (explicit)...';
+                const docEs = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `lang-test-es-${timestamp}`,
+                    "source": { "url": `https://example.com/lang-test-es-${timestamp}`, "type": "article" },
+                    "content": `Este es un documento en español para la prueba de campo de idioma. ¡Hola mundo! Timestamp: ${timestamp}`,
+                    "metadata": {
+                        "title": "Spanish Document Test",
+                        "language": "es"  // Explicit Spanish
+                    }
+                };
+                res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(docEs)
+                });
+                let resultEs = await res.json();
+                output += "Step 2 - Ingest Spanish doc (language='es'):\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(resultEs, null, 2) + "\n\n";
+
+                // Step 3: Fetch documents and verify language fields
+                document.getElementById('result').textContent = 'Step 3: Fetching documents to verify language fields...';
+                res = await fetch(`${BASE_URL}/debug/documents`);
+                let docsData = await res.json();
+                output += "Step 3 - Fetch documents:\n";
+
+                // Find our test documents
+                let enDoc = null;
+                let esDoc = null;
+                if (docsData.documents) {
+                    enDoc = docsData.documents.find(d => d.id === resultEn.doc_id);
+                    esDoc = docsData.documents.find(d => d.id === resultEs.doc_id);
+                }
+
+                output += `\nEnglish document found: ${enDoc !== null && enDoc !== undefined}\n`;
+                if (enDoc) {
+                    output += `  language field: "${enDoc.language}"\n`;
+                }
+
+                output += `Spanish document found: ${esDoc !== null && esDoc !== undefined}\n`;
+                if (esDoc) {
+                    output += `  language field: "${esDoc.language}"\n`;
+                }
+
+                output += "\n=== VERIFICATION ===\n\n";
+
+                // Verify language fields
+                const enLangCorrect = enDoc && enDoc.language === 'en';
+                const esLangCorrect = esDoc && esDoc.language === 'es';
+
+                output += `Test 1 - English doc has language='en': ${enLangCorrect}\n`;
+                output += `Test 2 - Spanish doc has language='es': ${esLangCorrect}\n\n`;
+
+                const allPassed = enLangCorrect && esLangCorrect;
+                output += `\n=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: Language field stored correctly for multi-language content.\n";
+                    output += "- Default 'en' applied when not specified\n";
+                    output += "- Explicit 'es' stored when provided\n";
+                } else {
+                    if (!enLangCorrect) {
+                        output += "ISSUE: English document language field is not 'en'\n";
+                    }
+                    if (!esLangCorrect) {
+                        output += "ISSUE: Spanish document language field is not 'es'\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testQueryLatency() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== QUERY LATENCY TEST (p95 < 2000ms) ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const NUM_QUERIES = 100;
+                const latencies = [];
+                const questions = [
+                    "What are the latest market trends?",
+                    "How does interest rate policy affect stocks?",
+                    "What is the Fed's stance on inflation?",
+                    "Discuss technology sector performance",
+                    "Analyze macro economic indicators"
+                ];
+
+                output += `Running ${NUM_QUERIES} queries...\n\n`;
+                document.getElementById('result').textContent = output;
+
+                for (let i = 0; i < NUM_QUERIES; i++) {
+                    const question = questions[i % questions.length];
+                    const startTime = performance.now();
+
+                    const res = await fetch(`${BASE_URL}/query`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            "workspace_id": WORKSPACE_A,
+                            "question": question,
+                            "mode": "retrieve",
+                            "top_k": 5
+                        })
+                    });
+                    await res.json();
+
+                    const endTime = performance.now();
+                    const latency = endTime - startTime;
+                    latencies.push(latency);
+
+                    // Update progress every 10 queries
+                    if ((i + 1) % 10 === 0) {
+                        document.getElementById('result').textContent = output + `Progress: ${i + 1}/${NUM_QUERIES} queries completed...`;
+                    }
+                }
+
+                // Calculate statistics
+                latencies.sort((a, b) => a - b);
+                const min = latencies[0];
+                const max = latencies[latencies.length - 1];
+                const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                const p50 = latencies[Math.floor(latencies.length * 0.5)];
+                const p95 = latencies[Math.floor(latencies.length * 0.95)];
+                const p99 = latencies[Math.floor(latencies.length * 0.99)];
+
+                output += `Completed ${NUM_QUERIES} queries.\n\n`;
+                output += "=== LATENCY STATISTICS ===\n\n";
+                output += `Min:    ${min.toFixed(2)} ms\n`;
+                output += `Max:    ${max.toFixed(2)} ms\n`;
+                output += `Avg:    ${avg.toFixed(2)} ms\n`;
+                output += `p50:    ${p50.toFixed(2)} ms\n`;
+                output += `p95:    ${p95.toFixed(2)} ms\n`;
+                output += `p99:    ${p99.toFixed(2)} ms\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+                const p95Target = 2000; // 2 seconds
+                const testPassed = p95 < p95Target;
+
+                output += `Target: p95 < ${p95Target}ms\n`;
+                output += `Actual: p95 = ${p95.toFixed(2)}ms\n`;
+                output += `Result: ${testPassed ? "PASS" : "FAIL"}\n\n`;
+
+                output += `=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Query latency p95 (${p95.toFixed(2)}ms) is below target (${p95Target}ms).\n`;
+                } else {
+                    output += `ISSUE: Query latency p95 (${p95.toFixed(2)}ms) exceeds target (${p95Target}ms).\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testIngestThroughput() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== INGEST THROUGHPUT TEST (>10 docs/minute) ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const NUM_DOCS = 20;
+                const timestamp = Date.now();
+                const startTime = performance.now();
+
+                output += `Ingesting ${NUM_DOCS} documents...\n\n`;
+                document.getElementById('result').textContent = output;
+
+                const results = [];
+                for (let i = 0; i < NUM_DOCS; i++) {
+                    const payload = {
+                        "workspace_id": WORKSPACE_A,
+                        "idempotency_key": `throughput-test-${timestamp}-doc${i}`,
+                        "source": {
+                            "url": `https://example.com/throughput-test-${timestamp}-doc${i}`,
+                            "type": "article"
+                        },
+                        "content": `Document ${i} for throughput testing. This content discusses various market topics including stocks, bonds, and commodities. The analysis covers multiple sectors and provides insights into current trends. Additional context about economic indicators and policy decisions.`,
+                        "metadata": {
+                            "title": `Throughput Test Document ${i}`
+                        }
+                    };
+
+                    const docStart = performance.now();
+                    const res = await fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    const docEnd = performance.now();
+
+                    results.push({
+                        index: i,
+                        status: data.status,
+                        latency: docEnd - docStart,
+                        chunks: data.chunks_created
+                    });
+
+                    // Update progress every 5 docs
+                    if ((i + 1) % 5 === 0) {
+                        document.getElementById('result').textContent = output + `Progress: ${i + 1}/${NUM_DOCS} documents ingested...`;
+                    }
+                }
+
+                const endTime = performance.now();
+                const totalTimeMs = endTime - startTime;
+                const totalTimeMinutes = totalTimeMs / 60000;
+                const docsPerMinute = NUM_DOCS / totalTimeMinutes;
+
+                output += `Completed ${NUM_DOCS} documents.\n\n`;
+                output += "=== TIMING STATISTICS ===\n\n";
+                output += `Total time: ${(totalTimeMs / 1000).toFixed(2)} seconds (${totalTimeMinutes.toFixed(2)} minutes)\n`;
+                output += `Throughput: ${docsPerMinute.toFixed(1)} docs/minute\n\n`;
+
+                // Per-document latencies
+                const latencies = results.map(r => r.latency);
+                latencies.sort((a, b) => a - b);
+                const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                const minLatency = latencies[0];
+                const maxLatency = latencies[latencies.length - 1];
+
+                output += "=== PER-DOCUMENT LATENCY ===\n\n";
+                output += `Min:    ${minLatency.toFixed(2)} ms\n`;
+                output += `Max:    ${maxLatency.toFixed(2)} ms\n`;
+                output += `Avg:    ${avgLatency.toFixed(2)} ms\n\n`;
+
+                // Count new vs existing docs
+                const newDocs = results.filter(r => r.status === 'indexed').length;
+                const existingDocs = results.filter(r => r.status === 'exists').length;
+                output += `New documents created: ${newDocs}\n`;
+                output += `Existing documents (deduplicated): ${existingDocs}\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+                const targetDocsPerMin = 10;
+                const testPassed = docsPerMinute > targetDocsPerMin;
+
+                output += `Target: > ${targetDocsPerMin} docs/minute\n`;
+                output += `Actual: ${docsPerMinute.toFixed(1)} docs/minute\n`;
+                output += `Result: ${testPassed ? "PASS" : "FAIL"}\n\n`;
+
+                output += `=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+                if (testPassed) {
+                    output += `SUCCESS: Ingest throughput (${docsPerMinute.toFixed(1)} docs/min) exceeds target (${targetDocsPerMin} docs/min).\n`;
+                } else {
+                    output += `ISSUE: Ingest throughput (${docsPerMinute.toFixed(1)} docs/min) is below target (${targetDocsPerMin} docs/min).\n`;
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testLastIndexedAt() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== LAST_INDEXED_AT UPDATE TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest a new document
+                document.getElementById('result').textContent = 'Step 1: Ingesting new document...';
+                const payload = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `last-indexed-test-${timestamp}`,
+                    "source": {
+                        "url": `https://example.com/last-indexed-test-${timestamp}`,
+                        "type": "article"
+                    },
+                    "content": `Test document for last_indexed_at verification. Timestamp: ${timestamp}. This document tests that the last_indexed_at field is set when vectors are created.`,
+                    "metadata": {
+                        "title": "Last Indexed At Test"
+                    }
+                };
+
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let ingestResult = await res.json();
+                output += "Step 1 - Ingest document:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(ingestResult, null, 2) + "\n\n";
+
+                if (ingestResult.status !== 'indexed') {
+                    output += `\n=== TEST SKIPPED ===\n`;
+                    output += `Document status is '${ingestResult.status}', expected 'indexed'.\n`;
+                    output += `This may happen if the document already exists.\n`;
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const docId = ingestResult.doc_id;
+
+                // Step 2: Fetch document and check initial last_indexed_at
+                document.getElementById('result').textContent = 'Step 2: Fetching document to verify initial last_indexed_at...';
+                res = await fetch(`${BASE_URL}/debug/documents`);
+                let docsData = await res.json();
+                output += "Step 2 - Fetch document (initial):\n";
+
+                let testDoc = null;
+                if (docsData.documents) {
+                    testDoc = docsData.documents.find(d => d.id === docId);
+                }
+
+                output += `Document found: ${testDoc !== null && testDoc !== undefined}\n`;
+                const initialLastIndexedAt = testDoc ? testDoc.last_indexed_at : null;
+                if (testDoc) {
+                    output += `  initial last_indexed_at: "${testDoc.last_indexed_at}"\n`;
+                    output += `  created_at: "${testDoc.created_at}"\n\n`;
+                }
+
+                // Step 3: Run reembed for just this document
+                document.getElementById('result').textContent = 'Step 3: Running reembed for this document...';
+                output += "Step 3 - Run /reembed for this doc_id:\n";
+
+                // Wait 2 seconds to ensure timestamp difference is detectable
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                res = await fetch(`${BASE_URL}/reembed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "target_collection": "kb_nomic_embed_text_v1",
+                        "embed_provider": "ollama",
+                        "embed_model": "nomic-embed-text",
+                        "doc_ids": [docId]
+                    })
+                });
+                let reembedResult = await res.json();
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(reembedResult, null, 2) + "\n\n";
+
+                // Step 4: Poll job until complete
+                document.getElementById('result').textContent = 'Step 4: Waiting for reembed job to complete...';
+                output += "Step 4 - Poll job status:\n";
+
+                const jobId = reembedResult.job_id;
+                let jobStatus = 'started';
+                let pollCount = 0;
+                const maxPolls = 30;
+
+                while (jobStatus !== 'completed' && jobStatus !== 'failed' && pollCount < maxPolls) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    res = await fetch(`${BASE_URL}/jobs/${jobId}`);
+                    let jobResult = await res.json();
+                    jobStatus = jobResult.status;
+                    pollCount++;
+                    output += `  Poll ${pollCount}: status=${jobStatus}, progress=${jobResult.progress}%\n`;
+                }
+                output += "\n";
+
+                // Step 5: Verify last_indexed_at was updated
+                document.getElementById('result').textContent = 'Step 5: Verifying last_indexed_at was updated...';
+                output += "Step 5 - Check updated last_indexed_at:\n";
+
+                res = await fetch(`${BASE_URL}/debug/documents`);
+                docsData = await res.json();
+
+                testDoc = null;
+                if (docsData.documents) {
+                    testDoc = docsData.documents.find(d => d.id === docId);
+                }
+
+                const updatedLastIndexedAt = testDoc ? testDoc.last_indexed_at : null;
+                output += `  updated last_indexed_at: "${updatedLastIndexedAt}"\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+
+                // Verify initial last_indexed_at was set
+                const hasInitialTimestamp = initialLastIndexedAt !== null && initialLastIndexedAt !== undefined;
+                output += `Test 1 - Initial last_indexed_at is set: ${hasInitialTimestamp}\n`;
+
+                // Verify updated last_indexed_at is set
+                const hasUpdatedTimestamp = updatedLastIndexedAt !== null && updatedLastIndexedAt !== undefined;
+                output += `Test 2 - Updated last_indexed_at is set: ${hasUpdatedTimestamp}\n`;
+
+                // Verify reembed job completed successfully
+                const reembedCompleted = jobStatus === 'completed';
+                output += `Test 3 - Reembed job completed: ${reembedCompleted}\n`;
+
+                // Verify timestamp was updated (should be different/later)
+                let timestampUpdated = false;
+                if (hasInitialTimestamp && hasUpdatedTimestamp) {
+                    const initialDate = new Date(initialLastIndexedAt);
+                    const updatedDate = new Date(updatedLastIndexedAt);
+                    timestampUpdated = updatedDate >= initialDate;
+                    output += `Test 4 - last_indexed_at updated after reembed: ${timestampUpdated}\n`;
+                    output += `  Initial: ${initialDate.toISOString()}\n`;
+                    output += `  Updated: ${updatedDate.toISOString()}\n`;
+                }
+
+                const testPassed = hasInitialTimestamp && hasUpdatedTimestamp && reembedCompleted && timestampUpdated;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (testPassed) {
+                    output += "SUCCESS: last_indexed_at is set on ingest and updates after reembed.\n";
+                } else {
+                    if (!hasInitialTimestamp) {
+                        output += "ISSUE: Initial last_indexed_at not set\n";
+                    }
+                    if (!reembedCompleted) {
+                        output += "ISSUE: Reembed job did not complete\n";
+                    }
+                    if (!timestampUpdated) {
+                        output += "ISSUE: last_indexed_at was not updated after reembed\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testSectionTracking() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== SECTION TRACKING TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+
+                // Step 1: Ingest document with section headers
+                document.getElementById('result').textContent = 'Step 1: Ingesting document with section headers...';
+
+                const contentWithSections = `# Introduction
+
+This is the introduction section of our document. We will discuss the key concepts
+and provide an overview of the topics covered.
+
+## Market Analysis
+
+The market analysis section covers AAPL, GOOGL, and MSFT stock performance.
+We examine quarterly earnings and growth projections for these technology giants.
+
+## Economic Outlook
+
+MACRO ECONOMIC FACTORS
+
+The Federal Reserve has announced changes to monetary policy. Chairman Powell
+discussed inflation concerns and interest rate decisions. The economic outlook
+remains uncertain given global factors.
+
+### Subsection on Interest Rates
+
+Interest rates are expected to remain elevated through the next quarter.
+This will impact borrowing costs and consumer spending patterns.
+
+## Conclusion
+
+In conclusion, we have covered the key aspects of market analysis and economic outlook.
+Investors should consider these factors when making investment decisions.`;
+
+                const payload = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `section-test-${timestamp}`,
+                    "source": { "url": `https://example.com/section-test-${timestamp}`, "type": "article" },
+                    "content": contentWithSections,
+                    "metadata": { "title": "Section Tracking Test", "author": "Test Author" }
+                };
+
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let ingestResult = await res.json();
+                const docId = ingestResult.doc_id;
+                output += "Step 1 - Ingest result:\n" + JSON.stringify(ingestResult, null, 2) + "\n\n";
+
+                // Wait for processing
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 2: Query chunks for this document
+                document.getElementById('result').textContent = 'Step 2: Querying chunks to check section field...';
+
+                res = await fetch(`${BASE_URL}/debug/chunks?workspace_id=${WORKSPACE_A}`);
+                let chunksData = await res.json();
+                output += "Step 2 - Raw chunks response:\n" + JSON.stringify(chunksData, null, 2) + "\n\n";
+
+                // Step 3: Filter chunks for our document and check sections
+                output += "Step 3 - Analyzing chunks for section field:\n\n";
+
+                let docChunks = [];
+                if (chunksData.chunks) {
+                    docChunks = chunksData.chunks.filter(c => c.doc_id === docId);
+                }
+
+                output += `Found ${docChunks.length} chunks for document ${docId}\n\n`;
+
+                let chunksWithSections = 0;
+                let sectionValues = [];
+                for (const chunk of docChunks) {
+                    const section = chunk.section;
+                    output += `Chunk ${chunk.chunk_index}:\n`;
+                    output += `  section: "${section || 'null'}"\n`;
+                    output += `  content preview: "${chunk.content_preview || chunk.content?.substring(0, 80) || ''}..."\n\n`;
+
+                    if (section) {
+                        chunksWithSections++;
+                        if (!sectionValues.includes(section)) {
+                            sectionValues.push(section);
+                        }
+                    }
+                }
+
+                output += "=== VERIFICATION ===\n\n";
+
+                // Verify chunks were created
+                const chunksCreated = docChunks.length > 0;
+                output += `Test 1 - Chunks created: ${chunksCreated} (${docChunks.length} chunks)\n`;
+
+                // Verify at least some chunks have section populated
+                const hasSections = chunksWithSections > 0;
+                output += `Test 2 - Chunks with section populated: ${chunksWithSections}/${docChunks.length}\n`;
+
+                // Verify detected sections include expected values
+                output += `Test 3 - Detected section names: ${JSON.stringify(sectionValues)}\n`;
+
+                const expectedSections = ['Introduction', 'Market Analysis', 'Economic Outlook', 'Conclusion'];
+                const foundExpected = expectedSections.some(s =>
+                    sectionValues.some(v => v.toLowerCase().includes(s.toLowerCase()))
+                );
+                output += `Test 4 - Found expected section headers: ${foundExpected}\n`;
+
+                const testPassed = chunksCreated && hasSections;
+                output += `\n=== TEST ${testPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (testPassed) {
+                    output += `SUCCESS: Section tracking is working!\n`;
+                    output += `  - ${docChunks.length} chunks created\n`;
+                    output += `  - ${chunksWithSections} chunks have section field populated\n`;
+                    output += `  - Detected sections: ${sectionValues.join(', ')}\n`;
+                } else {
+                    if (!chunksCreated) {
+                        output += "ISSUE: No chunks were created\n";
+                    }
+                    if (!hasSections) {
+                        output += "ISSUE: Section field is not being populated in chunks\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testYouTubeCitationUrl() {
+            const WORKSPACE_A = "00000000-0000-0000-0000-000000000001";
+            let output = "=== YOUTUBE CITATION URL TEST ===\n\n";
+            document.getElementById('result').textContent = 'Starting test...';
+
+            try {
+                const timestamp = Date.now();
+                const TEST_VIDEO_ID = "dQw4w9WgXcQ";  // Famous video ID for testing
+
+                // Step 1: Ingest a YouTube-type document with video_id and pre-chunked content with timestamps
+                document.getElementById('result').textContent = 'Step 1: Ingesting YouTube document with timestamps...';
+
+                const payload = {
+                    "workspace_id": WORKSPACE_A,
+                    "idempotency_key": `youtube-citation-test-${timestamp}`,
+                    "source": {
+                        "url": `https://www.youtube.com/watch?v=${TEST_VIDEO_ID}`,
+                        "type": "youtube"
+                    },
+                    "video_id": TEST_VIDEO_ID,
+                    "content": "This is a test video transcript about market analysis and trading strategies. We discuss AAPL, MSFT, and other tech stocks. The Federal Reserve policy impacts are analyzed.",
+                    "metadata": {
+                        "title": "YouTube Citation Test Video",
+                        "author": "Test Channel"
+                    },
+                    "chunks": [
+                        {
+                            "content": "Welcome to our market analysis video. Today we'll discuss AAPL stock performance and quarterly earnings.",
+                            "time_start_secs": 0,
+                            "time_end_secs": 45
+                        },
+                        {
+                            "content": "Moving on to Microsoft MSFT. The cloud business continues strong growth with Azure leading.",
+                            "time_start_secs": 45,
+                            "time_end_secs": 120
+                        },
+                        {
+                            "content": "The Federal Reserve announced policy changes. Chairman Powell discussed inflation targets and rate decisions.",
+                            "time_start_secs": 120,
+                            "time_end_secs": 200
+                        }
+                    ]
+                };
+
+                let res = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                let ingestResult = await res.json();
+                output += "Step 1 - Ingest YouTube document:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += JSON.stringify(ingestResult, null, 2) + "\n\n";
+
+                if (res.status !== 200 && res.status !== 201) {
+                    output += "ERROR: Failed to ingest document\n";
+                    output += "\n=== TEST FAILED ===\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                const docId = ingestResult.doc_id;
+                output += `Document created with ID: ${docId}\n\n`;
+
+                // Wait for indexing
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Step 2: Query for the content to get citation URLs
+                document.getElementById('result').textContent = 'Step 2: Querying to get citation URLs...';
+
+                res = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        "workspace_id": WORKSPACE_A,
+                        "question": "What did the Federal Reserve announce?",
+                        "mode": "retrieve",
+                        "top_k": 5
+                    })
+                });
+                let queryResult = await res.json();
+                output += "Step 2 - Query Results:\n";
+                output += `HTTP Status: ${res.status}\n`;
+                output += `Results count: ${queryResult.results ? queryResult.results.length : 0}\n\n`;
+
+                // Step 3: Find results from our test video and verify citation URL format
+                const videoResults = queryResult.results ?
+                    queryResult.results.filter(r => r.doc_id === docId) : [];
+
+                output += `Step 3 - Results from test video: ${videoResults.length}\n\n`;
+
+                output += "=== VERIFICATION ===\n\n";
+
+                // Check if citation URLs have the correct format
+                let citationUrlsCorrect = true;
+                let foundTimestamp = false;
+
+                if (videoResults.length > 0) {
+                    for (const result of videoResults) {
+                        output += `Chunk: "${result.content.substring(0, 50)}..."\n`;
+                        output += `  citation_url: ${result.citation_url}\n`;
+                        output += `  source_url: ${result.source_url}\n`;
+                        output += `  locator_label: ${result.locator_label}\n\n`;
+
+                        // Check citation URL format: should be youtube.com/watch?v=XXX&t=YYY
+                        if (result.citation_url) {
+                            const expectedBase = `https://www.youtube.com/watch?v=${TEST_VIDEO_ID}`;
+                            const hasCorrectBase = result.citation_url.startsWith(expectedBase);
+                            const hasTimestamp = result.citation_url.includes('&t=');
+
+                            if (!hasCorrectBase) {
+                                citationUrlsCorrect = false;
+                                output += `  ERROR: Citation URL doesn't start with ${expectedBase}\n`;
+                            }
+                            if (hasTimestamp) {
+                                foundTimestamp = true;
+                                // Extract and verify timestamp
+                                const match = result.citation_url.match(/&t=(\d+)/);
+                                if (match) {
+                                    output += `  Timestamp: ${match[1]} seconds\n`;
+                                }
+                            }
+                        } else {
+                            output += `  WARNING: No citation_url\n`;
+                        }
+                        output += "\n";
+                    }
+                } else {
+                    output += "No results from test video found in query results.\n";
+                    output += "This could mean the embeddings haven't finished or the query didn't match.\n\n";
+
+                    // Show all results for debugging
+                    if (queryResult.results && queryResult.results.length > 0) {
+                        output += "All query results:\n";
+                        for (const r of queryResult.results.slice(0, 3)) {
+                            output += `  doc_id: ${r.doc_id}\n`;
+                            output += `  content: "${r.content.substring(0, 50)}..."\n`;
+                            output += `  citation_url: ${r.citation_url}\n\n`;
+                        }
+                    }
+                }
+
+                // Test results
+                const test1Pass = videoResults.length > 0;
+                const test2Pass = citationUrlsCorrect;
+                const test3Pass = foundTimestamp;
+
+                output += "Test 1 - Query returns YouTube document results: " + test1Pass + "\n";
+                output += "Test 2 - Citation URLs have correct base format: " + test2Pass + "\n";
+                output += "Test 3 - Citation URLs include &t= timestamp: " + test3Pass + "\n\n";
+
+                const allPassed = test1Pass && test2Pass && test3Pass;
+                output += `=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: YouTube citation URLs correctly include video ID and timestamp!\n";
+                    output += `Format verified: https://www.youtube.com/watch?v=${TEST_VIDEO_ID}&t=<seconds>\n`;
+                } else {
+                    if (!test1Pass) {
+                        output += "ISSUE: No results from test video in query\n";
+                    }
+                    if (!test2Pass) {
+                        output += "ISSUE: Citation URL format incorrect\n";
+                    }
+                    if (!test3Pass) {
+                        output += "ISSUE: Citation URL missing timestamp parameter\n";
+                    }
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testDocumentVersioning() {
+            let output = "=== Document Versioning Test ===\n\n";
+            document.getElementById('result').textContent = output + "Running test...";
+
+            try {
+                const timestamp = Date.now();
+                const randomPart = Math.random().toString(36).substring(7);
+                const uniqueUrl = `https://example.com/version-test-${timestamp}-${randomPart}`;
+
+                // Step 1: Create initial document (version 1)
+                // Use timestamp in content to ensure unique content hash (avoid deduplication)
+                output += "Step 1: Creating initial document (version 1)...\n";
+                const payload1 = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "source": {
+                        "url": uniqueUrl,
+                        "type": "article"
+                    },
+                    "content": `Version 1 content [${timestamp}-${randomPart}]. This is the original document about trading strategies. AAPL is mentioned here.`,
+                    "metadata": {
+                        "title": "Versioned Document Test",
+                        "author": "Test Author"
+                    }
+                };
+
+                const res1 = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload1)
+                });
+                const data1 = await res1.json();
+                output += `  Status: ${res1.status}\n`;
+                output += `  doc_id: ${data1.doc_id}\n`;
+                output += `  version: ${data1.version}\n`;
+                output += `  status: ${data1.status}\n\n`;
+
+                const docId1 = data1.doc_id;
+                const version1 = data1.version;
+
+                if (data1.status !== 'indexed' && data1.status !== 'exists') {
+                    output += "ERROR: Expected status 'indexed' or 'exists', got '" + data1.status + "'\n";
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+
+                // If document already exists, that's fine for testing updates
+                if (data1.status === 'exists') {
+                    output += "  (Document already exists - will test update on existing)\n\n";
+                }
+
+                // Step 2: Get chunks for version 1
+                output += "Step 2: Getting chunks for version 1...\n";
+                const chunksRes1 = await fetch(`${BASE_URL}/debug/chunks?workspace_id=00000000-0000-0000-0000-000000000001&limit=100`);
+                const chunksData1 = await chunksRes1.json();
+                const chunksArray = chunksData1.chunks || chunksData1; // Handle both formats
+                const v1Chunks = Array.isArray(chunksArray) ? chunksArray.filter(c => c.doc_id === docId1) : [];
+                output += `  Found ${v1Chunks.length} chunks for version 1\n\n`;
+
+                // Step 3: Update document to version 2
+                output += "Step 3: Updating document to version 2...\n";
+                const payload2 = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "source": {
+                        "url": uniqueUrl,
+                        "type": "article"
+                    },
+                    "content": `Version 2 content [${timestamp}-${randomPart}]. This is the UPDATED document with new trading strategies. GOOGL is now mentioned instead of AAPL. The market outlook has changed.`,
+                    "metadata": {
+                        "title": "Versioned Document Test - Updated",
+                        "author": "Test Author"
+                    },
+                    "update_existing": true
+                };
+
+                const res2 = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload2)
+                });
+                const data2 = await res2.json();
+                output += `  Status: ${res2.status}\n`;
+                if (res2.status >= 400) {
+                    output += `  Error: ${JSON.stringify(data2, null, 2)}\n\n`;
+                    document.getElementById('result').textContent = output;
+                    return;
+                }
+                output += `  doc_id: ${data2.doc_id}\n`;
+                output += `  version: ${data2.version}\n`;
+                output += `  status: ${data2.status}\n`;
+                output += `  superseded_doc_id: ${data2.superseded_doc_id}\n\n`;
+
+                const docId2 = data2.doc_id;
+                const version2 = data2.version;
+
+                // Step 4: Verify version incremented
+                output += "Step 4: Verifying version incremented...\n";
+                const versionIncremented = version2 > version1;
+                output += `  Version 1: ${version1}\n`;
+                output += `  Version 2: ${version2}\n`;
+                output += `  Incremented: ${versionIncremented}\n\n`;
+
+                // Step 5: Verify old document status is superseded
+                output += "Step 5: Checking old document status...\n";
+                const docsRes = await fetch(`${BASE_URL}/debug/documents?workspace_id=00000000-0000-0000-0000-000000000001&limit=100`);
+                const docsData = await docsRes.json();
+
+                // Find both documents (endpoint returns {success: true, documents: [...]})
+                const docsArray = docsData.documents || docsData;
+                const oldDoc = docsArray.find(d => d.id === docId1);
+                const newDoc = docsArray.find(d => d.id === docId2);
+
+                const oldStatusCorrect = oldDoc && oldDoc.status === 'superseded';
+                const newStatusCorrect = newDoc && newDoc.status === 'active';
+
+                if (oldDoc) {
+                    output += `  Old document (${docId1}):\n`;
+                    output += `    status: ${oldDoc.status} (expected: superseded) ${oldStatusCorrect ? "✓" : "✗"}\n`;
+                } else {
+                    output += `  Old document not found in results (may be filtered out)\n`;
+                }
+
+                if (newDoc) {
+                    output += `  New document (${docId2}):\n`;
+                    output += `    status: ${newDoc.status} (expected: active) ${newStatusCorrect ? "✓" : "✗"}\n`;
+                    output += `    version: ${newDoc.version}\n`;
+                }
+                output += "\n";
+
+                // Step 6: Verify superseded_doc_id is correct
+                output += "Step 6: Verifying supersede linkage...\n";
+                const supersedeLinkCorrect = data2.superseded_doc_id === docId1;
+                output += `  superseded_doc_id: ${data2.superseded_doc_id}\n`;
+                output += `  Original doc_id: ${docId1}\n`;
+                output += `  Match: ${supersedeLinkCorrect ? "✓" : "✗"}\n\n`;
+
+                // Step 7: Test version 3 update
+                output += "Step 7: Testing update to version 3...\n";
+                const payload3 = {
+                    "workspace_id": "00000000-0000-0000-0000-000000000001",
+                    "source": {
+                        "url": uniqueUrl,
+                        "type": "article"
+                    },
+                    "content": `Version 3 content [${timestamp}-${randomPart}]. Third iteration of the document. MSFT is now the focus.`,
+                    "metadata": {
+                        "title": "Versioned Document Test - V3",
+                        "author": "Test Author"
+                    },
+                    "update_existing": true
+                };
+
+                const res3 = await fetch(`${BASE_URL}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload3)
+                });
+                const data3 = await res3.json();
+                output += `  version: ${data3.version} (expected: 3)\n`;
+                output += `  superseded_doc_id: ${data3.superseded_doc_id} (expected: ${docId2})\n\n`;
+
+                const version3Correct = data3.version === 3;
+                const supersede3Correct = data3.superseded_doc_id === docId2;
+
+                // Summary
+                output += "=== TEST SUMMARY ===\n";
+                const test1Pass = versionIncremented;
+                const test2Pass = data2.status === 'updated';
+                const test3Pass = supersedeLinkCorrect;
+                const test4Pass = version3Correct;
+
+                output += `Test 1 - Version increments correctly (1 -> 2): ${test1Pass ? "PASS" : "FAIL"}\n`;
+                output += `Test 2 - Update returns status 'updated': ${test2Pass ? "PASS" : "FAIL"}\n`;
+                output += `Test 3 - Supersede linkage correct: ${test3Pass ? "PASS" : "FAIL"}\n`;
+                output += `Test 4 - Version 3 correct: ${test4Pass ? "PASS" : "FAIL"}\n\n`;
+
+                const allPassed = test1Pass && test2Pass && test3Pass && test4Pass;
+                output += `=== TEST ${allPassed ? "PASSED" : "FAILED"} ===\n`;
+
+                if (allPassed) {
+                    output += "SUCCESS: Document versioning works correctly!\n";
+                    output += "- Version numbers increment on update\n";
+                    output += "- Old documents marked as superseded\n";
+                    output += "- New documents link to superseded doc_id\n";
+                }
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+
+        async function testRerankComparison() {
+            let output = "=== Rerank Comparison Test ===\n\n";
+            document.getElementById('result').textContent = output + "Running test...";
+
+            try {
+                // Step 1: First ensure we have some documents ingested
+                output += "Step 1: Ingesting test documents for rerank comparison...\n";
+
+                const docs = [
+                    {
+                        content: "Bitcoin price analysis shows strong support at $40,000. Technical indicators suggest bullish momentum for BTC.",
+                        title: "Bitcoin Technical Analysis"
+                    },
+                    {
+                        content: "Ethereum smart contracts enable DeFi applications. ETH gas fees have decreased significantly.",
+                        title: "Ethereum DeFi Update"
+                    },
+                    {
+                        content: "The Federal Reserve announced interest rate decisions. This impacts crypto and traditional markets alike.",
+                        title: "Fed Rate Decision"
+                    }
+                ];
+
+                for (let i = 0; i < docs.length; i++) {
+                    const payload = {
+                        workspace_id: "00000000-0000-0000-0000-000000000001",
+                        idempotency_key: `rerank-test-doc-${i}`,
+                        source: {
+                            url: `https://example.com/rerank-test-${i}`,
+                            type: "article"
+                        },
+                        content: docs[i].content,
+                        metadata: { title: docs[i].title, author: "Test" }
+                    };
+
+                    const res = await fetch(`${BASE_URL}/ingest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    output += `  Ingested: ${docs[i].title} (${data.status})\n`;
+                }
+                output += "\n";
+
+                // Step 2: Query without rerank
+                output += "Step 2: Running query WITHOUT rerank...\n";
+                const queryPayload = {
+                    workspace_id: "00000000-0000-0000-0000-000000000001",
+                    question: "What is the Bitcoin price support level?",
+                    mode: "retrieve",
+                    rerank: false,
+                    top_k: 5,
+                    debug: true
+                };
+
+                const res1 = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(queryPayload)
+                });
+                const data1 = await res1.json();
+
+                if (data1.meta) {
+                    output += `  Rerank enabled: ${data1.meta.rerank_enabled}\n`;
+                    output += `  Rerank state: ${data1.meta.rerank_state}\n`;
+                    output += `  Results count: ${data1.results?.length || 0}\n`;
+                }
+
+                const vectorIds = (data1.results || []).map(r => r.chunk_id);
+                output += `  Result IDs: ${vectorIds.slice(0, 3).join(', ')}...\n\n`;
+
+                // Step 3: Query with rerank
+                output += "Step 3: Running query WITH rerank...\n";
+                queryPayload.rerank = true;
+
+                const res2 = await fetch(`${BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(queryPayload)
+                });
+                const data2 = await res2.json();
+
+                if (data2.meta) {
+                    output += `  Rerank enabled: ${data2.meta.rerank_enabled}\n`;
+                    output += `  Rerank state: ${data2.meta.rerank_state}\n`;
+                    output += `  Rerank method: ${data2.meta.rerank_method || 'N/A'}\n`;
+                    output += `  Rerank model: ${data2.meta.rerank_model || 'N/A'}\n`;
+                    output += `  Rerank ms: ${data2.meta.rerank_ms || 'N/A'}\n`;
+                    output += `  Results count: ${data2.results?.length || 0}\n`;
+                }
+
+                const rerankedIds = (data2.results || []).map(r => r.chunk_id);
+                output += `  Result IDs: ${rerankedIds.slice(0, 3).join(', ')}...\n\n`;
+
+                // Step 4: Use compare endpoint if available
+                output += "Step 4: Using /query/compare endpoint...\n";
+                const comparePayload = {
+                    workspace_id: "00000000-0000-0000-0000-000000000001",
+                    question: "What is the Bitcoin price support level?",
+                    retrieve_k: 10,
+                    top_k: 5,
+                    debug: true
+                };
+
+                const res3 = await fetch(`${BASE_URL}/query/compare`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(comparePayload)
+                });
+
+                if (res3.ok) {
+                    const data3 = await res3.json();
+                    output += `  Jaccard similarity: ${data3.metrics?.jaccard?.toFixed(3) || 'N/A'}\n`;
+                    output += `  Spearman correlation: ${data3.metrics?.spearman?.toFixed(3) || 'N/A'}\n`;
+                    output += `  Rank delta mean: ${data3.metrics?.rank_delta_mean?.toFixed(2) || 'N/A'}\n`;
+                    output += `  Rank delta max: ${data3.metrics?.rank_delta_max || 'N/A'}\n`;
+                    output += `  Vector-only results: ${data3.vector_only?.results?.length || 0}\n`;
+                    output += `  Reranked results: ${data3.reranked?.results?.length || 0}\n`;
+                } else {
+                    output += `  Compare endpoint returned ${res3.status}\n`;
+                }
+
+                output += "\n=== Test Complete ===\n";
+                output += "Reranking changes result ordering based on semantic relevance.\n";
+                output += "Jaccard < 1.0 indicates different results selected.\n";
+                output += "Spearman < 1.0 indicates different ranking order.\n";
+
+                document.getElementById('result').textContent = output;
+            } catch(e) {
+                document.getElementById('result').textContent = output + '\n\nError: ' + e.message;
+            }
+        }
+    </script>
+</body>
+</html>

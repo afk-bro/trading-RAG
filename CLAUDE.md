@@ -40,15 +40,14 @@ Sources (YouTube, PDF, Pine)
 
 ```bash
 # Setup
-./init.sh                                    # Creates .env, starts Docker services
+./init.sh                                    # Creates .env, starts Docker
 
 # Development
 source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000   # Local dev server
+uvicorn app.main:app --reload --port 8000
 
 # Docker
 docker compose -f docker-compose.rag.yml up --build
-docker compose -f docker-compose.rag.yml logs -f trading-rag-svc
 
 # Testing
 pytest tests/                                # All tests
@@ -70,6 +69,7 @@ mypy app/ --ignore-missing-imports
 
 **Optional**:
 - `OPENROUTER_API_KEY` - LLM API access (enables `mode=answer` queries)
+- `ADMIN_TOKEN` - Admin endpoint protection
 
 Services default to Docker network hostnames: `qdrant:6333`, `ollama:11434`
 
@@ -91,156 +91,78 @@ PostgreSQL tables (via Supabase):
 
 | Table | Purpose |
 |-------|---------|
-| `workspaces` | Control plane: routing defaults, config (jsonb), flags |
+| `workspaces` | Control plane (routing defaults, config jsonb) |
 | `documents` | Source metadata, content hash, status lifecycle |
-| `chunks` | Text segments, token counts, metadata arrays |
+| `chunks` | Text segments with token counts, metadata arrays |
 | `chunk_vectors` | Maps chunks to embedding model/collection |
-| `strategies` | Strategy registry with tags, source refs, backtest summaries |
-| `strategy_versions` | Immutable config snapshots with state machine (draft→active↔paused→retired) |
-| `strategy_version_transitions` | Audit log for version state changes |
-| `strategy_intel_snapshots` | Append-only time series of regime + confidence per version |
-| `paper_equity_snapshots` | Append-only equity time series for drawdown computation |
-| `backtest_runs` | Strategy backtest results with metrics |
-| `tune_sessions` | Parameter sweep sessions |
-| `wfo_runs` | Walk-forward optimization results |
-| `ops_alerts` | Operational alerts with delivery tracking |
-| `jobs` | Async job queue with status tracking |
+| `strategy_versions` | Immutable config snapshots with state machine |
+| `strategy_intel_snapshots` | Regime + confidence time series |
+| `paper_equity_snapshots` | Equity tracking for paper trading |
 
-All tables FK to workspaces for multi-tenant isolation. Migrations in `migrations/`.
+All tables FK to workspaces. Migrations in `migrations/`.
 
 ## API Endpoints
 
-### Core RAG
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/ingest` | Generic document ingestion |
-| POST | `/sources/youtube/ingest` | YouTube transcript ingestion |
-| POST | `/sources/pdf/ingest` | PDF file upload (multipart) |
-| POST | `/sources/pine/ingest` | Pine Script registry (admin) |
-| POST | `/query` | Semantic search (`retrieve` or `answer` mode) |
-| GET | `/jobs/{job_id}` | Async job status |
+**Health**: `GET /health`, `GET /ready`, `GET /metrics`
 
-### Strategy Lifecycle
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/strategies/{id}/versions` | Create draft version |
-| GET | `/strategies/{id}/versions` | List versions |
-| GET | `/strategies/{id}/versions/{vid}` | Get version details |
-| POST | `/strategies/{id}/versions/{vid}/activate` | Activate version (pauses current active) |
-| POST | `/strategies/{id}/versions/{vid}/pause` | Pause active version |
-| POST | `/strategies/{id}/versions/{vid}/retire` | Retire version (terminal) |
-| GET | `/strategies/{id}/versions/{vid}/transitions` | Get audit trail |
-| GET | `/strategies/{id}/versions/{vid}/intel/latest` | Latest intel snapshot |
-| GET | `/strategies/{id}/versions/{vid}/intel` | Intel timeline (cursor pagination) |
-| POST | `/strategies/{id}/versions/{vid}/intel/recompute` | Trigger intel recomputation |
+**RAG Core**:
+- `POST /ingest`, `/sources/youtube/ingest`, `/sources/pdf/ingest`, `/sources/pine/ingest`
+- `POST /query` (modes: `retrieve`, `answer`)
+- `GET /sources/pine/scripts`, `GET /sources/pine/scripts/{id}`
 
-### Backtests & WFO
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/backtests/tune` | Start parameter sweep |
-| GET | `/backtests/tunes` | List tunes |
-| POST | `/backtests/wfo` | Queue WFO job |
-| GET | `/backtests/leaderboard` | Global ranking |
+**Backtests** (see `docs/features/backtests.md`):
+- `POST /backtests/tune`, `GET /backtests/tunes`, `GET /backtests/tunes/{id}`
+- `POST /backtests/wfo`, `GET /backtests/wfo/{id}`, `GET /backtests/wfo`
+- `GET /backtests/leaderboard`
 
-### Execution (admin)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/execute/intents` | Execute trade intent (paper) |
-| GET | `/execute/paper/state/{ws}` | Paper trading state |
+**KB Recommend** (see `docs/features/kb-recommend.md`):
+- `POST /kb/trials/recommend`, `/kb/trials/ingest`, `/kb/trials/upload-ohlcv`
 
-### Dashboards (read-only)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
-| GET | `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
-| GET | `/dashboards/{ws}/alerts` | Active alerts by severity |
-| GET | `/dashboards/{ws}/summary` | Combined overview for dashboard cards |
+**Execution** (see `docs/features/execution.md`):
+- `POST /execute/intents`, `GET /execute/paper/state/{workspace_id}`
 
-### Admin
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/admin/system/health` | System health dashboard |
-| GET | `/admin/coverage/cockpit` | Coverage triage UI |
-| GET | `/admin/backtests/*` | Backtest admin UI |
-| GET | `/admin/ops-alerts` | List ops alerts |
-| POST | `/admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
-| POST | `/admin/ops-alerts/{id}/resolve` | Resolve alert |
-| POST | `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
-| GET | `/admin/ingest` | Ingest UI (YouTube, PDF, Pine) |
+**Dashboards**:
+- `GET /dashboards/{workspace_id}/equity` - Equity curve with drawdown
+- `GET /dashboards/{workspace_id}/intel-timeline` - Confidence history
+- `GET /dashboards/{workspace_id}/alerts` - Active alerts
+- `GET /dashboards/{workspace_id}/summary` - Combined overview
 
-All admin endpoints require `X-Admin-Token` header.
+**Admin** (requires `X-Admin-Token`):
+- `GET /admin/system/health`, `/admin/ops/snapshot`
+- `GET /admin/ops-alerts`, `POST /admin/ops-alerts/{id}/acknowledge|resolve|reopen`
+- `GET /admin/coverage/cockpit`, `PATCH /admin/coverage/weak/{id}`
+- `GET /admin/backtests/*`, `/admin/testing/run-plans/*`
 
 ## Testing
 
-### Test Categories
-
-| Category | Location | CI | Requirements |
-|----------|----------|-----|--------------|
-| Unit | `tests/unit/` | Always | None |
-| Integration | `tests/integration/` | Always | Qdrant container |
-| E2E | `tests/e2e/` | Manual | Server + browser |
-
-### Markers
-
-```python
-@pytest.mark.requires_db      # Needs real DB - skipped normally
-@pytest.mark.e2e              # Browser test - auto-skipped
-@pytest.mark.slow             # Can deselect with -m "not slow"
-```
-
-### Required Env for Tests
-
 ```bash
-export SUPABASE_URL=https://test.supabase.co
-export SUPABASE_SERVICE_ROLE_KEY=test-key
+pytest tests/unit/ -v                        # Fast, no deps
+pytest tests/integration/ -m "not requires_db"  # Needs Qdrant
+pytest tests/e2e/ -m e2e -v                  # Needs running server
 ```
 
-### Mypy Ratchet
+**Markers**: `@pytest.mark.requires_db`, `@pytest.mark.e2e`, `@pytest.mark.smoke`, `@pytest.mark.slow`
 
-`mypy.ini` has per-module ignores. Ratchet script fails CI if ignore count exceeds baseline (53). To fix: remove entry, fix errors, decrease baseline.
+**CI Jobs**: lint, unit-tests, integration-tests, integration-tests-full (nightly), smoke-test (nightly)
 
-## Project Structure
+**Mypy Ratchet**: `mypy.ini` has per-module ignores. Baseline in `scripts/check_mypy_ratchet.sh`.
 
-```
-trading-RAG/
-├── app/                    # Main application code
-│   ├── routers/            # API endpoints
-│   ├── services/           # Business logic
-│   │   ├── intel/          # Regime classification + confidence scoring
-│   │   └── ops_alerts/     # Rule evaluation, deduplication, Telegram notifications
-│   ├── repositories/       # Data access layer
-│   └── jobs/               # Job handlers
-├── tests/                  # Test suite
-│   ├── unit/               # Unit tests
-│   ├── integration/        # Integration tests
-│   └── fixtures/           # Test data
-├── migrations/             # SQL migrations
-├── scripts/                # Utility scripts
-├── docs/                   # Documentation
-│   ├── ops/                # Operations docs
-│   ├── plans/              # Design documents
-│   └── archive/            # Archived specs
-├── dashboards/             # Grafana dashboards
-└── ops/                    # Prometheus configs
-```
+## Security & Ops
 
-## Detailed Documentation
+See `docs/features/ops.md` for full details.
 
-| Topic | Location |
-|-------|----------|
-| Backtest tuning & WFO | [docs/backtests.md](docs/backtests.md) |
-| Pine Script system | [docs/pine-scripts.md](docs/pine-scripts.md) |
-| Execution & strategy runner | [docs/execution.md](docs/execution.md) |
-| Coverage triage & KB recommend | [docs/coverage.md](docs/coverage.md) |
-| Operational hardening & security | [docs/ops/hardening.md](docs/ops/hardening.md) |
-| Alerting rules | [docs/ops/alerting-rules.md](docs/ops/alerting-rules.md) |
-| Runbooks | [docs/ops/runbooks.md](docs/ops/runbooks.md) |
-| Tech debt | [docs/tech-debt.md](docs/tech-debt.md) |
-| PRD v0.1 | [docs/plans/v.01-PRD.md](docs/plans/v.01-PRD.md) |
+- `require_admin_token()` - Admin endpoint protection
+- `RateLimiter`, `WorkspaceSemaphore` - Rate/concurrency limiting
+- Prometheus alerts in `ops/prometheus/rules/`
+- Runbooks in `docs/ops/runbooks.md`
 
-## Roadmap Context
+## Feature Documentation
 
-Evolving from trading-focused RAG to general-purpose rag-core:
-- Trading is the first workspace (finance knowledge base)
-- PDF backend is swappable (pymupdf now, MinerU/StudyG later)
-- Workspace config enables per-tenant customization without code changes
+Detailed documentation for subsystems:
+
+- `docs/features/backtests.md` - Backtest tuning, WFO, test generator
+- `docs/features/pine-scripts.md` - Pine Script registry, ingest, auto-strategy
+- `docs/features/execution.md` - Paper execution, strategy runner
+- `docs/features/coverage.md` - Coverage triage workflow
+- `docs/features/kb-recommend.md` - KB recommend pipeline, regime fingerprints
+- `docs/features/ops.md` - System health, security, v1.0.0 hardening
