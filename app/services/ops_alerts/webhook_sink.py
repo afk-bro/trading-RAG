@@ -372,12 +372,14 @@ async def send_alert_webhooks(
     tasks = []
 
     if slack_webhook_url:
-        sink = SlackWebhookSink(slack_webhook_url)
-        tasks.append(_safe_send(sink, alert_event, "Slack"))
+        slack_sink = SlackWebhookSink(slack_webhook_url)
+        tasks.append(_safe_send(slack_sink, alert_event, "Slack"))
 
     if generic_webhook_url:
-        sink = GenericWebhookSink(generic_webhook_url, headers=generic_webhook_headers)
-        tasks.append(_safe_send(sink, alert_event, "Generic"))
+        generic_sink = GenericWebhookSink(
+            generic_webhook_url, headers=generic_webhook_headers
+        )
+        tasks.append(_safe_send(generic_sink, alert_event, "Generic"))
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
