@@ -217,7 +217,9 @@ class TestClaimJob:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         repo = JobRepository(mock_pool)
-        job = await repo.claim(worker_id="worker-1", job_types=[JobType.TUNE, JobType.WFO])
+        job = await repo.claim(
+            worker_id="worker-1", job_types=[JobType.TUNE, JobType.WFO]
+        )
 
         assert job is not None
         assert job.type == JobType.TUNE

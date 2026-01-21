@@ -147,7 +147,9 @@ class TestSlackWebhookSink:
         # First call fails, second succeeds
         mock_fail = Mock(spec=httpx.Response)
         mock_fail.status_code = 500
-        mock_fail.raise_for_status = Mock(side_effect=httpx.HTTPStatusError("", request=Mock(), response=mock_fail))
+        mock_fail.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError("", request=Mock(), response=mock_fail)
+        )
 
         mock_success = Mock(spec=httpx.Response)
         mock_success.status_code = 200
@@ -167,7 +169,9 @@ class TestSlackWebhookSink:
         """Test retry logic fails after max attempts."""
         mock_fail = Mock(spec=httpx.Response)
         mock_fail.status_code = 500
-        mock_fail.raise_for_status = Mock(side_effect=httpx.HTTPStatusError("", request=Mock(), response=mock_fail))
+        mock_fail.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError("", request=Mock(), response=mock_fail)
+        )
 
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_fail
@@ -244,7 +248,9 @@ class TestGenericWebhookSink:
         """Test retry logic for generic webhook."""
         mock_fail = Mock(spec=httpx.Response)
         mock_fail.status_code = 503
-        mock_fail.raise_for_status = Mock(side_effect=httpx.HTTPStatusError("", request=Mock(), response=mock_fail))
+        mock_fail.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError("", request=Mock(), response=mock_fail)
+        )
 
         mock_success = Mock(spec=httpx.Response)
         mock_success.status_code = 200

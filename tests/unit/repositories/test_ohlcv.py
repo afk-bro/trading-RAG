@@ -184,9 +184,7 @@ class TestOHLCVRepository:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         repo = OHLCVRepository(mock_pool)
-        candles = await repo.get_range(
-            "kucoin", "BTC-USDT", "1h", start_ts, end_ts
-        )
+        candles = await repo.get_range("kucoin", "BTC-USDT", "1h", start_ts, end_ts)
 
         assert len(candles) == 5
         assert all(isinstance(c, Candle) for c in candles)
@@ -204,9 +202,7 @@ class TestOHLCVRepository:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         repo = OHLCVRepository(mock_pool)
-        candles = await repo.get_range(
-            "kucoin", "BTC-USDT", "1h", start_ts, end_ts
-        )
+        candles = await repo.get_range("kucoin", "BTC-USDT", "1h", start_ts, end_ts)
 
         assert candles == []
 
@@ -259,9 +255,7 @@ class TestOHLCVRepository:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         repo = OHLCVRepository(mock_pool)
-        count = await repo.count_in_range(
-            "kucoin", "BTC-USDT", "1h", start_ts, end_ts
-        )
+        count = await repo.count_in_range("kucoin", "BTC-USDT", "1h", start_ts, end_ts)
 
         assert count == 42
 
@@ -279,8 +273,6 @@ class TestOHLCVRepository:
         mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
         repo = OHLCVRepository(mock_pool)
-        count = await repo.count_in_range(
-            "kucoin", "BTC-USDT", "1h", start_ts, end_ts
-        )
+        count = await repo.count_in_range("kucoin", "BTC-USDT", "1h", start_ts, end_ts)
 
         assert count == 0

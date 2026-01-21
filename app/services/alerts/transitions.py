@@ -133,7 +133,9 @@ class AlertTransitionManager:
             # Send webhooks for NEW activations (not updates to existing active alerts)
             is_new_activation = not existing or existing["status"] != "active"
             if is_new_activation and self.webhook_enabled:
-                await self._send_webhooks(result, workspace_id, rule_type, severity, context_json, timeframe)
+                await self._send_webhooks(
+                    result, workspace_id, rule_type, severity, context_json, timeframe
+                )
 
             return {"action": "activated", "event_id": result["id"]}
 

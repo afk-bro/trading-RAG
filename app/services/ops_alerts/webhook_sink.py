@@ -118,7 +118,9 @@ class SlackWebhookSink:
         if self.admin_ui_base_url:
             alert_id = alert_event.get("id")
             if alert_id:
-                admin_url = f"{self.admin_ui_base_url}/admin/ops-alerts?alert_id={alert_id}"
+                admin_url = (
+                    f"{self.admin_ui_base_url}/admin/ops-alerts?alert_id={alert_id}"
+                )
                 fields.append(
                     {
                         "title": "Admin Link",
@@ -381,9 +383,7 @@ async def send_alert_webhooks(
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def _safe_send(
-    sink: Any, alert_event: dict[str, Any], sink_name: str
-) -> None:
+async def _safe_send(sink: Any, alert_event: dict[str, Any], sink_name: str) -> None:
     """
     Wrapper that catches and logs webhook errors without propagating.
 
