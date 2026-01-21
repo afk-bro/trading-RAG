@@ -1,7 +1,6 @@
 """Unit tests for live price poller service."""
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,8 +8,6 @@ import pytest
 from app.services.market_data.poller import (
     LivePricePoller,
     PollKey,
-    PollState,
-    PollerHealth,
     get_poller,
     set_poller,
 )
@@ -243,7 +240,9 @@ class TestDuePairSelection:
     """Tests for due pair selection logic."""
 
     @pytest.mark.asyncio
-    async def test_expands_symbol_timeframes(self, mock_pool, mock_settings, sample_symbols):
+    async def test_expands_symbol_timeframes(
+        self, mock_pool, mock_settings, sample_symbols
+    ):
         """Test selection expands symbols to (exchange, symbol, tf) pairs."""
         pool, _ = mock_pool
 
@@ -268,7 +267,9 @@ class TestDuePairSelection:
                 assert pair.timeframe == "1m"
 
     @pytest.mark.asyncio
-    async def test_filters_to_active_timeframes(self, mock_pool, mock_settings, sample_symbols):
+    async def test_filters_to_active_timeframes(
+        self, mock_pool, mock_settings, sample_symbols
+    ):
         """Test selection filters to configured active timeframes."""
         pool, _ = mock_pool
         mock_settings.live_price_poll_timeframes = ["1m", "5m"]
@@ -355,7 +356,9 @@ class TestPollerHealth:
             assert health.running is False
 
     @pytest.mark.asyncio
-    async def test_health_computes_pairs_enabled(self, mock_pool, mock_settings, sample_symbols):
+    async def test_health_computes_pairs_enabled(
+        self, mock_pool, mock_settings, sample_symbols
+    ):
         """Test health computes pairs_enabled from symbols × timeframes."""
         pool, _ = mock_pool
 
@@ -424,20 +427,54 @@ class TestModuleSingleton:
 # =============================================================================
 
 
+@pytest.fixture
+def mock_market_candle():
+    """Sample MarketDataCandle for testing."""
+    from app.services.market_data.base import MarketDataCandle
+
+    return MarketDataCandle(
+        ts=datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
+        open=100.0,
+        high=105.0,
+        low=99.0,
+        close=102.0,
+        volume=1000.0,
+    )
+
+
 class TestPollTick:
     """Tests for poll tick execution."""
 
     @pytest.mark.asyncio
-    async def test_poll_tick_logs_selection(self, mock_pool, mock_settings, sample_symbols):
+    async def test_poll_tick_logs_selection(
+        self, mock_pool, mock_settings, sample_symbols, mock_market_candle
+    ):
         """Test poll tick logs number of selected pairs."""
         pool, _ = mock_pool
 
-        with patch(
-            "app.services.market_data.poller.CoreSymbolsRepository"
-        ) as mock_repo_cls:
-            mock_repo = MagicMock()
-            mock_repo.list_symbols = AsyncMock(return_value=sample_symbols)
-            mock_repo_cls.return_value = mock_repo
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+            patch(
+                "app.services.market_data.poller.CcxtMarketDataProvider"
+            ) as mock_provider_cls,
+        ):
+            # Mock symbols repository
+            mock_symbols = MagicMock()
+            mock_symbols.list_symbols = AsyncMock(return_value=sample_symbols)
+            mock_symbols_cls.return_value = mock_symbols
+
+            # Mock OHLCV repository
+            mock_ohlcv = MagicMock()
+            mock_ohlcv.upsert_candles = AsyncMock(return_value=5)
+            mock_ohlcv_cls.return_value = mock_ohlcv
+
+            # Mock CCXT provider
+            mock_provider = MagicMock()
+            mock_provider.fetch_ohlcv = AsyncMock(return_value=[mock_market_candle])
+            mock_provider_cls.return_value = mock_provider
 
             poller = LivePricePoller(pool, mock_settings)
             result = await poller.run_once()
@@ -446,6 +483,7 @@ class TestPollTick:
             assert result.pairs_fetched == 3
             assert result.pairs_succeeded == 3
             assert result.pairs_failed == 0
+            assert result.candles_upserted == 15  # 3 pairs × 5 candles each
             assert result.duration_ms >= 0
 
     @pytest.mark.asyncio
@@ -453,15 +491,248 @@ class TestPollTick:
         """Test poll tick with no symbols."""
         pool, _ = mock_pool
 
-        with patch(
-            "app.services.market_data.poller.CoreSymbolsRepository"
-        ) as mock_repo_cls:
-            mock_repo = MagicMock()
-            mock_repo.list_symbols = AsyncMock(return_value=[])
-            mock_repo_cls.return_value = mock_repo
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+        ):
+            mock_symbols = MagicMock()
+            mock_symbols.list_symbols = AsyncMock(return_value=[])
+            mock_symbols_cls.return_value = mock_symbols
+
+            mock_ohlcv = MagicMock()
+            mock_ohlcv_cls.return_value = mock_ohlcv
 
             poller = LivePricePoller(pool, mock_settings)
             result = await poller.run_once()
 
             assert result.pairs_fetched == 0
             assert result.duration_ms >= 0
+
+
+# =============================================================================
+# LP2 Fetch Tests
+# =============================================================================
+
+
+class TestFetchPair:
+    """Tests for _fetch_pair method (LP2)."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_pair_with_last_candle_ts(
+        self, mock_pool, mock_settings, mock_market_candle
+    ):
+        """Test fetch uses smart lookback from last_candle_ts."""
+        pool, _ = mock_pool
+        last_ts = datetime(2024, 1, 15, 11, 59, 0, tzinfo=timezone.utc)
+
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+            patch(
+                "app.services.market_data.poller.CcxtMarketDataProvider"
+            ) as mock_provider_cls,
+        ):
+            mock_symbols_cls.return_value = MagicMock()
+
+            mock_ohlcv = MagicMock()
+            mock_ohlcv.upsert_candles = AsyncMock(return_value=3)
+            mock_ohlcv_cls.return_value = mock_ohlcv
+
+            mock_provider = MagicMock()
+            mock_provider.fetch_ohlcv = AsyncMock(return_value=[mock_market_candle])
+            mock_provider_cls.return_value = mock_provider
+
+            poller = LivePricePoller(pool, mock_settings)
+            pair = PollKey("binance", "BTC/USDT", "1m")
+
+            count, latest = await poller._fetch_pair(pair, last_ts)
+
+            # Verify provider was called with start_ts = last_ts - 60s (1 candle overlap)
+            call_args = mock_provider.fetch_ohlcv.call_args
+            assert call_args.kwargs["symbol"] == "BTC/USDT"
+            assert call_args.kwargs["timeframe"] == "1m"
+            # Start should be last_ts - 60 seconds (1 candle buffer)
+            start_ts = call_args.kwargs["start_ts"]
+            expected_start = last_ts - timedelta(seconds=60)
+            assert start_ts == expected_start
+
+            assert count == 3
+            assert latest == mock_market_candle.ts
+
+    @pytest.mark.asyncio
+    async def test_fetch_pair_fallback_lookback(
+        self, mock_pool, mock_settings, mock_market_candle
+    ):
+        """Test fetch uses config lookback when no last_candle_ts."""
+        pool, _ = mock_pool
+
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+            patch(
+                "app.services.market_data.poller.CcxtMarketDataProvider"
+            ) as mock_provider_cls,
+        ):
+            mock_symbols_cls.return_value = MagicMock()
+
+            mock_ohlcv = MagicMock()
+            mock_ohlcv.upsert_candles = AsyncMock(return_value=5)
+            mock_ohlcv_cls.return_value = mock_ohlcv
+
+            mock_provider = MagicMock()
+            mock_provider.fetch_ohlcv = AsyncMock(return_value=[mock_market_candle])
+            mock_provider_cls.return_value = mock_provider
+
+            mock_settings.live_price_poll_lookback_candles = 5
+
+            poller = LivePricePoller(pool, mock_settings)
+            pair = PollKey("binance", "BTC/USDT", "1m")
+
+            count, latest = await poller._fetch_pair(pair, None)
+
+            # Verify provider was called with start_ts = now - 5 candles * 60s
+            call_args = mock_provider.fetch_ohlcv.call_args
+            start_ts = call_args.kwargs["start_ts"]
+            end_ts = call_args.kwargs["end_ts"]
+            # Should be approximately 5 minutes ago
+            expected_duration = timedelta(seconds=5 * 60)
+            actual_duration = end_ts - start_ts
+            assert abs(actual_duration - expected_duration) < timedelta(seconds=2)
+
+    @pytest.mark.asyncio
+    async def test_fetch_pair_unknown_timeframe(self, mock_pool, mock_settings):
+        """Test fetch handles unknown timeframe gracefully."""
+        pool, _ = mock_pool
+
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+        ):
+            mock_symbols_cls.return_value = MagicMock()
+            mock_ohlcv_cls.return_value = MagicMock()
+
+            poller = LivePricePoller(pool, mock_settings)
+            pair = PollKey("binance", "BTC/USDT", "99x")  # Invalid timeframe
+
+            count, latest = await poller._fetch_pair(pair, None)
+
+            assert count == 0
+            assert latest is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_pair_empty_result(self, mock_pool, mock_settings):
+        """Test fetch handles empty candle response."""
+        pool, _ = mock_pool
+
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+            patch(
+                "app.services.market_data.poller.CcxtMarketDataProvider"
+            ) as mock_provider_cls,
+        ):
+            mock_symbols_cls.return_value = MagicMock()
+            mock_ohlcv_cls.return_value = MagicMock()
+
+            mock_provider = MagicMock()
+            mock_provider.fetch_ohlcv = AsyncMock(return_value=[])
+            mock_provider_cls.return_value = mock_provider
+
+            poller = LivePricePoller(pool, mock_settings)
+            pair = PollKey("binance", "BTC/USDT", "1m")
+
+            count, latest = await poller._fetch_pair(pair, None)
+
+            assert count == 0
+            assert latest is None
+
+
+class TestStalenessMetric:
+    """Tests for staleness gauge updates (LP2)."""
+
+    @pytest.mark.asyncio
+    async def test_staleness_gauge_updated(
+        self, mock_pool, mock_settings, mock_market_candle
+    ):
+        """Test LATEST_CANDLE_AGE gauge is updated after fetch."""
+        pool, _ = mock_pool
+
+        with (
+            patch(
+                "app.services.market_data.poller.CoreSymbolsRepository"
+            ) as mock_symbols_cls,
+            patch("app.services.market_data.poller.OHLCVRepository") as mock_ohlcv_cls,
+            patch(
+                "app.services.market_data.poller.CcxtMarketDataProvider"
+            ) as mock_provider_cls,
+            patch("app.services.market_data.poller.LATEST_CANDLE_AGE") as mock_gauge,
+        ):
+            mock_symbols_cls.return_value = MagicMock()
+
+            mock_ohlcv = MagicMock()
+            mock_ohlcv.upsert_candles = AsyncMock(return_value=1)
+            mock_ohlcv_cls.return_value = mock_ohlcv
+
+            mock_provider = MagicMock()
+            mock_provider.fetch_ohlcv = AsyncMock(return_value=[mock_market_candle])
+            mock_provider_cls.return_value = mock_provider
+
+            poller = LivePricePoller(pool, mock_settings)
+            pair = PollKey("binance", "BTC/USDT", "1m")
+
+            await poller._fetch_pair(pair, None)
+
+            # Verify gauge was updated with correct labels
+            mock_gauge.labels.assert_called_with(
+                exchange_id="binance",
+                symbol="BTC/USDT",
+                timeframe="1m",
+            )
+            mock_gauge.labels.return_value.set.assert_called_once()
+            # The age should be positive (candle is in the past)
+            age_value = mock_gauge.labels.return_value.set.call_args[0][0]
+            assert age_value > 0
+
+
+class TestProviderCache:
+    """Tests for CCXT provider caching."""
+
+    def test_provider_cached_per_exchange(self, mock_pool, mock_settings):
+        """Test providers are cached by exchange_id."""
+        pool, _ = mock_pool
+
+        with (
+            patch("app.services.market_data.poller.CoreSymbolsRepository"),
+            patch("app.services.market_data.poller.OHLCVRepository"),
+            patch(
+                "app.services.market_data.poller.CcxtMarketDataProvider"
+            ) as mock_provider_cls,
+        ):
+            # Each call creates a new mock instance
+            mock_provider_cls.side_effect = lambda x: MagicMock(exchange_id=x)
+
+            poller = LivePricePoller(pool, mock_settings)
+
+            # Get provider twice for same exchange
+            p1 = poller._get_provider("binance")
+            p2 = poller._get_provider("binance")
+
+            # Should be same instance (cached)
+            assert p1 is p2
+
+            # Different exchange gets different provider
+            p3 = poller._get_provider("kraken")
+            assert p1 is not p3
+
+            # Provider class should have been called twice (once per exchange)
+            assert mock_provider_cls.call_count == 2
