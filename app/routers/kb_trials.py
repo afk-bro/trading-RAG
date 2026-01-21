@@ -858,8 +858,8 @@ async def recommend(
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail={
-                "error": "Dataset storage not implemented. Use regime_tags parameter to specify regime explicitly, "
-                "or upload OHLCV file via /kb/trials/recommend/upload endpoint (future).",
+                "error": "Dataset storage not implemented. Use regime_tags to specify "
+                "regime explicitly, or upload OHLCV via /kb/trials/recommend/upload.",
                 "code": "DATASET_STORAGE_NOT_IMPLEMENTED",
                 "dataset_id": request.dataset_id,
             },

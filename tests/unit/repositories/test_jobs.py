@@ -1,12 +1,11 @@
 """Tests for job repository."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, Mock
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
-from app.jobs.models import Job
 from app.jobs.types import JobStatus, JobType
 from app.repositories.jobs import JobRepository
 

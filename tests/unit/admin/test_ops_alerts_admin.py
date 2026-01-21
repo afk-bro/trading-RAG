@@ -148,10 +148,9 @@ class TestOpsAlertsListEndpoint:
         with patch("app.admin.ops_alerts._db_pool", mock_db_pool), patch(
             "app.repositories.alerts.AlertsRepository", return_value=mock_alerts_repo
         ):
-            response = client.get(
-                f"/admin/ops-alerts?workspace_id={workspace_id}&status=active&severity=high&limit=10&offset=20",
-                headers={"X-Admin-Token": "test-token"},
-            )
+            url = f"/admin/ops-alerts?workspace_id={workspace_id}"
+            url += "&status=active&severity=high&limit=10&offset=20"
+            response = client.get(url, headers={"X-Admin-Token": "test-token"})
 
         assert response.status_code == status.HTTP_200_OK
 

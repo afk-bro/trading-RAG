@@ -207,7 +207,7 @@ async def reopen_ops_alert(
         )
 
     # Reactivate by upserting with active status
-    result = await repo.upsert_activate(
+    await repo.upsert_activate(
         workspace_id=event["workspace_id"],
         rule_id=event["rule_id"],
         strategy_entity_id=event["strategy_entity_id"],

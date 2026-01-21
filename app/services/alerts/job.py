@@ -1,6 +1,6 @@
 """Alert evaluator job - scheduled evaluation of alert rules."""
 
-from typing import Any, Optional
+from typing import Any  # noqa: F401
 from uuid import UUID
 
 import structlog
