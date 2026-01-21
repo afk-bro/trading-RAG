@@ -1,0 +1,131 @@
+{% extends "layout.html" %}
+
+{% block title %}WFO Runs - KB Admin{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+    <h1>Walk-Forward Optimization Runs</h1>
+    <div class="detail-meta">
+        <span>Workspace: {{ workspace_id[:8] }}...</span>
+        <span>Total: {{ total }}</span>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+    <form method="get" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        <select name="status" onchange="this.form.submit()">
+            <option value="">All Status</option>
+            <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="running" {% if status_filter == 'running' %}selected{% endif %}>Running</option>
+            <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
+            <option value="canceled" {% if status_filter == 'canceled' %}selected{% endif %}>Canceled</option>
+        </select>
+        <a href="/admin/backtests/wfo?workspace_id={{ workspace_id }}" class="btn btn-secondary">Clear</a>
+    </form>
+</div>
+
+{% if error %}
+<div class="card">
+    <div class="empty-state">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+</div>
+{% elif wfos|length == 0 %}
+<div class="card">
+    <div class="empty-state">
+        <h3>No WFO Runs</h3>
+        <p>No Walk-Forward Optimization runs found for this workspace.</p>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Created</th>
+                <th>Strategy</th>
+                <th>Status</th>
+                <th>Folds</th>
+                <th>Config</th>
+                <th>Best Params</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for wfo in wfos %}
+            <tr>
+                <td>
+                    <a href="/admin/backtests/wfo/{{ wfo.id }}" title="{{ wfo.id }}">
+                        {{ wfo.id[:8] }}...
+                    </a>
+                </td>
+                <td>{{ wfo.created_at.strftime('%Y-%m-%d %H:%M') if wfo.created_at else '-' }}</td>
+                <td>
+                    <span title="{{ wfo.strategy_entity_id }}">
+                        {{ wfo.strategy_name or wfo.strategy_entity_id[:8] + '...' }}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge badge-{{ wfo.status }}">{{ wfo.status }}</span>
+                </td>
+                <td>
+                    {% set completed = wfo.folds_completed or 0 %}
+                    {% set failed = wfo.folds_failed or 0 %}
+                    {% set total = wfo.n_folds or 0 %}
+                    <span title="Completed: {{ completed }}, Failed: {{ failed }}, Total: {{ total }}">
+                        {{ completed }}/{{ total }}
+                        {% if failed > 0 %}
+                        <span class="badge badge-failed" style="margin-left: 4px;">{{ failed }} failed</span>
+                        {% endif %}
+                    </span>
+                </td>
+                <td>
+                    {% if wfo.wfo_config %}
+                    <span title="Train: {{ wfo.wfo_config.train_days }}d, Test: {{ wfo.wfo_config.test_days }}d, Step: {{ wfo.wfo_config.step_days }}d">
+                        {{ wfo.wfo_config.train_days }}/{{ wfo.wfo_config.test_days }}/{{ wfo.wfo_config.step_days }}d
+                    </span>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td class="truncate" style="max-width: 200px;">
+                    {% if wfo.best_params %}
+                    {{ wfo.best_params | tojson }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        <div class="pagination-info">
+            Showing {{ offset + 1 }}-{{ [offset + limit, total] | min }} of {{ total }}
+        </div>
+        <div class="pagination-buttons">
+            {% if has_prev %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter }}&offset={{ prev_offset }}&limit={{ limit }}" class="btn btn-secondary">Prev</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter }}&offset={{ next_offset }}&limit={{ limit }}" class="btn btn-secondary">Next</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<style>
+    .badge-pending { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-canceled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+</style>
+{% endblock %}

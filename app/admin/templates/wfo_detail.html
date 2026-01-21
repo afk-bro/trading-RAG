@@ -1,0 +1,666 @@
+{% extends "layout.html" %}
+
+{% block title %}WFO {{ wfo.id[:8] }}... - KB Admin{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/admin/backtests/wfo?workspace_id={{ wfo.workspace_id }}">WFO Runs</a> /
+    <span>{{ wfo.id[:8] }}...</span>
+</div>
+
+<!-- Header -->
+<div class="detail-header">
+    <h1>
+        <span class="badge badge-{{ wfo.status }}">{{ wfo.status }}</span>
+        Walk-Forward Optimization
+    </h1>
+    <div class="detail-meta">
+        <span title="{{ wfo.id }}">ID: {{ wfo.id[:12] }}...
+            <button onclick="navigator.clipboard.writeText('{{ wfo.id }}')" class="copy-btn" title="Copy ID">&#128203;</button>
+        </span>
+        <span>Created: {{ wfo.created_at.strftime('%Y-%m-%d %H:%M:%S') if wfo.created_at else '-' }}</span>
+        <span>Strategy: {{ wfo.strategy_name or wfo.strategy_entity_id[:8] + '...' }}</span>
+    </div>
+</div>
+
+<!-- Summary Stats -->
+<div class="stats">
+    <div class="stat">
+        <div class="stat-value">{{ wfo.folds_completed or 0 }}/{{ wfo.n_folds or 0 }}</div>
+        <div class="stat-label">Folds Completed</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value{% if wfo.folds_failed > 0 %} text-danger{% endif %}">{{ wfo.folds_failed or 0 }}</div>
+        <div class="stat-label">Folds Failed</div>
+    </div>
+    {% if wfo.wfo_config %}
+    <div class="stat">
+        <div class="stat-value">{{ wfo.wfo_config.train_days }}d</div>
+        <div class="stat-label">Train Window</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ wfo.wfo_config.test_days }}d</div>
+        <div class="stat-label">Test Window</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value">{{ wfo.wfo_config.step_days }}d</div>
+        <div class="stat-label">Step Size</div>
+    </div>
+    {% endif %}
+    {% if wfo.best_candidate %}
+    <div class="stat">
+        <div class="stat-value text-success">{{ '%.3f' | format(wfo.best_candidate.mean_oos) }}</div>
+        <div class="stat-label">Best Mean OOS</div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Fold Selector & Chart -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Fold Equity Curve</h3>
+        <div class="fold-selector">
+            <label for="fold-select">Select Fold:</label>
+            <select id="fold-select" onchange="loadFoldEquity()">
+                <option value="">-- Select a fold --</option>
+            </select>
+            <span id="fold-info" class="fold-info"></span>
+        </div>
+    </div>
+    <div id="chart-container">
+        <div id="chart-placeholder" class="chart-placeholder">
+            <p>Select a fold above to view its equity curve</p>
+        </div>
+        <div id="chart-loading" class="chart-loading" style="display: none;">Loading equity data...</div>
+        <div id="chart-error" class="chart-error" style="display: none;"></div>
+        <div id="equity-chart" style="width: 100%; height: 400px;"></div>
+    </div>
+    <div id="chart-notes" class="chart-notes" style="display: none;"></div>
+</div>
+
+<!-- Fold Summary Stats -->
+<div class="stats" id="fold-stats" style="display: none;">
+    <div class="stat">
+        <div class="stat-value" id="stat-return">-</div>
+        <div class="stat-label">Return</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" id="stat-sharpe">-</div>
+        <div class="stat-label">Sharpe</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" id="stat-maxdd">-</div>
+        <div class="stat-label">Max DD</div>
+    </div>
+    <div class="stat">
+        <div class="stat-value" id="stat-trades">-</div>
+        <div class="stat-label">Trades</div>
+    </div>
+</div>
+
+<!-- Best Candidate -->
+{% if wfo.best_candidate %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Best Candidate</h3>
+        <span class="badge badge-verified">Winner</span>
+    </div>
+    <div class="candidate-summary">
+        <div class="candidate-metrics">
+            <div class="metric">
+                <span class="metric-label">Mean OOS:</span>
+                <span class="metric-value">{{ '%.4f' | format(wfo.best_candidate.mean_oos) }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Median OOS:</span>
+                <span class="metric-value">{{ '%.4f' | format(wfo.best_candidate.median_oos) }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Worst Fold:</span>
+                <span class="metric-value{% if wfo.best_candidate.worst_fold_oos < 0 %} text-danger{% endif %}">{{ '%.4f' | format(wfo.best_candidate.worst_fold_oos) }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Std Dev:</span>
+                <span class="metric-value">{{ '%.4f' | format(wfo.best_candidate.stddev_oos) }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Coverage:</span>
+                <span class="metric-value">{{ '%.0f' | format(wfo.best_candidate.coverage * 100) }}%</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Top-K %:</span>
+                <span class="metric-value">{{ '%.0f' | format(wfo.best_candidate.pct_top_k * 100) }}%</span>
+            </div>
+        </div>
+        <div class="candidate-params">
+            <strong>Parameters:</strong>
+            <div class="code-block">{{ wfo.best_candidate.params | tojson(indent=2) }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Candidates Comparison Table -->
+{% if wfo.candidates and wfo.candidates|length > 0 %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Candidate Comparison</h3>
+        <span class="badge badge-type">{{ wfo.candidates|length }} candidates</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Params Hash</th>
+                <th>Mean OOS</th>
+                <th>Median OOS</th>
+                <th>Worst Fold</th>
+                <th>Std Dev</th>
+                <th>Coverage</th>
+                <th>Top-K %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for candidate in wfo.candidates[:20] %}
+            <tr{% if candidate.params_hash == wfo.best_candidate.params_hash %} class="winner-row"{% endif %}>
+                <td>{{ loop.index }}</td>
+                <td title="{{ candidate.params | tojson }}">
+                    <code>{{ candidate.params_hash[:12] }}...</code>
+                </td>
+                <td class="{% if candidate.mean_oos > 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ '%.4f' | format(candidate.mean_oos) }}
+                </td>
+                <td>{{ '%.4f' | format(candidate.median_oos) }}</td>
+                <td class="{% if candidate.worst_fold_oos < 0 %}text-danger{% endif %}">
+                    {{ '%.4f' | format(candidate.worst_fold_oos) }}
+                </td>
+                <td>{{ '%.4f' | format(candidate.stddev_oos) }}</td>
+                <td>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: {{ candidate.coverage * 100 }}%"></div>
+                        <span>{{ '%.0f' | format(candidate.coverage * 100) }}%</span>
+                    </div>
+                </td>
+                <td>{{ '%.0f' | format(candidate.pct_top_k * 100) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if wfo.candidates|length > 20 %}
+    <div class="table-note">Showing top 20 of {{ wfo.candidates|length }} candidates</div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Configuration -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Configuration</h3>
+    </div>
+    <div class="config-grid">
+        {% if wfo.wfo_config %}
+        <div class="config-section">
+            <h4>WFO Config</h4>
+            <div class="code-block">{{ wfo.wfo_config | tojson(indent=2) }}</div>
+        </div>
+        {% endif %}
+        {% if wfo.data_source %}
+        <div class="config-section">
+            <h4>Data Source</h4>
+            <div class="code-block">{{ wfo.data_source | tojson(indent=2) }}</div>
+        </div>
+        {% endif %}
+        {% if wfo.param_space %}
+        <div class="config-section">
+            <h4>Parameter Space</h4>
+            <div class="code-block">{{ wfo.param_space | tojson(indent=2) }}</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Child Tunes -->
+{% if wfo.child_tune_ids and wfo.child_tune_ids|length > 0 %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Fold Tunes</h3>
+        <span class="badge badge-type">{{ wfo.child_tune_ids|length }} folds</span>
+    </div>
+    <div class="fold-links">
+        {% for tune_id in wfo.child_tune_ids %}
+        <a href="/admin/backtests/tunes/{{ tune_id }}" class="fold-link" title="{{ tune_id }}">
+            Fold {{ loop.index0 }}: {{ tune_id[:8] }}...
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Full JSON (expandable) -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Full WFO Data</h3>
+        <button onclick="toggleJson()" class="btn btn-secondary">Toggle JSON</button>
+    </div>
+    <div id="full-json" style="display: none;">
+        <div class="code-block" style="max-height: 600px; overflow-y: auto;">{{ wfo_json }}</div>
+    </div>
+</div>
+
+<!-- Plotly CDN -->
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
+<script>
+const WFO_ID = '{{ wfo.id }}';
+const ADMIN_TOKEN = localStorage.getItem('adminToken') || '';
+let chartData = null;
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadChartData();
+});
+
+async function loadChartData() {
+    try {
+        const resp = await fetch(`/backtests/wfo/${WFO_ID}/chart-data`, {
+            headers: { 'X-Admin-Token': ADMIN_TOKEN }
+        });
+
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+
+        chartData = await resp.json();
+        populateFoldSelector();
+    } catch (err) {
+        console.error('Failed to load WFO data:', err);
+    }
+}
+
+function populateFoldSelector() {
+    const select = document.getElementById('fold-select');
+
+    if (!chartData.folds || chartData.folds.length === 0) {
+        select.innerHTML = '<option value="">No folds available</option>';
+        return;
+    }
+
+    let options = '<option value="">-- Select a fold --</option>';
+    chartData.folds.forEach((fold, idx) => {
+        const statusBadge = fold.status === 'completed' ? '✓' : fold.status === 'failed' ? '✗' : '○';
+        const dateRange = fold.test_start && fold.test_end ?
+            ` (${fold.test_start.split('T')[0]} - ${fold.test_end.split('T')[0]})` : '';
+        options += `<option value="${idx}">${statusBadge} Fold ${idx}${dateRange}</option>`;
+    });
+    select.innerHTML = options;
+}
+
+async function loadFoldEquity() {
+    const select = document.getElementById('fold-select');
+    const foldIndex = select.value;
+
+    if (foldIndex === '') {
+        document.getElementById('chart-placeholder').style.display = 'block';
+        document.getElementById('equity-chart').innerHTML = '';
+        document.getElementById('fold-stats').style.display = 'none';
+        document.getElementById('fold-info').textContent = '';
+        return;
+    }
+
+    document.getElementById('chart-placeholder').style.display = 'none';
+    document.getElementById('chart-loading').style.display = 'block';
+    document.getElementById('chart-error').style.display = 'none';
+
+    try {
+        const resp = await fetch(`/backtests/wfo/${WFO_ID}/chart-data?fold_index=${foldIndex}`, {
+            headers: { 'X-Admin-Token': ADMIN_TOKEN }
+        });
+
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+
+        const data = await resp.json();
+        document.getElementById('chart-loading').style.display = 'none';
+
+        if (data.selected_fold && data.selected_fold.equity && data.selected_fold.equity.length > 0) {
+            renderEquityChart(data.selected_fold);
+            renderFoldStats(data.selected_fold);
+
+            // Show fold info
+            const fold = chartData.folds[parseInt(foldIndex)];
+            if (fold) {
+                document.getElementById('fold-info').innerHTML =
+                    `<a href="/admin/backtests/tunes/${fold.tune_id}">View Tune</a>`;
+            }
+        } else {
+            document.getElementById('chart-error').style.display = 'block';
+            document.getElementById('chart-error').textContent = 'No equity data for this fold';
+        }
+
+        // Show notes
+        if (data.notes && data.notes.length > 0) {
+            const notesDiv = document.getElementById('chart-notes');
+            notesDiv.style.display = 'block';
+            notesDiv.innerHTML = data.notes.map(n => `<div class="note">${n}</div>`).join('');
+        } else {
+            document.getElementById('chart-notes').style.display = 'none';
+        }
+    } catch (err) {
+        document.getElementById('chart-loading').style.display = 'none';
+        document.getElementById('chart-error').style.display = 'block';
+        document.getElementById('chart-error').textContent = `Error: ${err.message}`;
+    }
+}
+
+function renderEquityChart(foldData) {
+    const timestamps = foldData.equity.map(p => p.t);
+    const equityValues = foldData.equity.map(p => p.equity);
+
+    // Compute drawdown
+    let peak = equityValues[0];
+    const drawdownPct = equityValues.map(eq => {
+        if (eq > peak) peak = eq;
+        return ((eq - peak) / peak) * 100;
+    });
+
+    const maxDD = Math.min(...drawdownPct);
+
+    const equityTrace = {
+        x: timestamps,
+        y: equityValues,
+        name: 'Equity',
+        type: 'scatter',
+        mode: 'lines',
+        line: { color: '#3fb950', width: 2 },
+        yaxis: 'y',
+        hovertemplate: '%{x}<br>Equity: $%{y:,.2f}<extra></extra>'
+    };
+
+    const drawdownTrace = {
+        x: timestamps,
+        y: drawdownPct,
+        name: 'Drawdown',
+        type: 'scatter',
+        mode: 'lines',
+        fill: 'tozeroy',
+        fillcolor: 'rgba(248, 81, 73, 0.2)',
+        line: { color: '#f85149', width: 1 },
+        yaxis: 'y2',
+        hovertemplate: '%{x}<br>Drawdown: %{y:.2f}%<extra></extra>'
+    };
+
+    const layout = {
+        title: {
+            text: `Fold ${foldData.fold_index} | Max DD: ${maxDD.toFixed(2)}%`,
+            font: { size: 14, color: '#8b949e' },
+            x: 0.99,
+            xanchor: 'right'
+        },
+        xaxis: {
+            type: 'date',
+            gridcolor: '#30363d',
+            linecolor: '#30363d'
+        },
+        yaxis: {
+            title: 'Equity ($)',
+            side: 'left',
+            gridcolor: '#30363d',
+            linecolor: '#30363d',
+            tickformat: ',.0f'
+        },
+        yaxis2: {
+            title: 'Drawdown (%)',
+            side: 'right',
+            overlaying: 'y',
+            gridcolor: 'transparent',
+            linecolor: '#30363d',
+            tickformat: '.1f',
+            range: [Math.min(maxDD * 1.2, -1), 1]
+        },
+        hovermode: 'x unified',
+        legend: {
+            orientation: 'h',
+            y: -0.15,
+            x: 0.5,
+            xanchor: 'center'
+        },
+        margin: { t: 40, r: 60, b: 60, l: 60 },
+        paper_bgcolor: '#161b22',
+        plot_bgcolor: '#0d1117',
+        font: { color: '#c9d1d9' }
+    };
+
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false
+    };
+
+    Plotly.newPlot('equity-chart', [equityTrace, drawdownTrace], layout, config);
+}
+
+function renderFoldStats(foldData) {
+    const statsDiv = document.getElementById('fold-stats');
+    const s = foldData.summary || {};
+
+    if (Object.keys(s).length === 0) {
+        statsDiv.style.display = 'none';
+        return;
+    }
+
+    statsDiv.style.display = 'flex';
+
+    const returnEl = document.getElementById('stat-return');
+    if (s.return_pct != null) {
+        returnEl.textContent = `${s.return_pct >= 0 ? '+' : ''}${s.return_pct.toFixed(2)}%`;
+        returnEl.className = `stat-value ${s.return_pct >= 0 ? 'text-success' : 'text-danger'}`;
+    } else {
+        returnEl.textContent = '-';
+        returnEl.className = 'stat-value';
+    }
+
+    const sharpeEl = document.getElementById('stat-sharpe');
+    sharpeEl.textContent = s.sharpe != null ? s.sharpe.toFixed(2) : '-';
+
+    const maxddEl = document.getElementById('stat-maxdd');
+    if (s.max_drawdown_pct != null) {
+        maxddEl.textContent = `-${Math.abs(s.max_drawdown_pct).toFixed(2)}%`;
+        maxddEl.className = 'stat-value text-danger';
+    } else {
+        maxddEl.textContent = '-';
+        maxddEl.className = 'stat-value';
+    }
+
+    const tradesEl = document.getElementById('stat-trades');
+    tradesEl.textContent = s.trades != null ? s.trades : '-';
+}
+
+function toggleJson() {
+    const el = document.getElementById('full-json');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+
+<style>
+    .badge-pending { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-canceled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+
+    .text-success { color: var(--success); }
+    .text-danger { color: var(--danger); }
+
+    .copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 2px 4px;
+    }
+    .copy-btn:hover {
+        background: var(--bg);
+        border-radius: 4px;
+    }
+
+    .fold-selector {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .fold-selector label {
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+
+    .fold-info {
+        font-size: 13px;
+    }
+
+    .chart-placeholder {
+        padding: 60px;
+        text-align: center;
+        color: var(--text-muted);
+        background: var(--bg);
+        border-radius: 6px;
+    }
+
+    .chart-loading, .chart-error {
+        padding: 40px;
+        text-align: center;
+        color: var(--text-muted);
+    }
+
+    .chart-error {
+        color: var(--danger);
+        background: rgba(248, 81, 73, 0.1);
+        border-radius: 6px;
+    }
+
+    .chart-notes {
+        padding: 12px;
+        margin-top: 12px;
+        background: rgba(210, 153, 34, 0.1);
+        border-radius: 6px;
+    }
+
+    .chart-notes .note {
+        color: var(--warning);
+        font-size: 14px;
+    }
+
+    .candidate-summary {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+    }
+
+    .candidate-metrics {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+    }
+
+    .metric {
+        background: var(--bg);
+        padding: 12px;
+        border-radius: 6px;
+    }
+
+    .metric-label {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+    }
+
+    .metric-value {
+        font-size: 16px;
+        font-weight: 600;
+    }
+
+    .candidate-params {
+        padding: 12px;
+        background: var(--bg);
+        border-radius: 6px;
+    }
+
+    .candidate-params strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    .winner-row {
+        background: rgba(63, 185, 80, 0.1);
+    }
+
+    .progress-bar-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .progress-bar {
+        height: 6px;
+        background: var(--success);
+        border-radius: 3px;
+        min-width: 10px;
+        max-width: 60px;
+    }
+
+    .table-note {
+        text-align: center;
+        padding: 12px;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .config-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 16px;
+    }
+
+    .config-section h4 {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+        font-weight: 500;
+    }
+
+    .fold-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .fold-link {
+        background: var(--bg);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        border: 1px solid var(--border);
+    }
+
+    .fold-link:hover {
+        border-color: var(--link);
+        text-decoration: none;
+    }
+
+    @media (max-width: 768px) {
+        .candidate-summary {
+            grid-template-columns: 1fr;
+        }
+
+        .candidate-metrics {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+</style>
+{% endblock %}

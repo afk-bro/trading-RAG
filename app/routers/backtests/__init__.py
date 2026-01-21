@@ -10,7 +10,7 @@ This package contains the backtest API endpoints split into modules:
 
 from fastapi import APIRouter
 
-from . import chart, runs, tunes, wfo
+from . import chart, runs, tunes, wfo, wfo_chart
 
 # Create combined router with prefix
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -20,6 +20,7 @@ router.include_router(runs.router)
 router.include_router(tunes.router)
 router.include_router(wfo.router)
 router.include_router(chart.router)
+router.include_router(wfo_chart.router)
 
 
 def set_db_pool(pool):
@@ -28,6 +29,7 @@ def set_db_pool(pool):
     tunes.set_db_pool(pool)
     wfo.set_db_pool(pool)
     chart.set_db_pool(pool)
+    wfo_chart.set_db_pool(pool)
 
 
 # Export for backward compatibility

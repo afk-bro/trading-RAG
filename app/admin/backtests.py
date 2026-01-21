@@ -992,3 +992,168 @@ async def admin_backtest_run_detail(
             "admin_token": admin_token,
         },
     )
+
+
+# ===========================================
+# WFO Admin Endpoints
+# ===========================================
+
+
+def _get_wfo_repo():
+    """Get WFO repository instance."""
+    from app.repositories.backtests import WFORepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return WFORepository(_db_pool)
+
+
+@router.get("/backtests/wfo", response_class=HTMLResponse)
+async def admin_wfo_list(
+    request: Request,
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(require_admin_token),
+):
+    """List Walk-Forward Optimization runs."""
+    wfo_repo = _get_wfo_repo()
+
+    # If no workspace specified, get first available
+    if not workspace_id and _db_pool:
+        try:
+            async with _db_pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
+                if row:
+                    workspace_id = row["id"]
+        except Exception as e:
+            logger.warning("Could not fetch default workspace", error=str(e))
+
+    if not workspace_id:
+        return templates.TemplateResponse(
+            "wfo_list.html",
+            {
+                "request": request,
+                "wfos": [],
+                "total": 0,
+                "workspace_id": None,
+                "error": "No workspace found.",
+            },
+        )
+
+    wfos, total = await wfo_repo.list_wfos(
+        workspace_id=workspace_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Enrich WFO data
+    enriched_wfos = []
+    for wfo in wfos:
+        wfo = dict(wfo)
+
+        # Parse JSONB fields
+        for field in ["wfo_config", "data_source", "best_params", "best_candidate"]:
+            if wfo.get(field) and isinstance(wfo[field], str):
+                try:
+                    wfo[field] = json.loads(wfo[field])
+                except json.JSONDecodeError:
+                    pass
+
+        enriched_wfos.append(wfo)
+
+    return templates.TemplateResponse(
+        "wfo_list.html",
+        {
+            "request": request,
+            "wfos": enriched_wfos,
+            "total": total,
+            "workspace_id": str(workspace_id),
+            "status_filter": status_filter or "",
+            "limit": limit,
+            "offset": offset,
+            "has_prev": offset > 0,
+            "has_next": offset + limit < total,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
+        },
+    )
+
+
+@router.get("/backtests/wfo/{wfo_id}", response_class=HTMLResponse)
+async def admin_wfo_detail(
+    request: Request,
+    wfo_id: UUID,
+    _: bool = Depends(require_admin_token),
+):
+    """View WFO run details with fold selector and candidate comparison."""
+    wfo_repo = _get_wfo_repo()
+
+    wfo = await wfo_repo.get_wfo(wfo_id)
+    if not wfo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"WFO run {wfo_id} not found",
+        )
+
+    wfo = dict(wfo)
+
+    # Convert UUID fields to strings
+    for field in ["id", "workspace_id", "strategy_entity_id", "job_id"]:
+        if wfo.get(field) is not None:
+            wfo[field] = str(wfo[field])
+
+    # Parse JSONB fields
+    jsonb_fields = [
+        "wfo_config", "data_source", "param_space",
+        "best_params", "best_candidate", "candidates",
+    ]
+    for field in jsonb_fields:
+        if wfo.get(field) and isinstance(wfo[field], str):
+            try:
+                wfo[field] = json.loads(wfo[field])
+            except json.JSONDecodeError:
+                pass
+
+    # Get child tune IDs
+    child_tune_ids = [str(tid) for tid in (wfo.get("child_tune_ids") or [])]
+    wfo["child_tune_ids"] = child_tune_ids
+
+    # Get strategy name
+    strategy_name = None
+    if wfo.get("strategy_entity_id") and _db_pool:
+        try:
+            async with _db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT name FROM strategies WHERE strategy_entity_id = $1",
+                    UUID(wfo["strategy_entity_id"]),
+                )
+                if row:
+                    strategy_name = row["name"]
+        except Exception as e:
+            logger.warning("Could not fetch strategy name", error=str(e))
+
+    wfo["strategy_name"] = strategy_name
+
+    # Convert to JSON-serializable for debug panel
+    wfo_json = _json_serializable(wfo)
+
+    # Get admin token for API calls from template
+    admin_token = request.headers.get("X-Admin-Token", "") or os.environ.get(
+        "ADMIN_TOKEN", ""
+    )
+
+    return templates.TemplateResponse(
+        "wfo_detail.html",
+        {
+            "request": request,
+            "wfo": wfo,
+            "wfo_json": json.dumps(wfo_json, indent=2),
+            "admin_token": admin_token,
+        },
+    )
