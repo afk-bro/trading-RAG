@@ -24,6 +24,7 @@ from app.schemas import (
 from app.services.execution.base import BrokerAdapter
 from app.services.policy_engine import PolicyEngine
 from app.repositories.trade_events import TradeEventsRepository, EventFilters
+from app.repositories.paper_equity import PaperEquityRepository
 
 
 logger = structlog.get_logger(__name__)
@@ -51,14 +52,20 @@ class PaperBroker(BrokerAdapter):
     - fees = 0.0 constant (configurable later)
     """
 
-    def __init__(self, events_repo: TradeEventsRepository):
+    def __init__(
+        self,
+        events_repo: TradeEventsRepository,
+        equity_repo: Optional[PaperEquityRepository] = None,
+    ):
         """
         Initialize paper broker.
 
         Args:
             events_repo: Trade events repository for journaling
+            equity_repo: Optional equity snapshots repository for drawdown tracking
         """
         self._events_repo = events_repo
+        self._equity_repo = equity_repo
         self._states: dict[UUID, PaperState] = {}  # workspace_id -> state
         self._settings = get_settings()
         self._policy_engine = PolicyEngine()
@@ -223,6 +230,9 @@ class PaperBroker(BrokerAdapter):
             realized_pnl=state.realized_pnl,
         )
 
+        # Record equity snapshot for drawdown tracking (if repo available)
+        await self._record_equity_snapshot(state)
+
         return ExecutionResult(
             success=True,
             intent_id=intent.id,
@@ -252,6 +262,42 @@ class PaperBroker(BrokerAdapter):
             if event.payload.get("mode") == self.mode:
                 return event
         return None
+
+    async def _record_equity_snapshot(self, state: PaperState) -> None:
+        """Record equity snapshot for drawdown tracking.
+
+        Called after successful execution. Skips if no equity repo or dedupe matches.
+        """
+        if self._equity_repo is None:
+            return
+
+        try:
+            # Compute positions value (market value of all positions)
+            positions_value = sum(
+                pos.quantity * pos.avg_price
+                for pos in state.positions.values()
+                if pos.quantity > 0
+            )
+
+            # Total equity
+            equity = state.cash + positions_value
+
+            await self._equity_repo.insert_snapshot(
+                workspace_id=state.workspace_id,
+                snapshot_ts=datetime.utcnow(),
+                equity=equity,
+                cash=state.cash,
+                positions_value=positions_value,
+                realized_pnl=state.realized_pnl,
+                # strategy_version_id=None for v1 (workspace-level)
+            )
+        except Exception as e:
+            # Log but don't fail execution
+            logger.warning(
+                "equity_snapshot_failed",
+                workspace_id=str(state.workspace_id),
+                error=str(e),
+            )
 
     def _build_current_state(
         self, state: PaperState, workspace_id: UUID

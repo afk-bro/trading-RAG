@@ -14,6 +14,7 @@ from app.admin import retention as retention_router
 from app.admin import events as events_router
 from app.admin import system_health as system_health_router
 from app.admin import ops as ops_router
+from app.admin import ops_alerts as ops_alerts_router
 from app.admin import trade_events as trade_events_router
 from app.admin import evals as evals_router
 from app.admin import kb_admin as kb_admin_router
@@ -55,6 +56,9 @@ router.include_router(system_health_router.router)
 
 # Ops
 router.include_router(ops_router.router)
+
+# Ops Alerts (operational alerting - health, coverage, drift)
+router.include_router(ops_alerts_router.router)
 
 # Trade Events
 router.include_router(trade_events_router.router)
@@ -109,6 +113,7 @@ def set_db_pool(pool):
     retention_router.set_db_pool(pool)
     system_health_router.set_db_pool(pool)
     ops_router.set_db_pool(pool)
+    ops_alerts_router.set_db_pool(pool)
     trade_events_router.set_db_pool(pool)
     evals_router.set_db_pool(pool)
     kb_admin_router.set_db_pool(pool)

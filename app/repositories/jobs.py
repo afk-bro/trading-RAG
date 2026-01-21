@@ -7,6 +7,7 @@ from uuid import UUID
 
 import structlog
 
+from app.core.resilience import with_db_retry
 from app.jobs.models import Job
 from app.jobs.types import JobType, JobStatus
 
@@ -65,6 +66,7 @@ class JobRepository:
         """Claim the next available job using FOR UPDATE SKIP LOCKED.
 
         Returns None if no jobs available.
+        Uses resilience wrapper for transient failure recovery.
         """
         type_filter = ""
         params: list[Any] = [worker_id]
@@ -93,8 +95,9 @@ class JobRepository:
             WHERE j.id = cte.id
             RETURNING j.*
         """
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(query, *params)
+        row = await with_db_retry(
+            self._pool, lambda conn: conn.fetchrow(query, *params)
+        )
 
         if row:
             logger.info(
@@ -109,7 +112,10 @@ class JobRepository:
     async def complete(
         self, job_id: UUID, result: Optional[dict[str, Any]] = None
     ) -> Job:
-        """Mark a job as succeeded."""
+        """Mark a job as succeeded.
+
+        Uses resilience wrapper for transient failure recovery.
+        """
         query = """
             UPDATE jobs SET
                 status = 'succeeded',
@@ -118,8 +124,9 @@ class JobRepository:
             WHERE id = $1
             RETURNING *
         """
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(query, job_id, result or {})
+        row = await with_db_retry(
+            self._pool, lambda conn: conn.fetchrow(query, job_id, result or {})
+        )
         logger.info("job_completed", job_id=str(job_id))
         return self._row_to_job(row)
 

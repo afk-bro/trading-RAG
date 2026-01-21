@@ -788,9 +788,9 @@ class KnowledgeBaseRepository:
 
         for word in words[:5]:  # Limit to first 5 words
             word_conditions.append(
-                f"""
-                (c.text ILIKE ${param_idx} OR e.name ILIKE ${param_idx} OR e.aliases::text ILIKE ${param_idx})  # noqa: E501
-            """
+                f"""(c.text ILIKE ${param_idx}
+                    OR e.name ILIKE ${param_idx}
+                    OR e.aliases::text ILIKE ${param_idx})"""
             )
             params.append(f"%{word}%")
             param_idx += 1

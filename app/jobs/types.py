@@ -10,6 +10,7 @@ class JobType(str, Enum):
     DATA_FETCH = "data_fetch"
     TUNE = "tune"
     WFO = "wfo"
+    OPS_ALERT_EVAL = "ops_alert_eval"
 
 
 class JobStatus(str, Enum):

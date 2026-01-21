@@ -1,5 +1,6 @@
 """Sentry initialization and configuration."""
 
+import logging
 import os
 from typing import Any, Optional
 
@@ -87,7 +88,7 @@ def init_sentry(settings: Settings) -> bool:
     # Only send ERROR-level logs as Sentry events
     sentry_logging = LoggingIntegration(
         level=None,  # Keep normal log levels
-        event_level="ERROR",  # Only ERROR+ become Sentry events
+        event_level=logging.ERROR,  # Only ERROR+ become Sentry events
     )
 
     sentry_sdk.init(

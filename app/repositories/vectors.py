@@ -8,6 +8,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qmodels
 
 from app.config import get_settings
+from app.core.resilience import with_qdrant_retry
 from app.schemas import QueryFilters, SymbolsMode
 
 logger = structlog.get_logger(__name__)
@@ -201,6 +202,8 @@ class VectorRepository:
         """
         Search for similar vectors with filtering.
 
+        Uses resilience wrapper for transient failure recovery.
+
         Args:
             vector: Query vector
             workspace_id: Workspace to search
@@ -228,12 +231,15 @@ class VectorRepository:
             qmodels.Filter(must=filter_conditions) if filter_conditions else None
         )
 
-        results = await self.client.search(
-            collection_name=self.collection,
-            query_vector=vector,
-            query_filter=qdrant_filter,
-            limit=limit,
-            with_payload=True,
+        results = await with_qdrant_retry(
+            self.client,
+            lambda c: c.search(
+                collection_name=self.collection,
+                query_vector=vector,
+                query_filter=qdrant_filter,
+                limit=limit,
+                with_payload=True,
+            ),
         )
 
         return [

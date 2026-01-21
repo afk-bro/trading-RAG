@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     )
     llm_timeout: int = Field(default=60, description="LLM request timeout in seconds")
 
+    # Query endpoint timeout
+    query_timeout_s: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Overall query endpoint timeout in seconds (prevents runaway queries)",
+    )
+
     # Qdrant Configuration
     qdrant_host: str = Field(default="localhost", description="Qdrant host")
     qdrant_port: int = Field(default=6333, description="Qdrant port")
@@ -216,22 +224,10 @@ class Settings(BaseSettings):
         description="Maximum position size as percentage of equity (0.20 = 20%)",
     )
 
-    # Webhook Configuration for Ops Alerts
-    webhook_enabled: bool = Field(
+    # Auto-Pause Guardrail (safety feature)
+    auto_pause_enabled: bool = Field(
         default=False,
-        description="Enable webhook delivery for ops alerts",
-    )
-    slack_webhook_url: Optional[str] = Field(
-        default=None,
-        description="Slack incoming webhook URL for alert notifications",
-    )
-    alert_webhook_url: Optional[str] = Field(
-        default=None,
-        description="Generic webhook URL for alert notifications",
-    )
-    alert_webhook_headers: Optional[str] = Field(
-        default=None,
-        description="JSON string of headers for generic webhook (e.g., API keys)",
+        description="Auto-pause active strategy versions on CRITICAL alerts (drawdown, confidence)",
     )
 
     # SSE (Server-Sent Events) Configuration
@@ -260,6 +256,43 @@ class Settings(BaseSettings):
         ge=100,
         le=10000,
         description="Maximum events to buffer per workspace stream for reconnection",
+    )
+
+    # Telegram Alerting Configuration
+    telegram_bot_token: Optional[str] = Field(
+        default=None,
+        description="Telegram bot token for ops alerts (format: 123456:ABC-xyz...)",
+    )
+    telegram_chat_id: Optional[str] = Field(
+        default=None,
+        description="Telegram chat/group ID to send alerts to (format: -100123456789)",
+    )
+    telegram_message_thread_id: Optional[int] = Field(
+        default=None,
+        description="Default topic ID (fallback if no per-category topic set)",
+    )
+    # Per-category topic routing for forum supergroups
+    telegram_topic_health: Optional[int] = Field(
+        default=None,
+        description="Topic ID for health_degraded alerts (system_health channel)",
+    )
+    telegram_topic_strategy: Optional[int] = Field(
+        default=None,
+        description="Topic ID for strategy alerts (weak_coverage, drift, confidence)",
+    )
+    telegram_enabled: bool = Field(
+        default=True,
+        description="Master kill switch for Telegram alerts (requires bot_token and chat_id)",
+    )
+    telegram_timeout_secs: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="Telegram API request timeout in seconds",
+    )
+    admin_base_url: Optional[str] = Field(
+        default=None,
+        description="Base URL for admin UI deep links in Telegram messages",
     )
 
     # Pine Repo Polling Configuration
@@ -389,4 +422,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    # mypy: Pydantic BaseSettings __init__ signature differs from runtime
+    # (required fields are populated from environment variables)
+    return Settings()  # type: ignore[call-arg]

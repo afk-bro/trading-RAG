@@ -9,7 +9,7 @@ Format: "trend=<value>|vol=<value>" (alphabetical dimension order)
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 # Valid dimension values (v1.5 invariant)
 VALID_TREND_VALUES = frozenset(["uptrend", "downtrend", "flat"])
@@ -94,7 +94,18 @@ def parse_regime_key(key: str) -> RegimeDims:
             f"Invalid regime key format: {key}. Missing trend or vol dimension"
         )
 
-    return RegimeDims(trend=dims_dict["trend"], vol=dims_dict["vol"])
+    trend_val = dims_dict["trend"]
+    vol_val = dims_dict["vol"]
+
+    if trend_val not in VALID_TREND_VALUES:
+        raise ValueError(f"Invalid trend value: {trend_val}")
+    if vol_val not in VALID_VOL_VALUES:
+        raise ValueError(f"Invalid vol value: {vol_val}")
+
+    return RegimeDims(
+        trend=cast(TrendValue, trend_val),
+        vol=cast(VolValue, vol_val),
+    )
 
 
 def extract_marginal_keys(key: str) -> list[str]:

@@ -18,6 +18,7 @@ from app.schemas.common import (
     RerankState,
     PineIngestStatus,
     # Health & Error
+    CircuitBreakerStatus,
     DependencyHealth,
     HealthResponse,
     ReadinessResponse,
@@ -136,6 +137,19 @@ from app.schemas.trading import (
     StrategyDetailResponse,
     CandidateStrategy,
     StrategyCard,
+    # Strategy Versions (Lifecycle v0.5)
+    StrategyVersionState,
+    StrategyVersionCreateRequest,
+    StrategyVersionResponse,
+    StrategyVersionListItem,
+    StrategyVersionListResponse,
+    VersionTransitionRequest,
+    VersionTransitionResponse,
+    # Strategy Intelligence (v1.5)
+    IntelSnapshotCreateRequest,
+    IntelSnapshotResponse,
+    IntelSnapshotListItem,
+    IntelSnapshotListResponse,
 )
 
 # ===========================================
@@ -193,6 +207,7 @@ __all__ = [
     "JobStatus",
     "RerankState",
     "PineIngestStatus",
+    "CircuitBreakerStatus",
     "DependencyHealth",
     "HealthResponse",
     "ReadinessResponse",
@@ -285,6 +300,19 @@ __all__ = [
     "StrategyDetailResponse",
     "CandidateStrategy",
     "StrategyCard",
+    # Strategy Versions (Lifecycle v0.5)
+    "StrategyVersionState",
+    "StrategyVersionCreateRequest",
+    "StrategyVersionResponse",
+    "StrategyVersionListItem",
+    "StrategyVersionListResponse",
+    "VersionTransitionRequest",
+    "VersionTransitionResponse",
+    # Strategy Intelligence (v1.5)
+    "IntelSnapshotCreateRequest",
+    "IntelSnapshotResponse",
+    "IntelSnapshotListItem",
+    "IntelSnapshotListResponse",
     # Sources
     "PineScriptType",
     "PineVersionType",

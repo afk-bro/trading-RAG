@@ -268,3 +268,63 @@ class TestYouTubeErrorReasonParsing:
         for error in non_retryable_errors:
             # These are terminal errors - retryable should be False
             assert error in non_retryable_errors
+
+
+class TestMaxPlaylistVideos:
+    """Tests for large playlist handling via max_playlist_videos parameter."""
+
+    def test_default_max_playlist_videos(self):
+        """Test default max_playlist_videos is 200."""
+        from uuid import uuid4
+
+        from app.schemas.ingest import YouTubeIngestRequest
+
+        request = YouTubeIngestRequest(
+            workspace_id=uuid4(), url="https://youtube.com/watch?v=test"
+        )
+        assert request.max_playlist_videos == 200
+
+    def test_custom_max_playlist_videos(self):
+        """Test custom max_playlist_videos value is accepted."""
+        from uuid import uuid4
+
+        from app.schemas.ingest import YouTubeIngestRequest
+
+        request = YouTubeIngestRequest(
+            workspace_id=uuid4(),
+            url="https://youtube.com/watch?v=test",
+            max_playlist_videos=300,
+        )
+        assert request.max_playlist_videos == 300
+
+    def test_max_playlist_videos_upper_bound(self):
+        """Test max_playlist_videos has upper limit of 500."""
+        import pytest
+        from pydantic import ValidationError
+        from uuid import uuid4
+
+        from app.schemas.ingest import YouTubeIngestRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            YouTubeIngestRequest(
+                workspace_id=uuid4(),
+                url="https://youtube.com/watch?v=test",
+                max_playlist_videos=501,  # Above limit
+            )
+        assert "max_playlist_videos" in str(exc_info.value).lower()
+
+    def test_max_playlist_videos_lower_bound(self):
+        """Test max_playlist_videos must be at least 1."""
+        import pytest
+        from pydantic import ValidationError
+        from uuid import uuid4
+
+        from app.schemas.ingest import YouTubeIngestRequest
+
+        with pytest.raises(ValidationError) as exc_info:
+            YouTubeIngestRequest(
+                workspace_id=uuid4(),
+                url="https://youtube.com/watch?v=test",
+                max_playlist_videos=0,  # Below minimum
+            )
+        assert "max_playlist_videos" in str(exc_info.value).lower()

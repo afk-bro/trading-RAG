@@ -46,8 +46,13 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Auto-Strategy Discovery**: Generate parameter specs from Pine Script inputs for backtesting
 - **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
 - **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
-- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts
-- **Ops Alerts**: Admin page for alert management with webhook delivery (Slack, generic HTTP)
+- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts management
+- **Ops Alerts**: Automated evaluation via pg_cron, Telegram delivery with activation/recovery/escalation notifications
+- **Paper Equity Snapshots**: Append-only equity time series with drawdown computation
+- **Workspace Drawdown Alerts**: WARN at 12%, CRITICAL at 20% with hysteresis (clear at 10%/16%)
+- **Auto-Pause Guardrail**: Config-gated safety feature that pauses active strategies on CRITICAL alerts
+- **Read-Only Dashboards**: Equity curve, intel timeline, alerts summary endpoints for trust-building UIs
+- **Idempotent Notifications**: Race-safe delivery with conditional mark pattern, delivery tracking columns
 - **Idempotency Hygiene**: Auto-prune via pg_cron, health page monitoring, Prometheus metrics
 - **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
 - **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules (28 alerts across 10 subsystems)
@@ -218,11 +223,19 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/backtests/leaderboard` | Global ranking (CSV export) |
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
 | `/admin/ops/snapshot` | Go-live verification (release, config, health) |
-| `/admin/ops/alerts` | Operational alerts list (acknowledge, resolve, reopen) |
 | `/admin/system/health` | System health dashboard (status cards) |
 | `/admin/system/health.json` | System health (machine-readable) |
 | `/admin/coverage/cockpit` | Coverage triage cockpit UI |
 | `/admin/coverage/cockpit/{run_id}` | Deep link to specific run |
+| `/admin/ops-alerts` | Ops alerts management |
+| `/admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
+| `/admin/ops-alerts/{id}/resolve` | Resolve alert |
+| `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
+| `/admin/ingest` | Ingest UI (YouTube, PDF, Pine) |
+| `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
+| `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
+| `/dashboards/{ws}/alerts` | Active alerts by severity |
+| `/dashboards/{ws}/summary` | Combined overview for dashboard cards |
 
 ### Pine Script Registry CLI
 
@@ -262,63 +275,55 @@ python -m app.services.pine --build ./scripts -q
 ```
 trading-RAG/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI application
-│   ├── config.py            # Configuration management
-│   ├── schemas.py           # Pydantic models
+│   ├── main.py               # FastAPI application
+│   ├── config.py             # Configuration management
+│   ├── schemas.py            # Pydantic models
 │   ├── deps/
-│   │   ├── __init__.py
-│   │   └── security.py      # Auth, rate limiting, concurrency
-│   ├── routers/
-│   │   ├── health.py        # /health and /ready endpoints
+│   │   └── security.py       # Auth, rate limiting, concurrency
+│   ├── routers/              # API endpoints
+│   │   ├── health.py         # /health and /ready endpoints
 │   │   ├── ingest.py
 │   │   ├── youtube.py
 │   │   ├── query.py
-│   │   ├── reembed.py
-│   │   ├── jobs.py
 │   │   ├── backtests.py
-│   │   └── trading_kb.py    # KB recommend endpoint
+│   │   └── trading_kb.py
 │   ├── admin/
-│   │   ├── router.py        # Admin UI and ops snapshot
-│   │   ├── ops_alerts.py    # Ops alerts admin page
-│   │   └── templates/
+│   │   ├── router.py         # Admin UI and ops snapshot
+│   │   └── templates/        # HTML templates
 │   ├── services/
 │   │   ├── chunker.py
 │   │   ├── embedder.py
-│   │   ├── extractor.py
 │   │   ├── llm.py
-│   │   ├── ops_alerts/        # Operational alerts service
-│   │   │   └── webhook_sink.py  # Slack/generic webhook delivery
-│   │   └── pine/              # Pine Script registry module
-│   │       ├── models.py      # Data models (PineRegistry, PineScriptEntry)
-│   │       ├── parser.py      # Regex-based Pine Script parser
-│   │       ├── linter.py      # Static analysis rules
-│   │       ├── registry.py    # Build orchestration + CLI
-│   │       └── adapters/      # File system adapter
-│   └── repositories/
-│       ├── documents.py
-│       ├── chunks.py
-│       └── vectors.py
-├── docs/
-│   ├── features/              # Detailed feature documentation
-│   │   ├── backtests.md       # Backtest tuning, WFO, test generator
-│   │   ├── coverage.md        # Coverage triage workflow
-│   │   ├── execution.md       # Paper execution, strategy runner
-│   │   ├── kb-recommend.md    # KB pipeline, regime fingerprints
-│   │   ├── ops.md             # System health, security, hardening
-│   │   └── pine-scripts.md    # Pine registry, ingest, auto-strategy
-│   ├── ops/
-│   │   ├── alerting-rules.md  # Sentry alert configuration
-│   │   └── runbooks.md        # Operational procedures
-│   └── plans/
+│   │   ├── pine/             # Pine Script registry module
+│   │   └── ops_alerts/       # Telegram notifications
+│   │       ├── evaluator.py  # Alert evaluation rules
+│   │       └── telegram.py   # Telegram delivery
+│   ├── repositories/
+│   │   ├── documents.py
+│   │   ├── chunks.py
+│   │   └── ops_alerts.py     # Delivery tracking
+│   └── jobs/
+│       └── handlers/         # Job handlers
 ├── tests/
-│   ├── unit/
-│   └── integration/
-├── migrations/
+│   ├── unit/                 # Unit tests
+│   ├── integration/          # Integration tests
+│   └── fixtures/             # Test data
+├── scripts/                  # Utility scripts
+├── migrations/               # SQL migrations
+├── docs/
+│   ├── ops/                  # Operations docs
+│   │   ├── alerting-rules.md
+│   │   ├── runbooks.md
+│   │   └── hardening.md
+│   ├── plans/                # Design documents
+│   └── archive/              # Archived specs
+├── dashboards/               # Grafana dashboards
+├── ops/                      # Prometheus configs
 ├── docker-compose.rag.yml
 ├── Dockerfile
 ├── requirements.txt
-├── init.sh
+├── app_spec.txt              # Application specification
+├── feature_list.json         # Test feature list
 └── README.md
 ```
 
@@ -349,6 +354,20 @@ trading-RAG/
 - IS/OOS metrics and scores
 - Composite objective scoring
 
+### ops_alerts
+- Operational alerts with severity levels (critical, high, medium, low)
+- Status lifecycle: active, acknowledged, resolved
+- Delivery tracking: `notified_at`, `recovery_notified_at`, `escalation_notified_at`
+- Deduplication via `dedupe_key`
+- Telegram message ID for audit trail
+
+### paper_equity_snapshots
+- Append-only equity time series for drawdown computation
+- Workspace-level tracking with optional strategy_version_id
+- Dual time axes: `snapshot_ts` (market time), `computed_at` (wall clock)
+- Components: equity, cash, positions_value, realized_pnl
+- Deduplication via `inputs_hash` (SHA256)
+
 ## Environment Variables
 
 | Variable | Description | Required |
@@ -362,6 +381,7 @@ trading-RAG/
 | `OLLAMA_PORT` | Ollama port (default: 11434) | No |
 | `EMBED_MODEL` | Embedding model (default: nomic-embed-text) | No |
 | `SERVICE_PORT` | Service port (default: 8000) | No |
+| `AUTO_PAUSE_ENABLED` | Auto-pause strategies on CRITICAL alerts (default: false) | No |
 
 **Note:** Without `OPENROUTER_API_KEY`, semantic search (`mode=retrieve`) works fully. LLM answer generation (`mode=answer`) will return retrieved chunks with a message indicating generation is disabled.
 
@@ -391,15 +411,6 @@ trading-RAG/
 | `SENTRY_DSN` | Sentry error tracking DSN |
 | `SENTRY_ENVIRONMENT` | Environment tag for Sentry |
 | `SENTRY_TRACES_SAMPLE_RATE` | Performance tracing sample rate (0.0-1.0) |
-
-### Webhook Configuration (Alerts)
-
-| Variable | Description |
-|----------|-------------|
-| `WEBHOOK_ENABLED` | Enable webhook delivery for alerts (`true`/`false`) |
-| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL for alert delivery |
-| `ALERT_WEBHOOK_URL` | Generic webhook URL for alert delivery |
-| `ALERT_WEBHOOK_HEADERS` | JSON string of headers for generic webhook |
 
 ### Health Probes
 

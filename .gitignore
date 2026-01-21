@@ -91,3 +91,20 @@ test-results/
 
 # Git worktrees
 .worktrees/
+
+# Claude Code
+.claude_settings.json
+.mcp.json
+claude-progress.txt
+
+# Logs
+logs/
+*.log.gz
+
+# Test artifacts
+tests/fixtures/*.html
+test-results/
+playwright-report/
+
+# Feature list (generated)
+# feature_list.json

@@ -12,7 +12,13 @@ from pydantic import BaseModel
 
 from app import __version__
 from app.config import Settings, get_settings
-from app.schemas import DependencyHealth, HealthResponse, ReadinessResponse
+from app.core.resilience import get_circuit_status
+from app.schemas import (
+    CircuitBreakerStatus,
+    DependencyHealth,
+    HealthResponse,
+    ReadinessResponse,
+)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -330,6 +336,17 @@ async def health_check(settings: Settings = Depends(get_settings)) -> HealthResp
     if supabase_health.latency_ms is not None:
         latency_ms["supabase"] = supabase_health.latency_ms
 
+    # Get circuit breaker status for recovery tracking
+    circuit_status = get_circuit_status()
+    circuit_breakers = {
+        name: CircuitBreakerStatus(
+            failures=status["failures"],
+            is_open=status["is_open"],
+            last_failure=status["last_failure"],
+        )
+        for name, status in circuit_status.items()
+    }
+
     response = HealthResponse(
         status=overall_status,
         qdrant=qdrant_health,
@@ -339,6 +356,7 @@ async def health_check(settings: Settings = Depends(get_settings)) -> HealthResp
         embed_model=settings.embed_model,
         latency_ms=latency_ms,
         version=__version__,
+        circuit_breakers=circuit_breakers,
     )
 
     logger.info(
@@ -664,7 +682,8 @@ async def list_documents(settings: Settings = Depends(get_settings)):
             """
             SELECT
                 id, workspace_id, source_url, canonical_url, source_type,
-                content_hash, title, author, language, status, version, created_at, updated_at, last_indexed_at  # noqa: E501
+                content_hash, title, author, language, status, version,
+                created_at, updated_at, last_indexed_at
             FROM documents
             ORDER BY created_at DESC
             LIMIT 20

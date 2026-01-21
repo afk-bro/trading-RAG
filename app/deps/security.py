@@ -13,7 +13,7 @@ import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 from uuid import UUID
 
 import structlog
@@ -362,7 +362,7 @@ class RateLimiter:
         self,
         limit_name: str,
         requests_per_minute: int,
-        key_func: Optional[callable] = None,
+        key_func: Optional[Callable[[Request], str]] = None,
     ):
         """
         Create a dependency that checks rate limit.

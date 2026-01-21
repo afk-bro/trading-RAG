@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -56,6 +57,18 @@ def _get_tune_repo():
             detail="Database connection not available",
         )
     return TuneRepository(_db_pool)
+
+
+def _get_run_repo():
+    """Get BacktestRepository instance."""
+    from app.repositories.backtests import BacktestRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return BacktestRepository(_db_pool)
 
 
 @router.get("/backtests/tunes", response_class=HTMLResponse)
@@ -436,7 +449,7 @@ async def _fetch_tune_for_compare(tune_id: UUID) -> Optional[dict[str, Any]]:
     """Fetch a tune's full detail for comparison."""
     tune_repo = _get_tune_repo()
 
-    tune = await tune_repo.get_tune_by_id(tune_id)
+    tune = await tune_repo.get_tune(tune_id)
     if not tune:
         return None
 
@@ -868,7 +881,7 @@ async def admin_tune_detail(
     """View tune details with runs."""
     tune_repo = _get_tune_repo()
 
-    tune = await tune_repo.get_tune_by_id(tune_id)
+    tune = await tune_repo.get_tune(tune_id)
     if not tune:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -932,9 +945,9 @@ async def admin_backtest_run_detail(
     _: bool = Depends(require_admin_token),
 ):
     """View backtest run details."""
-    tune_repo = _get_tune_repo()
+    run_repo = _get_run_repo()
 
-    run = await tune_repo.get_run_by_id(run_id)
+    run = await run_repo.get_run(run_id)
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -942,6 +955,17 @@ async def admin_backtest_run_detail(
         )
 
     run = dict(run)
+
+    # Convert UUID fields to strings for template
+    for field in [
+        "id",
+        "workspace_id",
+        "strategy_entity_id",
+        "strategy_spec_id",
+        "tune_id",
+    ]:
+        if run.get(field) is not None:
+            run[field] = str(run[field])
 
     # Parse JSONB fields
     for field in ["params", "metrics_is", "metrics_oos"]:
@@ -954,11 +978,17 @@ async def admin_backtest_run_detail(
     # Convert to JSON-serializable for debug panel
     run_json = _json_serializable(run)
 
+    # Get admin token for API calls from template
+    admin_token = request.headers.get("X-Admin-Token", "") or os.environ.get(
+        "ADMIN_TOKEN", ""
+    )
+
     return templates.TemplateResponse(
         "backtest_run_detail.html",
         {
             "request": request,
             "run": run,
             "run_json": json.dumps(run_json, indent=2),
+            "admin_token": admin_token,
         },
     )

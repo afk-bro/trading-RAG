@@ -11,6 +11,9 @@ Standard operating procedures for Trading RAG service.
 5. [Handling KB Status: Degraded](#handling-kb-status-degraded)
 6. [KB Trial Ingestion Operations](#kb-trial-ingestion-operations)
 7. [Service Restart Procedure](#service-restart-procedure)
+8. [Failure Modes & Recovery](#failure-modes--recovery)
+9. [Strategy Alerts](#strategy-alerts)
+10. [Drawdown Alerts](#drawdown-alerts)
 
 ---
 
@@ -462,6 +465,337 @@ curl -X POST "http://localhost:8000/kb/trials/recommend" \
 docker compose pull trading-rag-svc:previous-tag
 docker compose up -d trading-rag-svc
 ```
+
+---
+
+## Failure Modes & Recovery
+
+The service implements circuit breakers and retry logic for transient failures.
+
+### Circuit Breaker Status
+
+Check circuit breaker state via health endpoint:
+
+```bash
+curl -s http://localhost:8000/health | jq '.circuit_breakers'
+# Returns: {"supabase": {"failures": 0, "is_open": false}, "qdrant": {...}}
+```
+
+### Circuit Breaker States
+
+| State | Meaning | Behavior |
+|-------|---------|----------|
+| Closed | Healthy | Normal operation |
+| Open | Service down | Requests fail-fast (no retry) |
+| Half-Open | Testing recovery | One request allowed through |
+
+### Thresholds
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Failure threshold | 5 | Consecutive failures to open circuit |
+| Reset timeout | 30s | Time before half-open test |
+| Max retry attempts | 3 | Retries per operation |
+| Backoff | exponential | 0.5s base, 2x multiplier, 10s max |
+
+### Prometheus Metrics
+
+```
+# Retry attempts by service
+resilience_retries_total{service="db"}
+resilience_retries_total{service="qdrant"}
+
+# Circuit breaker state (0=closed, 1=open, 2=half_open)
+circuit_breaker_state{service="db"}
+circuit_breaker_state{service="qdrant"}
+
+# Failure counts and trip events
+circuit_breaker_failures_total{service="db|qdrant"}
+circuit_breaker_trips_total{service="db|qdrant"}
+```
+
+### When Circuit Opens
+
+**Symptoms:**
+- Requests return 500 with "circuit breaker is open"
+- `circuit_breaker_trips_total` counter increments
+- `/health` shows `is_open: true`
+
+**Diagnosis:**
+```bash
+# Check which service tripped
+curl -s http://localhost:8000/health | jq '.circuit_breakers | to_entries | map(select(.value.is_open)) | .[].key'
+
+# Check recent errors
+docker compose logs trading-rag-svc --since 5m | grep -E "(db_retry|qdrant_retry|circuit_opened)"
+```
+
+**Resolution:**
+1. **Wait for auto-recovery** - Circuit resets after 30s
+2. **Fix underlying issue** - Check database/Qdrant connectivity
+3. **Manual reset** (via service restart if circuit stuck)
+
+### Transient vs Non-Transient Errors
+
+**Retried (transient):**
+- Connection refused/reset
+- Timeouts
+- Pool exhaustion
+- Network errors
+
+**Not retried (non-transient):**
+- SQL syntax errors
+- Constraint violations
+- Authentication failures
+- Missing collections
+
+### Alert Thresholds
+
+Recommended alert rules:
+
+```yaml
+# Circuit breaker opened
+- alert: CircuitBreakerOpen
+  expr: circuit_breaker_state > 0
+  for: 1m
+  labels:
+    severity: warning
+
+# High retry rate
+- alert: HighRetryRate
+  expr: rate(resilience_retries_total[5m]) > 0.5
+  for: 5m
+  labels:
+    severity: warning
+```
+
+---
+
+## Strategy Alerts
+
+Operational alerts for strategy intelligence monitoring.
+
+### STRATEGY_CONFIDENCE_LOW
+
+**Triggers when:** Strategy version's confidence score drops below thresholds for 2+ consecutive snapshots.
+
+| Severity | Threshold | Meaning |
+|----------|-----------|---------|
+| MEDIUM (warn) | `score < 0.35` | Confidence degraded, attention needed |
+| HIGH (critical) | `score < 0.20` | Confidence severely degraded, action required |
+
+**Auto-resolves when:** Score recovers above hysteresis threshold (warn: 0.40, critical: 0.25)
+
+### When STRATEGY_CONFIDENCE_LOW Fires
+
+#### 1. Confirm Snapshot Freshness
+
+Check that `as_of_ts` in the payload isn't stale:
+
+```bash
+# View alert payload
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "strategy_confidence_low")'
+```
+
+If `as_of_ts` is hours old, investigate why intel snapshots aren't being computed:
+- Check intel runner job status
+- Verify OHLCV data feed is current
+- Check for errors in intel computation logs
+
+#### 2. Analyze weak_components
+
+The alert payload includes the 3 weakest confidence components. Map each to action:
+
+| Component | Low Score Meaning | Action |
+|-----------|-------------------|--------|
+| `performance` | Strategy underperforming in recent window | Review recent trades, consider pause if persistent |
+| `drawdown` | Drawdown exceeds acceptable threshold | Check position sizing, verify risk limits |
+| `stability` | Inconsistent WFO results across folds | Widen parameter filters or reduce leverage |
+| `data_freshness` | Stale or missing data | Check OHLCV ingest, verify live data provider |
+| `regime_fit` | Current market regime doesn't match strategy's strength | Consider regime gating, may need to wait for regime change |
+
+#### 3. Review Regime Context
+
+```bash
+# Get latest intel snapshot for the version
+curl -s "http://localhost:8000/strategies/{id}/versions/{vid}/intel/latest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.regime, .confidence_components'
+```
+
+Check if regime has recently changed - a sudden regime shift can cause temporary confidence drops.
+
+#### 4. Action Ladder
+
+| Severity | Recommended Action |
+|----------|-------------------|
+| **MEDIUM (warn)** | Monitor closely. If persists >24h, consider pausing version. Review weak components for root cause. |
+| **HIGH (critical)** | Immediate attention. Strongly consider pausing version. Do NOT ignore - critical confidence indicates high risk. |
+
+#### 5. Pausing a Strategy Version
+
+```bash
+# Pause the affected version
+curl -X POST "http://localhost:8000/strategies/{strategy_id}/versions/{version_id}/pause" \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+After pausing, the alert will auto-resolve (version no longer active).
+
+### Prometheus Metrics
+
+Monitor alert patterns:
+
+```promql
+# Are confidence alerts noisy?
+rate(ops_alert_evals_total{rule_type="strategy_confidence_low", result="triggered"}[1h])
+
+# Warn vs critical ratio
+sum(ops_alert_triggered_total{rule_type="strategy_confidence_low", severity="medium"})
+/
+sum(ops_alert_triggered_total{rule_type="strategy_confidence_low", severity="high"})
+
+# Alert duration (time to resolution)
+histogram_quantile(0.95, sum(rate(strategy_confidence_alert_duration_seconds_bucket[24h])) by (le))
+
+# Currently active alerts
+ops_alert_active{rule_type="strategy_confidence_low"}
+```
+
+### Preventing Flapping
+
+If alerts are repeatedly triggering and resolving (flapping):
+
+1. **Check hysteresis gap** - Current gap is 5 points (trigger at 0.35, clear at 0.40). May need wider gap.
+2. **Check persistence count** - Currently requires 2 consecutive low snapshots. May need 3 for noisy data.
+3. **Review snapshot frequency** - If snapshots are too frequent, transient dips cause alerts.
+
+### Recovery Verification
+
+After addressing root cause, verify recovery:
+
+```bash
+# Check alert was resolved
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "strategy_confidence_low" and .resolved_at != null)'
+
+# Confirm score recovered
+curl -s "http://localhost:8000/strategies/{id}/versions/{vid}/intel/latest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.confidence_score'
+```
+
+---
+
+## Drawdown Alerts
+
+Operational alerts for paper trading equity monitoring.
+
+### WORKSPACE_DRAWDOWN_HIGH
+
+**Triggers when:** Paper trading drawdown exceeds thresholds (computed over 30-day rolling window).
+
+| Severity | Threshold | Meaning |
+|----------|-----------|---------|
+| MEDIUM (warn) | `DD >= 12%` | Significant drawdown, attention needed |
+| HIGH (critical) | `DD >= 20%` | Severe drawdown, immediate action required |
+
+**Auto-resolves when:** Drawdown recovers below hysteresis threshold (warn: 10%, critical: 16%)
+
+### When WORKSPACE_DRAWDOWN_HIGH Fires
+
+#### 1. Confirm Data Freshness
+
+Check that `current_ts` in the payload is recent:
+
+```bash
+# View alert payload
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "workspace_drawdown_high")'
+```
+
+Key payload fields:
+- `drawdown_pct`: Current drawdown percentage (e.g., 0.15 = 15%)
+- `peak_equity`: Highest equity in window
+- `current_equity`: Current equity
+- `peak_ts`: When peak occurred
+- `window_days`: Rolling window (default 30)
+
+#### 2. Analyze Drawdown Cause
+
+| Pattern | Likely Cause | Action |
+|---------|--------------|--------|
+| Sharp single drop | Large losing trade | Review trade, check position sizing |
+| Gradual decline | Strategy underperforming | Review strategy confidence, consider pause |
+| Peak was recent | New peak followed by pullback | May be normal volatility, monitor |
+| Peak was 20+ days ago | Extended drawdown | Serious concern, review all active strategies |
+
+#### 3. Review Active Strategies
+
+```bash
+# List active versions for the workspace
+curl -s "http://localhost:8000/strategies?workspace_id={ws_id}" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.active_version_id != null)'
+```
+
+Cross-reference with confidence alerts - if both WORKSPACE_DRAWDOWN_HIGH and STRATEGY_CONFIDENCE_LOW are firing, pause is strongly indicated.
+
+#### 4. Action Ladder
+
+| Severity | Recommended Action |
+|----------|-------------------|
+| **MEDIUM (warn)** | Monitor closely. Review recent trades. Check for open positions with large unrealized losses. |
+| **HIGH (critical)** | Immediate action. Pause active strategy versions. Close or reduce risky positions. Do NOT ignore - 20%+ drawdown indicates significant capital at risk. |
+
+#### 5. Pausing on Critical Drawdown
+
+When critical drawdown fires, pause all active versions:
+
+```bash
+# List active versions
+curl -s "http://localhost:8000/strategies?workspace_id={ws_id}" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq -r '.[] | .active_version_id | select(. != null)'
+
+# Pause each active version
+curl -X POST "http://localhost:8000/strategies/{strategy_id}/versions/{version_id}/pause" \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+### Prometheus Metrics
+
+Monitor drawdown patterns:
+
+```promql
+# Current drawdown by workspace
+workspace_drawdown_pct
+
+# Drawdown alert rate
+rate(ops_alert_evals_total{rule_type="workspace_drawdown_high", result="triggered"}[1h])
+
+# Currently active drawdown alerts
+ops_alert_active{rule_type="workspace_drawdown_high"}
+```
+
+### Recovery Verification
+
+After addressing drawdown:
+
+```bash
+# Check alert was resolved
+curl -s "http://localhost:8000/admin/ops-alerts" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.[] | select(.rule_type == "workspace_drawdown_high" and .resolved_at != null)'
+
+# Verify drawdown has improved
+# (via equity curve endpoint when available)
+```
+
+### Hysteresis Values
+
+| Level | Trigger | Clear |
+|-------|---------|-------|
+| Warn | >= 12% | < 10% |
+| Critical | >= 20% | < 16% |
+
+The 2-4% hysteresis gap prevents flapping when drawdown hovers near threshold.
 
 ---
 

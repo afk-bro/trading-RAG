@@ -1,0 +1,804 @@
+{% extends "layout.html" %}
+
+{% block title %}Ops Alerts - Admin{% endblock %}
+
+{% block content %}
+<div class="alerts-container">
+    <!-- Left Panel: Queue -->
+    <div class="queue-panel">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Operational Alerts</h2>
+                <div class="header-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="refreshQueue()" title="Refresh">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                        </svg>
+                    </button>
+                    <span class="queue-count">{{ items|length }} alerts</span>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="queue-toolbar">
+                <div class="status-tabs">
+                    <a href="?workspace_id={{ workspace_id }}&status=active" class="tab {% if status_filter == 'active' or not status_filter %}active{% endif %}">Active</a>
+                    <a href="?workspace_id={{ workspace_id }}&status=resolved" class="tab {% if status_filter == 'resolved' %}active{% endif %}">Resolved</a>
+                    <a href="?workspace_id={{ workspace_id }}&status=all" class="tab {% if status_filter == 'all' %}active{% endif %}">All</a>
+                </div>
+                <div class="filter-dropdowns">
+                    <select id="severity-filter" onchange="applySeverityFilter()" class="filter-select">
+                        <option value="">All Severities</option>
+                        <option value="critical" {% if severity_filter == 'critical' %}selected{% endif %}>Critical</option>
+                        <option value="high" {% if severity_filter == 'high' %}selected{% endif %}>High</option>
+                        <option value="medium" {% if severity_filter == 'medium' %}selected{% endif %}>Medium</option>
+                        <option value="low" {% if severity_filter == 'low' %}selected{% endif %}>Low</option>
+                    </select>
+                    <select id="rule-filter" onchange="applyRuleFilter()" class="filter-select">
+                        <option value="">All Rules</option>
+                        <option value="health_degraded" {% if rule_filter == 'health_degraded' %}selected{% endif %}>Health Degraded</option>
+                        <option value="weak_coverage:P1" {% if rule_filter == 'weak_coverage:P1' %}selected{% endif %}>Weak Coverage P1</option>
+                        <option value="weak_coverage:P2" {% if rule_filter == 'weak_coverage:P2' %}selected{% endif %}>Weak Coverage P2</option>
+                        <option value="drift_spike" {% if rule_filter == 'drift_spike' %}selected{% endif %}>Drift Spike</option>
+                        <option value="confidence_drop" {% if rule_filter == 'confidence_drop' %}selected{% endif %}>Confidence Drop</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Queue List -->
+            <div class="queue-list" id="queue-list">
+                {% if items %}
+                {% for item in items %}
+                <div class="queue-item {% if loop.first %}selected{% endif %}"
+                     data-alert-id="{{ item.id }}"
+                     data-item='{{ item | tojson | e }}'
+                     onclick="selectItem(this)">
+                    <div class="item-header">
+                        <span class="severity-badge severity-{{ item.severity }}">
+                            {{ item.severity | upper }}
+                        </span>
+                        <span class="item-time relative-time" data-timestamp="{{ item.last_seen_at }}" title="{{ item.last_seen_at }}">
+                            {{ item.last_seen_at[:16] }}
+                        </span>
+                        <span class="status-dot status-{{ item.status }}"></span>
+                    </div>
+                    <div class="item-rule">
+                        {{ item.rule_type | replace('_', ' ') | title }}
+                    </div>
+                    <div class="item-stats">
+                        <span class="stat-chip" title="Occurrences">{{ item.occurrence_count }}x</span>
+                        {% if item.acknowledged_at %}
+                        <span class="stat-chip ack" title="Acknowledged">ACK</span>
+                        {% endif %}
+                    </div>
+                    <div class="item-dedupe truncate" title="{{ item.dedupe_key }}">
+                        {{ item.dedupe_key }}
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="empty-state">
+                    <h3>{% if status_filter == 'active' or not status_filter %}No active alerts{% else %}No alerts{% endif %}</h3>
+                    <p>{% if status_filter == 'active' or not status_filter %}All systems operational!{% else %}No alerts match this filter.{% endif %}</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel: Detail -->
+    <div class="detail-panel">
+        <div class="card" id="detail-card">
+            {% if items %}
+            <div class="detail-placeholder" id="detail-placeholder" style="display: none;">
+                <h3>Select an alert</h3>
+                <p>Click an alert from the queue to see details</p>
+            </div>
+            <div id="detail-content">
+                <!-- Populated by selectItem() -->
+            </div>
+            {% else %}
+            <div class="detail-placeholder">
+                <h3>No alerts to display</h3>
+                <p>The queue is empty</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+/* Two-panel layout */
+.alerts-container {
+    display: grid;
+    grid-template-columns: 45% 55%;
+    gap: 20px;
+    height: calc(100vh - 120px);
+    min-height: 600px;
+}
+
+.queue-panel, .detail-panel {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.queue-panel .card, .detail-panel .card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin-bottom: 0;
+}
+
+/* Queue toolbar */
+.queue-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.status-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.tab {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: all 0.15s;
+}
+
+.tab:hover {
+    background: var(--bg);
+    color: var(--text);
+    text-decoration: none;
+}
+
+.tab.active {
+    background: var(--link);
+    color: white;
+}
+
+.filter-dropdowns {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-select {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+}
+
+/* Queue list */
+.queue-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+.queue-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.queue-item:hover {
+    border-color: var(--link);
+}
+
+.queue-item.selected {
+    border-color: var(--link);
+    background: rgba(56, 139, 253, 0.1);
+}
+
+.item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.severity-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.severity-critical { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+.severity-high { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+.severity-medium { background: rgba(88, 166, 255, 0.2); color: #58a6ff; }
+.severity-low { background: rgba(139, 148, 158, 0.2); color: #8b949e; }
+
+.item-time {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex: 1;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-dot.status-active { background: var(--warning); }
+.status-dot.status-resolved { background: var(--success); }
+
+.item-rule {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+
+.item-stats {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.stat-chip {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    color: var(--text-muted);
+}
+
+.stat-chip.ack {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--info);
+}
+
+.item-dedupe {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: monospace;
+}
+
+/* Detail panel */
+.detail-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+}
+
+.detail-placeholder h3 {
+    margin-bottom: 8px;
+    color: var(--text);
+}
+
+#detail-content {
+    padding: 4px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Detail sections */
+.detail-section {
+    margin-bottom: 20px;
+}
+
+.detail-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.detail-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.detail-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.detail-status {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.detail-status.active { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+.detail-status.resolved { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+
+/* Stats grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.stat-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.stat-value {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* Payload box */
+.payload-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 12px;
+    font-family: monospace;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Triage controls */
+.triage-controls {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.triage-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.triage-btn {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+
+.triage-btn:hover:not(:disabled) {
+    border-color: var(--link);
+}
+
+.triage-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.triage-btn.btn-acknowledge { border-color: var(--info); background: rgba(88, 166, 255, 0.15); }
+.triage-btn.btn-resolve { border-color: var(--success); background: rgba(63, 185, 80, 0.15); }
+.triage-btn.btn-reopen { border-color: var(--warning); background: rgba(210, 153, 34, 0.15); }
+
+/* Header actions */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn-sm {
+    padding: 4px 8px;
+}
+
+.queue-count {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Copy button */
+.copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    color: var(--text-muted);
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.copy-btn:hover {
+    background: var(--bg);
+    color: var(--text);
+}
+
+/* Timestamps section */
+.timestamps-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    font-size: 12px;
+}
+
+.timestamp-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.timestamp-label {
+    color: var(--text-muted);
+}
+
+.timestamp-value {
+    font-family: monospace;
+}
+
+/* Empty state */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+.empty-state h3 {
+    margin-bottom: 8px;
+    color: var(--text);
+}
+</style>
+
+<script>
+const workspaceId = '{{ workspace_id }}';
+let selectedAlertId = null;
+
+// Select first item on load
+document.addEventListener('DOMContentLoaded', () => {
+    const firstItem = document.querySelector('.queue-item');
+    if (firstItem) {
+        selectItem(firstItem);
+    }
+    updateRelativeTimes();
+    setInterval(updateRelativeTimes, 60000);
+});
+
+function selectItem(el) {
+    // Update selection UI
+    document.querySelectorAll('.queue-item').forEach(item => item.classList.remove('selected'));
+    el.classList.add('selected');
+
+    // Parse item data
+    const item = JSON.parse(el.dataset.item);
+    selectedAlertId = item.id;
+
+    renderDetail(item);
+}
+
+function renderDetail(item) {
+    const content = document.getElementById('detail-content');
+    const placeholder = document.getElementById('detail-placeholder');
+
+    if (placeholder) placeholder.style.display = 'none';
+
+    const ruleDisplay = item.rule_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const payloadJson = JSON.stringify(item.payload, null, 2);
+
+    content.innerHTML = `
+        <!-- Header -->
+        <div class="detail-section">
+            <div class="detail-header">
+                <div>
+                    <div class="detail-title">
+                        <span class="severity-badge severity-${item.severity}">${item.severity.toUpperCase()}</span>
+                        ${ruleDisplay}
+                    </div>
+                    <div class="detail-meta">
+                        <button class="copy-btn" onclick="copyToClipboard('${item.id}')" title="Copy alert ID">
+                            ${item.id.slice(0, 8)}... <small>copy</small>
+                        </button>
+                        <span>v${item.rule_version}</span>
+                    </div>
+                </div>
+                <span class="detail-status ${item.status}">${item.status}</span>
+            </div>
+        </div>
+
+        <!-- Key Metrics -->
+        <div class="detail-section">
+            <div class="detail-section-title">Alert Info</div>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-label">Occurrences</div>
+                    <div class="stat-value">${item.occurrence_count}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Dedupe Key</div>
+                    <div class="stat-value" style="font-size: 11px; font-family: monospace; word-break: break-all;">
+                        ${escapeHtml(item.dedupe_key)}
+                    </div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Source</div>
+                    <div class="stat-value">${item.source}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Workspace</div>
+                    <div class="stat-value" style="font-size: 11px; font-family: monospace;">
+                        ${item.workspace_id.slice(0, 8)}...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timestamps -->
+        <div class="detail-section">
+            <div class="detail-section-title">Timestamps</div>
+            <div class="timestamps-grid">
+                <div class="timestamp-row">
+                    <span class="timestamp-label">Created</span>
+                    <span class="timestamp-value">${formatTimestamp(item.created_at)}</span>
+                </div>
+                <div class="timestamp-row">
+                    <span class="timestamp-label">Last Seen</span>
+                    <span class="timestamp-value">${formatTimestamp(item.last_seen_at)}</span>
+                </div>
+                ${item.acknowledged_at ? `
+                <div class="timestamp-row">
+                    <span class="timestamp-label">Acknowledged</span>
+                    <span class="timestamp-value">${formatTimestamp(item.acknowledged_at)}${item.acknowledged_by ? ` by ${item.acknowledged_by}` : ''}</span>
+                </div>
+                ` : ''}
+                ${item.resolved_at ? `
+                <div class="timestamp-row">
+                    <span class="timestamp-label">Resolved</span>
+                    <span class="timestamp-value">${formatTimestamp(item.resolved_at)}</span>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+
+        <!-- Payload -->
+        <div class="detail-section">
+            <div class="detail-section-title">Payload</div>
+            <div class="payload-box">${escapeHtml(payloadJson)}</div>
+        </div>
+
+        <!-- Actions -->
+        <div class="detail-section">
+            <div class="detail-section-title">Actions</div>
+            <div class="triage-controls">
+                <div class="triage-buttons">
+                    <button class="triage-btn btn-acknowledge"
+                            onclick="acknowledgeAlert('${item.id}')"
+                            ${item.acknowledged_at ? 'disabled title="Already acknowledged"' : ''}>
+                        ${item.acknowledged_at ? 'Acknowledged' : 'Acknowledge'}
+                    </button>
+                    <button class="triage-btn btn-resolve"
+                            onclick="resolveAlert('${item.id}')"
+                            ${item.status === 'resolved' ? 'disabled title="Already resolved"' : ''}>
+                        ${item.status === 'resolved' ? 'Resolved' : 'Resolve'}
+                    </button>
+                    <button class="triage-btn btn-reopen"
+                            onclick="reopenAlert('${item.id}')"
+                            ${item.status === 'active' ? 'disabled title="Already active"' : ''}>
+                        Reopen
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function acknowledgeAlert(alertId) {
+    try {
+        const response = await fetch(`/admin/ops-alerts/${alertId}/acknowledge`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': '{{ admin_token or "" }}'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to acknowledge');
+        }
+
+        // Refresh the item
+        await refreshItem(alertId);
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function resolveAlert(alertId) {
+    try {
+        const response = await fetch(`/admin/ops-alerts/${alertId}/resolve`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': '{{ admin_token or "" }}'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to resolve');
+        }
+
+        // Refresh the item
+        await refreshItem(alertId);
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function reopenAlert(alertId) {
+    try {
+        const response = await fetch(`/admin/ops-alerts/${alertId}/reopen`, {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': '{{ admin_token or "" }}'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to reopen');
+        }
+
+        // Refresh the item
+        await refreshItem(alertId);
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function refreshItem(alertId) {
+    try {
+        const response = await fetch(`/admin/ops-alerts/${alertId}`, {
+            headers: {
+                'X-Admin-Token': '{{ admin_token or "" }}'
+            }
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch alert');
+
+        const item = await response.json();
+
+        // Update queue item
+        const queueItem = document.querySelector(`[data-alert-id="${alertId}"]`);
+        if (queueItem) {
+            queueItem.dataset.item = JSON.stringify(item);
+
+            // Update status dot
+            const statusDot = queueItem.querySelector('.status-dot');
+            statusDot.className = `status-dot status-${item.status}`;
+
+            // Update ACK chip
+            const statsDiv = queueItem.querySelector('.item-stats');
+            if (item.acknowledged_at && !statsDiv.querySelector('.ack')) {
+                statsDiv.innerHTML += '<span class="stat-chip ack" title="Acknowledged">ACK</span>';
+            }
+        }
+
+        // Re-render detail
+        renderDetail(item);
+    } catch (error) {
+        console.error('Failed to refresh item:', error);
+        refreshQueue();
+    }
+}
+
+function refreshQueue() {
+    window.location.reload();
+}
+
+function applySeverityFilter() {
+    const severity = document.getElementById('severity-filter').value;
+    const url = new URL(window.location);
+    if (severity) {
+        url.searchParams.set('severity', severity);
+    } else {
+        url.searchParams.delete('severity');
+    }
+    window.location = url;
+}
+
+function applyRuleFilter() {
+    const rule = document.getElementById('rule-filter').value;
+    const url = new URL(window.location);
+    if (rule) {
+        url.searchParams.set('rule_type', rule);
+    } else {
+        url.searchParams.delete('rule_type');
+    }
+    window.location = url;
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatTimestamp(isoString) {
+    if (!isoString) return 'N/A';
+    const date = new Date(isoString);
+    return date.toLocaleString();
+}
+
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+</script>
+{% endblock %}

@@ -1,29 +1,40 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with this repository.
+Guidance for Claude Code when working with this repository.
 
 ## Git & Communication Guidelines
 
-**Do not reference Claude or AI in any git artifacts.** This includes commit messages, PR titles/descriptions, code comments, and branch names. Write as if a human authored them.
+**Do not reference Claude or AI in any git artifacts.** This includes commit messages, PR titles/descriptions, code comments, and branch names. Write as if a human developer authored them.
 
 ## Overview
 
-**rag-core** is a multi-tenant RAG system. FastAPI service that ingests documents (YouTube, PDFs, Pine Scripts), chunks with token-awareness, generates embeddings via Ollama, stores vectors in Qdrant, and provides semantic search with LLM answer generation.
+**rag-core** is a multi-tenant Retrieval-Augmented Generation system. FastAPI service that ingests documents (YouTube transcripts, PDFs, Pine scripts), chunks them with token-awareness, generates embeddings via Ollama, stores vectors in Qdrant, and provides semantic search with LLM-powered answer generation.
 
-Workspace-scoped: each workspace has its own configuration stored in `workspaces` table.
+Workspace-scoped: each workspace has its own configuration stored in a control-plane table.
 
 ## Architecture
 
 ```
-Sources (YouTube, PDF, Pine) → FastAPI → Ollama (Embed) + Qdrant (Vector) + Supabase (Postgres)
+Sources (YouTube, PDF, Pine)
+              │
+              ▼
+    ┌─────────────────┐
+    │  FastAPI Service │
+    │   (rag-core)     │
+    └────────┬────────┘
+             │
+    ┌────────┼────────┬────────────┐
+    ▼        ▼        ▼            ▼
+ Ollama   Qdrant   Supabase   Workspaces
+(Embed)  (Vector)  (Postgres)  (Control)
 ```
 
 **Data Flow**: Content → Extract → Chunk (512 tokens) → Embed (768-dim) → Vector + Postgres
 
 **Layer Pattern**:
 - `app/routers/` - API endpoints (thin controllers)
-- `app/services/` - Business logic
-- `app/repositories/` - Data access
+- `app/services/` - Business logic (chunker, embedder, pdf_extractor, llm, intel)
+- `app/repositories/` - Data access (documents, chunks, vectors, strategy_intel)
 
 ## Common Commands
 
@@ -40,10 +51,10 @@ docker compose -f docker-compose.rag.yml up --build
 
 # Testing
 pytest tests/                                # All tests
-pytest tests/unit/                           # Unit only
-pytest tests/unit/test_pdf_extractor.py -v  # Single file
+pytest tests/unit/                          # Unit only
+pytest tests/integration/ -m "not requires_db"  # Integration (mocked DB)
 
-# Linting
+# Linting (CI runs these)
 black --check app/ tests/
 flake8 app/ tests/ --max-line-length=100
 mypy app/ --ignore-missing-imports
@@ -51,31 +62,42 @@ mypy app/ --ignore-missing-imports
 
 ## Configuration
 
-**Required** (`.env`):
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`
+**Required** (set in `.env`):
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` - Database credentials
+- `DATABASE_URL` - PostgreSQL connection string
 
 **Optional**:
-- `OPENROUTER_API_KEY` - LLM API (enables `mode=answer`)
+- `OPENROUTER_API_KEY` - LLM API access (enables `mode=answer` queries)
 - `ADMIN_TOKEN` - Admin endpoint protection
 
-**DB Notes**: Use Supabase transaction pooler (port 6543). asyncpg uses `statement_cache_size=0` for pgbouncer.
+Services default to Docker network hostnames: `qdrant:6333`, `ollama:11434`
+
+**Database Notes**: Use Supabase transaction pooler (port 6543). asyncpg configured with `statement_cache_size=0` for pgbouncer compatibility.
 
 ## Key Architectural Details
 
-- **Async-First**: All I/O uses async. Do not introduce blocking calls.
-- **Token-Aware Chunking**: tiktoken for accurate counting, ~512 tokens with overlap
-- **PDF Extraction**: Swappable backend (PyMuPDF, pdfplumber)
-- **Idempotency**: Content hashes, unique constraint on `(workspace_id, source_type, canonical_url)`
-- **Model Migration**: `chunk_vectors` tracks embeddings per model/collection
+| Principle | Details |
+|-----------|---------|
+| **Async-First** | All I/O uses async (asyncpg, httpx, Qdrant async). No blocking calls. |
+| **Token-Aware Chunking** | tiktoken for accurate counting. ~512 tokens with overlap. Page-aware for PDFs. |
+| **PDF Extraction** | Swappable backend (PyMuPDF, pdfplumber). Interface: `extract_pdf(file_bytes, config)` |
+| **Idempotency** | Content hashes + idempotency keys. Unique constraint on `(workspace_id, source_type, canonical_url)` |
+| **Model Migration** | `chunk_vectors` tracks embeddings per model/collection. Re-embed endpoint available. |
 
 ## Database Schema
 
 PostgreSQL tables (via Supabase):
 
-- **workspaces** - Control plane (routing defaults, config jsonb)
-- **documents** - Source metadata, content hash, status lifecycle
-- **chunks** - Text segments with token counts, metadata arrays
-- **chunk_vectors** - Maps chunks to embedding model/collection
+| Table | Purpose |
+|-------|---------|
+| `workspaces` | Control plane (routing defaults, config jsonb) |
+| `documents` | Source metadata, content hash, status lifecycle |
+| `chunks` | Text segments with token counts, metadata arrays |
+| `chunk_vectors` | Maps chunks to embedding model/collection |
+| `strategy_versions` | Immutable config snapshots with state machine |
+| `strategy_intel_snapshots` | Regime + confidence time series |
+| `paper_equity_snapshots` | Equity tracking for paper trading |
 
 All tables FK to workspaces. Migrations in `migrations/`.
 
@@ -99,8 +121,15 @@ All tables FK to workspaces. Migrations in `migrations/`.
 **Execution** (see `docs/features/execution.md`):
 - `POST /execute/intents`, `GET /execute/paper/state/{workspace_id}`
 
+**Dashboards**:
+- `GET /dashboards/{workspace_id}/equity` - Equity curve with drawdown
+- `GET /dashboards/{workspace_id}/intel-timeline` - Confidence history
+- `GET /dashboards/{workspace_id}/alerts` - Active alerts
+- `GET /dashboards/{workspace_id}/summary` - Combined overview
+
 **Admin** (requires `X-Admin-Token`):
 - `GET /admin/system/health`, `/admin/ops/snapshot`
+- `GET /admin/ops-alerts`, `POST /admin/ops-alerts/{id}/acknowledge|resolve|reopen`
 - `GET /admin/coverage/cockpit`, `PATCH /admin/coverage/weak/{id}`
 - `GET /admin/backtests/*`, `/admin/testing/run-plans/*`
 
@@ -131,18 +160,9 @@ See `docs/features/ops.md` for full details.
 
 Detailed documentation for subsystems:
 
-| Feature | Doc |
-|---------|-----|
-| Backtest Tuning, WFO, Test Generator | `docs/features/backtests.md` |
-| Pine Script Registry, Ingest, Auto-Strategy | `docs/features/pine-scripts.md` |
-| Paper Execution, Strategy Runner | `docs/features/execution.md` |
-| Coverage Triage, Cockpit UI | `docs/features/coverage.md` |
-| KB Recommend, Regime Fingerprints | `docs/features/kb-recommend.md` |
-| System Health, Security, v1.0.0 Hardening | `docs/features/ops.md` |
-
-## Roadmap
-
-Evolving from trading-focused RAG to general-purpose rag-core:
-- Trading is the first workspace
-- PDF backend swappable (MinerU/StudyG planned)
-- Workspace config enables per-tenant customization
+- `docs/features/backtests.md` - Backtest tuning, WFO, test generator
+- `docs/features/pine-scripts.md` - Pine Script registry, ingest, auto-strategy
+- `docs/features/execution.md` - Paper execution, strategy runner
+- `docs/features/coverage.md` - Coverage triage workflow
+- `docs/features/kb-recommend.md` - KB recommend pipeline, regime fingerprints
+- `docs/features/ops.md` - System health, security, v1.0.0 hardening

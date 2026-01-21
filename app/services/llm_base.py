@@ -5,8 +5,18 @@ from dataclasses import dataclass
 from typing import Literal, TypedDict
 
 import structlog
+import tiktoken
 
 logger = structlog.get_logger(__name__)
+
+# Token counter for context truncation
+_token_encoding = tiktoken.get_encoding("cl100k_base")
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens in text using cl100k_base encoding."""
+    return len(_token_encoding.encode(text))
+
 
 # Message types
 Role = Literal["system", "user", "assistant"]
@@ -194,6 +204,7 @@ class BaseLLMClient(ABC):
         question: str,
         chunks: list[dict],
         max_context_tokens: int = 8000,
+        model: str | None = None,
     ) -> LLMResponse:
         """
         Generate an answer with citations from context chunks.
@@ -205,18 +216,39 @@ class BaseLLMClient(ABC):
             question: User's question
             chunks: List of chunks with 'content' and optional 'title'/'source_url'
             max_context_tokens: Maximum tokens for context
+            model: Override model for answer generation (defaults to answer_model)
 
         Returns:
             LLMResponse with answer text
         """
-        # Build context with citation numbers
+        # Build context with citation numbers, truncating by whole chunks
+        # to stay within max_context_tokens
         context_parts = []
+        total_tokens = 0
+        chunks_included = 0
+
         for i, chunk in enumerate(chunks, 1):
             source_info = chunk.get("title", chunk.get("source_url", f"Source {i}"))
             locator = chunk.get("locator_label", "")
             if locator:
                 source_info = f"{source_info} ({locator})"
-            context_parts.append(f"[{i}] {source_info}:\n{chunk['content']}\n")
+            chunk_text = f"[{i}] {source_info}:\n{chunk['content']}\n"
+            chunk_tokens = _count_tokens(chunk_text)
+
+            # Check if adding this chunk would exceed the limit
+            if total_tokens + chunk_tokens > max_context_tokens:
+                logger.info(
+                    "Truncating context to respect max_context_tokens",
+                    max_context_tokens=max_context_tokens,
+                    chunks_included=chunks_included,
+                    chunks_total=len(chunks),
+                    tokens_used=total_tokens,
+                )
+                break
+
+            context_parts.append(chunk_text)
+            total_tokens += chunk_tokens
+            chunks_included += 1
 
         context = "\n".join(context_parts)
 
@@ -242,11 +274,15 @@ Provide your response in this format:
 **Not specified in context:**
 - [Aspects of the question the context does not address, if any]"""
 
+        effective_model = model or self.answer_model
         logger.info(
             "Generating grounded answer",
             question=question[:50],
-            num_chunks=len(chunks),
-            model=self.answer_model,
+            chunks_provided=len(chunks),
+            chunks_included=chunks_included,
+            context_tokens=total_tokens,
+            max_context_tokens=max_context_tokens,
+            model=effective_model,
         )
 
         return await self.generate(
@@ -254,7 +290,7 @@ Provide your response in this format:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            model=self.answer_model,
+            model=effective_model,
         )
 
     async def rerank(

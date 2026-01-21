@@ -96,6 +96,23 @@ class YouTubeIngestRequest(BaseModel):
     workspace_id: UUID = Field(..., description="Workspace identifier")
     url: str = Field(..., description="YouTube URL (video or playlist)")
     idempotency_key: Optional[str] = Field(None, description="Idempotency key")
+    preferred_languages: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "List of language codes in preference order for transcript fetching. "
+            "Defaults to ['en', 'en-US', 'en-GB'] if not specified. "
+            "Example: ['es', 'es-ES', 'en'] for Spanish first, then English."
+        ),
+    )
+    max_playlist_videos: int = Field(
+        default=200,
+        ge=1,
+        le=500,
+        description=(
+            "Maximum number of videos to fetch from a playlist. "
+            "Defaults to 200, max 500. Large playlists will be truncated."
+        ),
+    )
 
 
 class YouTubeIngestResponse(BaseModel):
@@ -112,6 +129,12 @@ class YouTubeIngestResponse(BaseModel):
         default=None, description="Video URLs if playlist"
     )
     error_reason: Optional[str] = Field(None, description="Error reason if failed")
+    language: Optional[str] = Field(
+        None, description="Language code of the fetched transcript (e.g., 'en', 'es')"
+    )
+    is_auto_generated: Optional[bool] = Field(
+        None, description="True if auto-generated transcript was used"
+    )
 
 
 # ===========================================

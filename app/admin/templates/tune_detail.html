@@ -1,12 +1,12 @@
 {% extends "layout.html" %}
 
-{% block title %}Tune {{ tune.id[:8] }}... - KB Admin{% endblock %}
+{% block title %}Tune {{ (tune.id|string)[:8] }}... - KB Admin{% endblock %}
 
 {% block content %}
 <!-- Breadcrumb -->
 <div class="breadcrumb">
     <a href="/admin/backtests/tunes?workspace_id={{ tune.workspace_id }}">Tunes</a> /
-    <span>{{ tune.id[:8] }}...</span>
+    <span>{{ (tune.id|string)[:8] }}...</span>
 </div>
 
 <!-- Canceled Banner -->
@@ -42,7 +42,7 @@
     </div>
     <div class="detail-meta">
         <span class="id-with-copy" title="{{ tune.id }}">
-            ID: {{ tune.id[:12] }}...
+            ID: {{ (tune.id|string)[:12] }}...
             <button onclick="copyToClipboard('{{ tune.id }}')" class="copy-btn" title="Copy tune ID">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             </button>
@@ -313,7 +313,7 @@
     <!-- Pagination -->
     <div class="pagination">
         <div class="pagination-info">
-            Showing {{ offset + 1 }} - {{ [offset + limit, total_runs]|min }} of {{ total_runs }}
+            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
         </div>
         <div class="pagination-buttons">
             {% if has_prev %}
