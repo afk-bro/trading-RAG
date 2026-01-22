@@ -27,6 +27,26 @@ Single-page operational health view for "what's broken?" diagnostics.
 - `RateLimiter` - Sliding window rate limiting
 - `WorkspaceSemaphore` - Per-workspace concurrency caps
 
+### Cookie-Based Authentication (`app/admin/auth.py`)
+
+Admin UI supports cookie-based authentication for seamless navigation:
+
+**Endpoints**:
+- `GET /admin/login` - Login page with token input form
+- `POST /admin/auth/login` - Validate token and set httponly cookie
+- `GET /admin/auth/logout` - Clear cookie and redirect to landing
+- `GET /admin/auth/check` - JSON endpoint to verify auth status
+
+**Token Sources** (checked in order):
+1. `X-Admin-Token` header
+2. `admin_token` cookie (httponly, 30-day expiry)
+3. `token` query parameter (fallback)
+
+**Cookie Settings**:
+- `httponly=True` - Prevent XSS access
+- `samesite="lax"` - CSRF protection
+- `max_age=30 days` - With "Remember me" option
+
 **Production Environment**:
 ```bash
 ADMIN_TOKEN=<secure-token>      # Required for /admin/*
@@ -36,6 +56,17 @@ CONFIG_PROFILE=production
 GIT_SHA=abc123                  # Set by CI/CD
 BUILD_TIME=2025-01-09T12:00:00Z
 ```
+
+## Alert Webhooks
+
+Configuration for external alert delivery:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WEBHOOK_ENABLED` | Master switch for webhook alerts | `false` |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL | None |
+| `ALERT_WEBHOOK_URL` | Generic webhook endpoint | None |
+| `ALERT_WEBHOOK_HEADERS` | JSON dict of custom headers | None |
 
 ## Monitoring
 

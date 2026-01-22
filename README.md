@@ -219,6 +219,11 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 
 | Route | Purpose |
 |-------|---------|
+| `/` | Landing page (public) |
+| `/admin/login` | Login page |
+| `/admin/auth/login` | Authenticate (POST) |
+| `/admin/auth/logout` | Logout and clear session |
+| `/admin/auth/check` | Check auth status (JSON) |
 | `/admin/backtests/tunes` | Filterable tune list |
 | `/admin/backtests/leaderboard` | Global ranking (CSV export) |
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
@@ -231,11 +236,27 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
 | `/admin/ops-alerts/{id}/resolve` | Resolve alert |
 | `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
-| `/admin/ingest` | Ingest UI (YouTube, PDF, Pine) |
+| `/admin/ingest` | Unified ingest UI (YouTube, PDF, Pine, Article, Text) |
 | `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
 | `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
 | `/dashboards/{ws}/alerts` | Active alerts by severity |
 | `/dashboards/{ws}/summary` | Combined overview for dashboard cards |
+
+### Unified Ingest Endpoint
+
+```http
+POST /ingest/unified
+Content-Type: multipart/form-data
+
+workspace_id=<uuid>
+url=<optional: YouTube/PDF/article URL>
+file=<optional: PDF/text/Pine file>
+content=<optional: raw text/markdown>
+title=<optional: override auto-detected title>
+source_type=<optional: override auto-detection>
+```
+
+Auto-detects content type from URL patterns or file extensions. Exactly one of `url`, `file`, or `content` is required.
 
 ### Pine Script Registry CLI
 

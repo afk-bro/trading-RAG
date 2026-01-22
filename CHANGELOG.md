@@ -8,6 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Unified Ingestion Endpoint** - Single endpoint for all content types with auto-detection
+  - `POST /ingest/unified` - Multipart form-data endpoint
+  - Auto-detects: YouTube URLs, PDF URLs, article URLs, PDF files, text/markdown files, Pine files
+  - Source type override via `source_type` parameter
+  - Detection logic in `app/services/ingest/detection.py`
+  - Service layer refactor: youtube.py, pdf.py, text.py, article.py under `app/services/ingest/`
+
+- **Cookie-Based Admin Authentication** - Seamless admin UI navigation
+  - `GET /admin/login` - Login page with token input
+  - `POST /admin/auth/login` - Authenticate and set httponly cookie
+  - `GET /admin/auth/logout` - Clear auth cookie and redirect
+  - `GET /admin/auth/check` - Verify authentication status
+  - 30-day cookie expiry with "Remember me" option
+  - Token accepted from: header (`X-Admin-Token`), cookie (`admin_token`), or query param
+
+- **Landing Page** - Public system overview at root URL
+  - `GET /` - HTML landing page describing Trading RAG system
+  - Feature highlights, architecture overview, quick links
+  - No authentication required
+
+- **Article Extractor Service** - Web content extraction for article URLs
+  - `app/services/article_extractor.py` - Fetch and parse web articles
+  - Uses trafilatura for content extraction
+  - Extracts: title, text, author, published date
+  - Response size guard (10MB limit)
+
+- **Admin Ingest UI Enhancements** - Extended content type support
+  - Article URL tab with title override
+  - Text/Markdown file upload tab
+  - All tabs use unified endpoint via FormData
+
+- **Webhook Alert Configuration** - Settings for alert delivery
+  - `webhook_enabled` - Master switch for webhook alerts
+  - `slack_webhook_url` - Slack incoming webhook URL
+  - `alert_webhook_url` - Generic webhook URL
+  - `alert_webhook_headers` - Custom headers for webhook requests
+
 - **Ops Alerts Admin UI** - Admin page for viewing and managing operational alerts
   - `GET /admin/ops/alerts` - HTML list page with filtering, pagination, severity badges
   - `POST /admin/ops/alerts/{id}/acknowledge` - Mark alert as acknowledged
