@@ -555,7 +555,9 @@ class TestPaperBrokerStrategyGating:
         gated_broker._version_repo.is_entity_active = AsyncMock(return_value=False)
 
         with patch.object(gated_broker, "_check_idempotency", return_value=None):
-            result = await gated_broker.execute_intent(sample_intent, fill_price=50000.0)
+            result = await gated_broker.execute_intent(
+                sample_intent, fill_price=50000.0
+            )
 
         assert not result.success
         assert result.error_code == "STRATEGY_PAUSED"
@@ -577,7 +579,9 @@ class TestPaperBrokerStrategyGating:
         gated_broker._version_repo.is_entity_active = AsyncMock(return_value=True)
 
         with patch.object(gated_broker, "_check_idempotency", return_value=None):
-            result = await gated_broker.execute_intent(sample_intent, fill_price=50000.0)
+            result = await gated_broker.execute_intent(
+                sample_intent, fill_price=50000.0
+            )
 
         assert result.success
         assert result.position_action == "opened"
@@ -591,7 +595,9 @@ class TestPaperBrokerStrategyGating:
         assert paper_broker._version_repo is None
 
         with patch.object(paper_broker, "_check_idempotency", return_value=None):
-            result = await paper_broker.execute_intent(sample_intent, fill_price=50000.0)
+            result = await paper_broker.execute_intent(
+                sample_intent, fill_price=50000.0
+            )
 
         assert result.success
         assert result.position_action == "opened"

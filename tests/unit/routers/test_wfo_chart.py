@@ -289,7 +289,12 @@ class TestWFOChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_wfo_chart_data_with_fold_selection(
-        self, sample_wfo_id, mock_pool, sample_wfo_row, sample_tune_rows, sample_equity_curve
+        self,
+        sample_wfo_id,
+        mock_pool,
+        sample_wfo_row,
+        sample_tune_rows,
+        sample_equity_curve,
     ):
         """Test WFO chart data returns selected fold equity."""
         from app.routers.backtests import wfo_chart

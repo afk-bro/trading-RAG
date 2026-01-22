@@ -1015,7 +1015,9 @@ def _get_wfo_repo():
 async def admin_wfo_list(
     request: Request,
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
-    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
+    status_filter: Optional[str] = Query(
+        None, alias="status", description="Filter by status"
+    ),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
@@ -1110,8 +1112,12 @@ async def admin_wfo_detail(
 
     # Parse JSONB fields
     jsonb_fields = [
-        "wfo_config", "data_source", "param_space",
-        "best_params", "best_candidate", "candidates",
+        "wfo_config",
+        "data_source",
+        "param_space",
+        "best_params",
+        "best_candidate",
+        "candidates",
     ]
     for field in jsonb_fields:
         if wfo.get(field) and isinstance(wfo[field], str):

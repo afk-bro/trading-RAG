@@ -128,7 +128,9 @@ def _parse_jsonb(raw: Any) -> Any:
     return None
 
 
-def _parse_equity_curve(raw: Any) -> tuple[list[EquityPoint], Literal["jsonb", "csv", "missing"]]:
+def _parse_equity_curve(
+    raw: Any,
+) -> tuple[list[EquityPoint], Literal["jsonb", "csv", "missing"]]:
     """Parse equity curve from JSONB, return (points, source)."""
     if not raw:
         return [], "missing"
@@ -171,7 +173,9 @@ def _parse_equity_curve(raw: Any) -> tuple[list[EquityPoint], Literal["jsonb", "
 )
 async def get_wfo_chart_data(
     wfo_id: UUID,
-    fold_index: Optional[int] = Query(None, ge=0, description="Fold to get equity curve for"),
+    fold_index: Optional[int] = Query(
+        None, ge=0, description="Fold to get equity curve for"
+    ),
 ):
     """Get chart data for a WFO run."""
     if _db_pool is None:
@@ -302,7 +306,8 @@ async def get_wfo_chart_data(
                     fold_index=idx,
                     tune_id=str(tune_id),
                     status=tune["status"],
-                    train_start=data_split.get("train_start") or dataset_meta.get("date_min"),
+                    train_start=data_split.get("train_start")
+                    or dataset_meta.get("date_min"),
                     train_end=data_split.get("train_end"),
                     test_start=data_split.get("test_start"),
                     test_end=data_split.get("test_end") or dataset_meta.get("date_max"),
@@ -318,7 +323,9 @@ async def get_wfo_chart_data(
     fold_idx = fold_index if isinstance(fold_index, int) else None
     if fold_idx is not None:
         if fold_idx >= len(child_tune_ids):
-            notes.append(f"Fold {fold_idx} does not exist (only {len(child_tune_ids)} folds)")
+            notes.append(
+                f"Fold {fold_idx} does not exist (only {len(child_tune_ids)} folds)"
+            )
         else:
             tune_id = child_tune_ids[fold_idx]
             async with _db_pool.acquire() as conn:
