@@ -230,6 +230,24 @@ class Settings(BaseSettings):
         description="Auto-pause active strategy versions on CRITICAL alerts (drawdown, confidence)",
     )
 
+    # Webhook Alert Configuration
+    webhook_enabled: bool = Field(
+        default=False,
+        description="Enable webhook notifications for alert activations",
+    )
+    slack_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Slack incoming webhook URL for alert notifications",
+    )
+    alert_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Generic webhook URL for alert notifications",
+    )
+    alert_webhook_headers: Optional[dict] = Field(
+        default=None,
+        description="Custom headers for alert webhook requests (JSON dict)",
+    )
+
     # SSE (Server-Sent Events) Configuration
     sse_ticket_secret: Optional[str] = Field(
         default=None,
