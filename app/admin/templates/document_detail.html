@@ -1,0 +1,582 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ document.title or 'Document' }} - KB Admin{% endblock %}
+
+{% block content %}
+<style>
+    .hidden {
+        display: none !important;
+    }
+
+    /* Breadcrumb */
+    .breadcrumb {
+        margin-bottom: 1rem;
+        font-size: 14px;
+    }
+
+    .breadcrumb a {
+        color: var(--text-muted);
+    }
+
+    .breadcrumb a:hover {
+        color: var(--link);
+    }
+
+    /* Document header */
+    .doc-header {
+        margin-bottom: 1.5rem;
+    }
+
+    .doc-header h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+        word-break: break-word;
+    }
+
+    .doc-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .doc-meta-item {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    /* Stats row */
+    .stats-row {
+        display: flex;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+
+    .stat-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1rem 1.5rem;
+        min-width: 120px;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+
+    /* Two column layout */
+    .content-grid {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+        .content-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* Chunks section */
+    .chunks-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+    }
+
+    .section-header {
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .section-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .chunk-list {
+        max-height: 800px;
+        overflow-y: auto;
+    }
+
+    .chunk-item {
+        border-bottom: 1px solid var(--border);
+        padding: 1rem;
+    }
+
+    .chunk-item:last-child {
+        border-bottom: none;
+    }
+
+    .chunk-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+
+    .chunk-index {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--link);
+    }
+
+    .chunk-meta {
+        display: flex;
+        gap: 0.75rem;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .chunk-content {
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text);
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .chunk-content.collapsed {
+        max-height: 100px;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .chunk-content.collapsed::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 40px;
+        background: linear-gradient(transparent, var(--bg-secondary));
+    }
+
+    .chunk-expand {
+        font-size: 12px;
+        color: var(--link);
+        cursor: pointer;
+        margin-top: 0.5rem;
+        display: inline-block;
+    }
+
+    .chunk-expand:hover {
+        text-decoration: underline;
+    }
+
+    /* Validation buttons */
+    .chunk-actions {
+        margin-top: 0.75rem;
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .validation-btn {
+        padding: 4px 10px;
+        font-size: 11px;
+        border-radius: 4px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text-muted);
+        transition: all 0.2s;
+    }
+
+    .validation-btn:hover {
+        border-color: var(--text-muted);
+    }
+
+    .validation-btn.active-verified {
+        background: rgba(63, 185, 80, 0.2);
+        border-color: var(--success);
+        color: var(--success);
+    }
+
+    .validation-btn.active-needs_review {
+        background: rgba(210, 153, 34, 0.2);
+        border-color: var(--warning);
+        color: var(--warning);
+    }
+
+    .validation-btn.active-garbage {
+        background: rgba(248, 81, 73, 0.2);
+        border-color: var(--danger);
+        color: var(--danger);
+    }
+
+    /* Sidebar */
+    .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .sidebar-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1rem;
+    }
+
+    .sidebar-card h3 {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        margin-bottom: 0.75rem;
+    }
+
+    /* Key concepts */
+    .concepts-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .concept-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem;
+        background: var(--bg);
+        border-radius: 4px;
+    }
+
+    .concept-term {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+    }
+
+    .concept-count {
+        font-size: 12px;
+        color: var(--text-muted);
+        background: var(--bg-secondary);
+        padding: 2px 8px;
+        border-radius: 10px;
+    }
+
+    .concept-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+
+    /* Tickers */
+    .tickers-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .ticker-badge {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--link);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: monospace;
+    }
+
+    .ticker-count {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-left: 4px;
+    }
+
+    /* Document info card */
+    .doc-info-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .doc-info-item {
+        display: flex;
+        flex-direction: column;
+        padding: 0.5rem;
+        background: var(--bg);
+        border-radius: 4px;
+    }
+
+    .doc-info-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+
+    .doc-info-value {
+        font-size: 13px;
+        color: var(--text);
+        word-break: break-all;
+    }
+
+    .doc-info-value a {
+        color: var(--link);
+    }
+
+    /* Time format helper */
+    .timestamp {
+        font-family: monospace;
+        font-size: 12px;
+    }
+
+    /* Empty state */
+    .empty-state {
+        padding: 2rem;
+        text-align: center;
+        color: var(--text-muted);
+    }
+
+    /* Video link */
+    .video-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        color: var(--link);
+        font-size: 12px;
+    }
+</style>
+
+<div class="breadcrumb">
+    <a href="/admin/ingest">Ingest</a> / Document Detail
+</div>
+
+<div class="doc-header">
+    <h1>{{ document.title or 'Untitled Document' }}</h1>
+    <div class="doc-meta">
+        {% if document.author %}
+        <span class="doc-meta-item">By {{ document.author }}</span>
+        {% endif %}
+        <span class="doc-meta-item">{{ document.source_type }}</span>
+        <span class="doc-meta-item">{{ document.language or 'en' }}</span>
+        <span class="doc-meta-item">{{ document.created_at.strftime('%Y-%m-%d %H:%M') if document.created_at else 'Unknown' }}</span>
+        {% if document.source_url and 'youtube.com' in document.source_url %}
+        <a href="{{ document.source_url }}" target="_blank" class="video-link">Watch on YouTube</a>
+        {% elif document.source_url %}
+        <a href="{{ document.source_url }}" target="_blank" class="video-link">View Source</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value">{{ chunk_count }}</div>
+        <div class="stat-label">Chunks</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ "{:,}".format(total_tokens) }}</div>
+        <div class="stat-label">Tokens</div>
+    </div>
+    {% if total_duration %}
+    <div class="stat-card">
+        <div class="stat-value">{{ (total_duration // 60)|int }}:{{ "%02d"|format(total_duration % 60) }}</div>
+        <div class="stat-label">Duration</div>
+    </div>
+    {% endif %}
+    <div class="stat-card">
+        <div class="stat-value">{{ key_concepts.concepts|length }}</div>
+        <div class="stat-label">Concepts</div>
+    </div>
+    {% if key_concepts.tickers %}
+    <div class="stat-card">
+        <div class="stat-value">{{ key_concepts.tickers|length }}</div>
+        <div class="stat-label">Tickers</div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="content-grid">
+    <!-- Main: Chunks -->
+    <div class="chunks-section">
+        <div class="section-header">
+            <span class="section-title">Content Chunks</span>
+            <span style="font-size: 12px; color: var(--text-muted);">
+                Click to expand, validate for QA
+            </span>
+        </div>
+        <div class="chunk-list">
+            {% if chunks %}
+                {% for chunk in chunks %}
+                <div class="chunk-item" data-chunk-id="{{ chunk.id }}">
+                    <div class="chunk-header">
+                        <span class="chunk-index">Chunk {{ chunk.chunk_index }}</span>
+                        <div class="chunk-meta">
+                            {% if chunk.time_start_secs is not none %}
+                            <span class="timestamp">
+                                {{ (chunk.time_start_secs // 60)|int }}:{{ "%02d"|format(chunk.time_start_secs % 60) }}
+                                -
+                                {{ (chunk.time_end_secs // 60)|int }}:{{ "%02d"|format(chunk.time_end_secs % 60) }}
+                            </span>
+                            {% endif %}
+                            {% if chunk.page_start %}
+                            <span>p. {{ chunk.page_start }}{% if chunk.page_end and chunk.page_end != chunk.page_start %}-{{ chunk.page_end }}{% endif %}</span>
+                            {% endif %}
+                            <span>{{ chunk.token_count or 0 }} tokens</span>
+                        </div>
+                    </div>
+                    <div class="chunk-content collapsed" id="content-{{ loop.index }}">{{ chunk.content }}</div>
+                    <span class="chunk-expand" onclick="toggleChunk({{ loop.index }})">Show more</span>
+                    <div class="chunk-actions">
+                        <button class="validation-btn {% if chunk.validation and chunk.validation.status == 'verified' %}active-verified{% endif %}"
+                                onclick="validateChunk('{{ chunk.id }}', 'verified', this)">
+                            Verified
+                        </button>
+                        <button class="validation-btn {% if chunk.validation and chunk.validation.status == 'needs_review' %}active-needs_review{% endif %}"
+                                onclick="validateChunk('{{ chunk.id }}', 'needs_review', this)">
+                            Needs Review
+                        </button>
+                        <button class="validation-btn {% if chunk.validation and chunk.validation.status == 'garbage' %}active-garbage{% endif %}"
+                                onclick="validateChunk('{{ chunk.id }}', 'garbage', this)">
+                            Garbage
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">No chunks found for this document</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sidebar: Concepts & Info -->
+    <div class="sidebar">
+        <!-- Key Concepts -->
+        {% if key_concepts.concepts %}
+        <div class="sidebar-card">
+            <h3>Key Concepts ({{ key_concepts.concepts|length }})</h3>
+            <div class="concepts-list">
+                {% for term, data in key_concepts.concepts.items() %}
+                {% if loop.index <= 15 %}
+                <div class="concept-item">
+                    <div>
+                        <div class="concept-term">{{ term }}</div>
+                        <div class="concept-desc">{{ data.description }}</div>
+                    </div>
+                    <span class="concept-count">{{ data.count }}x</span>
+                </div>
+                {% endif %}
+                {% endfor %}
+                {% if key_concepts.concepts|length > 15 %}
+                <div style="font-size: 12px; color: var(--text-muted); text-align: center; padding-top: 0.5rem;">
+                    +{{ key_concepts.concepts|length - 15 }} more
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tickers -->
+        {% if key_concepts.tickers %}
+        <div class="sidebar-card">
+            <h3>Tickers Mentioned</h3>
+            <div class="tickers-list">
+                {% for ticker, count in key_concepts.tickers.items() %}
+                {% if loop.index <= 10 %}
+                <span class="ticker-badge">
+                    ${{ ticker }}<span class="ticker-count">({{ count }})</span>
+                </span>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Document Info -->
+        <div class="sidebar-card">
+            <h3>Document Info</h3>
+            <div class="doc-info-list">
+                <div class="doc-info-item">
+                    <span class="doc-info-label">Document ID</span>
+                    <span class="doc-info-value" style="font-family: monospace; font-size: 11px;">{{ document.id }}</span>
+                </div>
+                <div class="doc-info-item">
+                    <span class="doc-info-label">Workspace ID</span>
+                    <span class="doc-info-value" style="font-family: monospace; font-size: 11px;">{{ document.workspace_id }}</span>
+                </div>
+                {% if document.canonical_url %}
+                <div class="doc-info-item">
+                    <span class="doc-info-label">Canonical URL</span>
+                    <span class="doc-info-value">
+                        <a href="{{ document.canonical_url }}" target="_blank">{{ document.canonical_url[:50] }}{% if document.canonical_url|length > 50 %}...{% endif %}</a>
+                    </span>
+                </div>
+                {% endif %}
+                <div class="doc-info-item">
+                    <span class="doc-info-label">Status</span>
+                    <span class="doc-info-value">{{ document.status }}</span>
+                </div>
+                {% if document.content_hash %}
+                <div class="doc-info-item">
+                    <span class="doc-info-label">Content Hash</span>
+                    <span class="doc-info-value" style="font-family: monospace; font-size: 11px;">{{ document.content_hash[:16] }}...</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleChunk(index) {
+        const content = document.getElementById('content-' + index);
+        const btn = content.nextElementSibling;
+
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            btn.textContent = 'Show less';
+        } else {
+            content.classList.add('collapsed');
+            btn.textContent = 'Show more';
+        }
+    }
+
+    function getAdminToken() {
+        return localStorage.getItem('admin_token') || '';
+    }
+
+    async function validateChunk(chunkId, status, btn) {
+        try {
+            const response = await fetch(`/admin/documents/chunks/${chunkId}/validate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Admin-Token': getAdminToken(),
+                },
+                body: JSON.stringify({ status: status }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to save validation');
+            }
+
+            // Update UI - remove active class from siblings, add to clicked
+            const container = btn.parentElement;
+            container.querySelectorAll('.validation-btn').forEach(b => {
+                b.className = 'validation-btn';
+            });
+            btn.classList.add('validation-btn', 'active-' + status);
+
+        } catch (error) {
+            console.error('Validation error:', error);
+            alert('Failed to save validation: ' + error.message);
+        }
+    }
+</script>
+{% endblock %}

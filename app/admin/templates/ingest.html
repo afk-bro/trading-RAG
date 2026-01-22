@@ -967,7 +967,9 @@ function displayResult(result, success, sourceType = 'unknown') {
     let html = '';
 
     // Common fields
-    if (result.doc_id) html += `<dt>Document ID</dt><dd>${escapeHtml(result.doc_id)}</dd>`;
+    if (result.doc_id) {
+        html += `<dt>Document ID</dt><dd><a href="/admin/documents/${escapeHtml(result.doc_id)}" target="_blank">${escapeHtml(result.doc_id)}</a></dd>`;
+    }
     if (result.video_id) html += `<dt>Video ID</dt><dd>${escapeHtml(result.video_id)}</dd>`;
 
     // PDF fields

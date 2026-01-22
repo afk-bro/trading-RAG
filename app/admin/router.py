@@ -25,6 +25,7 @@ from app.admin import jobs as jobs_router
 from app.admin import pine_discovery as pine_discovery_router
 from app.admin import pine_repos as pine_repos_router
 from app.admin import ingest as ingest_router
+from app.admin import documents as documents_router
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = structlog.get_logger(__name__)
@@ -93,6 +94,9 @@ router.include_router(pine_repos_router.router)
 # Ingest (unified content ingestion UI)
 router.include_router(ingest_router.router)
 
+# Documents (document detail viewer)
+router.include_router(documents_router.router)
+
 # =============================================================================
 # Shared Resources
 # =============================================================================
@@ -127,6 +131,7 @@ def set_db_pool(pool):
     pine_discovery_router.set_db_pool(pool)
     pine_repos_router.set_db_pool(pool)
     ingest_router.set_db_pool(pool)
+    documents_router.set_db_pool(pool)
 
 
 def set_qdrant_client(client):
