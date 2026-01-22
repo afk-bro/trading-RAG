@@ -15,7 +15,6 @@ from app.admin import retention as retention_router
 from app.admin import events as events_router
 from app.admin import system_health as system_health_router
 from app.admin import ops as ops_router
-from app.admin import ops_alerts as ops_alerts_router
 from app.admin import trade_events as trade_events_router
 from app.admin import evals as evals_router
 from app.admin import kb_admin as kb_admin_router
