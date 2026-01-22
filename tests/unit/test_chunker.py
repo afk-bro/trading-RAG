@@ -199,6 +199,122 @@ class TestNormalizeTranscript:
         result = normalize_transcript(text)
         assert result == text
 
+    # Sponsor removal tests
+    def test_removes_sponsored_by(self):
+        """Test removal of 'sponsored by' phrases."""
+        text = (
+            "Let's talk about stocks. This video is sponsored by NordVPN. "
+            "Now back to the content."
+        )
+        result = normalize_transcript(text)
+        assert "sponsored by" not in result.lower()
+        assert "NordVPN" not in result
+        assert "Let's talk about stocks" in result
+        assert "Now back to the content" in result
+
+    def test_removes_todays_sponsor(self):
+        """Test removal of 'today's sponsor' phrases."""
+        text = "Important analysis here. Today's sponsor is Squarespace. More analysis follows."
+        result = normalize_transcript(text)
+        assert "sponsor" not in result.lower()
+        assert "Squarespace" not in result
+        assert "Important analysis" in result
+
+    def test_removes_link_in_description(self):
+        """Test removal of 'link in description' phrases."""
+        text = "Check out this data. Link in the description below. The market shows."
+        result = normalize_transcript(text)
+        assert "link in the description" not in result.lower()
+        assert "Check out this data" in result
+        assert "The market shows" in result
+
+    def test_removes_use_code(self):
+        """Test removal of 'use code' discount phrases."""
+        text = "Great opportunity. Use code TRADER for 20% off. Let's continue."
+        result = normalize_transcript(text)
+        assert "use code" not in result.lower()
+        assert "20% off" not in result
+        assert "Great opportunity" in result
+
+    # Engagement phrase removal tests
+    def test_removes_subscribe_reminder(self):
+        """Test removal of subscribe reminders."""
+        text = "Key insight here. Don't forget to like and subscribe! More insights."
+        result = normalize_transcript(text)
+        assert "subscribe" not in result.lower()
+        assert "Key insight" in result
+        assert "More insights" in result
+
+    def test_removes_smash_like(self):
+        """Test removal of 'smash that like' phrases."""
+        text = (
+            "Analysis begins. Smash that like button if you agree! Analysis continues."
+        )
+        result = normalize_transcript(text)
+        assert "smash" not in result.lower()
+        assert "like button" not in result.lower()
+        assert "Analysis begins" in result
+
+    def test_removes_bell_notification(self):
+        """Test removal of bell notification reminders."""
+        text = "Welcome. Hit the bell for notifications! Let's dive in."
+        result = normalize_transcript(text)
+        assert "bell" not in result.lower()
+        assert "notifications" not in result.lower()
+        assert "Let's dive in" in result
+
+    def test_removes_comment_request(self):
+        """Test removal of comment requests."""
+        text = "That's my take. Let me know what you think in the comments. Moving on."
+        result = normalize_transcript(text)
+        assert "comments" not in result.lower()
+        assert "That's my take" in result
+        assert "Moving on" in result
+
+    def test_removes_social_media_plugs(self):
+        """Test removal of social media plugs."""
+        text = "Great point. Follow me on Twitter for updates. Next topic."
+        result = normalize_transcript(text)
+        assert "follow me on" not in result.lower()
+        assert "Twitter" not in result
+        assert "Great point" in result
+
+    def test_removes_thanks_for_watching(self):
+        """Test removal of thanks for watching."""
+        text = "That's the conclusion. Thanks for watching! See you next time."
+        result = normalize_transcript(text)
+        assert "thanks for watching" not in result.lower()
+        assert "That's the conclusion" in result
+
+    def test_removes_welcome_back(self):
+        """Test removal of welcome back to channel."""
+        text = "Welcome back to the channel! Today we discuss earnings."
+        result = normalize_transcript(text)
+        assert "welcome back to" not in result.lower()
+        assert "channel" not in result.lower()
+        assert "Today we discuss earnings" in result
+
+    def test_preserves_legitimate_content(self):
+        """Test that legitimate content with similar words is preserved."""
+        # "like" as comparison, "channel" as waterway
+        text = "Stocks moved like water through a channel pattern."
+        result = normalize_transcript(text)
+        assert result == text
+
+    def test_multiple_removals(self):
+        """Test removal of multiple sponsor/engagement phrases."""
+        text = (
+            "Welcome back to the channel! This video is sponsored by Acme Corp. "
+            "The market analysis shows bullish trends. Don't forget to subscribe! "
+            "Let me know in the comments what you think."
+        )
+        result = normalize_transcript(text)
+        assert "sponsored" not in result.lower()
+        assert "subscribe" not in result.lower()
+        assert "comments" not in result.lower()
+        assert "welcome back to" not in result.lower()
+        assert "market analysis shows bullish trends" in result
+
 
 class TestChunkerConfiguration:
     """Tests for Chunker configuration options."""

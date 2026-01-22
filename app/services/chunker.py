@@ -250,6 +250,8 @@ def normalize_transcript(text: str) -> str:
     Removes:
     - [Music] and similar markers
     - Repeated phrases
+    - Sponsor segments
+    - Generic intro/outro engagement phrases
     - Excessive whitespace
     """
     # Remove common markers
@@ -257,6 +259,54 @@ def normalize_transcript(text: str) -> str:
 
     # Remove repeated words (like "um um um")
     text = re.sub(r"\b(\w+)(\s+\1)+\b", r"\1", text, flags=re.IGNORECASE)
+
+    # Remove sponsor segments (common patterns)
+    sponsor_patterns = [
+        # "This video is sponsored by X" / "Today's sponsor is X"
+        r"(?:this\s+(?:video|episode|content)\s+is\s+(?:sponsored|brought\s+to\s+you)\s+by|"
+        r"today'?s\s+sponsor\s+is|"
+        r"a\s+(?:huge\s+)?(?:thank\s+you|thanks)\s+to\s+(?:our\s+)?sponsor|"
+        r"speaking\s+of\s+(?:which\s+)?(?:our\s+)?sponsor|"
+        r"before\s+we\s+(?:continue|get\s+started).*?sponsor)"
+        r"[^.!?]*[.!?]",
+        # "Use code X for Y% off" / "Link in description"
+        r"(?:use\s+(?:my\s+)?(?:code|link)|"
+        r"check\s+(?:out\s+)?the\s+link|"
+        r"link\s+(?:is\s+)?in\s+(?:the\s+)?description|"
+        r"click\s+(?:the\s+)?(?:link|first\s+link)\s+(?:in\s+(?:the\s+)?description|below))"
+        r"[^.!?]*[.!?]",
+    ]
+    for pattern in sponsor_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+
+    # Remove generic intro/outro engagement phrases
+    engagement_patterns = [
+        # Subscribe/like/bell patterns - require action verb context
+        r"(?:don'?t\s+forget\s+to\s+|make\s+sure\s+(?:you\s+)?|please\s+|remember\s+to\s+)"
+        r"(?:like|subscribe|hit\s+(?:the\s+)?(?:like|bell)|smash\s+(?:the\s+)?like)[^.!?]*[.!?]",
+        # "Hit/smash that like/subscribe button"
+        r"(?:hit|smash|click)\s+(?:that\s+|the\s+)?(?:like|subscribe|bell|notification)"
+        r"(?:\s+(?:button|icon))?[^.!?]*[.!?]",
+        # "Like and subscribe" / "Subscribe and hit the bell"
+        r"(?:like\s+and\s+subscribe|subscribe\s+and\s+(?:hit|click|smash))[^.!?]*[.!?]",
+        # "Leave a comment" / "Let me know in the comments"
+        r"(?:leave\s+a\s+comment|let\s+me\s+know\s+(?:in\s+the\s+comments|"
+        r"what\s+you\s+think|down\s+below))[^.!?]*[.!?]",
+        # "Follow me on social media"
+        r"(?:follow\s+me\s+on|check\s+(?:out\s+)?my|find\s+me\s+on)\s+"
+        r"(?:twitter|instagram|tiktok|facebook|social\s+media)[^.!?]*[.!?]",
+        # "Thanks for watching" / "See you in the next one"
+        r"(?:thanks?\s+(?:so\s+much\s+)?for\s+watching|"
+        r"see\s+you\s+(?:in\s+the\s+next\s+(?:one|video|episode)|next\s+time|soon)|"
+        r"until\s+next\s+time|peace\s+out)[^.!?]*[.!?]",
+        # "If you're new here" / "Welcome back to the channel"
+        r"(?:if\s+you'?re\s+new\s+(?:here|to\s+(?:this\s+)?channel)|"
+        r"welcome\s+back\s+to\s+(?:the\s+|my\s+)?channel)[^.!?]*[.!?]",
+        # "Before we get started" (channel promo)
+        r"before\s+we\s+(?:get\s+started|begin|dive\s+in)[^.!?]*(?:subscribe|channel)[^.!?]*[.!?]",
+    ]
+    for pattern in engagement_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
 
     # Normalize whitespace
     text = re.sub(r"\s+", " ", text)
