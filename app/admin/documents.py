@@ -222,7 +222,79 @@ NON_TICKERS = {
     "HR",
     "IT",
     "VP",
-    "CEO",
+    # Trading indicators (not tickers)
+    "EMA",
+    "SMA",
+    "VWAP",
+    "RSI",
+    "MACD",
+    "ATR",
+    "ADX",
+    "CCI",
+    "MFI",
+    "OBV",
+    "ROC",
+    "TEMA",
+    "WMA",
+    "DEMA",
+    "HMA",
+    "KAMA",
+    "BB",  # Bollinger Bands
+    "KC",  # Keltner Channel
+    "SAR",  # Parabolic SAR
+    "DMI",  # Directional Movement Index
+    "PPO",  # Percentage Price Oscillator
+    "TSI",  # True Strength Index
+    "UO",  # Ultimate Oscillator
+    "WR",  # Williams %R
+    "CMF",  # Chaikin Money Flow
+    "EMV",  # Ease of Movement
+    "FI",  # Force Index
+    "NVI",  # Negative Volume Index
+    "PVI",  # Positive Volume Index
+    "TRIX",
+    "VROC",  # Volume Rate of Change
+    "VI",  # Vortex Indicator
+    # Trading terms/abbreviations (not tickers)
+    "SMB",  # SMB Capital (company name)
+    "HOD",  # High of day
+    "LOD",  # Low of day
+    "ATH",  # All time high
+    "ATL",  # All time low
+    "EOD",  # End of day
+    "RTH",  # Regular trading hours
+    "AH",  # After hours
+    "PM",  # Pre-market
+    "NYSE",
+    "NASD",
+    "OTC",
+    "DMA",  # Direct market access
+    "HFT",  # High frequency trading
+    "MM",  # Market maker
+    "TA",  # Technical analysis
+    "FA",  # Fundamental analysis
+    "DD",  # Due diligence
+    "PE",  # Price to earnings
+    "EPS",  # Earnings per share
+    "ROI",  # Return on investment
+    "PNL",  # Profit and loss
+    "RR",  # Risk reward
+    "SL",  # Stop loss
+    "TP",  # Take profit
+    "BE",  # Break even
+    "ES",  # E-mini S&P (futures, but commonly used as abbreviation)
+    "NQ",  # E-mini Nasdaq
+    "YM",  # E-mini Dow
+    "CL",  # Crude oil futures
+    "GC",  # Gold futures
+    "ZB",  # Bond futures
+    "IV",  # Implied volatility
+    "HV",  # Historical volatility
+    "OI",  # Open interest
+    "DTE",  # Days to expiration
+    "ITM",  # In the money
+    "OTM",  # Out of the money
+    "ATM",  # At the money
 }
 
 
