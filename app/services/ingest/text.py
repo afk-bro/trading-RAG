@@ -108,9 +108,9 @@ async def extract_text_content(
     if title_override:
         title = title_override
     elif is_markdown:
-        title = extract_markdown_title(text)
+        title = extract_markdown_title(text) or filename
     else:
-        title = extract_text_title(text)
+        title = extract_text_title(text) or filename
 
     # Compute hash
     content_hash = compute_content_hash(text)

@@ -105,8 +105,10 @@ async def unified_ingest(
     logger.info("Detected source type", detected=detected.value)
 
     # Dispatch to appropriate handler
+    # Note: assertions are safe because detect_source_type validates inputs
     try:
         if detected == DetectedSource.YOUTUBE:
+            assert url is not None
             response = await _handle_youtube(
                 workspace_id=workspace_id,
                 url=url,
@@ -115,6 +117,7 @@ async def unified_ingest(
                 settings=settings,
             )
         elif detected == DetectedSource.ARTICLE_URL:
+            assert url is not None
             response = await _handle_article(
                 workspace_id=workspace_id,
                 url=url,
@@ -123,6 +126,7 @@ async def unified_ingest(
                 settings=settings,
             )
         elif detected == DetectedSource.PDF_URL:
+            assert url is not None
             response = await _handle_pdf_url(
                 workspace_id=workspace_id,
                 url=url,
@@ -131,6 +135,7 @@ async def unified_ingest(
                 settings=settings,
             )
         elif detected == DetectedSource.PDF_FILE:
+            assert file is not None
             response = await _handle_pdf_file(
                 workspace_id=workspace_id,
                 file=file,
@@ -139,6 +144,7 @@ async def unified_ingest(
                 settings=settings,
             )
         elif detected == DetectedSource.TEXT_FILE:
+            assert file is not None
             response = await _handle_text_file(
                 workspace_id=workspace_id,
                 file=file,
@@ -147,6 +153,7 @@ async def unified_ingest(
                 settings=settings,
             )
         elif detected == DetectedSource.PINE_FILE:
+            assert file is not None
             response = await _handle_pine_file(
                 workspace_id=workspace_id,
                 file=file,
@@ -155,6 +162,7 @@ async def unified_ingest(
                 settings=settings,
             )
         elif detected == DetectedSource.TEXT_CONTENT:
+            assert content is not None
             response = await _handle_text_content(
                 workspace_id=workspace_id,
                 content=content,
