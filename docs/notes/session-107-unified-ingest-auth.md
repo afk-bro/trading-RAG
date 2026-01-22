@@ -92,6 +92,18 @@ Added missing Settings attributes for `AlertEvaluatorJob`:
 
 **Fix**: Updated test to check for HTML content type and "Trading RAG" in response text.
 
+### Missing Alert Tables
+
+**Root Cause**: Alerts page returned 500 error because `alert_rules` and `alert_events` tables didn't exist.
+
+**Fix**: Created both tables via Supabase migrations with proper constraints and indexes.
+
+### Ingest UI "View Job Run Detail" Link
+
+**Root Cause**: The `.hidden` CSS class was only defined for `.results-panel.hidden` but other elements like `.job-link.hidden` had no corresponding CSS rule. This caused the "View Job Run Detail" link to show even when no `run_id` was present (e.g., for synchronous YouTube ingestion).
+
+**Fix**: Added generic `.hidden { display: none !important; }` CSS rule to `ingest.html`.
+
 ## Files Changed
 
 | File | Change |
@@ -105,7 +117,7 @@ Added missing Settings attributes for `AlertEvaluatorJob`:
 | `app/admin/templates/landing.html` | New - landing page |
 | `app/admin/templates/login.html` | New - login page |
 | `app/admin/templates/layout.html` | Modified - logout button |
-| `app/admin/templates/ingest.html` | Modified - new tabs |
+| `app/admin/templates/ingest.html` | Modified - new tabs, .hidden CSS fix |
 | `app/admin/router.py` | Modified - include auth router |
 | `app/api/router.py` | Modified - include unified_ingest |
 | `app/main.py` | Modified - landing page route |
