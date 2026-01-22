@@ -8,14 +8,14 @@ Guidance for Claude Code when working with this repository.
 
 ## Overview
 
-**rag-core** is a multi-tenant Retrieval-Augmented Generation system. FastAPI service that ingests documents (YouTube transcripts, PDFs, Pine scripts), chunks them with token-awareness, generates embeddings via Ollama, stores vectors in Qdrant, and provides semantic search with LLM-powered answer generation.
+**rag-core** is a multi-tenant Retrieval-Augmented Generation system. FastAPI service that ingests documents (YouTube transcripts, PDFs, Pine scripts, articles, text/markdown), chunks them with token-awareness, generates embeddings via Ollama, stores vectors in Qdrant, and provides semantic search with LLM-powered answer generation.
 
 Workspace-scoped: each workspace has its own configuration stored in a control-plane table.
 
 ## Architecture
 
 ```
-Sources (YouTube, PDF, Pine)
+Sources (YouTube, PDF, Pine, Articles, Text)
               │
               ▼
     ┌─────────────────┐
@@ -95,6 +95,7 @@ PostgreSQL tables (via Supabase):
 | `documents` | Source metadata, content hash, status lifecycle |
 | `chunks` | Text segments with token counts, metadata arrays |
 | `chunk_vectors` | Maps chunks to embedding model/collection |
+| `chunk_validations` | QA status per chunk (verified, needs_review, garbage) |
 | `strategy_versions` | Immutable config snapshots with state machine |
 | `strategy_intel_snapshots` | Regime + confidence time series |
 | `paper_equity_snapshots` | Equity tracking for paper trading |
@@ -106,6 +107,7 @@ All tables FK to workspaces. Migrations in `migrations/`.
 **Health**: `GET /health`, `GET /ready`, `GET /metrics`
 
 **RAG Core**:
+- `POST /ingest/unified` - Auto-detecting unified endpoint (YouTube, PDF, article, text, Pine)
 - `POST /ingest`, `/sources/youtube/ingest`, `/sources/pdf/ingest`, `/sources/pine/ingest`
 - `POST /query` (modes: `retrieve`, `answer`)
 - `GET /sources/pine/scripts`, `GET /sources/pine/scripts/{id}`
@@ -132,6 +134,7 @@ All tables FK to workspaces. Migrations in `migrations/`.
 - `GET /admin/ops-alerts`, `POST /admin/ops-alerts/{id}/acknowledge|resolve|reopen`
 - `GET /admin/coverage/cockpit`, `PATCH /admin/coverage/weak/{id}`
 - `GET /admin/backtests/*`, `/admin/testing/run-plans/*`
+- `GET /admin/documents/{doc_id}` - Document detail with key concepts, tickers, validation
 
 ## Testing
 

@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Document Detail Page** - Comprehensive document viewer at `/admin/documents/{doc_id}`
+  - Document metadata display (title, author, source type, timestamps)
+  - Stats bar: chunks, tokens, concepts, tickers
+  - Key trading concepts extraction (40+ terms: breakout, support, resistance, VWAP, etc.)
+  - Ticker symbol detection with comprehensive exclusion list (200+ non-tickers)
+  - Chunk validation UI (Verified/Needs Review/Garbage buttons)
+  - `chunk_validations` table for tracking QA status
+  - Link from ingest results to document detail page
+
+- **Transcript Preprocessing Filters** - Clean YouTube transcripts before chunking
+  - Sponsor segment removal (sponsored by, today's sponsor, use code, etc.)
+  - Engagement phrase removal (subscribe, like button, bell notification, etc.)
+  - Preserves legitimate content ("like water through a channel")
+  - 13 new unit tests for filter coverage
+
+- **Ticker Detection Improvements** - Reduced false positives
+  - Fixed regex to prevent mid-word matches (RRENT from CURRENT, TICLE from ARTICLE)
+  - Added 70+ trading indicator exclusions (EMA, SMA, VWAP, RSI, MACD, ATR, etc.)
+  - Added finance/regulatory term exclusions (PDT, FX, FINRA, CMT, CPA, CFTC, etc.)
+  - Added futures contract exclusions (ES, NQ, YM, CL, GC, ZB)
+  - Added options term exclusions (IV, HV, OI, DTE, ITM, OTM, ATM)
+
 - **Unified Ingestion Endpoint** - Single endpoint for all content types with auto-detection
   - `POST /ingest/unified` - Multipart form-data endpoint
   - Auto-detects: YouTube URLs, PDF URLs, article URLs, PDF files, text/markdown files, Pine files

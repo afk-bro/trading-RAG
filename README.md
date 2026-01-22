@@ -46,7 +46,8 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Auto-Strategy Discovery**: Generate parameter specs from Pine Script inputs for backtesting
 - **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
 - **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
-- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts management
+- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts management, document detail with key concepts
+- **Document QA**: Key concept extraction (40+ trading terms), ticker detection, chunk validation workflow
 - **Ops Alerts**: Automated evaluation via pg_cron, Telegram delivery with activation/recovery/escalation notifications
 - **Paper Equity Snapshots**: Append-only equity time series with drawdown computation
 - **Workspace Drawdown Alerts**: WARN at 12%, CRITICAL at 20% with hysteresis (clear at 10%/16%)
@@ -237,6 +238,7 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/ops-alerts/{id}/resolve` | Resolve alert |
 | `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
 | `/admin/ingest` | Unified ingest UI (YouTube, PDF, Pine, Article, Text) |
+| `/admin/documents/{doc_id}` | Document detail page with key concepts |
 | `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
 | `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
 | `/dashboards/{ws}/alerts` | Active alerts by severity |
