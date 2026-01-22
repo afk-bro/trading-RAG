@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.admin import analytics as analytics_router
 from app.admin import alerts as alerts_router
+from app.admin import auth as auth_router
 from app.admin import ops_alerts as ops_alerts_router
 from app.admin import coverage as coverage_router
 from app.admin import retention as retention_router
@@ -32,6 +33,9 @@ logger = structlog.get_logger(__name__)
 # =============================================================================
 # Include All Sub-Routers
 # =============================================================================
+
+# Auth (login, logout - no auth required for these)
+router.include_router(auth_router.router)
 
 # Analytics
 router.include_router(analytics_router.router)

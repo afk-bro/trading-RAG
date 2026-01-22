@@ -442,6 +442,8 @@
         <button class="tab {% if active_tab == 'youtube' %}active{% endif %}" data-tab="youtube" onclick="switchTab('youtube')">YouTube</button>
         <button class="tab {% if active_tab == 'pdf' %}active{% endif %}" data-tab="pdf" onclick="switchTab('pdf')">PDF</button>
         <button class="tab {% if active_tab == 'pine' %}active{% endif %}" data-tab="pine" onclick="switchTab('pine')">Pine Script</button>
+        <button class="tab {% if active_tab == 'article' %}active{% endif %}" data-tab="article" onclick="switchTab('article')">Article URL</button>
+        <button class="tab {% if active_tab == 'text' %}active{% endif %}" data-tab="text" onclick="switchTab('text')">Text/MD</button>
         <button class="tab {% if active_tab == 'generic' %}active{% endif %}" data-tab="generic" onclick="switchTab('generic')">Generic</button>
     </div>
 
@@ -528,6 +530,48 @@
         <div class="btn-group">
             <button type="button" class="btn" onclick="submitPine(event)">Ingest Registry</button>
             <button type="button" class="copy-curl-btn" onclick="copyPineCurl(this)">Copy curl</button>
+        </div>
+    </div>
+
+    <!-- Article URL Tab -->
+    <div class="tab-content {% if active_tab == 'article' %}active{% endif %}" id="article-tab">
+        <div class="last-ingest-info">
+            Last ingest: {% if last_ingests.get('article') %}<span class="timestamp" data-iso="{{ last_ingests.article }}" title="{{ last_ingests.article }}">{{ last_ingests.article[:19] | replace('T', ' ') }} UTC</span>{% else %}<span class="never">Never</span>{% endif %}
+        </div>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 1rem;">
+            Scrape and ingest content from any web article. Uses trafilatura for extraction.
+        </p>
+        <div class="form-group">
+            <label>Article URL</label>
+            <input type="url" id="article-url" placeholder="https://example.com/article">
+        </div>
+        <div class="form-group">
+            <label>Title (optional, auto-extracted)</label>
+            <input type="text" id="article-title" placeholder="Article title">
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitArticle(event)">Scrape & Ingest</button>
+        </div>
+    </div>
+
+    <!-- Text/Markdown Tab -->
+    <div class="tab-content {% if active_tab == 'text' %}active{% endif %}" id="text-tab">
+        <div class="last-ingest-info">
+            Last ingest: {% if last_ingests.get('note') %}<span class="timestamp" data-iso="{{ last_ingests.note }}" title="{{ last_ingests.note }}">{{ last_ingests.note[:19] | replace('T', ' ') }} UTC</span>{% else %}<span class="never">Never</span>{% endif %}
+        </div>
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 1rem;">
+            Upload a text or markdown file. Title is auto-extracted from first heading (markdown) or first line (text).
+        </p>
+        <div class="form-group">
+            <label>Text/Markdown File</label>
+            <input type="file" id="text-file" accept=".txt,.md,.markdown">
+        </div>
+        <div class="form-group">
+            <label>Title (optional, auto-extracted)</label>
+            <input type="text" id="text-title" placeholder="Document title">
+        </div>
+        <div class="btn-group">
+            <button type="button" class="btn" onclick="submitText(event)">Upload & Ingest</button>
         </div>
     </div>
 
@@ -1241,6 +1285,88 @@ async function submitGeneric(event) {
         await handleResponse(response, sourceTypeLabel);
     } catch (e) {
         displayResult({ error_reason: e.message }, false, 'Generic');
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function submitArticle(event) {
+    const btn = event.target;
+    const url = document.getElementById('article-url').value.trim();
+
+    if (!url) {
+        alert('Please enter an article URL');
+        return;
+    }
+
+    if (!getAdminToken()) {
+        alert('Please enter and save your admin token first');
+        return;
+    }
+
+    setLoading(btn, true);
+    hideResults();
+
+    try {
+        const formData = new FormData();
+        formData.append('workspace_id', getWorkspaceId());
+        formData.append('url', url);
+
+        const title = document.getElementById('article-title').value.trim();
+        if (title) formData.append('title', title);
+
+        const response = await fetch('/ingest/unified', {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': getAdminToken(),
+            },
+            body: formData
+        });
+
+        await handleResponse(response, 'Article');
+    } catch (e) {
+        displayResult({ error_reason: e.message }, false, 'Article');
+    } finally {
+        setLoading(btn, false);
+    }
+}
+
+async function submitText(event) {
+    const btn = event.target;
+    const fileInput = document.getElementById('text-file');
+
+    if (!fileInput.files[0]) {
+        alert('Please select a text or markdown file');
+        return;
+    }
+
+    if (!getAdminToken()) {
+        alert('Please enter and save your admin token first');
+        return;
+    }
+
+    setLoading(btn, true);
+    hideResults();
+
+    try {
+        const formData = new FormData();
+        formData.append('workspace_id', getWorkspaceId());
+        formData.append('file', fileInput.files[0]);
+
+        const title = document.getElementById('text-title').value.trim();
+        if (title) formData.append('title', title);
+
+        const response = await fetch('/ingest/unified', {
+            method: 'POST',
+            headers: {
+                'X-Admin-Token': getAdminToken(),
+            },
+            body: formData
+        });
+
+        await handleResponse(response, 'Text');
+    } catch (e) {
+        displayResult({ error_reason: e.message }, false, 'Text');
     } finally {
         setLoading(btn, false);
     }

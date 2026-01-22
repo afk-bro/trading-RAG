@@ -8,8 +8,12 @@ This is the application assembly file. All logic is delegated to:
 - app/api/router.py - Router aggregation
 """
 
+from pathlib import Path
+
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app.api import api_router
@@ -51,9 +55,20 @@ setup_middleware(app, settings)
 app.include_router(api_router)
 
 
-@app.get("/")
-async def root():
-    """Root endpoint with service info."""
+# Setup templates for landing page
+_templates_dir = Path(__file__).parent / "admin" / "templates"
+_templates = Jinja2Templates(directory=str(_templates_dir))
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """Landing page with system overview."""
+    return _templates.TemplateResponse("landing.html", {"request": request})
+
+
+@app.get("/api")
+async def api_info():
+    """API info endpoint (JSON)."""
     return {
         "service": "Trading RAG Pipeline",
         "version": __version__,

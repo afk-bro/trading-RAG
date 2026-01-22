@@ -15,7 +15,7 @@ asyncpg==0.29.0
 supabase==2.3.4
 
 # Vector database
-qdrant-client==1.7.3
+qdrant-client==1.16.2
 
 # YouTube
 youtube-transcript-api>=1.2.3
@@ -34,6 +34,9 @@ sentence-transformers==3.3.1
 pymupdf==1.24.0
 pdfplumber==0.11.0
 python-multipart==0.0.9
+
+# Web article extraction
+trafilatura>=1.6.0
 
 # Utilities
 python-dotenv==1.0.1

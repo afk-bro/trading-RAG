@@ -53,6 +53,35 @@
             gap: 24px;
         }
 
+        nav .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex: 1;
+        }
+
+        nav .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-left: auto;
+        }
+
+        nav .logout-btn {
+            color: var(--text-muted);
+            font-size: 13px;
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        nav .logout-btn:hover {
+            color: var(--danger);
+            border-color: var(--danger);
+            text-decoration: none;
+        }
+
         nav .logo {
             font-weight: 600;
             font-size: 18px;
@@ -397,16 +426,22 @@
 <body>
     <nav>
         <div class="nav-content">
-            <a href="/admin" class="logo">KB Admin</a>
-            <a href="/admin/kb/entities" {% if request.url.path.startswith('/admin/kb/entities') %}class="active"{% endif %}>Entities</a>
-            <a href="/admin/kb/claims" {% if request.url.path == '/admin/kb/claims' %}class="active"{% endif %}>Claims</a>
-            <a href="/admin/coverage/cockpit" {% if request.url.path.startswith('/admin/coverage') %}class="active"{% endif %}>Coverage</a>
-            <a href="/admin/backtests/tunes" {% if request.url.path.startswith('/admin/backtests') %}class="active"{% endif %}>Tunes</a>
-            <a href="/admin/testing/run-plans" {% if request.url.path.startswith('/admin/testing') %}class="active"{% endif %}>Run Plans</a>
-            <a href="/admin/trade/events" {% if request.url.path.startswith('/admin/trade') %}class="active"{% endif %}>Events</a>
-            <a href="/admin/alerts/page?workspace_id=00000000-0000-0000-0000-000000000000" {% if request.url.path.startswith('/admin/alerts') %}class="active"{% endif %}>Alerts</a>
-            <a href="/admin/analytics/regimes?workspace_id=00000000-0000-0000-0000-000000000000" {% if request.url.path.startswith('/admin/analytics') %}class="active"{% endif %}>Analytics</a>
-            <a href="/admin/ingest" {% if request.url.path.startswith('/admin/ingest') %}class="active"{% endif %}>Ingest</a>
+            <a href="/" class="logo">Trading RAG</a>
+            <div class="nav-links">
+                <a href="/admin/ingest" {% if request.url.path.startswith('/admin/ingest') %}class="active"{% endif %}>Ingest</a>
+                <a href="/admin/kb/entities" {% if request.url.path.startswith('/admin/kb/entities') %}class="active"{% endif %}>Entities</a>
+                <a href="/admin/kb/claims" {% if request.url.path == '/admin/kb/claims' %}class="active"{% endif %}>Claims</a>
+                <a href="/admin/coverage/cockpit" {% if request.url.path.startswith('/admin/coverage') %}class="active"{% endif %}>Coverage</a>
+                <a href="/admin/backtests/tunes" {% if request.url.path.startswith('/admin/backtests') %}class="active"{% endif %}>Tunes</a>
+                <a href="/admin/testing/run-plans" {% if request.url.path.startswith('/admin/testing') %}class="active"{% endif %}>Run Plans</a>
+                <a href="/admin/trade/events" {% if request.url.path.startswith('/admin/trade') %}class="active"{% endif %}>Events</a>
+                <a href="/admin/alerts/page?workspace_id=00000000-0000-0000-0000-000000000000" {% if request.url.path.startswith('/admin/alerts') %}class="active"{% endif %}>Alerts</a>
+                <a href="/admin/analytics/regimes?workspace_id=00000000-0000-0000-0000-000000000000" {% if request.url.path.startswith('/admin/analytics') %}class="active"{% endif %}>Analytics</a>
+            </div>
+            <div class="nav-right">
+                <a href="/docs" title="API Documentation">Docs</a>
+                <a href="/admin/auth/logout" class="logout-btn">Logout</a>
+            </div>
         </div>
     </nav>
 

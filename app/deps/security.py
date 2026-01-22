@@ -65,8 +65,10 @@ def require_admin_token(request: Request) -> bool:
             detail="ADMIN_TOKEN not configured. Contact system administrator.",
         )
 
-    # Get token from header (preferred) or query param (fallback)
+    # Get token from header (preferred), cookie, or query param (fallback)
     provided_token = request.headers.get("X-Admin-Token")
+    if not provided_token:
+        provided_token = request.cookies.get("admin_token")
     if not provided_token:
         provided_token = request.query_params.get("token")
 

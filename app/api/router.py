@@ -21,6 +21,7 @@ from app.routers import (
     sources,
     strategies,
     testing,
+    unified_ingest,
     youtube,
     youtube_pine,
 )
@@ -36,6 +37,7 @@ api_router.include_router(metrics.router)  # Metrics endpoint (excluded from Ope
 
 # Core RAG functionality
 api_router.include_router(ingest.router, tags=["Ingestion"])
+api_router.include_router(unified_ingest.router, tags=["Ingestion"])
 api_router.include_router(youtube.router, prefix="/sources/youtube", tags=["YouTube"])
 api_router.include_router(
     youtube_pine.router, prefix="/sources/youtube", tags=["YouTube"]
