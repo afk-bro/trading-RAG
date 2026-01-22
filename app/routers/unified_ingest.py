@@ -36,11 +36,15 @@ class UnifiedIngestResponse(IngestResponse):
 )
 async def unified_ingest(
     workspace_id: UUID = Form(..., description="Workspace identifier"),
-    url: Optional[str] = Form(None, description="URL to ingest (YouTube, article, or PDF)"),
+    url: Optional[str] = Form(
+        None, description="URL to ingest (YouTube, article, or PDF)"
+    ),
     content: Optional[str] = Form(None, description="Raw text/markdown content"),
     title: Optional[str] = Form(None, description="Override auto-detected title"),
     source_type: Optional[str] = Form(None, description="Override auto-detection"),
-    file: Optional[UploadFile] = File(None, description="File upload (.pdf, .txt, .md)"),
+    file: Optional[UploadFile] = File(
+        None, description="File upload (.pdf, .txt, .md)"
+    ),
     idempotency_key: Optional[str] = Form(None, description="Idempotency key"),
     _: bool = Depends(require_admin_token),
     settings: Settings = Depends(get_settings),
@@ -434,7 +438,9 @@ async def _process_pdf_bytes(
         for i, prev_chunk in enumerate(raw_chunks):
             if prev_chunk is chunk:
                 break
-            chunk_start_char += len(prev_chunk.content) + len(pdf_config.join_pages_with)
+            chunk_start_char += len(prev_chunk.content) + len(
+                pdf_config.join_pages_with
+            )
 
         page_num = 1
         for char_start, pn in page_markers:
@@ -510,7 +516,9 @@ async def _handle_text_file(
     return await ingest_pipeline(
         workspace_id=workspace_id,
         content=extracted.text,
-        source_type=SourceType.NOTE if not extracted.is_markdown else SourceType.ARTICLE,
+        source_type=(
+            SourceType.NOTE if not extracted.is_markdown else SourceType.ARTICLE
+        ),
         source_url=None,
         canonical_url=canonical_url,
         idempotency_key=idempotency_key or canonical_url,

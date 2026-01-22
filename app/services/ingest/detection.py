@@ -19,10 +19,18 @@ class DetectedSource(str, Enum):
 
 
 # Sources that require URL input
-URL_SOURCES = {DetectedSource.YOUTUBE, DetectedSource.PDF_URL, DetectedSource.ARTICLE_URL}
+URL_SOURCES = {
+    DetectedSource.YOUTUBE,
+    DetectedSource.PDF_URL,
+    DetectedSource.ARTICLE_URL,
+}
 
 # Sources that require file input
-FILE_SOURCES = {DetectedSource.PDF_FILE, DetectedSource.TEXT_FILE, DetectedSource.PINE_FILE}
+FILE_SOURCES = {
+    DetectedSource.PDF_FILE,
+    DetectedSource.TEXT_FILE,
+    DetectedSource.PINE_FILE,
+}
 
 
 def is_youtube_url(url: str) -> bool:

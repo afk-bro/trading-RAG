@@ -166,7 +166,9 @@ async def ingest_text_file(
     return await ingest_pipeline_func(
         workspace_id=workspace_id,
         content=extracted.text,
-        source_type=SourceType.NOTE if not extracted.is_markdown else SourceType.ARTICLE,
+        source_type=(
+            SourceType.NOTE if not extracted.is_markdown else SourceType.ARTICLE
+        ),
         source_url=None,
         canonical_url=canonical_url,
         idempotency_key=idempotency_key or canonical_url,
