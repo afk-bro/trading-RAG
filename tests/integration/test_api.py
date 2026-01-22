@@ -64,13 +64,13 @@ class TestRootEndpoint:
         assert response.status_code == 200
 
     def test_root_has_service_info(self, client):
-        """Test that root endpoint has service information."""
+        """Test that root endpoint has service information (landing page)."""
         response = client.get("/")
-        data = response.json()
+        content = response.text
 
-        assert "service" in data
-        assert "version" in data
-        assert data["service"] == "Trading RAG Pipeline"
+        # Landing page should contain service info in HTML
+        assert "Trading RAG" in content
+        assert "text/html" in response.headers.get("content-type", "")
 
 
 class TestIngestEndpoint:
