@@ -89,7 +89,8 @@ TRADING_CONCEPTS = {
 }
 
 # Ticker pattern (1-5 uppercase letters, optionally with $ prefix)
-TICKER_PATTERN = re.compile(r"\$?([A-Z]{1,5})\b")
+# Uses negative lookbehind to prevent matching mid-word (e.g., "RRENT" from "CURRENT")
+TICKER_PATTERN = re.compile(r"(?<![A-Za-z])\$?([A-Z]{1,5})\b")
 
 # Common non-ticker words to exclude
 NON_TICKERS = {
@@ -295,6 +296,22 @@ NON_TICKERS = {
     "ITM",  # In the money
     "OTM",  # Out of the money
     "ATM",  # At the money
+    # Finance/regulatory terms
+    "PDT",  # Pattern Day Trader
+    "FX",  # Forex/Foreign Exchange
+    "FINRA",  # Financial Industry Regulatory Authority
+    "CMT",  # Chartered Market Technician
+    "CPA",  # Certified Public Accountant
+    "CFP",  # Certified Financial Planner
+    "CFA",  # Chartered Financial Analyst
+    "CFTC",  # Commodity Futures Trading Commission
+    "FDIC",  # Federal Deposit Insurance Corporation
+    "SIPC",  # Securities Investor Protection Corporation
+    "DTCC",  # Depository Trust & Clearing Corporation
+    "CBOE",  # Chicago Board Options Exchange (exchange, not ticker)
+    "CME",  # Chicago Mercantile Exchange
+    "ICE",  # Intercontinental Exchange
+    "NYMEX",  # New York Mercantile Exchange
 }
 
 
