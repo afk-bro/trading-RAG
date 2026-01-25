@@ -4,6 +4,8 @@ Provides analytics endpoints for:
 1. Regime Coverage: "Do we have enough data per regime?"
 2. Tier Usage: "How often are we falling back?"
 3. Value Add (Uplift): "Does regime selection outperform baseline?"
+
+Refactored to use repository pattern - SQL queries moved to analytics_repository.py.
 """
 
 from datetime import datetime, timedelta
@@ -33,9 +35,17 @@ from app.admin.services.analytics_models import (
     UpliftItem,
     UpliftResponse,
 )
-from app.admin.services.analytics_queries import (
-    get_drift_driver_regimes,
-    get_tier_usage_time_series,
+from app.admin.services.analytics_queries import get_tier_usage_time_series
+from app.admin.services.analytics_repository import (
+    CONFIDENCE_TREND_THRESHOLD,
+    DEFAULT_BACKLOG_SYMBOLS,
+    DEFAULT_BACKLOG_TIMEFRAMES,
+    DRIFT_TREND_THRESHOLD_PP,
+    MIN_BUCKETS_FOR_TREND,
+    PRIORITY_HIGH_THRESHOLD,
+    PRIORITY_MEDIUM_THRESHOLD,
+    AnalyticsRepository,
+    QueryBuilder,
 )
 from app.deps.security import require_admin_token
 from app.repositories.alerts import AlertsRepository
@@ -57,6 +67,21 @@ def set_db_pool(pool):
     _db_pool = pool
 
 
+def _require_db_pool():
+    """Raise 503 if database pool is not available."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+    return _db_pool
+
+
+def _get_repository() -> AnalyticsRepository:
+    """Get analytics repository with active pool."""
+    return AnalyticsRepository(_require_db_pool())
+
+
 # =============================================================================
 # HTML Page
 # =============================================================================
@@ -75,10 +100,8 @@ async def analytics_regimes_page(
     _: bool = Depends(require_admin_token),
 ) -> HTMLResponse:
     """Render the regime analytics dashboard page."""
-    # Get admin token from header or query param (query param for dev convenience)
     admin_token = request.headers.get("X-Admin-Token", "") or token or ""
 
-    # Fetch recent alerts for the workspace
     recent_alerts = []
     if _db_pool is not None:
         try:
@@ -131,76 +154,31 @@ async def get_regime_coverage(
     _: bool = Depends(require_admin_token),
 ) -> RegimeCoverageResponse:
     """Get regime coverage statistics."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-
-    # Build query conditions
-    conditions = ["t.workspace_id = $1", "t.regime_key IS NOT NULL"]
-    params: list = [workspace_id]
-    param_idx = 2
-
-    if strategy_entity_id:
-        conditions.append(f"t.strategy_entity_id = ${param_idx}")
-        params.append(strategy_entity_id)
-        param_idx += 1
-
-    if since:
-        conditions.append(f"t.created_at >= ${param_idx}")
-        params.append(since)
-        param_idx += 1
-
-    where_clause = " AND ".join(conditions)
-
-    query = f"""
-        SELECT
-            t.regime_key,
-            t.trend_tag,
-            t.vol_tag,
-            COUNT(DISTINCT t.id) as n_tunes,
-            COUNT(DISTINCT tr.run_id) as n_runs,
-            AVG(t.best_oos_score) as avg_best_oos,
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY t.best_oos_score) as p50_best_oos,
-            PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY t.best_oos_score) as p90_best_oos
-        FROM backtest_tunes t
-        LEFT JOIN backtest_tune_runs tr ON tr.tune_id = t.id AND tr.status = 'completed'
-        WHERE {where_clause}
-          AND t.status = 'completed'
-          AND t.best_oos_score IS NOT NULL
-        GROUP BY t.regime_key, t.trend_tag, t.vol_tag
-        ORDER BY n_tunes DESC, avg_best_oos DESC NULLS LAST
-    """
-
-    async with _db_pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
+    repo = _get_repository()
+    rows = await repo.get_regime_coverage(
+        workspace_id=workspace_id,
+        strategy_entity_id=strategy_entity_id,
+        since=since,
+    )
 
     items = []
     regimes_meeting = 0
 
     for row in rows:
-        n_tunes = row["n_tunes"]
-        meets_threshold = n_tunes >= min_samples
+        meets_threshold = row.n_tunes >= min_samples
         if meets_threshold:
             regimes_meeting += 1
 
         items.append(
             RegimeCoverageItem(
-                regime_key=row["regime_key"],
-                trend_tag=row["trend_tag"],
-                vol_tag=row["vol_tag"],
-                n_tunes=n_tunes,
-                n_runs=row["n_runs"],
-                avg_best_oos=(
-                    float(row["avg_best_oos"]) if row["avg_best_oos"] else None
-                ),
-                p50_best_oos=(
-                    float(row["p50_best_oos"]) if row["p50_best_oos"] else None
-                ),
-                p90_best_oos=(
-                    float(row["p90_best_oos"]) if row["p90_best_oos"] else None
-                ),
+                regime_key=row.regime_key,
+                trend_tag=row.trend_tag,
+                vol_tag=row.vol_tag,
+                n_tunes=row.n_tunes,
+                n_runs=row.n_runs,
+                avg_best_oos=row.avg_best_oos,
+                p50_best_oos=row.p50_best_oos,
+                p90_best_oos=row.p90_best_oos,
                 min_samples_met=meets_threshold,
             )
         )
@@ -250,75 +228,48 @@ async def get_tier_usage(
     _: bool = Depends(require_admin_token),
 ):
     """Get tier usage distribution from recommend_events."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-
+    pool = _require_db_pool()
     since = datetime.utcnow() - timedelta(days=period_days)
 
-    # Build query conditions
-    conditions = ["workspace_id = $1", "created_at >= $2"]
-    params: list = [workspace_id, since]
-    param_idx = 3
+    # Build query conditions for time-series mode (uses legacy helper)
+    qb = QueryBuilder()
+    qb.add("workspace_id = ?", workspace_id)
+    qb.add("created_at >= ?", since)
+    qb.add_if("strategy_entity_id = ?", strategy_entity_id)
+    qb.add_if("query_regime_key = ?", regime_key)
 
-    if strategy_entity_id:
-        conditions.append(f"strategy_entity_id = ${param_idx}")
-        params.append(strategy_entity_id)
-        param_idx += 1
-
-    if regime_key:
-        conditions.append(f"query_regime_key = ${param_idx}")
-        params.append(regime_key)
-        param_idx += 1
-
-    where_clause = " AND ".join(conditions)
-
-    # Time-series mode
+    # Time-series mode delegates to existing helper
     if bucket:
         return await get_tier_usage_time_series(
-            pool=_db_pool,
+            pool=pool,
             workspace_id=workspace_id,
             strategy_entity_id=strategy_entity_id,
             period_days=period_days,
             bucket=bucket,
-            where_clause=where_clause,
-            params=params,
+            where_clause=qb.where_clause,
+            params=qb.params,
         )
 
-    # Totals mode (default)
-    query = f"""
-        SELECT
-            tier_used,
-            COUNT(*) as count,
-            AVG(confidence) as avg_confidence,
-            AVG(candidate_count) as avg_candidate_count
-        FROM recommend_events
-        WHERE {where_clause}
-        GROUP BY tier_used
-        ORDER BY count DESC
-    """
+    # Totals mode uses repository
+    repo = AnalyticsRepository(pool)
+    rows = await repo.get_tier_usage_totals(
+        workspace_id=workspace_id,
+        since=since,
+        strategy_entity_id=strategy_entity_id,
+        regime_key=regime_key,
+    )
 
-    async with _db_pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
-
-    total = sum(row["count"] for row in rows)
-    items = []
-
-    for row in rows:
-        count = row["count"]
-        pct = (count / total * 100) if total > 0 else 0.0
-
-        items.append(
-            TierUsageItem(
-                tier=row["tier_used"],
-                count=count,
-                pct=round(pct, 1),
-                avg_confidence=round(float(row["avg_confidence"]), 2),
-                avg_candidate_count=round(float(row["avg_candidate_count"]), 1),
-            )
+    total = sum(r.count for r in rows)
+    items = [
+        TierUsageItem(
+            tier=r.tier_used,
+            count=r.count,
+            pct=round((r.count / total * 100) if total > 0 else 0.0, 1),
+            avg_confidence=round(r.avg_confidence, 2),
+            avg_candidate_count=round(r.avg_candidate_count, 1),
         )
+        for r in rows
+    ]
 
     return TierUsageResponse(
         workspace_id=str(workspace_id),
@@ -354,114 +305,45 @@ async def get_uplift(
     _: bool = Depends(require_admin_token),
 ) -> UpliftResponse:
     """Get uplift analysis comparing regime selection to baseline."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-
+    repo = _get_repository()
     since = datetime.utcnow() - timedelta(days=period_days)
 
-    # Build base conditions
-    base_conditions = ["workspace_id = $1", "created_at >= $2"]
-    params: list = [workspace_id, since]
-    param_idx = 3
+    # Get baseline and uplift data
+    baseline_score = await repo.get_baseline_score(
+        workspace_id=workspace_id,
+        strategy_entity_id=strategy_entity_id,
+    )
 
-    if strategy_entity_id:
-        base_conditions.append(f"strategy_entity_id = ${param_idx}")
-        params.append(strategy_entity_id)
-        param_idx += 1
+    regime_rows = await repo.get_uplift_by_regime(
+        workspace_id=workspace_id,
+        since=since,
+        strategy_entity_id=strategy_entity_id,
+        regime_key=regime_key,
+    )
 
-    if regime_key:
-        base_conditions.append(f"query_regime_key = ${param_idx}")
-        params.append(regime_key)
-        param_idx += 1
+    tier_rows = await repo.get_uplift_by_tier(
+        workspace_id=workspace_id,
+        since=since,
+        strategy_entity_id=strategy_entity_id,
+        regime_key=regime_key,
+    )
 
-    where_clause = " AND ".join(base_conditions)
-
-    # Get global baseline (top OOS score)
-    baseline_query = f"""
-        SELECT MAX(t.best_oos_score) as baseline
-        FROM backtest_tunes t
-        WHERE t.workspace_id = $1
-          AND t.status = 'completed'
-          AND t.best_oos_score IS NOT NULL
-          {"AND t.strategy_entity_id = $" + str(param_idx - 1) if strategy_entity_id else ""}
-    """
-    baseline_params = [workspace_id]
-    if strategy_entity_id:
-        baseline_params.append(strategy_entity_id)
-
-    async with _db_pool.acquire() as conn:
-        baseline_row = await conn.fetchrow(baseline_query, *baseline_params)
-        baseline_score = (
-            float(baseline_row["baseline"]) if baseline_row["baseline"] else 0.0
-        )
-
-        # Get uplift by regime
-        regime_query = f"""
-            SELECT
-                query_regime_key as group_key,
-                COUNT(*) as n_recommendations,
-                AVG(top_candidate_score) as avg_selected_score
-            FROM recommend_events
-            WHERE {where_clause}
-              AND query_regime_key IS NOT NULL
-              AND top_candidate_score IS NOT NULL
-            GROUP BY query_regime_key
-            ORDER BY n_recommendations DESC
-        """
-        regime_rows = await conn.fetch(regime_query, *params)
-
-        # Get uplift by tier
-        tier_query = f"""
-            SELECT
-                tier_used as group_key,
-                COUNT(*) as n_recommendations,
-                AVG(top_candidate_score) as avg_selected_score
-            FROM recommend_events
-            WHERE {where_clause}
-              AND top_candidate_score IS NOT NULL
-            GROUP BY tier_used
-            ORDER BY n_recommendations DESC
-        """
-        tier_rows = await conn.fetch(tier_query, *params)
-
-    by_regime = []
-    for row in regime_rows:
-        avg_selected = float(row["avg_selected_score"])
-        uplift = avg_selected - baseline_score
+    # Transform to response models
+    def make_uplift_item(row, group_type: str) -> UpliftItem:
+        uplift = row.avg_selected_score - baseline_score
         uplift_pct = (uplift / baseline_score * 100) if baseline_score != 0 else 0.0
-
-        by_regime.append(
-            UpliftItem(
-                group_key=row["group_key"],
-                group_type="regime",
-                n_recommendations=row["n_recommendations"],
-                avg_selected_score=round(avg_selected, 4),
-                avg_baseline_score=round(baseline_score, 4),
-                uplift=round(uplift, 4),
-                uplift_pct=round(uplift_pct, 2),
-            )
+        return UpliftItem(
+            group_key=row.group_key,
+            group_type=group_type,
+            n_recommendations=row.n_recommendations,
+            avg_selected_score=round(row.avg_selected_score, 4),
+            avg_baseline_score=round(baseline_score, 4),
+            uplift=round(uplift, 4),
+            uplift_pct=round(uplift_pct, 2),
         )
 
-    by_tier = []
-    for row in tier_rows:
-        avg_selected = float(row["avg_selected_score"])
-        uplift = avg_selected - baseline_score
-        uplift_pct = (uplift / baseline_score * 100) if baseline_score != 0 else 0.0
-
-        by_tier.append(
-            UpliftItem(
-                group_key=row["group_key"],
-                group_type="tier",
-                n_recommendations=row["n_recommendations"],
-                avg_selected_score=round(avg_selected, 4),
-                avg_baseline_score=round(baseline_score, 4),
-                uplift=round(uplift, 4),
-                uplift_pct=round(uplift_pct, 2),
-            )
-        )
+    by_regime = [make_uplift_item(r, "regime") for r in regime_rows]
+    by_tier = [make_uplift_item(r, "tier") for r in tier_rows]
 
     # Compute overall uplift (weighted by n_recommendations)
     total_recs = sum(item.n_recommendations for item in by_tier)
@@ -506,94 +388,51 @@ async def generate_regime_backlog(
     _: bool = Depends(require_admin_token),
 ) -> RegimeBacklogResponse:
     """Generate tuning backlog from regime coverage gaps."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    repo = _get_repository()
 
     # Handle focus mode: auto-select drift-driving regimes
     only_regimes = request.only_regimes
     if request.focus == "drift_drivers" and not only_regimes:
-        # Fetch top drift drivers and use their regime keys
-        drift_drivers = await get_drift_driver_regimes(
-            pool=_db_pool,
+        only_regimes = await repo.get_drift_driver_regime_keys(
             workspace_id=request.workspace_id,
             strategy_entity_id=request.strategy_entity_id,
             limit=request.max_items,
         )
-        only_regimes = drift_drivers
 
-    # Build query conditions
-    conditions = ["t.workspace_id = $1", "t.regime_key IS NOT NULL"]
-    params: list = [request.workspace_id]
-    param_idx = 2
-
-    if request.strategy_entity_id:
-        conditions.append(f"t.strategy_entity_id = ${param_idx}")
-        params.append(request.strategy_entity_id)
-        param_idx += 1
-
-    # Add only_regimes filter if specified
-    if only_regimes:
-        placeholders = ", ".join(f"${param_idx + i}" for i in range(len(only_regimes)))
-        conditions.append(f"t.regime_key IN ({placeholders})")
-        params.extend(only_regimes)
-        param_idx += len(only_regimes)
-
-    where_clause = " AND ".join(conditions)
-
-    # Query regimes with tune counts
-    query = f"""
-        SELECT
-            t.regime_key,
-            t.trend_tag,
-            t.vol_tag,
-            COUNT(DISTINCT t.id) as n_tunes
-        FROM backtest_tunes t
-        WHERE {where_clause}
-          AND t.status = 'completed'
-        GROUP BY t.regime_key, t.trend_tag, t.vol_tag
-        HAVING COUNT(DISTINCT t.id) < ${param_idx}
-        ORDER BY COUNT(DISTINCT t.id) ASC
-        LIMIT ${param_idx + 1}
-    """
-    params.extend([request.min_samples, request.max_items])
-
-    async with _db_pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
-
-    # Default suggestions (can be made smarter later)
-    default_timeframes = ["5m", "15m"]
-    default_symbols = ["BTC-USDT", "ETH-USDT"]
+    rows = await repo.get_regime_backlog(
+        workspace_id=request.workspace_id,
+        min_samples=request.min_samples,
+        max_items=request.max_items,
+        strategy_entity_id=request.strategy_entity_id,
+        only_regimes=only_regimes,
+    )
 
     regimes = []
     total_missing = 0
 
     for row in rows:
-        current = row["n_tunes"]
-        missing = request.min_samples - current
+        missing = request.min_samples - row.n_tunes
         total_missing += missing
 
         # Determine priority based on gap size
-        if missing >= 3:
+        if missing >= PRIORITY_HIGH_THRESHOLD:
             priority = "high"
-        elif missing >= 2:
+        elif missing >= PRIORITY_MEDIUM_THRESHOLD:
             priority = "medium"
         else:
             priority = "low"
 
         regimes.append(
             RegimeBacklogItem(
-                regime_key=row["regime_key"],
-                trend_tag=row["trend_tag"],
-                vol_tag=row["vol_tag"],
-                current_tunes=current,
+                regime_key=row.regime_key,
+                trend_tag=row.trend_tag,
+                vol_tag=row.vol_tag,
+                current_tunes=row.n_tunes,
                 missing_samples=missing,
                 suggested_actions=SuggestedActions(
                     n_tunes=missing,
-                    timeframes=default_timeframes,
-                    symbols=default_symbols,
+                    timeframes=DEFAULT_BACKLOG_TIMEFRAMES,
+                    symbols=DEFAULT_BACKLOG_SYMBOLS,
                     priority=priority,
                 ),
             )
@@ -609,6 +448,35 @@ async def generate_regime_backlog(
         total_missing=total_missing,
         regimes=regimes,
     )
+
+
+def _compute_trend(
+    values: list[float], threshold: float, increasing_label: str, decreasing_label: str
+) -> str:
+    """Compute trend by comparing first half vs second half averages.
+
+    Args:
+        values: List of numeric values (chronologically ordered)
+        threshold: Minimum difference to consider significant
+        increasing_label: Label for upward trend
+        decreasing_label: Label for downward trend
+
+    Returns:
+        Trend label: increasing_label, decreasing_label, 'stable', or 'insufficient_data'
+    """
+    if len(values) < MIN_BUCKETS_FOR_TREND:
+        return "insufficient_data" if len(values) < 2 else "stable"
+
+    mid = len(values) // 2
+    first_half_avg = sum(values[:mid]) / mid
+    second_half_avg = sum(values[mid:]) / (len(values) - mid)
+    diff = second_half_avg - first_half_avg
+
+    if diff > threshold:
+        return increasing_label
+    elif diff < -threshold:
+        return decreasing_label
+    return "stable"
 
 
 @router.get(
@@ -643,90 +511,22 @@ async def get_regime_drift(
     _: bool = Depends(require_admin_token),
 ) -> RegimeDriftResponse:
     """Get regime drift indicators from recommend_events."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-
+    repo = _get_repository()
     since = datetime.utcnow() - timedelta(days=period_days)
-    trunc_unit = "day" if bucket == "day" else "week"
 
-    # Build query conditions
-    conditions = ["workspace_id = $1", "created_at >= $2"]
-    params: list = [workspace_id, since]
-    param_idx = 3
+    # Fetch data
+    bucket_rows = await repo.get_drift_buckets(
+        workspace_id=workspace_id,
+        since=since,
+        bucket=bucket,
+        strategy_entity_id=strategy_entity_id,
+        regime_key=regime_key,
+    )
 
-    if strategy_entity_id:
-        conditions.append(f"strategy_entity_id = ${param_idx}")
-        params.append(strategy_entity_id)
-        param_idx += 1
-
-    if regime_key:
-        conditions.append(f"query_regime_key = ${param_idx}")
-        params.append(regime_key)
-        param_idx += 1
-
-    where_clause = " AND ".join(conditions)
-
-    # Query per-bucket metrics (including confidence)
-    query = f"""
-        WITH bucket_stats AS (
-            SELECT
-                date_trunc('{trunc_unit}', created_at) as bucket_start,
-                COUNT(*) as total,
-                SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact_count,
-                COUNT(DISTINCT query_regime_key) as unique_regimes,
-                AVG(COALESCE(confidence, 0.5)) as avg_confidence
-            FROM recommend_events
-            WHERE {where_clause}
-            GROUP BY bucket_start
-        ),
-        top_regime_per_bucket AS (
-            SELECT
-                date_trunc('{trunc_unit}', created_at) as bucket_start,
-                query_regime_key,
-                COUNT(*) as regime_count,
-                ROW_NUMBER() OVER (
-                    PARTITION BY date_trunc('{trunc_unit}', created_at)
-                    ORDER BY COUNT(*) DESC
-                ) as rn
-            FROM recommend_events
-            WHERE {where_clause}
-              AND query_regime_key IS NOT NULL
-            GROUP BY bucket_start, query_regime_key
-        )
-        SELECT
-            bs.bucket_start,
-            bs.total,
-            bs.non_exact_count,
-            bs.unique_regimes,
-            bs.avg_confidence,
-            COALESCE(tr.regime_count, 0) as top_regime_count
-        FROM bucket_stats bs
-        LEFT JOIN top_regime_per_bucket tr
-            ON tr.bucket_start = bs.bucket_start AND tr.rn = 1
-        ORDER BY bs.bucket_start ASC
-    """
-
-    async with _db_pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
-
-        # Get overall unique regimes
-        overall_query = f"""
-            SELECT COUNT(DISTINCT query_regime_key) as unique_regimes
-            FROM recommend_events
-            WHERE {where_clause}
-              AND query_regime_key IS NOT NULL
-        """
-        overall_row = await conn.fetchrow(overall_query, *params)
-
-    if not rows:
+    if not bucket_rows:
         return RegimeDriftResponse(
             workspace_id=str(workspace_id),
-            strategy_entity_id=(
-                str(strategy_entity_id) if strategy_entity_id else None
-            ),
+            strategy_entity_id=str(strategy_entity_id) if strategy_entity_id else None,
             period_days=period_days,
             bucket=bucket,
             drift_trend="insufficient_data",
@@ -738,7 +538,14 @@ async def get_regime_drift(
             avg_daily_churn=0.0,
         )
 
-    # Build series
+    overall_unique = await repo.get_overall_unique_regimes(
+        workspace_id=workspace_id,
+        since=since,
+        strategy_entity_id=strategy_entity_id,
+        regime_key=regime_key,
+    )
+
+    # Build series and compute aggregates
     series = []
     total_recs = 0
     total_non_exact = 0
@@ -746,28 +553,29 @@ async def get_regime_drift(
     confidence_scores = []
     weighted_confidence_sum = 0.0
 
-    for row in rows:
-        total = row["total"]
-        non_exact = row["non_exact_count"]
-        non_exact_pct = (non_exact / total * 100) if total > 0 else 0.0
-        top_regime_pct = (row["top_regime_count"] / total * 100) if total > 0 else 0.0
-        avg_conf = float(row["avg_confidence"]) if row["avg_confidence"] else 0.5
+    for row in bucket_rows:
+        non_exact_pct = (
+            (row.non_exact_count / row.total * 100) if row.total > 0 else 0.0
+        )
+        top_regime_pct = (
+            (row.top_regime_count / row.total * 100) if row.total > 0 else 0.0
+        )
 
-        total_recs += total
-        total_non_exact += non_exact
+        total_recs += row.total
+        total_non_exact += row.non_exact_count
         non_exact_pcts.append(non_exact_pct)
-        confidence_scores.append(avg_conf)
-        weighted_confidence_sum += avg_conf * total
+        confidence_scores.append(row.avg_confidence)
+        weighted_confidence_sum += row.avg_confidence * row.total
 
         series.append(
             DriftBucketItem(
-                bucket_start=row["bucket_start"].isoformat(),
-                total=total,
-                non_exact_count=non_exact,
+                bucket_start=row.bucket_start.isoformat(),
+                total=row.total,
+                non_exact_count=row.non_exact_count,
                 non_exact_pct=round(non_exact_pct, 1),
-                unique_regimes=row["unique_regimes"],
+                unique_regimes=row.unique_regimes,
                 top_regime_pct=round(top_regime_pct, 1),
-                avg_confidence=round(avg_conf, 3),
+                avg_confidence=round(row.avg_confidence, 3),
             )
         )
 
@@ -775,45 +583,17 @@ async def get_regime_drift(
     overall_non_exact_pct = (
         (total_non_exact / total_recs * 100) if total_recs > 0 else 0.0
     )
-    overall_unique = overall_row["unique_regimes"] if overall_row else 0
     overall_avg_conf = weighted_confidence_sum / total_recs if total_recs > 0 else 0.0
 
-    # Calculate drift trend (compare first half vs second half of period)
-    drift_trend = "stable"
-    if len(non_exact_pcts) >= 4:
-        mid = len(non_exact_pcts) // 2
-        first_half_avg = sum(non_exact_pcts[:mid]) / mid
-        second_half_avg = sum(non_exact_pcts[mid:]) / (len(non_exact_pcts) - mid)
-        diff = second_half_avg - first_half_avg
+    # Compute trends
+    drift_trend = _compute_trend(
+        non_exact_pcts, DRIFT_TREND_THRESHOLD_PP, "increasing", "decreasing"
+    )
+    confidence_trend = _compute_trend(
+        confidence_scores, CONFIDENCE_TREND_THRESHOLD, "improving", "degrading"
+    )
 
-        if diff > 10:  # More than 10pp increase
-            drift_trend = "increasing"
-        elif diff < -10:  # More than 10pp decrease
-            drift_trend = "decreasing"
-        else:
-            drift_trend = "stable"
-    elif len(non_exact_pcts) < 2:
-        drift_trend = "insufficient_data"
-
-    # Calculate confidence trend (compare first half vs second half)
-    confidence_trend = "stable"
-    if len(confidence_scores) >= 4:
-        mid = len(confidence_scores) // 2
-        first_half_conf = sum(confidence_scores[:mid]) / mid
-        second_half_conf = sum(confidence_scores[mid:]) / (len(confidence_scores) - mid)
-        conf_diff = second_half_conf - first_half_conf
-
-        if conf_diff > 0.05:  # More than 5% improvement
-            confidence_trend = "improving"
-        elif conf_diff < -0.05:  # More than 5% degradation
-            confidence_trend = "degrading"
-        else:
-            confidence_trend = "stable"
-    elif len(confidence_scores) < 2:
-        confidence_trend = "insufficient_data"
-
-    # Calculate avg daily churn (new unique regimes appearing)
-    # Simple heuristic: unique_regimes / days with data
+    # Calculate avg daily churn
     avg_daily_churn = overall_unique / len(series) if series else 0.0
 
     return RegimeDriftResponse(
@@ -860,150 +640,64 @@ async def get_drift_drivers(
     _: bool = Depends(require_admin_token),
 ) -> DriftDriversResponse:
     """Get top regimes driving non-exact fallback."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-
+    repo = _get_repository()
     since = datetime.utcnow() - timedelta(days=period_days)
-    # For WoW comparison, we need prior week data
     prior_week_start = since - timedelta(days=7)
 
-    # Build query conditions
-    conditions = ["workspace_id = $1", "created_at >= $2"]
-    params: list = [workspace_id, since]
-    param_idx = 3
+    # Fetch current period data
+    driver_rows = await repo.get_drift_drivers(
+        workspace_id=workspace_id,
+        since=since,
+        limit=limit,
+        strategy_entity_id=strategy_entity_id,
+    )
 
-    if strategy_entity_id:
-        conditions.append(f"strategy_entity_id = ${param_idx}")
-        params.append(strategy_entity_id)
-        param_idx += 1
-
-    where_clause = " AND ".join(conditions)
-
-    # Build prior week conditions (for WoW)
-    prior_conditions = ["workspace_id = $1", "created_at >= $2", "created_at < $3"]
-    prior_params: list = [workspace_id, prior_week_start, since]
-    prior_param_idx = 4
-
-    if strategy_entity_id:
-        prior_conditions.append(f"strategy_entity_id = ${prior_param_idx}")
-        prior_params.append(strategy_entity_id)
-        prior_param_idx += 1
-
-    prior_where_clause = " AND ".join(prior_conditions)
-
-    # Query per-regime drift stats with tier distribution
-    query = f"""
-        WITH regime_stats AS (
-            SELECT
-                query_regime_key,
-                query_trend_tag,
-                query_vol_tag,
-                COUNT(*) as total_requests,
-                SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact_count,
-                SUM(CASE WHEN tier_used = 'exact' THEN 1 ELSE 0 END) as exact_count,
-                SUM(CASE WHEN tier_used = 'partial_trend' THEN 1 ELSE 0 END) as partial_trend_count,
-                SUM(CASE WHEN tier_used = 'partial_vol' THEN 1 ELSE 0 END) as partial_vol_count,
-                SUM(CASE WHEN tier_used = 'distance' THEN 1 ELSE 0 END) as distance_count,
-                SUM(CASE WHEN tier_used = 'global_best' THEN 1 ELSE 0 END) as global_count
-            FROM recommend_events
-            WHERE {where_clause}
-              AND query_regime_key IS NOT NULL
-            GROUP BY query_regime_key, query_trend_tag, query_vol_tag
-        ),
-        coverage AS (
-            SELECT
-                regime_key,
-                COUNT(DISTINCT id) as n_tunes
-            FROM backtest_tunes
-            WHERE workspace_id = $1
-              AND regime_key IS NOT NULL
-              AND status = 'completed'
-            GROUP BY regime_key
-        )
-        SELECT
-            rs.query_regime_key as regime_key,
-            rs.query_trend_tag as trend_tag,
-            rs.query_vol_tag as vol_tag,
-            rs.total_requests,
-            rs.non_exact_count,
-            rs.exact_count,
-            rs.partial_trend_count,
-            rs.partial_vol_count,
-            rs.distance_count,
-            rs.global_count,
-            COALESCE(c.n_tunes, 0) as current_tunes
-        FROM regime_stats rs
-        LEFT JOIN coverage c ON c.regime_key = rs.query_regime_key
-        WHERE rs.non_exact_count > 0
-        ORDER BY rs.non_exact_count DESC
-        LIMIT ${param_idx}
-    """
-    params.append(limit)
-
-    # Query prior week stats for WoW comparison
-    prior_query = f"""
-        SELECT
-            query_regime_key,
-            COUNT(*) as total,
-            SUM(CASE WHEN tier_used != 'exact' THEN 1 ELSE 0 END) as non_exact
-        FROM recommend_events
-        WHERE {prior_where_clause}
-          AND query_regime_key IS NOT NULL
-        GROUP BY query_regime_key
-    """
-
-    async with _db_pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
-        prior_rows = await conn.fetch(prior_query, *prior_params)
-
-    # Build prior week lookup for WoW calculation
-    prior_lookup = {}
-    for row in prior_rows:
-        total = row["total"]
-        non_exact = row["non_exact"]
-        pct = (non_exact / total * 100) if total > 0 else 0.0
-        prior_lookup[row["query_regime_key"]] = pct
+    # Fetch prior week for WoW comparison
+    prior_lookup = await repo.get_prior_week_drift(
+        workspace_id=workspace_id,
+        prior_start=prior_week_start,
+        prior_end=since,
+        strategy_entity_id=strategy_entity_id,
+    )
 
     # Build response
     drivers = []
     total_non_exact = 0
 
-    for row in rows:
-        total = row["total_requests"]
-        non_exact = row["non_exact_count"]
-        non_exact_pct = (non_exact / total * 100) if total > 0 else 0.0
-        total_non_exact += non_exact
+    for row in driver_rows:
+        non_exact_pct = (
+            (row.non_exact_count / row.total_requests * 100)
+            if row.total_requests > 0
+            else 0.0
+        )
+        total_non_exact += row.non_exact_count
 
         # Calculate WoW change
         wow_change = None
-        prior_pct = prior_lookup.get(row["regime_key"])
+        prior_pct = prior_lookup.get(row.regime_key)
         if prior_pct is not None:
             wow_change = round(non_exact_pct - prior_pct, 1)
 
         # Calculate coverage gap
-        current_tunes = row["current_tunes"]
-        coverage_gap = max(0, min_samples - current_tunes)
+        coverage_gap = max(0, min_samples - row.current_tunes)
 
         drivers.append(
             DriftDriverItem(
-                regime_key=row["regime_key"],
-                trend_tag=row["trend_tag"],
-                vol_tag=row["vol_tag"],
-                total_requests=total,
-                non_exact_count=non_exact,
+                regime_key=row.regime_key,
+                trend_tag=row.trend_tag,
+                vol_tag=row.vol_tag,
+                total_requests=row.total_requests,
+                non_exact_count=row.non_exact_count,
                 non_exact_pct=round(non_exact_pct, 1),
                 wow_change=wow_change,
                 tier_distribution=TierDistribution(
-                    exact=row["exact_count"],
-                    partial_trend=row["partial_trend_count"],
-                    partial_vol=row["partial_vol_count"],
-                    distance=row["distance_count"],
-                    global_best=row["global_count"],
+                    exact=row.exact_count,
+                    partial_trend=row.partial_trend_count,
+                    partial_vol=row.partial_vol_count,
+                    distance=row.distance_count,
+                    global_best=row.global_count,
                 ),
-                current_tunes=current_tunes,
+                current_tunes=row.current_tunes,
                 coverage_gap=coverage_gap,
             )
         )
