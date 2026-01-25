@@ -1,9 +1,8 @@
 """KB entities and claims admin UI endpoints."""
 
 import json
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 import structlog
@@ -11,6 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.admin.utils import (
+    PaginationDefaults,
+    json_serializable,
+    parse_json_field,
+    require_db_pool,
+)
 from app.deps.security import require_admin_token
 from app.schemas import KBClaimType, KBEntityType
 
@@ -31,29 +36,12 @@ def set_db_pool(pool):
     _db_pool = pool
 
 
-def _json_serializable(obj: Any) -> Any:
-    """Convert object to JSON-serializable form."""
-    if isinstance(obj, dict):
-        return {k: _json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_json_serializable(v) for v in obj]
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, UUID):
-        return str(obj)
-    return obj
-
-
 def _get_kb_repo():
     """Get KnowledgeBaseRepository instance."""
     from app.repositories.kb import KnowledgeBaseRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-    return KnowledgeBaseRepository(_db_pool)
+    pool = require_db_pool(_db_pool, "Database")
+    return KnowledgeBaseRepository(pool)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -71,7 +59,11 @@ async def admin_entities(
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
     q: Optional[str] = Query(None, description="Search query"),
     type: Optional[str] = Query(None, description="Filter by entity type"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.DETAIL_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -126,11 +118,7 @@ async def admin_entities(
 
     # Parse aliases for display
     for entity in entities:
-        if isinstance(entity.get("aliases"), str):
-            try:
-                entity["aliases"] = json.loads(entity["aliases"])
-            except json.JSONDecodeError:
-                entity["aliases"] = []
+        entity["aliases"] = parse_json_field(entity.get("aliases")) or []
 
     return templates.TemplateResponse(
         "entities.html",
@@ -158,7 +146,11 @@ async def admin_entity_detail(
     entity_id: UUID,
     status_filter: Optional[str] = Query("verified", description="Claim status filter"),
     claim_type: Optional[str] = Query(None, description="Claim type filter"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.DETAIL_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -181,11 +173,7 @@ async def admin_entity_detail(
     )
 
     # Parse aliases
-    if isinstance(entity.get("aliases"), str):
-        try:
-            entity["aliases"] = json.loads(entity["aliases"])
-        except json.JSONDecodeError:
-            entity["aliases"] = []
+    entity["aliases"] = parse_json_field(entity.get("aliases")) or []
 
     # Get claims for this entity
     from app.services.kb_types import ClaimType
@@ -315,7 +303,7 @@ async def admin_claim_detail(
         )
 
     # Convert to JSON-serializable for debug panel
-    claim_json = _json_serializable(claim)
+    claim_json = json_serializable(claim)
 
     return templates.TemplateResponse(
         "claim_detail.html",
@@ -334,7 +322,11 @@ async def admin_claims_list(
     q: Optional[str] = Query(None, description="Search query"),
     status_filter: Optional[str] = Query("verified", description="Status filter"),
     claim_type: Optional[str] = Query(None, description="Claim type filter"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.DETAIL_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):

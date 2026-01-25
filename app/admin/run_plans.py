@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app.admin.utils import PaginationDefaults, json_serializable, require_db_pool
 from app.deps.security import require_admin_token
 
 router = APIRouter(tags=["admin"])
@@ -28,19 +29,6 @@ def set_db_pool(pool):
     """Set the database pool for run_plans routes."""
     global _db_pool
     _db_pool = pool
-
-
-def _json_serializable(obj: Any) -> Any:
-    """Convert object to JSON-serializable form."""
-    if isinstance(obj, dict):
-        return {k: _json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_json_serializable(v) for v in obj]
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, UUID):
-        return str(obj)
-    return obj
 
 
 def _get_run_plans_repo():
@@ -68,7 +56,9 @@ async def admin_run_plans_list(
         None, alias="status", description="Filter by status"
     ),
     hours: int = Query(24, ge=1, le=168, description="Time window in hours"),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(
+        PaginationDefaults.DEFAULT_LIMIT, ge=1, le=PaginationDefaults.MAX_LIMIT
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -192,13 +182,9 @@ async def admin_run_plans_list(
         WHERE ($3::text IS NULL OR status = $3)
     """
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = require_db_pool(_db_pool)
 
-    async with _db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             query, workspace_id, since, status_filter, limit, offset
         )
@@ -247,7 +233,11 @@ async def admin_run_plan_detail(
     request: Request,
     run_plan_id: str,
     workspace_id: Optional[UUID] = Query(None, description="Workspace UUID"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.DETAIL_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -284,13 +274,9 @@ async def admin_run_plan_detail(
         ORDER BY created_at ASC
     """
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = require_db_pool(_db_pool)
 
-    async with _db_pool.acquire() as conn:
+    async with pool.acquire() as conn:
         rows = await conn.fetch(query, workspace_id, run_plan_id)
 
     if not rows:
@@ -359,7 +345,7 @@ async def admin_run_plan_detail(
     run_plan["variants"] = run_plan["variants"][offset : offset + limit]  # noqa: E203
 
     # Convert to JSON-serializable for debug panel
-    run_plan_json = _json_serializable(run_plan)
+    run_plan_json = json_serializable(run_plan)
 
     return templates.TemplateResponse(
         "run_plan_detail.html",
@@ -404,7 +390,11 @@ async def get_run_plan(
 @router.get("/run-plans/{plan_id}/runs")
 async def get_run_plan_runs(
     plan_id: UUID,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.DETAIL_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):

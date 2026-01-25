@@ -22,6 +22,24 @@ from app.deps.security import require_admin_token
 router = APIRouter(prefix="/system", tags=["admin-system"])
 logger = structlog.get_logger(__name__)
 
+# =============================================================================
+# Constants
+# =============================================================================
+
+AUTO_REFRESH_SECONDS = 30
+
+STATUS_COLORS = {
+    "ok": "green",
+    "degraded": "orange",
+    "error": "red",
+}
+
+STATUS_ICONS = {
+    "ok": "&#10003;",
+    "degraded": "&#9888;",
+    "error": "&#10007;",
+}
+
 # Global connection pool (set during app startup)
 _db_pool = None
 
@@ -65,14 +83,11 @@ async def system_health_html(
     """
     snapshot = await collect_system_health(settings, _db_pool)
 
-    # Status badge colors
     def status_color(s: str) -> str:
-        return {"ok": "green", "degraded": "orange", "error": "red"}.get(s, "gray")
+        return STATUS_COLORS.get(s, "gray")
 
     def status_icon(s: str) -> str:
-        return {"ok": "&#10003;", "degraded": "&#9888;", "error": "&#10007;"}.get(
-            s, "?"
-        )
+        return STATUS_ICONS.get(s, "?")
 
     # Format datetime
     def fmt_dt(dt: Optional[datetime]) -> str:
@@ -108,7 +123,7 @@ async def system_health_html(
 <html>
 <head>
     <title>System Health - Trading RAG</title>
-    <meta http-equiv="refresh" content="30">
+    <meta http-equiv="refresh" content="{AUTO_REFRESH_SECONDS}">
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{

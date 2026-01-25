@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from app.admin.utils import json_serializable, PaginationDefaults, require_db_pool
 from app.deps.security import require_admin_token
 from app.services.alerts.models import AlertStatus, RuleType, Severity
 
@@ -31,29 +32,12 @@ def set_db_pool(pool):
     _db_pool = pool
 
 
-def _json_serializable(obj: Any) -> Any:
-    """Convert object to JSON-serializable form."""
-    if isinstance(obj, dict):
-        return {k: _json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_json_serializable(v) for v in obj]
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, UUID):
-        return str(obj)
-    return obj
-
-
 def _get_alerts_repo():
     """Get AlertsRepository instance."""
     from app.repositories.alerts import AlertsRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-    return AlertsRepository(_db_pool)
+    pool = require_db_pool(_db_pool, "Database")
+    return AlertsRepository(pool)
 
 
 # =============================================================================
@@ -103,7 +87,12 @@ async def alerts_page(
     severity: Optional[Severity] = Query(None, description="Filter by severity"),
     rule_type: Optional[RuleType] = Query(None, description="Filter by rule type"),
     acknowledged: Optional[bool] = Query(None, description="Filter by acknowledged"),
-    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    limit: int = Query(
+        PaginationDefaults.DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+        description="Max results",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     token: Optional[str] = Query(None, description="Admin token (dev convenience)"),
     _: str = Depends(require_admin_token),
@@ -211,7 +200,7 @@ async def list_alert_rules(
     rules = await repo.list_rules(workspace_id=workspace_id, enabled_only=enabled_only)
 
     return {
-        "rules": [_json_serializable(r) for r in rules],
+        "rules": [json_serializable(r) for r in rules],
         "count": len(rules),
     }
 
@@ -246,7 +235,7 @@ async def create_alert_rule(
         rule_type=request.rule_type.value,
     )
 
-    return _json_serializable(rule)
+    return json_serializable(rule)
 
 
 @router.get("/rules/{rule_id}")
@@ -268,7 +257,7 @@ async def get_alert_rule(
             detail="Alert rule not found",
         )
 
-    return _json_serializable(rule)
+    return json_serializable(rule)
 
 
 @router.patch("/rules/{rule_id}")
@@ -303,7 +292,7 @@ async def update_alert_rule(
         enabled=request.enabled,
     )
 
-    return _json_serializable(rule)
+    return json_serializable(rule)
 
 
 @router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -357,7 +346,12 @@ async def list_alert_events(
     to_ts: Optional[datetime] = Query(
         None, alias="to", description="End timestamp filter (last_seen <= to)"
     ),
-    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+        description="Max results",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: bool = Depends(require_admin_token),
 ):
@@ -385,7 +379,7 @@ async def list_alert_events(
     )
 
     return {
-        "items": [_json_serializable(e) for e in events],
+        "items": [json_serializable(e) for e in events],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -411,7 +405,7 @@ async def get_alert_event(
             detail="Alert event not found",
         )
 
-    return _json_serializable(event)
+    return json_serializable(event)
 
 
 @router.post("/{event_id}/acknowledge")
