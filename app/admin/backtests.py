@@ -645,9 +645,9 @@ async def admin_tune_compare(
         for key in sorted(all_param_keys):
             builder.add_field(
                 key,
-                lambda t, k=key: (  # type: ignore[misc]
-                    t.get("best_run") or {}
-                ).get("params", {}).get(k),
+                lambda t, k=key: (t.get("best_run") or {})  # type: ignore[misc]
+                .get("params", {})
+                .get(k),
             )
         sections.append(builder.build_section("Best Parameters"))
 
