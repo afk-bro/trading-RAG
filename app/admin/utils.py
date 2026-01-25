@@ -178,7 +178,7 @@ def parse_bool_param(value: Optional[str]) -> Optional[bool]:
 # =============================================================================
 
 
-def prepare_for_template(obj: dict, uuid_fields: list[str] = None) -> dict:
+def prepare_for_template(obj: dict, uuid_fields: Optional[list[str]] = None) -> dict:
     """Prepare a dict for Jinja2 template rendering.
 
     Converts UUID and datetime fields to strings for template compatibility.

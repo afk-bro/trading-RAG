@@ -8,7 +8,7 @@ import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Literal, Optional
+from typing import Callable, Generator, Literal, Optional
 from uuid import UUID, uuid4
 
 import structlog
@@ -65,7 +65,7 @@ def _get_pool():
 
 
 @contextmanager
-def measure_duration_ms() -> Generator[callable, None, None]:
+def measure_duration_ms() -> Generator[Callable[[], int], None, None]:
     """Context manager that yields a callable returning elapsed ms.
 
     Usage:

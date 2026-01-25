@@ -320,7 +320,7 @@ def extract_key_concepts(chunks: list[dict]) -> dict:
     combined_text = " ".join(c.get("content", "") for c in chunks).lower()
 
     # Find matching concepts
-    found_concepts = {}
+    found_concepts: dict[str, dict[str, object]] = {}
     for term, description in TRADING_CONCEPTS.items():
         # Use word boundary matching
         pattern = r"\b" + re.escape(term) + r"\b"
@@ -331,15 +331,19 @@ def extract_key_concepts(chunks: list[dict]) -> dict:
                 "count": len(matches),
             }
 
-    # Sort by frequency
+    # Sort by frequency (cast count to int for sorting)
     found_concepts = dict(
-        sorted(found_concepts.items(), key=lambda x: x[1]["count"], reverse=True)
+        sorted(
+            found_concepts.items(),
+            key=lambda x: x[1].get("count", 0),  # type: ignore[arg-type, attr-defined, return-value]
+            reverse=True,
+        )
     )
 
     # Find potential tickers
     combined_upper = " ".join(c.get("content", "") for c in chunks)
     ticker_matches = TICKER_PATTERN.findall(combined_upper)
-    tickers = {}
+    tickers: dict[str, int] = {}
     for t in ticker_matches:
         if t not in NON_TICKERS and len(t) >= 2:
             tickers[t] = tickers.get(t, 0) + 1

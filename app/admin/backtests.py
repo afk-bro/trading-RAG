@@ -245,7 +245,7 @@ class CompareFieldBuilder:
         # IS metric
         self.add_field(
             f"{label_prefix} (IS)",
-            lambda t, k=metric_key: (t.get("best_run") or {})
+            lambda t, k=metric_key: (t.get("best_run") or {})  # type: ignore[misc]
             .get("metrics_is", {})
             .get(k),
             format_spec,
@@ -253,7 +253,7 @@ class CompareFieldBuilder:
         # OOS metric
         self.add_field(
             f"{label_prefix} (OOS)",
-            lambda t, k=metric_key: (t.get("best_run") or {})
+            lambda t, k=metric_key: (t.get("best_run") or {})  # type: ignore[misc]
             .get("metrics_oos", {})
             .get(k),
             format_spec,
@@ -645,7 +645,9 @@ async def admin_tune_compare(
         for key in sorted(all_param_keys):
             builder.add_field(
                 key,
-                lambda t, k=key: (t.get("best_run") or {}).get("params", {}).get(k),
+                lambda t, k=key: (  # type: ignore[misc]
+                    t.get("best_run") or {}
+                ).get("params", {}).get(k),
             )
         sections.append(builder.build_section("Best Parameters"))
 
