@@ -223,7 +223,7 @@ async def get_tier_usage(
     bucket: Optional[str] = Query(
         None,
         description="Time bucket: 'day' or 'week'. Omit for totals only.",
-        regex="^(day|week)$",
+        pattern="^(day|week)$",
     ),
     _: bool = Depends(require_admin_token),
 ):
@@ -507,7 +507,7 @@ async def get_regime_drift(
     regime_key: Optional[str] = Query(
         None, description="Filter to specific regime (e.g., 'trend=flat|vol=high_vol')"
     ),
-    bucket: str = Query("day", regex="^(day|week)$", description="Time bucket"),
+    bucket: str = Query("day", pattern="^(day|week)$", description="Time bucket"),
     _: bool = Depends(require_admin_token),
 ) -> RegimeDriftResponse:
     """Get regime drift indicators from recommend_events."""
