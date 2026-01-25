@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import UUID
 
 import structlog
@@ -15,6 +15,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from app.admin.utils import (
+    PaginationDefaults,
+    json_serializable,
+    parse_bool_param,
+    parse_jsonb_fields,
+    prepare_for_template,
+    require_db_pool,
+)
 from app.deps.security import require_admin_token
 
 router = APIRouter(tags=["admin"])
@@ -34,28 +42,259 @@ def set_db_pool(pool):
     _db_pool = pool
 
 
-def _json_serializable(obj: Any) -> Any:
-    """Convert object to JSON-serializable form."""
-    if isinstance(obj, dict):
-        return {k: _json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_json_serializable(v) for v in obj]
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, UUID):
-        return str(obj)
-    return obj
+# =============================================================================
+# MetricsObj - Module level class for metrics display
+# =============================================================================
+
+
+class MetricsObj:
+    """Wrapper for metrics dict providing attribute access in templates."""
+
+    def __init__(self, d: dict):
+        self.return_pct = d.get("return_pct")
+        self.sharpe = d.get("sharpe")
+        self.max_drawdown_pct = d.get("max_drawdown_pct")
+        self.trades = d.get("trades")
+        self.profit_factor = d.get("profit_factor")
+
+
+# =============================================================================
+# Leaderboard CSV Formatter
+# =============================================================================
+
+
+class LeaderboardCSVFormatter:
+    """Formats leaderboard data for CSV export."""
+
+    HEADERS = [
+        # Core identifiers
+        "rank",
+        "tune_id",
+        "created_at",
+        "status",
+        "strategy_entity_id",
+        "strategy_name",
+        # Config snapshot
+        "objective_type",
+        "objective_params",
+        "oos_ratio",
+        "gates_max_drawdown_pct",
+        "gates_min_trades",
+        "gates_evaluated_on",
+        # Winner fields
+        "best_run_id",
+        "best_params",
+        "best_objective_score",
+        "best_score",
+        # OOS metrics
+        "return_pct",
+        "sharpe",
+        "max_drawdown_pct",
+        "trades",
+        "profit_factor",
+        # Robustness
+        "overfit_gap",
+    ]
+
+    def _compute_overfit_gap(self, entry: dict) -> Optional[float]:
+        """Compute overfit gap (IS - OOS score difference)."""
+        score_is = entry.get("score_is")
+        score_oos = entry.get("score_oos")
+        if score_is is not None and score_oos is not None:
+            return round(score_is - score_oos, 4)
+        return None
+
+    def format_row(self, entry: dict, rank: int) -> list:
+        """Format a single leaderboard entry as a CSV row."""
+        # Parse JSONB fields
+        entry_copy = dict(entry)
+        parse_jsonb_fields(entry_copy, ["gates", "best_metrics_oos"])
+
+        gates = entry_copy.get("gates") or {}
+        metrics_oos = entry_copy.get("best_metrics_oos") or {}
+
+        # Format complex fields
+        objective_params = entry.get("objective_params")
+        if isinstance(objective_params, dict):
+            objective_params = json.dumps(objective_params)
+
+        best_params = entry.get("best_params")
+        if isinstance(best_params, dict):
+            best_params = json.dumps(best_params)
+
+        overfit_gap = self._compute_overfit_gap(entry)
+
+        return [
+            rank,
+            str(entry.get("id", "")),
+            entry.get("created_at", "").isoformat() if entry.get("created_at") else "",
+            entry.get("status", ""),
+            str(entry.get("strategy_entity_id", "")),
+            entry.get("strategy_name", ""),
+            entry.get("objective_type", "sharpe"),
+            objective_params or "",
+            entry.get("oos_ratio", ""),
+            gates.get("max_drawdown_pct", ""),
+            gates.get("min_trades", ""),
+            gates.get("evaluated_on", ""),
+            str(entry.get("best_run_id", "")) if entry.get("best_run_id") else "",
+            best_params or "",
+            entry.get("best_objective_score", ""),
+            entry.get("best_score", ""),
+            metrics_oos.get("return_pct", ""),
+            metrics_oos.get("sharpe", ""),
+            metrics_oos.get("max_drawdown_pct", ""),
+            metrics_oos.get("trades", ""),
+            metrics_oos.get("profit_factor", ""),
+            overfit_gap if overfit_gap is not None else "",
+        ]
+
+    def generate(
+        self,
+        entries: list[dict],
+        offset: int = 0,
+        workspace_id: str = "",
+        objective_type: Optional[str] = None,
+    ) -> StreamingResponse:
+        """Generate CSV export of leaderboard entries."""
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(self.HEADERS)
+
+        for idx, entry in enumerate(entries):
+            rank = offset + idx + 1
+            writer.writerow(self.format_row(entry, rank))
+
+        output.seek(0)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+        # Build descriptive filename
+        parts = ["leaderboard"]
+        if workspace_id:
+            parts.append(workspace_id)
+        if objective_type:
+            parts.append(objective_type)
+        parts.append(timestamp)
+        filename = "_".join(parts) + ".csv"
+
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+
+# =============================================================================
+# Compare Field Builder
+# =============================================================================
+
+
+class CompareField(BaseModel):
+    """A single field in tune comparison."""
+
+    label: str
+    values: list[str]
+    differs: bool = False
+
+
+class CompareSection(BaseModel):
+    """A section of fields in tune comparison."""
+
+    title: str
+    fields: list[CompareField]
+
+
+class CompareFieldBuilder:
+    """Builds comparison fields across multiple tunes."""
+
+    def __init__(self, tunes: list[dict]):
+        self.tunes = tunes
+        self._fields: list[CompareField] = []
+
+    def add_field(
+        self,
+        label: str,
+        extractor: Callable[[dict], Any],
+        format_spec: str = "default",
+    ) -> "CompareFieldBuilder":
+        """Add a comparison field.
+
+        Args:
+            label: Display label for the field
+            extractor: Function to extract value from a tune dict
+            format_spec: Format type (pct, float, float2, float4, int, pct_ratio, etc)
+
+        Returns:
+            Self for chaining
+        """
+        values = [
+            _normalize_compare_value(extractor(t), format_spec) for t in self.tunes
+        ]
+        self._fields.append(
+            CompareField(label=label, values=values, differs=_values_differ(values))
+        )
+        return self
+
+    def add_metric_pair(
+        self,
+        label_prefix: str,
+        metric_key: str,
+        format_spec: str = "pct",
+    ) -> "CompareFieldBuilder":
+        """Add IS/OOS metric pair."""
+        # IS metric
+        self.add_field(
+            f"{label_prefix} (IS)",
+            lambda t, k=metric_key: (t.get("best_run") or {})
+            .get("metrics_is", {})
+            .get(k),
+            format_spec,
+        )
+        # OOS metric
+        self.add_field(
+            f"{label_prefix} (OOS)",
+            lambda t, k=metric_key: (t.get("best_run") or {})
+            .get("metrics_oos", {})
+            .get(k),
+            format_spec,
+        )
+        return self
+
+    def build(self) -> list[CompareField]:
+        """Build and return the list of fields."""
+        fields = self._fields
+        self._fields = []
+        return fields
+
+    def build_section(self, title: str) -> CompareSection:
+        """Build a section with current fields and reset."""
+        return CompareSection(title=title, fields=self.build())
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+async def _get_default_workspace_id() -> Optional[UUID]:
+    """Get the first available workspace ID."""
+    if _db_pool is None:
+        return None
+    try:
+        async with _db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
+            if row:
+                return row["id"]
+    except Exception as e:
+        logger.warning("Could not fetch default workspace", error=str(e))
+    return None
 
 
 def _get_tune_repo():
     """Get TuneRepository instance."""
     from app.repositories.backtests import TuneRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    require_db_pool(_db_pool)
     return TuneRepository(_db_pool)
 
 
@@ -63,12 +302,93 @@ def _get_run_repo():
     """Get BacktestRepository instance."""
     from app.repositories.backtests import BacktestRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    require_db_pool(_db_pool)
     return BacktestRepository(_db_pool)
+
+
+def _get_wfo_repo():
+    """Get WFO repository instance."""
+    from app.repositories.backtests import WFORepository
+
+    require_db_pool(_db_pool)
+    return WFORepository(_db_pool)
+
+
+def _normalize_compare_value(value: Any, fmt: str = "default") -> str:
+    """Normalize value for display and comparison."""
+    if value is None:
+        return "—"
+    if fmt == "pct":
+        return f"{value:+.2f}%" if isinstance(value, (int, float)) else str(value)
+    if fmt == "pct_neg":
+        # For drawdown (already negative or should show as negative)
+        v = -abs(value) if isinstance(value, (int, float)) else value
+        return f"{v:.1f}%"
+    if fmt == "float":
+        return f"{value:.2f}" if isinstance(value, (int, float)) else str(value)
+    if fmt == "float2":
+        return f"{value:.2f}" if isinstance(value, (int, float)) else str(value)
+    if fmt == "float4":
+        return f"{value:.4f}" if isinstance(value, (int, float)) else str(value)
+    if fmt == "int":
+        return str(int(value)) if isinstance(value, (int, float)) else str(value)
+    if fmt == "pct_ratio":
+        return f"{value * 100:.0f}%" if isinstance(value, (int, float)) else str(value)
+    if fmt == "datetime":
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return str(value)
+    return str(value)
+
+
+def _values_differ(values: list[str]) -> bool:
+    """Check if normalized values differ across tunes."""
+    non_missing = [v for v in values if v != "—"]
+    if len(non_missing) <= 1:
+        # All missing or only one has value = differ
+        return len(set(values)) > 1
+    return len(set(non_missing)) > 1
+
+
+def _overfit_class(gap: Optional[float]) -> str:
+    """CSS class for overfit gap severity."""
+    if gap is None:
+        return ""
+    if gap < 0:
+        return "overfit-good"  # OOS better than IS (rare but good)
+    if gap <= 0.3:
+        return ""  # Normal
+    if gap <= 0.5:
+        return "overfit-warning"
+    return "overfit-danger"
+
+
+async def _fetch_tune_for_compare(tune_id: UUID) -> Optional[dict[str, Any]]:
+    """Fetch a tune's full detail for comparison."""
+    tune_repo = _get_tune_repo()
+
+    tune = await tune_repo.get_tune(tune_id)
+    if not tune:
+        return None
+
+    result = dict(tune)
+    parse_jsonb_fields(result, ["param_ranges", "gates", "best_params"])
+
+    # Get best run info
+    best_run = await tune_repo.get_best_run(tune_id)
+    if best_run:
+        result["best_run"] = dict(best_run)
+        parse_jsonb_fields(result["best_run"], ["params", "metrics_is", "metrics_oos"])
+
+    # Get counts
+    result["counts"] = await tune_repo.get_tune_status_counts(tune_id)
+
+    return result
+
+
+# =============================================================================
+# Admin Endpoints
+# =============================================================================
 
 
 @router.get("/backtests/tunes", response_class=HTMLResponse)
@@ -81,7 +401,11 @@ async def admin_tunes_list(
     oos_enabled: Optional[str] = Query(
         None, description="Filter by OOS: 'true', 'false', or empty"
     ),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(
+        PaginationDefaults.DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -89,14 +413,8 @@ async def admin_tunes_list(
     tune_repo = _get_tune_repo()
 
     # If no workspace specified, get first available
-    if not workspace_id and _db_pool:
-        try:
-            async with _db_pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
-                if row:
-                    workspace_id = row["id"]
-        except Exception as e:
-            logger.warning("Could not fetch default workspace", error=str(e))
+    if not workspace_id:
+        workspace_id = await _get_default_workspace_id()
 
     if not workspace_id:
         return templates.TemplateResponse(
@@ -110,12 +428,7 @@ async def admin_tunes_list(
             },
         )
 
-    # Convert oos_enabled string to bool (query params come as strings)
-    oos_enabled_bool = None
-    if oos_enabled == "true":
-        oos_enabled_bool = True
-    elif oos_enabled == "false":
-        oos_enabled_bool = False
+    oos_enabled_bool = parse_bool_param(oos_enabled)
 
     tunes, total = await tune_repo.list_tunes(
         workspace_id=workspace_id,
@@ -130,18 +443,10 @@ async def admin_tunes_list(
     # Get counts for each tune
     enriched_tunes = []
     for tune in tunes:
+        tune = dict(tune)
         counts = await tune_repo.get_tune_status_counts(tune["id"])
-
-        # Parse best_params if needed
-        best_params = tune.get("best_params")
-        if isinstance(best_params, str):
-            try:
-                best_params = json.loads(best_params)
-            except json.JSONDecodeError:
-                best_params = None
-
+        parse_jsonb_fields(tune, ["best_params"])
         tune["counts"] = counts
-        tune["best_params"] = best_params
         enriched_tunes.append(tune)
 
     return templates.TemplateResponse(
@@ -180,17 +485,18 @@ async def admin_leaderboard(
     format: Optional[str] = Query(
         None, description="Output format: 'csv' for download"
     ),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(
+        PaginationDefaults.LEADERBOARD_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.LEADERBOARD_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
     """Global leaderboard: best tunes ranked by objective score."""
     tune_repo = _get_tune_repo()
 
-    # Parse oos_enabled filter
-    oos_enabled_bool = None
-    if oos_enabled is not None:
-        oos_enabled_bool = oos_enabled.lower() == "true"
+    oos_enabled_bool = parse_bool_param(oos_enabled)
 
     entries, total = await tune_repo.get_leaderboard(
         workspace_id=workspace_id,
@@ -204,9 +510,10 @@ async def admin_leaderboard(
 
     # CSV Export
     if format == "csv":
-        return _generate_leaderboard_csv(
+        formatter = LeaderboardCSVFormatter()
+        return formatter.generate(
             entries,
-            offset,
+            offset=offset,
             workspace_id=str(workspace_id)[:8],
             objective_type=objective_type,
         )
@@ -220,25 +527,15 @@ async def admin_leaderboard(
         if e.get("best_run_id"):
             e["best_run_id"] = str(e["best_run_id"])
 
-        # Parse gates snapshot if present
-        if e.get("gates") and isinstance(e["gates"], dict):
-            pass  # Already a dict
-        elif e.get("gates") and isinstance(e["gates"], str):
-            try:
-                e["gates"] = json.loads(e["gates"])
-            except json.JSONDecodeError:
-                e["gates"] = None
+        parse_jsonb_fields(e, ["gates"])
 
         # Parse best_metrics_oos to object for template
         if e.get("best_metrics_oos"):
-
-            class MetricsObj:
-                def __init__(self, d):
-                    self.return_pct = d.get("return_pct")
-                    self.sharpe = d.get("sharpe")
-                    self.max_drawdown_pct = d.get("max_drawdown_pct")
-                    self.trades = d.get("trades")
-
+            if isinstance(e["best_metrics_oos"], str):
+                try:
+                    e["best_metrics_oos"] = json.loads(e["best_metrics_oos"])
+                except json.JSONDecodeError:
+                    e["best_metrics_oos"] = {}
             e["best_metrics_oos"] = MetricsObj(e["best_metrics_oos"])
 
         enriched_entries.append(e)
@@ -262,224 +559,6 @@ async def admin_leaderboard(
             "next_offset": offset + limit,
         },
     )
-
-
-def _generate_leaderboard_csv(
-    entries: list[dict],
-    offset: int = 0,
-    workspace_id: str = "",
-    objective_type: Optional[str] = None,
-) -> StreamingResponse:
-    """Generate CSV export of leaderboard entries."""
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    # CSV columns as specified
-    headers = [
-        # Core identifiers
-        "rank",
-        "tune_id",
-        "created_at",
-        "status",
-        "strategy_entity_id",
-        "strategy_name",
-        # Config snapshot
-        "objective_type",
-        "objective_params",
-        "oos_ratio",
-        "gates_max_drawdown_pct",
-        "gates_min_trades",
-        "gates_evaluated_on",
-        # Winner fields
-        "best_run_id",
-        "best_params",
-        "best_objective_score",
-        "best_score",
-        # OOS metrics
-        "return_pct",
-        "sharpe",
-        "max_drawdown_pct",
-        "trades",
-        "profit_factor",
-        # Robustness
-        "overfit_gap",
-    ]
-    writer.writerow(headers)
-
-    for idx, entry in enumerate(entries):
-        # Parse JSONB fields if needed
-        gates = entry.get("gates") or {}
-        if isinstance(gates, str):
-            try:
-                gates = json.loads(gates)
-            except json.JSONDecodeError:
-                gates = {}
-
-        metrics_oos = entry.get("best_metrics_oos") or {}
-        if isinstance(metrics_oos, str):
-            try:
-                metrics_oos = json.loads(metrics_oos)
-            except json.JSONDecodeError:
-                metrics_oos = {}
-
-        objective_params = entry.get("objective_params")
-        if isinstance(objective_params, dict):
-            objective_params = json.dumps(objective_params)
-
-        best_params = entry.get("best_params")
-        if isinstance(best_params, dict):
-            best_params = json.dumps(best_params)
-
-        # Compute overfit gap
-        score_is = entry.get("score_is")
-        score_oos = entry.get("score_oos")
-        overfit_gap = None
-        if score_is is not None and score_oos is not None:
-            overfit_gap = round(score_is - score_oos, 4)
-
-        row = [
-            offset + idx + 1,  # rank (1-indexed)
-            str(entry.get("id", "")),
-            entry.get("created_at", "").isoformat() if entry.get("created_at") else "",
-            entry.get("status", ""),
-            str(entry.get("strategy_entity_id", "")),
-            entry.get("strategy_name", ""),
-            entry.get("objective_type", "sharpe"),
-            objective_params or "",
-            entry.get("oos_ratio", ""),
-            gates.get("max_drawdown_pct", ""),
-            gates.get("min_trades", ""),
-            gates.get("evaluated_on", ""),
-            str(entry.get("best_run_id", "")) if entry.get("best_run_id") else "",
-            best_params or "",
-            entry.get("best_objective_score", ""),
-            entry.get("best_score", ""),
-            metrics_oos.get("return_pct", ""),
-            metrics_oos.get("sharpe", ""),
-            metrics_oos.get("max_drawdown_pct", ""),
-            metrics_oos.get("trades", ""),
-            metrics_oos.get("profit_factor", ""),
-            overfit_gap if overfit_gap is not None else "",
-        ]
-        writer.writerow(row)
-
-    output.seek(0)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-
-    # Build descriptive filename
-    parts = ["leaderboard"]
-    if workspace_id:
-        parts.append(workspace_id)
-    if objective_type:
-        parts.append(objective_type)
-    parts.append(timestamp)
-    filename = "_".join(parts) + ".csv"
-
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-# =============================================================================
-# Tune Compare helpers
-# =============================================================================
-
-
-def _normalize_compare_value(value: Any, fmt: str = "default") -> str:
-    """Normalize value for display and comparison."""
-    if value is None:
-        return "—"
-    if fmt == "pct":
-        return f"{value:+.2f}%" if isinstance(value, (int, float)) else str(value)
-    if fmt == "pct_neg":
-        # For drawdown (already negative or should show as negative)
-        v = -abs(value) if isinstance(value, (int, float)) else value
-        return f"{v:.1f}%"
-    if fmt == "float2":
-        return f"{value:.2f}" if isinstance(value, (int, float)) else str(value)
-    if fmt == "float4":
-        return f"{value:.4f}" if isinstance(value, (int, float)) else str(value)
-    if fmt == "int":
-        return str(int(value)) if isinstance(value, (int, float)) else str(value)
-    if fmt == "pct_ratio":
-        return f"{value * 100:.0f}%" if isinstance(value, (int, float)) else str(value)
-    return str(value)
-
-
-def _values_differ(values: list[str]) -> bool:
-    """Check if normalized values differ across tunes."""
-    non_missing = [v for v in values if v != "—"]
-    if len(non_missing) <= 1:
-        # All missing or only one has value = differ
-        return len(set(values)) > 1
-    return len(set(non_missing)) > 1
-
-
-def _overfit_class(gap: Optional[float]) -> str:
-    """CSS class for overfit gap severity."""
-    if gap is None:
-        return ""
-    if gap < 0:
-        return "overfit-good"  # OOS better than IS (rare but good)
-    if gap <= 0.3:
-        return ""  # Normal
-    if gap <= 0.5:
-        return "overfit-warning"
-    return "overfit-danger"
-
-
-class CompareField(BaseModel):
-    """A single field in tune comparison."""
-
-    label: str
-    values: list[str]
-    differs: bool = False
-
-
-class CompareSection(BaseModel):
-    """A section of fields in tune comparison."""
-
-    title: str
-    fields: list[CompareField]
-
-
-async def _fetch_tune_for_compare(tune_id: UUID) -> Optional[dict[str, Any]]:
-    """Fetch a tune's full detail for comparison."""
-    tune_repo = _get_tune_repo()
-
-    tune = await tune_repo.get_tune(tune_id)
-    if not tune:
-        return None
-
-    result = dict(tune)
-
-    # Parse JSONB fields
-    for field in ["param_ranges", "gates", "best_params"]:
-        if result.get(field) and isinstance(result[field], str):
-            try:
-                result[field] = json.loads(result[field])
-            except json.JSONDecodeError:
-                pass
-
-    # Get best run info
-    best_run = await tune_repo.get_best_run(tune_id)
-    if best_run:
-        result["best_run"] = dict(best_run)
-        for field in ["params", "metrics_is", "metrics_oos"]:
-            if result["best_run"].get(field) and isinstance(
-                result["best_run"][field], str
-            ):
-                try:
-                    result["best_run"][field] = json.loads(result["best_run"][field])
-                except json.JSONDecodeError:
-                    pass
-
-    # Get counts
-    result["counts"] = await tune_repo.get_tune_status_counts(tune_id)
-
-    return result
 
 
 @router.get("/backtests/compare")
@@ -513,183 +592,47 @@ async def admin_tune_compare(
                 detail=f"Tune {tid} not found",
             )
 
-    # Build comparison sections
+    # Build comparison sections using CompareFieldBuilder
     sections: list[CompareSection] = []
+    builder = CompareFieldBuilder(tunes)
 
     # 1. Basic Info
-    basic_fields = []
-
-    # Strategy name
-    strategy_names = [t.get("strategy_name", "—") for t in tunes]
-    basic_fields.append(
-        CompareField(
-            label="Strategy",
-            values=strategy_names,
-            differs=_values_differ(strategy_names),
-        )
+    builder.add_field("Strategy", lambda t: t.get("strategy_name", "—"))
+    builder.add_field("Status", lambda t: t.get("status", "—"))
+    builder.add_field("Created", lambda t: t.get("created_at"), "datetime")
+    builder.add_field(
+        "Total Runs", lambda t: t.get("counts", {}).get("total", 0), "int"
     )
-
-    # Status
-    statuses = [t.get("status", "—") for t in tunes]
-    basic_fields.append(
-        CompareField(label="Status", values=statuses, differs=_values_differ(statuses))
+    builder.add_field(
+        "Valid Runs", lambda t: t.get("counts", {}).get("valid", 0), "int"
     )
-
-    # Created
-    created = [_normalize_compare_value(t.get("created_at"), "datetime") for t in tunes]
-    basic_fields.append(
-        CompareField(label="Created", values=created, differs=_values_differ(created))
-    )
-
-    # Total runs
-    total_runs = [str(t.get("counts", {}).get("total", 0)) for t in tunes]
-    basic_fields.append(
-        CompareField(
-            label="Total Runs", values=total_runs, differs=_values_differ(total_runs)
-        )
-    )
-
-    # Valid runs
-    valid_runs = [str(t.get("counts", {}).get("valid", 0)) for t in tunes]
-    basic_fields.append(
-        CompareField(
-            label="Valid Runs", values=valid_runs, differs=_values_differ(valid_runs)
-        )
-    )
-
-    sections.append(CompareSection(title="Basic Info", fields=basic_fields))
+    sections.append(builder.build_section("Basic Info"))
 
     # 2. Configuration
-    config_fields = []
-
-    # Objective type
-    obj_types = [t.get("objective_type", "sharpe") for t in tunes]
-    config_fields.append(
-        CompareField(
-            label="Objective", values=obj_types, differs=_values_differ(obj_types)
-        )
+    builder.add_field("Objective", lambda t: t.get("objective_type", "sharpe"))
+    builder.add_field("OOS Ratio", lambda t: t.get("oos_ratio"), "float")
+    builder.add_field(
+        "Max Drawdown Gate",
+        lambda t: (t.get("gates") or {}).get("max_drawdown_pct"),
+        "pct",
     )
-
-    # OOS ratio
-    oos_ratios = [_normalize_compare_value(t.get("oos_ratio"), "float") for t in tunes]
-    config_fields.append(
-        CompareField(
-            label="OOS Ratio", values=oos_ratios, differs=_values_differ(oos_ratios)
-        )
+    builder.add_field(
+        "Min Trades Gate",
+        lambda t: (t.get("gates") or {}).get("min_trades"),
+        "int",
     )
-
-    # Gates
-    gates_dd = []
-    gates_trades = []
-    for t in tunes:
-        gates = t.get("gates") or {}
-        gates_dd.append(_normalize_compare_value(gates.get("max_drawdown_pct"), "pct"))
-        gates_trades.append(str(gates.get("min_trades", "—")))
-    config_fields.append(
-        CompareField(
-            label="Max Drawdown Gate",
-            values=gates_dd,
-            differs=_values_differ(gates_dd),
-        )
-    )
-    config_fields.append(
-        CompareField(
-            label="Min Trades Gate",
-            values=gates_trades,
-            differs=_values_differ(gates_trades),
-        )
-    )
-
-    sections.append(CompareSection(title="Configuration", fields=config_fields))
+    sections.append(builder.build_section("Configuration"))
 
     # 3. Best Run Metrics
-    metrics_fields = []
-
-    # Return IS
-    return_is = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mis = br.get("metrics_is") or {}
-        return_is.append(_normalize_compare_value(mis.get("return_pct"), "pct"))
-    metrics_fields.append(
-        CompareField(
-            label="Return % (IS)", values=return_is, differs=_values_differ(return_is)
-        )
+    builder.add_metric_pair("Return %", "return_pct", "pct")
+    builder.add_metric_pair("Sharpe", "sharpe", "float")
+    builder.add_metric_pair("Max DD", "max_drawdown_pct", "pct")
+    builder.add_field(
+        "Trades (OOS)",
+        lambda t: (t.get("best_run") or {}).get("metrics_oos", {}).get("trades"),
+        "int",
     )
-
-    # Return OOS
-    return_oos = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mos = br.get("metrics_oos") or {}
-        return_oos.append(_normalize_compare_value(mos.get("return_pct"), "pct"))
-    metrics_fields.append(
-        CompareField(
-            label="Return % (OOS)",
-            values=return_oos,
-            differs=_values_differ(return_oos),
-        )
-    )
-
-    # Sharpe IS
-    sharpe_is = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mis = br.get("metrics_is") or {}
-        sharpe_is.append(_normalize_compare_value(mis.get("sharpe"), "float"))
-    metrics_fields.append(
-        CompareField(
-            label="Sharpe (IS)", values=sharpe_is, differs=_values_differ(sharpe_is)
-        )
-    )
-
-    # Sharpe OOS
-    sharpe_oos = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mos = br.get("metrics_oos") or {}
-        sharpe_oos.append(_normalize_compare_value(mos.get("sharpe"), "float"))
-    metrics_fields.append(
-        CompareField(
-            label="Sharpe (OOS)", values=sharpe_oos, differs=_values_differ(sharpe_oos)
-        )
-    )
-
-    # Max DD IS
-    dd_is = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mis = br.get("metrics_is") or {}
-        dd_is.append(_normalize_compare_value(mis.get("max_drawdown_pct"), "pct"))
-    metrics_fields.append(
-        CompareField(label="Max DD (IS)", values=dd_is, differs=_values_differ(dd_is))
-    )
-
-    # Max DD OOS
-    dd_oos = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mos = br.get("metrics_oos") or {}
-        dd_oos.append(_normalize_compare_value(mos.get("max_drawdown_pct"), "pct"))
-    metrics_fields.append(
-        CompareField(
-            label="Max DD (OOS)", values=dd_oos, differs=_values_differ(dd_oos)
-        )
-    )
-
-    # Trades
-    trades_oos = []
-    for t in tunes:
-        br = t.get("best_run") or {}
-        mos = br.get("metrics_oos") or {}
-        trades_oos.append(str(mos.get("trades", "—")))
-    metrics_fields.append(
-        CompareField(
-            label="Trades (OOS)", values=trades_oos, differs=_values_differ(trades_oos)
-        )
-    )
-
-    sections.append(CompareSection(title="Best Run Metrics", fields=metrics_fields))
+    sections.append(builder.build_section("Best Run Metrics"))
 
     # 4. Parameter comparison
     all_param_keys: set[str] = set()
@@ -699,51 +642,38 @@ async def admin_tune_compare(
         all_param_keys.update(params.keys())
 
     if all_param_keys:
-        param_fields = []
         for key in sorted(all_param_keys):
-            values = []
-            for t in tunes:
-                br = t.get("best_run") or {}
-                params = br.get("params") or {}
-                values.append(_normalize_compare_value(params.get(key)))
-            param_fields.append(
-                CompareField(label=key, values=values, differs=_values_differ(values))
+            builder.add_field(
+                key,
+                lambda t, k=key: (t.get("best_run") or {}).get("params", {}).get(k),
             )
-        sections.append(CompareSection(title="Best Parameters", fields=param_fields))
+        sections.append(builder.build_section("Best Parameters"))
 
     # 5. Overfit analysis
-    overfit_fields = []
+    builder.add_field(
+        "Score (IS)",
+        lambda t: (t.get("best_run") or {}).get("objective_score_is"),
+        "float",
+    )
+    builder.add_field(
+        "Score (OOS)",
+        lambda t: (t.get("best_run") or {}).get("objective_score_oos"),
+        "float",
+    )
 
-    # Score IS vs OOS
-    score_is_vals = []
-    score_oos_vals = []
+    # Compute overfit gaps
     overfit_gaps = []
     for t in tunes:
         br = t.get("best_run") or {}
         s_is = br.get("objective_score_is")
         s_oos = br.get("objective_score_oos")
-        score_is_vals.append(_normalize_compare_value(s_is, "float"))
-        score_oos_vals.append(_normalize_compare_value(s_oos, "float"))
         if s_is is not None and s_oos is not None:
             gap = round(s_is - s_oos, 4)
             overfit_gaps.append(f"{gap:.4f}")
         else:
             overfit_gaps.append("—")
 
-    overfit_fields.append(
-        CompareField(
-            label="Score (IS)",
-            values=score_is_vals,
-            differs=_values_differ(score_is_vals),
-        )
-    )
-    overfit_fields.append(
-        CompareField(
-            label="Score (OOS)",
-            values=score_oos_vals,
-            differs=_values_differ(score_oos_vals),
-        )
-    )
+    overfit_fields = builder.build()
     overfit_fields.append(
         CompareField(
             label="Overfit Gap",
@@ -751,7 +681,6 @@ async def admin_tune_compare(
             differs=_values_differ(overfit_gaps),
         )
     )
-
     sections.append(CompareSection(title="Overfit Analysis", fields=overfit_fields))
 
     # JSON export
@@ -874,7 +803,11 @@ async def backfill_tune_regime(
 async def admin_tune_detail(
     request: Request,
     tune_id: UUID,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.DETAIL_MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -889,14 +822,9 @@ async def admin_tune_detail(
         )
 
     tune = dict(tune)
-
-    # Parse JSONB fields
-    for field in ["param_ranges", "gates", "best_params", "objective_params"]:
-        if tune.get(field) and isinstance(tune[field], str):
-            try:
-                tune[field] = json.loads(tune[field])
-            except json.JSONDecodeError:
-                pass
+    parse_jsonb_fields(
+        tune, ["param_ranges", "gates", "best_params", "objective_params"]
+    )
 
     # Get runs
     runs, total = await tune_repo.list_tune_runs(
@@ -909,12 +837,7 @@ async def admin_tune_detail(
     enriched_runs = []
     for run in runs:
         run = dict(run)
-        for field in ["params", "metrics_is", "metrics_oos"]:
-            if run.get(field) and isinstance(run[field], str):
-                try:
-                    run[field] = json.loads(run[field])
-                except json.JSONDecodeError:
-                    pass
+        parse_jsonb_fields(run, ["params", "metrics_is", "metrics_oos"])
         enriched_runs.append(run)
 
     # Get counts
@@ -957,26 +880,22 @@ async def admin_backtest_run_detail(
     run = dict(run)
 
     # Convert UUID fields to strings for template
-    for field in [
-        "id",
-        "workspace_id",
-        "strategy_entity_id",
-        "strategy_spec_id",
-        "tune_id",
-    ]:
-        if run.get(field) is not None:
-            run[field] = str(run[field])
+    prepare_for_template(
+        run,
+        uuid_fields=[
+            "id",
+            "workspace_id",
+            "strategy_entity_id",
+            "strategy_spec_id",
+            "tune_id",
+        ],
+    )
 
     # Parse JSONB fields
-    for field in ["params", "metrics_is", "metrics_oos"]:
-        if run.get(field) and isinstance(run[field], str):
-            try:
-                run[field] = json.loads(run[field])
-            except json.JSONDecodeError:
-                pass
+    parse_jsonb_fields(run, ["params", "metrics_is", "metrics_oos"])
 
     # Convert to JSON-serializable for debug panel
-    run_json = _json_serializable(run)
+    run_json = json_serializable(run)
 
     # Get admin token for API calls from template
     admin_token = request.headers.get("X-Admin-Token", "") or os.environ.get(
@@ -999,18 +918,6 @@ async def admin_backtest_run_detail(
 # ===========================================
 
 
-def _get_wfo_repo():
-    """Get WFO repository instance."""
-    from app.repositories.backtests import WFORepository
-
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-    return WFORepository(_db_pool)
-
-
 @router.get("/backtests/wfo", response_class=HTMLResponse)
 async def admin_wfo_list(
     request: Request,
@@ -1018,7 +925,11 @@ async def admin_wfo_list(
     status_filter: Optional[str] = Query(
         None, alias="status", description="Filter by status"
     ),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(
+        PaginationDefaults.DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -1026,14 +937,8 @@ async def admin_wfo_list(
     wfo_repo = _get_wfo_repo()
 
     # If no workspace specified, get first available
-    if not workspace_id and _db_pool:
-        try:
-            async with _db_pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT id FROM workspaces LIMIT 1")
-                if row:
-                    workspace_id = row["id"]
-        except Exception as e:
-            logger.warning("Could not fetch default workspace", error=str(e))
+    if not workspace_id:
+        workspace_id = await _get_default_workspace_id()
 
     if not workspace_id:
         return templates.TemplateResponse(
@@ -1058,15 +963,9 @@ async def admin_wfo_list(
     enriched_wfos = []
     for wfo in wfos:
         wfo = dict(wfo)
-
-        # Parse JSONB fields
-        for field in ["wfo_config", "data_source", "best_params", "best_candidate"]:
-            if wfo.get(field) and isinstance(wfo[field], str):
-                try:
-                    wfo[field] = json.loads(wfo[field])
-                except json.JSONDecodeError:
-                    pass
-
+        parse_jsonb_fields(
+            wfo, ["wfo_config", "data_source", "best_params", "best_candidate"]
+        )
         enriched_wfos.append(wfo)
 
     return templates.TemplateResponse(
@@ -1106,25 +1005,23 @@ async def admin_wfo_detail(
     wfo = dict(wfo)
 
     # Convert UUID fields to strings
-    for field in ["id", "workspace_id", "strategy_entity_id", "job_id"]:
-        if wfo.get(field) is not None:
-            wfo[field] = str(wfo[field])
+    prepare_for_template(
+        wfo,
+        uuid_fields=["id", "workspace_id", "strategy_entity_id", "job_id"],
+    )
 
     # Parse JSONB fields
-    jsonb_fields = [
-        "wfo_config",
-        "data_source",
-        "param_space",
-        "best_params",
-        "best_candidate",
-        "candidates",
-    ]
-    for field in jsonb_fields:
-        if wfo.get(field) and isinstance(wfo[field], str):
-            try:
-                wfo[field] = json.loads(wfo[field])
-            except json.JSONDecodeError:
-                pass
+    parse_jsonb_fields(
+        wfo,
+        [
+            "wfo_config",
+            "data_source",
+            "param_space",
+            "best_params",
+            "best_candidate",
+            "candidates",
+        ],
+    )
 
     # Get child tune IDs
     child_tune_ids = [str(tid) for tid in (wfo.get("child_tune_ids") or [])]
@@ -1147,7 +1044,7 @@ async def admin_wfo_detail(
     wfo["strategy_name"] = strategy_name
 
     # Convert to JSON-serializable for debug panel
-    wfo_json = _json_serializable(wfo)
+    wfo_json = json_serializable(wfo)
 
     # Get admin token for API calls from template
     admin_token = request.headers.get("X-Admin-Token", "") or os.environ.get(

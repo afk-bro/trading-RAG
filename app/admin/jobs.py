@@ -1,8 +1,8 @@
 """Jobs admin endpoints (Retention Job Endpoints, Job Runs, Jobs Admin UI, Job Queue)."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Coroutine, Literal, Optional
 from uuid import UUID
 
 import structlog
@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from app.admin.utils import json_serializable, require_db_pool, PaginationDefaults
 from app.deps.security import require_admin_token
 
 router = APIRouter(tags=["admin"])
@@ -23,6 +24,9 @@ templates = Jinja2Templates(directory=str(templates_dir))
 # Global connection pool (set during app startup)
 _db_pool = None
 
+# Job name constants
+JOB_NAMES = ["rollup_events", "cleanup_events", "evaluate_alerts"]
+
 
 def set_db_pool(pool):
     """Set the database pool for jobs routes."""
@@ -30,17 +34,117 @@ def set_db_pool(pool):
     _db_pool = pool
 
 
-def _json_serializable(obj: Any) -> Any:
-    """Convert object to JSON-serializable form."""
-    if isinstance(obj, dict):
-        return {k: _json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_json_serializable(v) for v in obj]
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, UUID):
-        return str(obj)
-    return obj
+def _get_db_pool():
+    """Get the database pool, raising 503 if not available."""
+    return require_db_pool(_db_pool, "Database")
+
+
+# =============================================================================
+# Job Execution Helper
+# =============================================================================
+
+
+async def _run_job_with_lock(
+    job_name: str,
+    workspace_id: UUID,
+    dry_run: bool,
+    job_fn: Callable[[Any, bool, str], Coroutine[Any, Any, dict]],
+    pool: Any,
+    error_context: Optional[dict] = None,
+) -> JSONResponse:
+    """Execute a job with lock acquisition and standard error handling.
+
+    Args:
+        job_name: Name of the job for logging and lock acquisition
+        workspace_id: Workspace to scope the job
+        dry_run: Whether to preview only
+        job_fn: Async function(conn, is_dry_run, correlation_id) -> dict
+        pool: Database connection pool
+        error_context: Additional context to include in error response
+
+    Returns:
+        JSONResponse with appropriate status code (200, 409, or 500)
+    """
+    from app.services.jobs import JobRunner
+
+    runner = JobRunner(pool)
+    try:
+        result = await runner.run(
+            job_name=job_name,
+            workspace_id=workspace_id,
+            dry_run=dry_run,
+            triggered_by="admin_token",
+            job_fn=job_fn,
+        )
+
+        if not result.lock_acquired:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=result.to_dict(),
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=result.to_dict(),
+        )
+
+    except Exception as e:
+        logger.exception(f"{job_name} job failed", error=str(e))
+        content = {
+            "status": "failed",
+            "error": str(e),
+            "workspace_id": str(workspace_id),
+        }
+        if error_context:
+            content.update(error_context)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=content,
+        )
+
+
+# =============================================================================
+# Model Serialization Helpers
+# =============================================================================
+
+
+def _job_to_dict(job) -> dict[str, Any]:
+    """Convert a Job model to a JSON-serializable dict."""
+    return json_serializable(
+        {
+            "id": job.id,
+            "type": job.type.value,
+            "status": job.status.value,
+            "payload": job.payload,
+            "attempt": job.attempt,
+            "max_attempts": job.max_attempts,
+            "run_after": job.run_after,
+            "locked_at": job.locked_at,
+            "locked_by": job.locked_by,
+            "parent_job_id": job.parent_job_id,
+            "workspace_id": job.workspace_id,
+            "dedupe_key": job.dedupe_key,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "result": job.result,
+            "priority": job.priority,
+        }
+    )
+
+
+def _job_event_to_dict(event) -> dict[str, Any]:
+    """Convert a JobEvent model to a JSON-serializable dict."""
+    return json_serializable(
+        {
+            "id": event.id,
+            "job_id": event.job_id,
+            "ts": event.ts,
+            "level": event.level,
+            "message": event.message,
+            "meta": event.meta,
+        }
+    )
 
 
 # ===========================================
@@ -70,13 +174,8 @@ async def run_rollup_job(
         500: Job failed with error details
     """
     from app.repositories.event_rollups import EventRollupsRepository
-    from app.services.jobs import JobRunner
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
@@ -100,38 +199,14 @@ async def run_rollup_job(
                 "rows_affected": count,
             }
 
-    runner = JobRunner(_db_pool)
-    try:
-        result = await runner.run(
-            job_name="rollup_events",
-            workspace_id=workspace_id,
-            dry_run=dry_run,
-            triggered_by="admin_token",
-            job_fn=job_fn,
-        )
-
-        if not result.lock_acquired:
-            return JSONResponse(
-                status_code=status.HTTP_409_CONFLICT,
-                content=result.to_dict(),
-            )
-
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=result.to_dict(),
-        )
-
-    except Exception as e:
-        logger.exception("rollup_events job failed", error=str(e))
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "status": "failed",
-                "error": str(e),
-                "workspace_id": str(workspace_id),
-                "target_date": str(target_date),
-            },
-        )
+    return await _run_job_with_lock(
+        job_name="rollup_events",
+        workspace_id=workspace_id,
+        dry_run=dry_run,
+        job_fn=job_fn,
+        pool=pool,
+        error_context={"target_date": str(target_date)},
+    )
 
 
 @router.post("/jobs/cleanup-events")
@@ -154,14 +229,8 @@ async def run_cleanup_job(
         500: Job failed with error details
     """
     from app.services.retention import RetentionService
-    from app.services.jobs import JobRunner
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-
+    pool = _get_db_pool()
     service = RetentionService()
 
     async def job_fn(conn, is_dry_run: bool, correlation_id: str) -> dict:
@@ -179,37 +248,13 @@ async def run_cleanup_job(
                 **result,
             }
 
-    runner = JobRunner(_db_pool)
-    try:
-        result = await runner.run(
-            job_name="cleanup_events",
-            workspace_id=workspace_id,
-            dry_run=dry_run,
-            triggered_by="admin_token",
-            job_fn=job_fn,
-        )
-
-        if not result.lock_acquired:
-            return JSONResponse(
-                status_code=status.HTTP_409_CONFLICT,
-                content=result.to_dict(),
-            )
-
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=result.to_dict(),
-        )
-
-    except Exception as e:
-        logger.exception("cleanup_events job failed", error=str(e))
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "status": "failed",
-                "error": str(e),
-                "workspace_id": str(workspace_id),
-            },
-        )
+    return await _run_job_with_lock(
+        job_name="cleanup_events",
+        workspace_id=workspace_id,
+        dry_run=dry_run,
+        job_fn=job_fn,
+        pool=pool,
+    )
 
 
 @router.post("/jobs/evaluate-alerts")
@@ -232,13 +277,9 @@ async def run_evaluate_alerts_job(
     """
     from app.services.alerts.job import AlertEvaluatorJob
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    job = AlertEvaluatorJob(_db_pool)
+    job = AlertEvaluatorJob(pool)
     try:
         result = await job.run(workspace_id=workspace_id, dry_run=dry_run)
 
@@ -288,7 +329,12 @@ async def list_job_runs(
         alias="status",
         description="Filter by status (running, completed, failed)",
     ),
-    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    limit: int = Query(
+        PaginationDefaults.DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+        description="Max results",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: bool = Depends(require_admin_token),
 ):
@@ -301,13 +347,9 @@ async def list_job_runs(
     """
     from app.repositories.job_runs import JobRunsRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    repo = JobRunsRepository(_db_pool)
+    repo = JobRunsRepository(pool)
     runs = await repo.list_runs(
         job_name=job_name,
         workspace_id=workspace_id,
@@ -322,7 +364,7 @@ async def list_job_runs(
     )
 
     # Convert to JSON-serializable format
-    runs_serializable = [_json_serializable(r) for r in runs]
+    runs_serializable = [json_serializable(r) for r in runs]
 
     return {
         "runs": runs_serializable,
@@ -346,13 +388,9 @@ async def get_job_run(
     """
     from app.repositories.job_runs import JobRunsRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    repo = JobRunsRepository(_db_pool)
+    repo = JobRunsRepository(pool)
     run = await repo.get_run(run_id)
 
     if not run:
@@ -361,7 +399,7 @@ async def get_job_run(
             detail="Job run not found",
         )
 
-    return _json_serializable(run)
+    return json_serializable(run)
 
 
 # ===========================================
@@ -379,7 +417,11 @@ async def jobs_page(
         alias="status",
         description="Filter by status",
     ),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(
+        PaginationDefaults.DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+    ),
     offset: int = Query(0, ge=0),
     _: bool = Depends(require_admin_token),
 ):
@@ -398,7 +440,7 @@ async def jobs_page(
                 "status_filter": status_filter,
                 "limit": limit,
                 "offset": offset,
-                "job_names": ["rollup_events", "cleanup_events"],
+                "job_names": JOB_NAMES,
                 "error": "Database connection not available",
             },
         )
@@ -428,7 +470,7 @@ async def jobs_page(
             "status_filter": status_filter,
             "limit": limit,
             "offset": offset,
-            "job_names": ["rollup_events", "cleanup_events"],
+            "job_names": JOB_NAMES,
         },
     )
 
@@ -442,13 +484,9 @@ async def job_run_detail_page(
     """Admin job run detail page."""
     from app.repositories.job_runs import JobRunsRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    repo = JobRunsRepository(_db_pool)
+    repo = JobRunsRepository(pool)
     run = await repo.get_run(run_id)
 
     if not run:
@@ -469,41 +507,6 @@ async def job_run_detail_page(
 # ===========================================
 # Job Queue Management Endpoints
 # ===========================================
-
-
-def _job_to_dict(job) -> dict[str, Any]:
-    """Convert a Job model to a JSON-serializable dict."""
-    return {
-        "id": str(job.id),
-        "type": job.type.value,
-        "status": job.status.value,
-        "payload": job.payload,
-        "attempt": job.attempt,
-        "max_attempts": job.max_attempts,
-        "run_after": job.run_after.isoformat() if job.run_after else None,
-        "locked_at": job.locked_at.isoformat() if job.locked_at else None,
-        "locked_by": job.locked_by,
-        "parent_job_id": str(job.parent_job_id) if job.parent_job_id else None,
-        "workspace_id": str(job.workspace_id) if job.workspace_id else None,
-        "dedupe_key": job.dedupe_key,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
-        "started_at": job.started_at.isoformat() if job.started_at else None,
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-        "result": job.result,
-        "priority": job.priority,
-    }
-
-
-def _job_event_to_dict(event) -> dict[str, Any]:
-    """Convert a JobEvent model to a JSON-serializable dict."""
-    return {
-        "id": event.id,
-        "job_id": str(event.job_id),
-        "ts": event.ts.isoformat() if event.ts else None,
-        "level": event.level,
-        "message": event.message,
-        "meta": event.meta,
-    }
 
 
 class TriggerSyncRequest(BaseModel):
@@ -532,7 +535,12 @@ async def list_jobs_queue(
         description="Filter by job type (data_sync, data_fetch, tune, wfo)",
     ),
     workspace_id: Optional[UUID] = Query(None, description="Filter by workspace"),
-    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    limit: int = Query(
+        PaginationDefaults.DETAIL_DEFAULT_LIMIT,
+        ge=1,
+        le=PaginationDefaults.MAX_LIMIT,
+        description="Max results",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     _: bool = Depends(require_admin_token),
 ):
@@ -544,13 +552,9 @@ async def list_jobs_queue(
     """
     from app.repositories.jobs import JobRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    repo = JobRepository(_db_pool)
+    repo = JobRepository(pool)
     jobs, total = await repo.list_jobs(
         status=status_filter,
         job_type=type_filter,
@@ -581,14 +585,10 @@ async def get_job_queue_detail(
     from app.repositories.jobs import JobRepository
     from app.repositories.job_events import JobEventsRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    job_repo = JobRepository(_db_pool)
-    events_repo = JobEventsRepository(_db_pool)
+    job_repo = JobRepository(pool)
+    events_repo = JobEventsRepository(pool)
 
     job = await job_repo.get(job_id)
     if not job:
@@ -598,7 +598,9 @@ async def get_job_queue_detail(
         )
 
     # Get events and children
-    events = await events_repo.list_for_job(job_id, limit=50)
+    events = await events_repo.list_for_job(
+        job_id, limit=PaginationDefaults.DETAIL_DEFAULT_LIMIT
+    )
     children = await job_repo.list_by_parent(job_id)
 
     return {
@@ -621,13 +623,9 @@ async def cancel_job_queue(
     """
     from app.repositories.jobs import JobRepository
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    repo = JobRepository(_db_pool)
+    repo = JobRepository(pool)
     job, children_count = await repo.cancel_job_tree(job_id)
 
     if not job:
@@ -656,13 +654,9 @@ async def trigger_data_sync(
     from app.repositories.jobs import JobRepository
     from app.jobs.types import JobType
 
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
+    pool = _get_db_pool()
 
-    repo = JobRepository(_db_pool)
+    repo = JobRepository(pool)
 
     # Build payload
     payload: dict[str, Any] = {

@@ -6,23 +6,36 @@ for Pine script discovery.
 
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal, Optional
-from uuid import UUID
+from typing import Generator, Literal, Optional
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
+from app.admin.utils import MAX_ERRORS_IN_RESPONSE, require_db_pool
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
 from app.services.pine.adapters.git import (
     InvalidRepoUrlError,
     extract_slug_from_url,
 )
+from app.services.pine.discovery import PineDiscoveryService
+from app.services.pine.poller import PineRepoPoller, get_poller
+from app.services.pine.repo_registry import PineRepoRepository
 
 router = APIRouter(prefix="/pine/repos", tags=["admin-pine-repos"])
 logger = structlog.get_logger(__name__)
+
+# ===========================================
+# Constants
+# ===========================================
+
+DEFAULT_BRANCH = "main"
+DEFAULT_GLOB_PATTERNS = ["**/*.pine"]
+MAX_SCAN_ERRORS = 10
 
 # Global connection pool and clients (set during app startup)
 _db_pool = None
@@ -42,13 +55,26 @@ def set_qdrant_client(client):
 
 
 def _get_pool():
-    """Get the database pool."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-    return _db_pool
+    """Get the database pool, raising 503 if unavailable."""
+    return require_db_pool(_db_pool, "Database")
+
+
+# ===========================================
+# Utility Helpers
+# ===========================================
+
+
+@contextmanager
+def measure_duration_ms() -> Generator[callable, None, None]:
+    """Context manager that yields a callable returning elapsed ms.
+
+    Usage:
+        with measure_duration_ms() as get_duration:
+            # do work
+            duration = get_duration()
+    """
+    start = time.time()
+    yield lambda: int((time.time() - start) * 1000)
 
 
 # ===========================================
@@ -68,11 +94,11 @@ class RegisterRepoRequest(BaseModel):
         examples=["https://github.com/owner/pine-scripts"],
     )
     branch: str = Field(
-        default="main",
+        default=DEFAULT_BRANCH,
         description="Git branch to track",
     )
     scan_globs: list[str] = Field(
-        default=["**/*.pine"],
+        default=DEFAULT_GLOB_PATTERNS,
         description="Glob patterns for matching Pine files",
     )
     run_now: bool = Field(
@@ -186,6 +212,40 @@ def _repo_to_response(repo) -> RepoResponse:
     )
 
 
+async def _toggle_repo_enabled(repo_id: UUID, enabled: bool) -> RepoResponse:
+    """Enable or disable a repo and return updated response.
+
+    Args:
+        repo_id: The repository UUID
+        enabled: True to enable, False to disable
+
+    Returns:
+        RepoResponse with updated state
+
+    Raises:
+        HTTPException: 404 if repo not found
+    """
+    pool = _get_pool()
+    repo_registry = PineRepoRepository(pool)
+
+    repo = await repo_registry.get(repo_id)
+    if repo is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Repository not found: {repo_id}",
+        )
+
+    await repo_registry.set_enabled(repo_id, enabled)
+    refreshed = await repo_registry.get(repo_id)
+    if refreshed:
+        repo = refreshed
+
+    action = "enabled" if enabled else "disabled"
+    logger.info(f"repo_{action}", repo_id=str(repo_id), repo_slug=repo.repo_slug)
+
+    return _repo_to_response(repo)
+
+
 # ===========================================
 # Endpoints
 # ===========================================
@@ -213,9 +273,6 @@ async def register_repo(
     _: str = Depends(require_admin_token),
 ):
     """Register a new GitHub repository for discovery."""
-    from app.services.pine.repo_registry import PineRepoRepository
-    from app.services.pine.discovery import PineDiscoveryService
-
     pool = _get_pool()
     log = logger.bind(
         workspace_id=str(request.workspace_id),
@@ -312,8 +369,6 @@ async def list_repos(
     _: str = Depends(require_admin_token),
 ):
     """List registered repositories."""
-    from app.services.pine.repo_registry import PineRepoRepository
-
     pool = _get_pool()
     repo_registry = PineRepoRepository(pool)
 
@@ -344,8 +399,6 @@ async def get_repo(
     _: str = Depends(require_admin_token),
 ):
     """Get repository details."""
-    from app.services.pine.repo_registry import PineRepoRepository
-
     pool = _get_pool()
     repo_registry = PineRepoRepository(pool)
 
@@ -377,8 +430,6 @@ async def unregister_repo(
     _: str = Depends(require_admin_token),
 ):
     """Unregister a repository."""
-    from app.services.pine.repo_registry import PineRepoRepository
-
     pool = _get_pool()
     log = logger.bind(repo_id=str(repo_id))
 
@@ -438,10 +489,6 @@ async def scan_repo(
     _: str = Depends(require_admin_token),
 ):
     """Trigger a repository scan."""
-    from uuid import uuid4
-    from app.services.pine.repo_registry import PineRepoRepository
-    from app.services.pine.discovery import PineDiscoveryService
-
     pool = _get_pool()
     run_id = f"scan-{uuid4().hex[:8]}"
     log = logger.bind(repo_id=str(repo_id), scan_run_id=run_id)
@@ -465,54 +512,53 @@ async def scan_repo(
     log = log.bind(repo_slug=repo.repo_slug)
     log.info("scan_started", force_full_scan=request.force_full_scan)
 
-    start_time = time.time()
+    with measure_duration_ms() as get_duration:
+        try:
+            discovery = PineDiscoveryService(pool, settings, _qdrant_client)
+            result = await discovery.discover_repo(
+                workspace_id=repo.workspace_id,
+                repo_id=repo_id,
+                trigger="manual",
+                force_full_scan=request.force_full_scan,
+            )
 
-    try:
-        discovery = PineDiscoveryService(pool, settings, _qdrant_client)
-        result = await discovery.discover_repo(
-            workspace_id=repo.workspace_id,
-            repo_id=repo_id,
-            trigger="manual",
-            force_full_scan=request.force_full_scan,
-        )
+            duration_ms = get_duration()
 
-        duration_ms = int((time.time() - start_time) * 1000)
+            log.info(
+                "scan_complete",
+                status=result.status,
+                scripts_new=result.scripts_new,
+                scripts_updated=result.scripts_updated,
+                scripts_deleted=result.scripts_deleted,
+                duration_ms=duration_ms,
+            )
 
-        log.info(
-            "scan_complete",
-            status=result.status,
-            scripts_new=result.scripts_new,
-            scripts_updated=result.scripts_updated,
-            scripts_deleted=result.scripts_deleted,
-            duration_ms=duration_ms,
-        )
+            return ScanRepoResponse(
+                status=result.status,
+                scan_run_id=run_id,
+                scripts_scanned=result.scripts_scanned,
+                scripts_new=result.scripts_new,
+                scripts_updated=result.scripts_updated,
+                scripts_deleted=result.scripts_deleted,
+                scripts_unchanged=result.scripts_unchanged,
+                specs_generated=result.specs_generated,
+                scripts_ingested=result.scripts_ingested,
+                scripts_ingest_failed=result.scripts_ingest_failed,
+                chunks_created=result.chunks_created,
+                commit_before=result.commit_before,
+                commit_after=result.commit_after,
+                is_full_scan=result.is_full_scan,
+                errors=result.errors[:MAX_SCAN_ERRORS],
+                duration_ms=duration_ms,
+            )
 
-        return ScanRepoResponse(
-            status=result.status,
-            scan_run_id=run_id,
-            scripts_scanned=result.scripts_scanned,
-            scripts_new=result.scripts_new,
-            scripts_updated=result.scripts_updated,
-            scripts_deleted=result.scripts_deleted,
-            scripts_unchanged=result.scripts_unchanged,
-            specs_generated=result.specs_generated,
-            scripts_ingested=result.scripts_ingested,
-            scripts_ingest_failed=result.scripts_ingest_failed,
-            chunks_created=result.chunks_created,
-            commit_before=result.commit_before,
-            commit_after=result.commit_after,
-            is_full_scan=result.is_full_scan,
-            errors=result.errors,
-            duration_ms=duration_ms,
-        )
-
-    except Exception as e:
-        duration_ms = int((time.time() - start_time) * 1000)
-        log.exception("scan_error")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Scan failed: {e}",
-        )
+        except Exception as e:
+            duration_ms = get_duration()
+            log.exception("scan_error")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Scan failed: {e}",
+            )
 
 
 @router.patch(
@@ -526,27 +572,7 @@ async def enable_repo(
     _: str = Depends(require_admin_token),
 ):
     """Enable a repository."""
-    from app.services.pine.repo_registry import PineRepoRepository
-
-    pool = _get_pool()
-    repo_registry = PineRepoRepository(pool)
-
-    repo = await repo_registry.get(repo_id)
-    if repo is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Repository not found: {repo_id}",
-        )
-
-    await repo_registry.set_enabled(repo_id, True)
-    refreshed = await repo_registry.get(repo_id)
-    # Repo should exist since we just checked it
-    if refreshed:
-        repo = refreshed
-
-    logger.info("repo_enabled", repo_id=str(repo_id), repo_slug=repo.repo_slug)
-
-    return _repo_to_response(repo)
+    return await _toggle_repo_enabled(repo_id, enabled=True)
 
 
 @router.patch(
@@ -560,27 +586,7 @@ async def disable_repo(
     _: str = Depends(require_admin_token),
 ):
     """Disable a repository."""
-    from app.services.pine.repo_registry import PineRepoRepository
-
-    pool = _get_pool()
-    repo_registry = PineRepoRepository(pool)
-
-    repo = await repo_registry.get(repo_id)
-    if repo is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Repository not found: {repo_id}",
-        )
-
-    await repo_registry.set_enabled(repo_id, False)
-    refreshed = await repo_registry.get(repo_id)
-    # Repo should exist since we just checked it
-    if refreshed:
-        repo = refreshed
-
-    logger.info("repo_disabled", repo_id=str(repo_id), repo_slug=repo.repo_slug)
-
-    return _repo_to_response(repo)
+    return await _toggle_repo_enabled(repo_id, enabled=False)
 
 
 # ===========================================
@@ -637,8 +643,6 @@ async def trigger_poll_run(
     _: str = Depends(require_admin_token),
 ):
     """Trigger a manual poll run."""
-    from app.services.pine.poller import get_poller, PineRepoPoller
-
     pool = _get_pool()
     log = logger.bind(endpoint="poll-run")
 
@@ -679,7 +683,7 @@ async def trigger_poll_run(
             repos_succeeded=result.repos_succeeded,
             repos_failed=result.repos_failed,
             repos_skipped=result.repos_skipped,
-            errors=result.errors[:10],  # Limit to first 10 errors
+            errors=result.errors[:MAX_ERRORS_IN_RESPONSE],
             duration_ms=result.duration_ms,
         )
 
@@ -702,8 +706,6 @@ async def get_poller_status(
     _: str = Depends(require_admin_token),
 ):
     """Get poller status."""
-    from app.services.pine.poller import get_poller
-
     poller = get_poller()
 
     if poller is None:

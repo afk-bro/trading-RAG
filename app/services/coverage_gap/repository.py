@@ -556,6 +556,76 @@ class MatchRunRepository:
         return count
 
     # ===========================================
+    # Explanation Cache Methods
+    # ===========================================
+
+    async def get_match_run_for_explanation(
+        self,
+        run_id: UUID,
+        workspace_id: UUID,
+    ) -> Optional[dict]:
+        """
+        Fetch match run data needed for explanation generation.
+
+        Returns intent_json, candidate_scores, and explanations_cache.
+
+        Args:
+            run_id: Match run ID
+            workspace_id: Workspace for scoping
+
+        Returns:
+            Dict with intent_json, candidate_scores, explanations_cache or None if not found
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT intent_json, candidate_scores, explanations_cache
+                FROM match_runs
+                WHERE id = $1 AND workspace_id = $2
+                """,
+                run_id,
+                workspace_id,
+            )
+
+        if not row:
+            return None
+
+        return dict(row)
+
+    async def update_explanations_cache(
+        self,
+        run_id: UUID,
+        workspace_id: UUID,
+        cache_data: dict,
+    ) -> bool:
+        """
+        Update the explanations_cache JSONB for a match run.
+
+        Args:
+            run_id: Match run ID
+            workspace_id: Workspace for scoping
+            cache_data: Full cache dict to store
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE match_runs
+                SET explanations_cache = $1
+                WHERE id = $2 AND workspace_id = $3
+                """,
+                json.dumps(cache_data),
+                run_id,
+                workspace_id,
+            )
+
+        # Parse "UPDATE N" result
+        count = int(result.split()[-1]) if result else 0
+        return count > 0
+
+    # ===========================================
     # SSE Event Helpers
     # ===========================================
 
