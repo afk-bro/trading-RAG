@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 # Pagination Constants
 # =============================================================================
 
+
 class PaginationDefaults:
     """Standard pagination limits for admin endpoints."""
 
