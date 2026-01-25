@@ -331,14 +331,11 @@ def extract_key_concepts(chunks: list[dict]) -> dict:
                 "count": len(matches),
             }
 
-    # Sort by frequency (cast count to int for sorting)
-    found_concepts = dict(
-        sorted(
-            found_concepts.items(),
-            key=lambda x: x[1].get("count", 0),  # type: ignore[arg-type, attr-defined, return-value]
-            reverse=True,
-        )
-    )
+    # Sort by frequency
+    def _sort_key(x: tuple[str, dict[str, object]]) -> int:
+        return int(x[1].get("count", 0) or 0)  # type: ignore[call-overload]
+
+    found_concepts = dict(sorted(found_concepts.items(), key=_sort_key, reverse=True))
 
     # Find potential tickers
     combined_upper = " ".join(c.get("content", "") for c in chunks)
