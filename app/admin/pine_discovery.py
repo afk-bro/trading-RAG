@@ -13,6 +13,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
+from app.admin.utils import json_serializable, PaginationDefaults, require_db_pool
 from app.config import Settings, get_settings
 from app.deps.security import require_admin_token
 from app.routers.metrics import (
@@ -42,13 +43,8 @@ def set_qdrant_client(client):
 
 
 def _get_pool():
-    """Get the database pool."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-    return _db_pool
+    """Get the database pool, raising 503 if unavailable."""
+    return require_db_pool(_db_pool, "Database")
 
 
 # ===========================================
@@ -460,9 +456,7 @@ async def archive_stale_scripts(request: ArchiveRequest):
                 {
                     "id": str(row["id"]),
                     "rel_path": row["rel_path"],
-                    "last_seen_at": (
-                        row["last_seen_at"].isoformat() if row["last_seen_at"] else None
-                    ),
+                    "last_seen_at": json_serializable(row["last_seen_at"]),
                 }
                 for row in rows
             ]
@@ -489,16 +483,12 @@ async def archive_stale_scripts(request: ArchiveRequest):
             bus = get_event_bus()
             for script in result.archived_scripts:
                 try:
-                    last_seen_str = None
-                    if script.last_seen_at:
-                        last_seen_str = script.last_seen_at.isoformat()
-
                     event = pine_script_archived(
                         event_id="",
                         workspace_id=request.workspace_id,
                         script_id=script.id,
                         rel_path=script.rel_path,
-                        last_seen_at=last_seen_str,
+                        last_seen_at=json_serializable(script.last_seen_at),
                     )
                     await bus.publish(event)
                 except Exception as e:
@@ -521,7 +511,7 @@ async def archive_stale_scripts(request: ArchiveRequest):
             {
                 "id": str(s.id),
                 "rel_path": s.rel_path,
-                "last_seen_at": s.last_seen_at.isoformat() if s.last_seen_at else None,
+                "last_seen_at": json_serializable(s.last_seen_at),
             }
             for s in result.archived_scripts
         ]
@@ -577,7 +567,7 @@ async def list_scripts(
     workspace_id: UUID,
     status: Optional[str] = None,
     script_type: Optional[str] = None,
-    limit: int = 50,
+    limit: int = PaginationDefaults.DETAIL_DEFAULT_LIMIT,
     offset: int = 0,
 ):
     """List discovered scripts with filtering and pagination."""
@@ -588,8 +578,8 @@ async def list_scripts(
     # Validate limit
     if limit < 1:
         limit = 1
-    elif limit > 100:
-        limit = 100
+    elif limit > PaginationDefaults.MAX_LIMIT:
+        limit = PaginationDefaults.MAX_LIMIT
 
     if offset < 0:
         offset = 0
@@ -614,9 +604,9 @@ async def list_scripts(
             status=s.status,
             sha256=s.sha256,
             has_spec=s.spec_json is not None,
-            last_seen_at=s.last_seen_at.isoformat() if s.last_seen_at else None,
-            created_at=s.created_at.isoformat() if s.created_at else None,
-            updated_at=s.updated_at.isoformat() if s.updated_at else None,
+            last_seen_at=json_serializable(s.last_seen_at),
+            created_at=json_serializable(s.created_at),
+            updated_at=json_serializable(s.updated_at),
         )
         for s in scripts
     ]

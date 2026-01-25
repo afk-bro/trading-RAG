@@ -5,36 +5,47 @@ plus status/log viewing for all deployments.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from app.admin.utils import require_db_pool
 from app.deps.security import require_admin_token
 
 router = APIRouter(prefix="/retention", tags=["admin-retention"])
 logger = structlog.get_logger(__name__)
 
+# ===========================================
+# Module Constants
+# ===========================================
+
 # Global connection pool (set during app startup via set_db_pool)
 _db_pool = None
+
+# Default retention periods (days)
+DEFAULT_TRADE_EVENTS_DAYS = 90
+DEFAULT_JOB_RUNS_DAYS = 30
+DEFAULT_MATCH_RUNS_DAYS = 180
+IDEMPOTENCY_KEYS_EXPIRY_DAYS = 7  # Fixed expiry, not configurable
+
+# Query parameter limits
+MIN_CUTOFF_DAYS = 1
+MAX_CUTOFF_DAYS_STANDARD = 365
+MAX_CUTOFF_DAYS_EXTENDED = 730  # For match_runs
+
+# Batch size limits
+DEFAULT_BATCH_SIZE = 10000
+MIN_BATCH_SIZE = 100
+MAX_BATCH_SIZE = 100000
 
 
 def set_db_pool(pool):
     """Set the database pool for this router."""
     global _db_pool
     _db_pool = pool
-
-
-def _get_pool():
-    """Get the database pool."""
-    if _db_pool is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection not available",
-        )
-    return _db_pool
 
 
 # ===========================================
@@ -98,6 +109,92 @@ class RetentionStatusResponse(BaseModel):
 
 
 # ===========================================
+# Helper Functions
+# ===========================================
+
+
+def _row_to_log_entry(row: Any) -> RetentionLogEntry:
+    """Convert a database row to a RetentionLogEntry model."""
+    return RetentionLogEntry(
+        id=row["id"],
+        job_name=row["job_name"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        rows_deleted=row["rows_deleted"],
+        cutoff_ts=row["cutoff_ts"],
+        dry_run=row["dry_run"],
+        ok=row["ok"],
+        error=row["error"],
+    )
+
+
+async def _execute_prune(
+    job_name: str,
+    sql_function: str,
+    cutoff_days: int,
+    batch_size: int,
+    dry_run: bool,
+    use_interval: bool = True,
+) -> PruneResult:
+    """Execute a retention prune operation.
+
+    Args:
+        job_name: Name of the retention job for logging/response
+        sql_function: Name of the SQL function to call
+        cutoff_days: Days to retain (converted to interval if use_interval=True)
+        batch_size: Number of rows to process per batch
+        dry_run: If True, count only without deleting
+        use_interval: If True, pass cutoff_days as interval; if False, omit interval param
+
+    Returns:
+        PruneResult with operation details
+    """
+    pool = require_db_pool(_db_pool)
+    start_time = datetime.utcnow()
+
+    async with pool.acquire() as conn:
+        if use_interval:
+            result = await conn.fetchrow(
+                f"""
+                SELECT deleted_count, job_log_id
+                FROM {sql_function}($1::interval, $2, $3)
+                """,
+                f"{cutoff_days} days",
+                batch_size,
+                dry_run,
+            )
+        else:
+            # For idempotency_keys which doesn't take a cutoff interval
+            result = await conn.fetchrow(
+                f"""
+                SELECT deleted_count, job_log_id
+                FROM {sql_function}($1, $2)
+                """,
+                batch_size,
+                dry_run,
+            )
+
+    duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+
+    logger.info(
+        f"retention_{sql_function}",
+        deleted_count=result["deleted_count"],
+        cutoff_days=cutoff_days,
+        dry_run=dry_run,
+        duration_ms=duration_ms,
+    )
+
+    return PruneResult(
+        job_name=job_name,
+        deleted_count=result["deleted_count"],
+        job_log_id=result["job_log_id"],
+        dry_run=dry_run,
+        cutoff_days=cutoff_days,
+        duration_ms=duration_ms,
+    )
+
+
+# ===========================================
 # Prune Endpoints
 # ===========================================
 
@@ -109,9 +206,17 @@ class RetentionStatusResponse(BaseModel):
     summary="Prune old trade events",
 )
 async def prune_trade_events(
-    cutoff_days: int = Query(default=90, ge=1, le=365, description="Days to retain"),
+    cutoff_days: int = Query(
+        default=DEFAULT_TRADE_EVENTS_DAYS,
+        ge=MIN_CUTOFF_DAYS,
+        le=MAX_CUTOFF_DAYS_STANDARD,
+        description="Days to retain",
+    ),
     batch_size: int = Query(
-        default=10000, ge=100, le=100000, description="Rows per batch"
+        default=DEFAULT_BATCH_SIZE,
+        ge=MIN_BATCH_SIZE,
+        le=MAX_BATCH_SIZE,
+        description="Rows per batch",
     ),
     dry_run: bool = Query(
         default=True, description="If true, count only without deleting"
@@ -125,37 +230,12 @@ async def prune_trade_events(
 
     **Default: dry_run=true** - Always preview before actual deletion.
     """
-    pool = _get_pool()
-    start_time = datetime.utcnow()
-
-    async with pool.acquire() as conn:
-        result = await conn.fetchrow(
-            """
-            SELECT deleted_count, job_log_id
-            FROM retention_prune_trade_events($1::interval, $2, $3)
-            """,
-            f"{cutoff_days} days",
-            batch_size,
-            dry_run,
-        )
-
-    duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-
-    logger.info(
-        "retention_prune_trade_events",
-        deleted_count=result["deleted_count"],
-        cutoff_days=cutoff_days,
-        dry_run=dry_run,
-        duration_ms=duration_ms,
-    )
-
-    return PruneResult(
+    return await _execute_prune(
         job_name="trade_events",
-        deleted_count=result["deleted_count"],
-        job_log_id=result["job_log_id"],
-        dry_run=dry_run,
+        sql_function="retention_prune_trade_events",
         cutoff_days=cutoff_days,
-        duration_ms=duration_ms,
+        batch_size=batch_size,
+        dry_run=dry_run,
     )
 
 
@@ -166,9 +246,17 @@ async def prune_trade_events(
     summary="Prune old job runs",
 )
 async def prune_job_runs(
-    cutoff_days: int = Query(default=30, ge=1, le=365, description="Days to retain"),
+    cutoff_days: int = Query(
+        default=DEFAULT_JOB_RUNS_DAYS,
+        ge=MIN_CUTOFF_DAYS,
+        le=MAX_CUTOFF_DAYS_STANDARD,
+        description="Days to retain",
+    ),
     batch_size: int = Query(
-        default=10000, ge=100, le=100000, description="Rows per batch"
+        default=DEFAULT_BATCH_SIZE,
+        ge=MIN_BATCH_SIZE,
+        le=MAX_BATCH_SIZE,
+        description="Rows per batch",
     ),
     dry_run: bool = Query(
         default=True, description="If true, count only without deleting"
@@ -179,37 +267,12 @@ async def prune_job_runs(
 
     **Default: dry_run=true** - Always preview before actual deletion.
     """
-    pool = _get_pool()
-    start_time = datetime.utcnow()
-
-    async with pool.acquire() as conn:
-        result = await conn.fetchrow(
-            """
-            SELECT deleted_count, job_log_id
-            FROM retention_prune_job_runs($1::interval, $2, $3)
-            """,
-            f"{cutoff_days} days",
-            batch_size,
-            dry_run,
-        )
-
-    duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-
-    logger.info(
-        "retention_prune_job_runs",
-        deleted_count=result["deleted_count"],
-        cutoff_days=cutoff_days,
-        dry_run=dry_run,
-        duration_ms=duration_ms,
-    )
-
-    return PruneResult(
+    return await _execute_prune(
         job_name="job_runs",
-        deleted_count=result["deleted_count"],
-        job_log_id=result["job_log_id"],
-        dry_run=dry_run,
+        sql_function="retention_prune_job_runs",
         cutoff_days=cutoff_days,
-        duration_ms=duration_ms,
+        batch_size=batch_size,
+        dry_run=dry_run,
     )
 
 
@@ -220,9 +283,17 @@ async def prune_job_runs(
     summary="Prune old resolved match runs",
 )
 async def prune_match_runs(
-    cutoff_days: int = Query(default=180, ge=1, le=730, description="Days to retain"),
+    cutoff_days: int = Query(
+        default=DEFAULT_MATCH_RUNS_DAYS,
+        ge=MIN_CUTOFF_DAYS,
+        le=MAX_CUTOFF_DAYS_EXTENDED,
+        description="Days to retain",
+    ),
     batch_size: int = Query(
-        default=10000, ge=100, le=100000, description="Rows per batch"
+        default=DEFAULT_BATCH_SIZE,
+        ge=MIN_BATCH_SIZE,
+        le=MAX_BATCH_SIZE,
+        description="Rows per batch",
     ),
     dry_run: bool = Query(
         default=True, description="If true, count only without deleting"
@@ -235,37 +306,12 @@ async def prune_match_runs(
 
     **Default: dry_run=true** - Always preview before actual deletion.
     """
-    pool = _get_pool()
-    start_time = datetime.utcnow()
-
-    async with pool.acquire() as conn:
-        result = await conn.fetchrow(
-            """
-            SELECT deleted_count, job_log_id
-            FROM retention_prune_match_runs($1::interval, $2, $3)
-            """,
-            f"{cutoff_days} days",
-            batch_size,
-            dry_run,
-        )
-
-    duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-
-    logger.info(
-        "retention_prune_match_runs",
-        deleted_count=result["deleted_count"],
-        cutoff_days=cutoff_days,
-        dry_run=dry_run,
-        duration_ms=duration_ms,
-    )
-
-    return PruneResult(
+    return await _execute_prune(
         job_name="match_runs",
-        deleted_count=result["deleted_count"],
-        job_log_id=result["job_log_id"],
-        dry_run=dry_run,
+        sql_function="retention_prune_match_runs",
         cutoff_days=cutoff_days,
-        duration_ms=duration_ms,
+        batch_size=batch_size,
+        dry_run=dry_run,
     )
 
 
@@ -277,7 +323,10 @@ async def prune_match_runs(
 )
 async def prune_idempotency_keys(
     batch_size: int = Query(
-        default=10000, ge=100, le=100000, description="Rows per batch"
+        default=DEFAULT_BATCH_SIZE,
+        ge=MIN_BATCH_SIZE,
+        le=MAX_BATCH_SIZE,
+        description="Rows per batch",
     ),
     dry_run: bool = Query(
         default=True, description="If true, count only without deleting"
@@ -290,35 +339,13 @@ async def prune_idempotency_keys(
 
     **Default: dry_run=true** - Always preview before actual deletion.
     """
-    pool = _get_pool()
-    start_time = datetime.utcnow()
-
-    async with pool.acquire() as conn:
-        result = await conn.fetchrow(
-            """
-            SELECT deleted_count, job_log_id
-            FROM retention_prune_idempotency_keys($1, $2)
-            """,
-            batch_size,
-            dry_run,
-        )
-
-    duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-
-    logger.info(
-        "retention_prune_idempotency_keys",
-        deleted_count=result["deleted_count"],
-        dry_run=dry_run,
-        duration_ms=duration_ms,
-    )
-
-    return PruneResult(
+    return await _execute_prune(
         job_name="idempotency_keys",
-        deleted_count=result["deleted_count"],
-        job_log_id=result["job_log_id"],
+        sql_function="retention_prune_idempotency_keys",
+        cutoff_days=IDEMPOTENCY_KEYS_EXPIRY_DAYS,
+        batch_size=batch_size,
         dry_run=dry_run,
-        cutoff_days=7,  # Fixed 7-day expiry
-        duration_ms=duration_ms,
+        use_interval=False,
     )
 
 
@@ -339,7 +366,7 @@ async def list_retention_logs(
     offset: int = Query(default=0, ge=0),
 ):
     """List retention job execution logs with optional filtering."""
-    pool = _get_pool()
+    pool = require_db_pool(_db_pool)
 
     async with pool.acquire() as conn:
         # Build query with optional filter
@@ -371,20 +398,7 @@ async def list_retention_logs(
             )
             total = await conn.fetchval("SELECT COUNT(*) FROM retention_job_log")
 
-    items = [
-        RetentionLogEntry(
-            id=row["id"],
-            job_name=row["job_name"],
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
-            rows_deleted=row["rows_deleted"],
-            cutoff_ts=row["cutoff_ts"],
-            dry_run=row["dry_run"],
-            ok=row["ok"],
-            error=row["error"],
-        )
-        for row in rows
-    ]
+    items = [_row_to_log_entry(row) for row in rows]
 
     return RetentionLogsResponse(
         items=items,
@@ -408,7 +422,7 @@ async def get_retention_status():
     - Most recent run per job type
     - Estimated row counts for retention tables
     """
-    pool = _get_pool()
+    pool = require_db_pool(_db_pool)
 
     async with pool.acquire() as conn:
         # Check pg_cron availability
@@ -445,7 +459,7 @@ async def get_retention_status():
         job_names = ["trade_events", "job_runs", "match_runs", "idempotency_keys"]
         last_runs = {}
 
-        for job_name in job_names:
+        for jn in job_names:
             row = await conn.fetchrow(
                 """
                 SELECT * FROM retention_job_log
@@ -453,22 +467,9 @@ async def get_retention_status():
                 ORDER BY started_at DESC
                 LIMIT 1
                 """,
-                job_name,
+                jn,
             )
-            if row:
-                last_runs[job_name] = RetentionLogEntry(
-                    id=row["id"],
-                    job_name=row["job_name"],
-                    started_at=row["started_at"],
-                    finished_at=row["finished_at"],
-                    rows_deleted=row["rows_deleted"],
-                    cutoff_ts=row["cutoff_ts"],
-                    dry_run=row["dry_run"],
-                    ok=row["ok"],
-                    error=row["error"],
-                )
-            else:
-                last_runs[job_name] = None
+            last_runs[jn] = _row_to_log_entry(row) if row else None
 
         # Get estimated row counts (use pg_class for fast estimates)
         table_estimates = {}
