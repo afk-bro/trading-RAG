@@ -78,14 +78,6 @@ class AdminEvent(BaseModel):
         """
         return f"id: {self.id}\nevent: {self.topic}\ndata: {self.model_dump_json()}\n\n"
 
-    class Config:
-        """Pydantic config."""
-
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            UUID: str,
-        }
-
 
 # Convenience constructors for common events
 
