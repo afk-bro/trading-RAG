@@ -405,12 +405,13 @@ class IntelRunner:
             # Map WFO candidate metrics to confidence context format
             metrics = self._map_wfo_to_confidence_metrics(best_candidate, wfo_config)
 
-            logger.debug(
-                "intel_runner_wfo_metrics_found",
-                strategy_entity_id=str(strategy_entity_id),
-                oos_sharpe=metrics.get("oos_sharpe"),
-                num_folds=metrics.get("num_folds"),
-            )
+            if metrics:
+                logger.debug(
+                    "intel_runner_wfo_metrics_found",
+                    strategy_entity_id=str(strategy_entity_id),
+                    oos_sharpe=metrics.get("oos_sharpe"),
+                    num_folds=metrics.get("num_folds"),
+                )
 
             return metrics
 
@@ -418,7 +419,7 @@ class IntelRunner:
         self,
         best_candidate: dict,
         wfo_config: Optional[dict] = None,
-    ) -> dict:
+    ) -> Optional[dict]:
         """
         Map WFOCandidateMetrics to ConfidenceContext.wfo_metrics format.
 
