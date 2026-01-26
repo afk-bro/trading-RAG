@@ -38,7 +38,7 @@ class IntelRunner:
         self,
         pool,
         ohlcv_provider: Optional[Any] = None,
-        engine_version: str = "intel_runner_v0.1",
+        engine_version: str = "intel_runner_v0.2",
     ):
         """
         Initialize runner.
@@ -92,24 +92,28 @@ class IntelRunner:
             workspace_id, strategy_entity_id, version_id
         )
 
-        # Step 3: Fetch OHLCV data (if provider available)
+        # Step 3: Fetch WFO metrics (preferred over backtest when available)
+        wfo_metrics = await self._fetch_wfo_metrics(workspace_id, strategy_entity_id)
+
+        # Step 4: Fetch OHLCV data (if provider available)
         ohlcv_df = await self._fetch_ohlcv(version_data, as_of_ts)
         latest_candle_ts = self._get_latest_candle_ts(ohlcv_df)
 
-        # Step 4: Build context and compute confidence
+        # Step 5: Build context and compute confidence
+        # Note: WFO metrics take precedence over backtest metrics in confidence computation
         ctx = ConfidenceContext(
             version_id=version_id,
             as_of_ts=as_of_ts,
             ohlcv=ohlcv_df,
             backtest_metrics=backtest_metrics,
-            wfo_metrics=None,  # TODO: Add WFO support
+            wfo_metrics=wfo_metrics,
             latest_candle_ts=latest_candle_ts,
             strategy_regime_profile=version_data.get("regime_awareness"),
         )
 
         result = compute_confidence(ctx)
 
-        # Step 5: Check for deduplication
+        # Step 6: Check for deduplication
         if not force:
             existing = await self._intel_repo.get_latest_snapshot(version_id)
             if existing and existing.inputs_hash == result.inputs_hash:
@@ -119,7 +123,7 @@ class IntelRunner:
                 )
                 return None
 
-        # Step 6: Persist snapshot
+        # Step 7: Persist snapshot
         snapshot = await self._intel_repo.insert_snapshot(
             workspace_id=workspace_id,
             strategy_version_id=version_id,
@@ -138,6 +142,7 @@ class IntelRunner:
             snapshot_id=str(snapshot.id),
             regime=result.regime,
             confidence=result.confidence_score,
+            metrics_source=result.features.get("metrics_source", "none"),
         )
 
         return snapshot
@@ -342,6 +347,117 @@ class IntelRunner:
                 "trades": summary.get("trades"),
                 "win_rate": summary.get("win_rate"),
             }
+
+    async def _fetch_wfo_metrics(
+        self,
+        workspace_id: UUID,
+        strategy_entity_id: Optional[UUID],
+    ) -> Optional[dict]:
+        """
+        Fetch latest WFO metrics for a strategy.
+
+        Queries wfo_runs for completed runs and extracts metrics from best_candidate.
+        WFO metrics are preferred over backtest metrics when available because
+        they provide out-of-sample validation across multiple time periods.
+
+        Returns:
+            Dict with keys: oos_sharpe, oos_return_pct, fold_variance, num_folds,
+            max_drawdown_pct. Returns None if no completed WFO runs found.
+        """
+        if not strategy_entity_id:
+            return None
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT best_candidate, wfo_config
+                FROM wfo_runs
+                WHERE workspace_id = $1
+                  AND strategy_entity_id = $2
+                  AND status = 'completed'
+                  AND best_candidate IS NOT NULL
+                ORDER BY completed_at DESC
+                LIMIT 1
+                """,
+                workspace_id,
+                strategy_entity_id,
+            )
+
+            if not row or not row["best_candidate"]:
+                logger.debug(
+                    "intel_runner_no_wfo_metrics",
+                    strategy_entity_id=str(strategy_entity_id),
+                )
+                return None
+
+            best_candidate = row["best_candidate"]
+            if isinstance(best_candidate, str):
+                import json
+
+                best_candidate = json.loads(best_candidate)
+
+            wfo_config = row["wfo_config"]
+            if isinstance(wfo_config, str):
+                import json
+
+                wfo_config = json.loads(wfo_config)
+
+            # Map WFO candidate metrics to confidence context format
+            metrics = self._map_wfo_to_confidence_metrics(best_candidate, wfo_config)
+
+            logger.debug(
+                "intel_runner_wfo_metrics_found",
+                strategy_entity_id=str(strategy_entity_id),
+                oos_sharpe=metrics.get("oos_sharpe"),
+                num_folds=metrics.get("num_folds"),
+            )
+
+            return metrics
+
+    def _map_wfo_to_confidence_metrics(
+        self,
+        best_candidate: dict,
+        wfo_config: Optional[dict] = None,
+    ) -> dict:
+        """
+        Map WFOCandidateMetrics to ConfidenceContext.wfo_metrics format.
+
+        Args:
+            best_candidate: WFOCandidateMetrics dict from wfo_runs.best_candidate
+            wfo_config: Optional WFO configuration for context
+
+        Returns:
+            Dict with keys expected by ConfidenceContext.wfo_metrics:
+            - oos_sharpe: Out-of-sample sharpe (from mean_oos)
+            - oos_return_pct: Not available from WFO candidate, set to None
+            - fold_variance: Normalized variance across folds (0-1 scale)
+            - num_folds: Number of folds the candidate was evaluated on
+            - max_drawdown_pct: Not directly available, set to None
+        """
+        if not best_candidate:
+            return None
+
+        mean_oos = best_candidate.get("mean_oos")
+        stddev_oos = best_candidate.get("stddev_oos", 0)
+        fold_count = best_candidate.get("fold_count", 0)
+
+        # Compute fold_variance as coefficient of variation, normalized to 0-1
+        # CV = stddev / |mean|, then cap at 1.0
+        fold_variance = None
+        if mean_oos is not None and abs(mean_oos) > 0.001:
+            cv = abs(stddev_oos / mean_oos)
+            fold_variance = min(cv, 1.0)
+        elif stddev_oos > 0:
+            # Mean is near zero but variance exists - high instability
+            fold_variance = 1.0
+
+        return {
+            "oos_sharpe": mean_oos,
+            "oos_return_pct": None,  # Not available from WFO candidate
+            "fold_variance": fold_variance,
+            "num_folds": fold_count,
+            "max_drawdown_pct": None,  # Not directly available
+        }
 
     async def _fetch_ohlcv(
         self,

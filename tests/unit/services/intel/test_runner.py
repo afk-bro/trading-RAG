@@ -77,6 +77,37 @@ def sample_snapshot_row():
     }
 
 
+@pytest.fixture
+def sample_wfo_best_candidate():
+    """Sample WFO best candidate metrics."""
+    return {
+        "params": {"lookback": 20, "threshold": 0.5},
+        "params_hash": "abc123",
+        "mean_oos": 1.25,  # Out-of-sample sharpe
+        "median_oos": 1.1,
+        "worst_fold_oos": 0.3,
+        "stddev_oos": 0.4,
+        "pct_top_k": 0.85,
+        "fold_count": 5,
+        "total_folds": 6,
+        "coverage": 0.833,
+        "regime_tags": ["trend_low_vol", "range_mid_vol"],
+    }
+
+
+@pytest.fixture
+def sample_wfo_config():
+    """Sample WFO configuration."""
+    return {
+        "train_days": 90,
+        "test_days": 30,
+        "step_days": 15,
+        "min_folds": 3,
+        "leaderboard_top_k": 10,
+        "allow_partial": False,
+    }
+
+
 # =============================================================================
 # IntelRunner Tests
 # =============================================================================
@@ -92,7 +123,7 @@ class TestIntelRunnerInit:
 
         assert runner._pool is pool
         assert runner._ohlcv_provider is None
-        assert runner._engine_version == "intel_runner_v0.1"
+        assert runner._engine_version == "intel_runner_v0.2"
 
     def test_init_with_provider(self, mock_pool):
         """Test initialization with OHLCV provider."""
@@ -169,6 +200,11 @@ class TestRunForVersion:
             "_fetch_backtest_metrics",
             new_callable=AsyncMock,
             return_value=sample_backtest_summary,
+        ), patch.object(
+            IntelRunner,
+            "_fetch_wfo_metrics",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             runner = IntelRunner(pool)
 
@@ -247,6 +283,11 @@ class TestRunForVersion:
             "_fetch_backtest_metrics",
             new_callable=AsyncMock,
             return_value=sample_backtest_summary,
+        ), patch.object(
+            IntelRunner,
+            "_fetch_wfo_metrics",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             runner = IntelRunner(pool)
 
@@ -314,6 +355,11 @@ class TestRunForVersion:
             "_fetch_backtest_metrics",
             new_callable=AsyncMock,
             return_value=sample_backtest_summary,
+        ), patch.object(
+            IntelRunner,
+            "_fetch_wfo_metrics",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             runner = IntelRunner(pool)
 
@@ -577,6 +623,232 @@ class TestFetchHelpers:
 
         assert runner._get_latest_candle_ts(None) is None
         assert runner._get_latest_candle_ts(pd.DataFrame()) is None
+
+
+class TestWFOMetrics:
+    """Tests for WFO metrics fetching and mapping."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_wfo_metrics_success(
+        self, mock_pool, sample_wfo_best_candidate, sample_wfo_config
+    ):
+        """Test successful WFO metrics fetch."""
+        pool, conn = mock_pool
+
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "best_candidate": sample_wfo_best_candidate,
+                "wfo_config": sample_wfo_config,
+            }
+        )
+
+        runner = IntelRunner(pool)
+        result = await runner._fetch_wfo_metrics(
+            workspace_id=uuid4(),
+            strategy_entity_id=uuid4(),
+        )
+
+        assert result is not None
+        assert result["oos_sharpe"] == 1.25
+        assert result["num_folds"] == 5
+        assert result["fold_variance"] is not None
+        # fold_variance = |0.4 / 1.25| = 0.32, capped at 1.0
+        assert 0 <= result["fold_variance"] <= 1.0
+
+    @pytest.mark.asyncio
+    async def test_fetch_wfo_metrics_returns_none_when_no_wfo(self, mock_pool):
+        """Test that None is returned when no WFO runs exist."""
+        pool, conn = mock_pool
+
+        conn.fetchrow = AsyncMock(return_value=None)
+
+        runner = IntelRunner(pool)
+        result = await runner._fetch_wfo_metrics(
+            workspace_id=uuid4(),
+            strategy_entity_id=uuid4(),
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_wfo_metrics_returns_none_without_strategy_entity(
+        self, mock_pool
+    ):
+        """Test that None is returned when strategy_entity_id is None."""
+        pool, _ = mock_pool
+
+        runner = IntelRunner(pool)
+        result = await runner._fetch_wfo_metrics(
+            workspace_id=uuid4(),
+            strategy_entity_id=None,
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_wfo_metrics_parses_json_string(
+        self, mock_pool, sample_wfo_best_candidate, sample_wfo_config
+    ):
+        """Test that JSON string fields are parsed correctly."""
+        pool, conn = mock_pool
+
+        # Return as JSON strings (simulating raw JSONB that wasn't auto-parsed)
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "best_candidate": json.dumps(sample_wfo_best_candidate),
+                "wfo_config": json.dumps(sample_wfo_config),
+            }
+        )
+
+        runner = IntelRunner(pool)
+        result = await runner._fetch_wfo_metrics(
+            workspace_id=uuid4(),
+            strategy_entity_id=uuid4(),
+        )
+
+        assert result is not None
+        assert result["oos_sharpe"] == 1.25
+
+    def test_map_wfo_to_confidence_metrics_basic(
+        self, mock_pool, sample_wfo_best_candidate
+    ):
+        """Test basic WFO metrics mapping."""
+        pool, _ = mock_pool
+        runner = IntelRunner(pool)
+
+        result = runner._map_wfo_to_confidence_metrics(sample_wfo_best_candidate)
+
+        assert result["oos_sharpe"] == 1.25
+        assert result["num_folds"] == 5
+        assert result["oos_return_pct"] is None  # Not available in WFO candidate
+        assert result["max_drawdown_pct"] is None  # Not available
+
+    def test_map_wfo_to_confidence_metrics_fold_variance_calculation(self, mock_pool):
+        """Test fold variance calculation from stddev and mean."""
+        pool, _ = mock_pool
+        runner = IntelRunner(pool)
+
+        # Test case: mean=2.0, stddev=0.5 -> CV = 0.25
+        candidate = {"mean_oos": 2.0, "stddev_oos": 0.5, "fold_count": 4}
+        result = runner._map_wfo_to_confidence_metrics(candidate)
+        assert result["fold_variance"] == pytest.approx(0.25, rel=0.01)
+
+        # Test case: high variance (stddev > mean) -> capped at 1.0
+        candidate = {"mean_oos": 0.5, "stddev_oos": 1.0, "fold_count": 4}
+        result = runner._map_wfo_to_confidence_metrics(candidate)
+        assert result["fold_variance"] == 1.0
+
+        # Test case: near-zero mean with variance -> high instability
+        candidate = {"mean_oos": 0.0005, "stddev_oos": 0.5, "fold_count": 4}
+        result = runner._map_wfo_to_confidence_metrics(candidate)
+        assert result["fold_variance"] == 1.0
+
+    def test_map_wfo_to_confidence_metrics_empty_candidate(self, mock_pool):
+        """Test mapping with empty or None candidate."""
+        pool, _ = mock_pool
+        runner = IntelRunner(pool)
+
+        assert runner._map_wfo_to_confidence_metrics(None) is None
+        assert runner._map_wfo_to_confidence_metrics({}) is None
+
+    def test_map_wfo_to_confidence_metrics_negative_sharpe(self, mock_pool):
+        """Test mapping with negative sharpe (poor OOS performance)."""
+        pool, _ = mock_pool
+        runner = IntelRunner(pool)
+
+        candidate = {"mean_oos": -0.5, "stddev_oos": 0.3, "fold_count": 3}
+        result = runner._map_wfo_to_confidence_metrics(candidate)
+
+        assert result["oos_sharpe"] == -0.5
+        # CV = |0.3 / -0.5| = 0.6
+        assert result["fold_variance"] == pytest.approx(0.6, rel=0.01)
+
+
+class TestWFOIntegration:
+    """Tests for WFO metrics integration in run_for_version."""
+
+    @pytest.mark.asyncio
+    async def test_wfo_metrics_used_in_context(
+        self,
+        mock_pool,
+        sample_version_row,
+        sample_backtest_summary,
+        sample_wfo_best_candidate,
+        sample_wfo_config,
+    ):
+        """Test that WFO metrics are passed to confidence context."""
+        pool, conn = mock_pool
+
+        version_id = sample_version_row["id"]
+        workspace_id = sample_version_row["workspace_id"]
+
+        with patch.object(
+            IntelRunner,
+            "_fetch_version_data",
+            new_callable=AsyncMock,
+            return_value={
+                **sample_version_row,
+                "config_snapshot": {"symbol": "BTC/USDT"},
+                "regime_awareness": None,
+            },
+        ), patch.object(
+            IntelRunner,
+            "_fetch_backtest_metrics",
+            new_callable=AsyncMock,
+            return_value=sample_backtest_summary,
+        ), patch.object(
+            IntelRunner,
+            "_fetch_wfo_metrics",
+            new_callable=AsyncMock,
+            return_value={
+                "oos_sharpe": 1.25,
+                "oos_return_pct": None,
+                "fold_variance": 0.32,
+                "num_folds": 5,
+                "max_drawdown_pct": None,
+            },
+        ):
+            runner = IntelRunner(pool)
+
+            with patch.object(
+                runner._intel_repo,
+                "get_latest_snapshot",
+                new_callable=AsyncMock,
+                return_value=None,
+            ), patch.object(
+                runner._intel_repo,
+                "insert_snapshot",
+                new_callable=AsyncMock,
+            ) as mock_insert:
+                from app.repositories.strategy_intel import IntelSnapshot
+
+                mock_insert.return_value = IntelSnapshot(
+                    id=uuid4(),
+                    workspace_id=workspace_id,
+                    strategy_version_id=version_id,
+                    as_of_ts=datetime.now(timezone.utc),
+                    computed_at=datetime.now(timezone.utc),
+                    regime="unknown",
+                    confidence_score=0.65,
+                    confidence_components={},
+                    features={"metrics_source": "wfo"},
+                    explain={},
+                    engine_version="intel_runner_v0.2",
+                    inputs_hash="a" * 64,
+                    run_id=None,
+                )
+
+                result = await runner.run_for_version(
+                    version_id=version_id,
+                    as_of_ts=datetime.now(timezone.utc),
+                    workspace_id=workspace_id,
+                )
+
+                assert result is not None
+                # Verify insert was called with WFO-influenced features
+                call_kwargs = mock_insert.call_args[1]
+                assert "features" in call_kwargs
+                assert call_kwargs["features"]["metrics_source"] == "wfo"
 
 
 class TestConvenienceFunction:
