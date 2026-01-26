@@ -170,6 +170,10 @@ class TrialSummary:
     jaccard_score: float
     rerank_score: float
     params: dict
+    # Metadata for transparency
+    used_regime_source: Literal["oos", "is", "none"] = "none"
+    is_relaxed: bool = False
+    is_metadata_only: bool = False
 
 
 @dataclass
@@ -499,6 +503,9 @@ class KBRecommender:
                 jaccard_score=c.jaccard_score,
                 rerank_score=c.rerank_score,
                 params=c.payload.get("params", {}),
+                used_regime_source=c.used_regime_source,
+                is_relaxed=c._relaxed,
+                is_metadata_only=c._metadata_only,
             )
             for c in top_k[:5]  # Only include top 5 for transparency
         ]

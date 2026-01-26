@@ -1085,9 +1085,9 @@ async def recommend(
                 similarity_score=t.similarity_score,
                 jaccard_score=t.jaccard_score,
                 rerank_score=t.rerank_score,
-                used_regime_source="oos",  # TODO: get from candidate
-                is_relaxed=False,  # TODO: get from candidate
-                is_metadata_only=False,  # TODO: get from candidate
+                used_regime_source=t.used_regime_source,
+                is_relaxed=t.is_relaxed,
+                is_metadata_only=t.is_metadata_only,
                 params=t.params,
             )
             for t in result.top_trials
