@@ -312,7 +312,8 @@ class TestSendNotificationsHandler:
         """_send_notifications queries DB instead of using eval_result."""
 
         workspace_id = uuid4()
-        await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        # New signature: telegram_notifier, discord_notifier, repo, workspace_id
+        await _send_notifications(mock_notifier, None, mock_repo, workspace_id)
 
         mock_repo.get_pending_notifications.assert_called_once_with(workspace_id)
 
@@ -327,13 +328,16 @@ class TestSendNotificationsHandler:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        telegram_sent, discord_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=False
         )
-        mock_repo.mark_notified.assert_called_once_with(alert.id, "activation", "tg123")
-        assert sent == 1
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "activation", None)
+        assert telegram_sent == 1
+        assert discord_sent == 0
 
     @pytest.mark.asyncio
     async def test_send_notifications_sends_recoveries(self, mock_notifier, mock_repo):
@@ -346,13 +350,16 @@ class TestSendNotificationsHandler:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        telegram_sent, discord_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=True, is_escalation=False
         )
-        mock_repo.mark_notified.assert_called_once_with(alert.id, "recovery", "tg123")
-        assert sent == 1
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "recovery", None)
+        assert telegram_sent == 1
+        assert discord_sent == 0
 
     @pytest.mark.asyncio
     async def test_send_notifications_sends_escalations(self, mock_notifier, mock_repo):
@@ -370,19 +377,22 @@ class TestSendNotificationsHandler:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        telegram_sent, discord_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=True
         )
-        mock_repo.mark_notified.assert_called_once_with(alert.id, "escalation", "tg123")
-        assert sent == 1
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "escalation", None)
+        assert telegram_sent == 1
+        assert discord_sent == 0
 
     @pytest.mark.asyncio
-    async def test_send_notifications_counts_only_won_races(
+    async def test_send_notifications_counts_only_successful_sends(
         self, mock_notifier, mock_repo
     ):
-        """_send_notifications only counts messages where mark_notified returns True."""
+        """_send_notifications counts messages where send succeeds."""
         alert1 = make_alert()
         alert2 = make_alert()
         mock_repo.get_pending_notifications.return_value = {
@@ -390,19 +400,22 @@ class TestSendNotificationsHandler:
             "recoveries": [],
             "escalations": [],
         }
-        # First call wins, second loses the race
-        mock_repo.mark_notified.side_effect = [True, False]
+        # Both sends succeed
+        mock_repo.mark_notified.return_value = True
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        telegram_sent, discord_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         assert mock_notifier.send_alert.call_count == 2
         assert mock_repo.mark_notified.call_count == 2
-        assert sent == 1  # Only the winner counts
+        assert telegram_sent == 2
+        assert discord_sent == 0
 
     @pytest.mark.asyncio
     async def test_send_notifications_records_failures(self, mock_notifier, mock_repo):
-        """_send_notifications records delivery failures."""
+        """_send_notifications does not mark notified on delivery failure."""
         alert = make_alert()
         mock_repo.get_pending_notifications.return_value = {
             "activations": [alert],
@@ -412,11 +425,14 @@ class TestSendNotificationsHandler:
         mock_notifier.send_alert.return_value = SendResult(ok=False)
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        telegram_sent, discord_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         # No mark_notified since send failed
         mock_repo.mark_notified.assert_not_called()
-        assert sent == 0
+        assert telegram_sent == 0
+        assert discord_sent == 0
 
     @pytest.mark.asyncio
     async def test_send_notifications_handles_exceptions(
@@ -432,12 +448,14 @@ class TestSendNotificationsHandler:
         mock_notifier.send_alert.side_effect = Exception("Network error")
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
-
-        mock_repo.mark_delivery_failed.assert_called_once_with(
-            alert.id, "activation", "Network error"
+        telegram_sent, discord_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
         )
-        assert sent == 0
+
+        # No mark_notified since exception occurred
+        mock_repo.mark_notified.assert_not_called()
+        assert telegram_sent == 0
+        assert discord_sent == 0
 
 
 class TestUpsertEscalationTracking:

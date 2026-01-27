@@ -310,7 +310,39 @@ class Settings(BaseSettings):
     )
     admin_base_url: Optional[str] = Field(
         default=None,
-        description="Base URL for admin UI deep links in Telegram messages",
+        description="Base URL for admin UI deep links in alert messages",
+    )
+
+    # Discord Alerting Configuration
+    discord_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Discord webhook URL for ops alerts (default channel)",
+    )
+    discord_webhook_health: Optional[str] = Field(
+        default=None,
+        description="Discord webhook URL for health alerts (optional, uses default if not set)",
+    )
+    discord_webhook_strategy: Optional[str] = Field(
+        default=None,
+        description="Discord webhook URL for strategy alerts (optional, uses default if not set)",
+    )
+    discord_enabled: bool = Field(
+        default=True,
+        description="Master kill switch for Discord alerts (requires webhook_url)",
+    )
+    discord_timeout_secs: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="Discord API request timeout in seconds",
+    )
+    discord_username: str = Field(
+        default="Trading RAG Alerts",
+        description="Bot display name in Discord",
+    )
+    discord_avatar_url: Optional[str] = Field(
+        default=None,
+        description="Bot avatar URL for Discord messages",
     )
 
     # Pine Repo Polling Configuration

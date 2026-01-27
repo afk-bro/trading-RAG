@@ -2,14 +2,14 @@
 
 This handler evaluates health, coverage, drift, and confidence rules
 for one or all workspaces, upserts triggered alerts, resolves cleared
-conditions, and sends Telegram notifications.
+conditions, and sends notifications via Telegram and Discord.
 
 Hybrid workspace selection:
 - If workspace_id provided: evaluate just that workspace
 - If not provided: iterate all active workspaces
 """
 
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 import structlog
@@ -20,6 +20,7 @@ from app.jobs.types import JobType
 from app.repositories.ops_alerts import OpsAlertsRepository
 from app.services.ops_alerts.evaluator import OpsAlertEvaluator
 from app.services.ops_alerts.telegram import get_telegram_notifier
+from app.services.ops_alerts.discord import get_discord_notifier
 
 logger = structlog.get_logger(__name__)
 
@@ -67,7 +68,8 @@ async def handle_ops_alert_eval(job: Job, ctx: dict[str, Any]) -> dict[str, Any]
     # Initialize components
     repo = OpsAlertsRepository(pool)
     evaluator = OpsAlertEvaluator(repo, pool)
-    notifier = get_telegram_notifier() if not dry_run else None
+    telegram_notifier = get_telegram_notifier() if not dry_run else None
+    discord_notifier = get_discord_notifier() if not dry_run else None
 
     # Get workspaces to evaluate
     if workspace_id:
@@ -84,6 +86,7 @@ async def handle_ops_alert_eval(job: Job, ctx: dict[str, Any]) -> dict[str, Any]
             "total_new": 0,
             "total_resolved": 0,
             "telegram_sent": 0,
+            "discord_sent": 0,
             "errors": [],
             "by_workspace": {},
         }
@@ -97,6 +100,7 @@ async def handle_ops_alert_eval(job: Job, ctx: dict[str, Any]) -> dict[str, Any]
         "total_resolved": 0,
         "total_escalated": 0,
         "telegram_sent": 0,
+        "discord_sent": 0,
         "errors": [],
         "by_workspace": {},
     }
@@ -120,13 +124,15 @@ async def handle_ops_alert_eval(job: Job, ctx: dict[str, Any]) -> dict[str, Any]
                 result["errors"].extend([f"{ws_id}:{e}" for e in eval_result.errors])
 
             # Send pending notifications (idempotent - queries DB state)
-            if notifier and not dry_run:
-                sent = await _send_notifications(
-                    notifier=notifier,
+            if not dry_run:
+                telegram_sent, discord_sent = await _send_notifications(
+                    telegram_notifier=telegram_notifier,
+                    discord_notifier=discord_notifier,
                     repo=repo,
                     workspace_id=ws_id,
                 )
-                result["telegram_sent"] += sent
+                result["telegram_sent"] += telegram_sent
+                result["discord_sent"] += discord_sent
 
             # Summarize per workspace
             result["by_workspace"][str(ws_id)] = {
@@ -153,6 +159,7 @@ async def handle_ops_alert_eval(job: Job, ctx: dict[str, Any]) -> dict[str, Any]
         new=result["total_new"],
         resolved=result["total_resolved"],
         telegram_sent=result["telegram_sent"],
+        discord_sent=result["discord_sent"],
         errors=len(result["errors"]),
     )
 
@@ -174,76 +181,149 @@ async def _get_active_workspaces(pool) -> list[UUID]:
 
 
 async def _send_notifications(
-    notifier,
+    telegram_notifier: Optional[Any],
+    discord_notifier: Optional[Any],
     repo: OpsAlertsRepository,
     workspace_id: UUID,
-) -> int:
+) -> tuple[int, int]:
     """
-    Send pending Telegram notifications for a workspace.
+    Send pending notifications for a workspace via Telegram and Discord.
 
     Uses DB state as source of truth (not eval_result) for idempotency.
     Conditional mark prevents duplicate notifications from concurrent workers.
 
-    Returns count of messages successfully sent and marked.
+    Both notifiers receive the same alerts. DB marking happens once per alert
+    (not per channel) - if either channel succeeds, we mark it notified.
+
+    Returns tuple of (telegram_sent, discord_sent) counts.
     """
-    sent = 0
+    telegram_sent = 0
+    discord_sent = 0
+
+    if not telegram_notifier and not discord_notifier:
+        return (0, 0)
 
     # Query DB for all pending notifications
     pending = await repo.get_pending_notifications(workspace_id)
 
     # Process activations (new alerts)
     for alert in pending["activations"]:
-        try:
-            result = await notifier.send_alert(
-                alert, is_recovery=False, is_escalation=False
-            )
-            if result.ok:
-                # Conditional mark - only count if we won the race
-                if await repo.mark_notified(alert.id, "activation", result.message_id):
-                    sent += 1
-        except Exception as e:
-            await repo.mark_delivery_failed(alert.id, "activation", str(e))
-            logger.warning(
-                "notification_delivery_error",
-                alert_id=str(alert.id),
-                notification_type="activation",
-                error=str(e),
-            )
+        t_ok, d_ok = await _send_to_channels(
+            alert,
+            telegram_notifier,
+            discord_notifier,
+            is_recovery=False,
+            is_escalation=False,
+        )
+        if t_ok:
+            telegram_sent += 1
+        if d_ok:
+            discord_sent += 1
+
+        # Mark notified if at least one channel succeeded
+        if t_ok or d_ok:
+            try:
+                await repo.mark_notified(alert.id, "activation", None)
+            except Exception as e:
+                logger.warning(
+                    "mark_notified_error",
+                    alert_id=str(alert.id),
+                    error=str(e),
+                )
 
     # Process recoveries (resolved alerts)
     for alert in pending["recoveries"]:
-        try:
-            result = await notifier.send_alert(
-                alert, is_recovery=True, is_escalation=False
-            )
-            if result.ok:
-                if await repo.mark_notified(alert.id, "recovery", result.message_id):
-                    sent += 1
-        except Exception as e:
-            await repo.mark_delivery_failed(alert.id, "recovery", str(e))
-            logger.warning(
-                "notification_delivery_error",
-                alert_id=str(alert.id),
-                notification_type="recovery",
-                error=str(e),
-            )
+        t_ok, d_ok = await _send_to_channels(
+            alert,
+            telegram_notifier,
+            discord_notifier,
+            is_recovery=True,
+            is_escalation=False,
+        )
+        if t_ok:
+            telegram_sent += 1
+        if d_ok:
+            discord_sent += 1
+
+        if t_ok or d_ok:
+            try:
+                await repo.mark_notified(alert.id, "recovery", None)
+            except Exception as e:
+                logger.warning(
+                    "mark_notified_error",
+                    alert_id=str(alert.id),
+                    error=str(e),
+                )
 
     # Process escalations (severity bumped on already-activated alerts)
     for alert in pending["escalations"]:
+        t_ok, d_ok = await _send_to_channels(
+            alert,
+            telegram_notifier,
+            discord_notifier,
+            is_recovery=False,
+            is_escalation=True,
+        )
+        if t_ok:
+            telegram_sent += 1
+        if d_ok:
+            discord_sent += 1
+
+        if t_ok or d_ok:
+            try:
+                await repo.mark_notified(alert.id, "escalation", None)
+            except Exception as e:
+                logger.warning(
+                    "mark_notified_error",
+                    alert_id=str(alert.id),
+                    error=str(e),
+                )
+
+    return (telegram_sent, discord_sent)
+
+
+async def _send_to_channels(
+    alert,
+    telegram_notifier: Optional[Any],
+    discord_notifier: Optional[Any],
+    is_recovery: bool,
+    is_escalation: bool,
+) -> tuple[bool, bool]:
+    """
+    Send alert to both Telegram and Discord channels.
+
+    Returns tuple of (telegram_ok, discord_ok) indicating success for each.
+    Failures are logged but don't prevent the other channel from sending.
+    """
+    telegram_ok = False
+    discord_ok = False
+
+    # Send to Telegram
+    if telegram_notifier:
         try:
-            result = await notifier.send_alert(
-                alert, is_recovery=False, is_escalation=True
+            result = await telegram_notifier.send_alert(
+                alert, is_recovery=is_recovery, is_escalation=is_escalation
             )
-            if result.ok:
-                if await repo.mark_notified(alert.id, "escalation", result.message_id):
-                    sent += 1
+            telegram_ok = result.ok
         except Exception as e:
-            await repo.mark_delivery_failed(alert.id, "escalation", str(e))
             logger.warning(
-                "notification_delivery_error",
+                "telegram_delivery_error",
                 alert_id=str(alert.id),
-                notification_type="escalation",
                 error=str(e),
             )
 
-    return sent
+    # Send to Discord
+    if discord_notifier:
+        try:
+            result = await discord_notifier.send_alert(
+                alert, is_recovery=is_recovery, is_escalation=is_escalation
+            )
+            discord_ok = result.ok
+        except Exception as e:
+            logger.warning(
+                "discord_delivery_error",
+                alert_id=str(alert.id),
+                error=str(e),
+            )
+
+    return (telegram_ok, discord_ok)
