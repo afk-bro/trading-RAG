@@ -116,9 +116,12 @@ jobs:
           QDRANT_PORT: 6333
 
   # Full integration tests with DB - runs nightly or on-demand only
+  # Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY secrets to be configured
   integration-tests-full:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: |
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.repository == 'afk-bro/trading-RAG'
     services:
       qdrant:
         image: qdrant/qdrant:latest
@@ -126,14 +129,27 @@ jobs:
           - 6333:6333
 
     steps:
+      - name: Check for required secrets
+        id: secrets-check
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Skipping integration-tests-full: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secrets not configured"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.secrets-check.outputs.skip != 'true'
 
       - name: Set up Python
+        if: steps.secrets-check.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Wait for Qdrant
+        if: steps.secrets-check.outputs.skip != 'true'
         run: |
           for i in {1..30}; do
             if curl -sf http://localhost:6333/readyz > /dev/null 2>&1; then
@@ -147,16 +163,19 @@ jobs:
           exit 1
 
       - name: Install dependencies
+        if: steps.secrets-check.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
       - name: Run all integration tests (including requires_db)
+        if: steps.secrets-check.outputs.skip != 'true'
         run: pytest tests/integration/ -v --tb=short
         env:
-          SUPABASE_URL: https://test.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: test-key-for-ci
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           QDRANT_HOST: localhost
           QDRANT_PORT: 6333
 
@@ -203,9 +222,12 @@ jobs:
           docker images trading-rag:test --format "{{.Size}}"
 
   # Nightly smoke tests (runs on schedule or manual trigger)
+  # Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY secrets to be configured
   smoke-test:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: |
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.repository == 'afk-bro/trading-RAG'
     services:
       qdrant:
         image: qdrant/qdrant:latest
@@ -213,14 +235,27 @@ jobs:
           - 6333:6333
 
     steps:
+      - name: Check for required secrets
+        id: secrets-check
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Skipping smoke-test: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secrets not configured"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.secrets-check.outputs.skip != 'true'
 
       - name: Set up Python
+        if: steps.secrets-check.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Wait for Qdrant
+        if: steps.secrets-check.outputs.skip != 'true'
         run: |
           for i in {1..30}; do
             if curl -sf http://localhost:6333/readyz > /dev/null 2>&1; then
@@ -234,22 +269,46 @@ jobs:
           exit 1
 
       - name: Install dependencies
+        if: steps.secrets-check.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install httpx
 
-      - name: Start service in background
+      - name: Create Qdrant collections
+        if: steps.secrets-check.outputs.skip != 'true'
         run: |
-          # Set minimal env vars for startup
-          export SUPABASE_URL=https://test.supabase.co
-          export SUPABASE_SERVICE_ROLE_KEY=test-key
-          export QDRANT_HOST=localhost
-          export QDRANT_PORT=6333
-          export LOG_LEVEL=WARNING
+          # Create required Qdrant collections for smoke tests
+          # trading_kb_trials collection (768 dimensions for nomic-embed-text)
+          curl -X PUT "http://localhost:6333/collections/trading_kb_trials" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "vectors": {
+                "size": 768,
+                "distance": "Cosine"
+              }
+            }'
+          echo "Created trading_kb_trials collection"
 
-          # Start uvicorn in background
+          # trading_rag collection for main RAG (768 dimensions)
+          curl -X PUT "http://localhost:6333/collections/trading_rag" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "vectors": {
+                "size": 768,
+                "distance": "Cosine"
+              }
+            }'
+          echo "Created trading_rag collection"
+
+          # Verify collections
+          curl -s http://localhost:6333/collections | python -m json.tool
+
+      - name: Start service in background
+        if: steps.secrets-check.outputs.skip != 'true'
+        run: |
+          # Start uvicorn in background with real credentials
           uvicorn app.main:app --host 0.0.0.0 --port 8000 &
           echo $! > /tmp/server.pid
 
@@ -262,8 +321,16 @@ jobs:
             echo "Waiting for server... ($i/30)"
             sleep 2
           done
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QDRANT_HOST: localhost
+          QDRANT_PORT: 6333
+          LOG_LEVEL: WARNING
 
       - name: Run smoke tests
+        if: steps.secrets-check.outputs.skip != 'true'
         run: |
           SMOKE_TEST_URL=http://localhost:8000 pytest tests/smoke/ -v --tb=short -s -m smoke
         env:
@@ -272,14 +339,14 @@ jobs:
 
       - name: Upload smoke test results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.secrets-check.outputs.skip != 'true'
         with:
           name: smoke-test-results
           path: /tmp/smoke-results/
           retention-days: 14
 
       - name: Stop server
-        if: always()
+        if: always() && steps.secrets-check.outputs.skip != 'true'
         run: |
           if [ -f /tmp/server.pid ]; then
             kill $(cat /tmp/server.pid) || true
