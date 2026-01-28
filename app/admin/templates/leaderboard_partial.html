@@ -139,15 +139,15 @@
     </div>
     <div class="pagination-buttons">
         {% if has_prev %}
-        <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}"
-           hx-get="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}"
+        <a href="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}"
+           hx-get="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}"
            hx-target="#leaderboard-content"
            hx-push-url="true"
            class="btn btn-secondary">Previous</a>
         {% endif %}
         {% if has_next %}
-        <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}"
-           hx-get="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}"
+        <a href="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}"
+           hx-get="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}"
            hx-target="#leaderboard-content"
            hx-push-url="true"
            class="btn btn-secondary">Next</a>

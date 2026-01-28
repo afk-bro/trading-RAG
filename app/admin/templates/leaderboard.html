@@ -16,7 +16,7 @@
 
     <!-- Filters (HTMX-powered) -->
     <form method="get" class="filters"
-          hx-get=""
+          hx-get="/admin/backtests/leaderboard"
           hx-target="#leaderboard-content"
           hx-push-url="true"
           hx-trigger="change from:input, change from:select"
