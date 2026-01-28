@@ -763,7 +763,8 @@ async def admin_run_compare(
                 run = dict(row)
                 # Parse JSONB fields
                 parse_jsonb_fields(
-                    run, ["params", "summary", "dataset_meta", "regime_is", "regime_oos"]
+                    run,
+                    ["params", "summary", "dataset_meta", "regime_is", "regime_oos"],
                 )
                 runs.append(run)
 
@@ -793,7 +794,8 @@ async def admin_run_compare(
             {
                 "id": str(run["id"]),
                 "status": run.get("status", "unknown"),
-                "strategy_name": run.get("strategy_name") or str(run["strategy_entity_id"])[:8],
+                "strategy_name": run.get("strategy_name")
+                or str(run["strategy_entity_id"])[:8],
                 "symbol": dataset.get("symbol", "-"),
                 "timeframe": dataset.get("timeframe", "-"),
                 "return_pct": summary.get("return_pct"),
@@ -995,7 +997,13 @@ async def admin_backtest_run_detail(
     run = dict(run)
 
     # Convert UUID fields to strings for template (but keep datetime as-is for strftime)
-    for field in ["id", "workspace_id", "strategy_entity_id", "strategy_spec_id", "tune_id"]:
+    for field in [
+        "id",
+        "workspace_id",
+        "strategy_entity_id",
+        "strategy_spec_id",
+        "tune_id",
+    ]:
         if run.get(field) is not None:
             run[field] = str(run[field])
 

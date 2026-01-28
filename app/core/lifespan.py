@@ -31,7 +31,10 @@ from app.services.market_data.poller import (
     LivePricePoller,
     set_poller as set_price_poller,
 )
-from app.services.discord_bot import start_bot as start_discord_bot, stop_bot as stop_discord_bot
+from app.services.discord_bot import (
+    start_bot as start_discord_bot,
+    stop_bot as stop_discord_bot,
+)
 
 logger = structlog.get_logger(__name__)
 

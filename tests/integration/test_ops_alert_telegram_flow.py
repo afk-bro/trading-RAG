@@ -94,16 +94,16 @@ class TestActivationNotificationFlow:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         # Should send exactly one activation notification
-        assert sent == 1
+        assert tg_sent == 1
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=False
         )
-        mock_repo.mark_notified.assert_called_once_with(
-            alert.id, "activation", "tg_msg_123"
-        )
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "activation", None)
 
     @pytest.mark.asyncio
     async def test_already_notified_alert_not_resent(self, mock_notifier, mock_repo):
@@ -116,10 +116,12 @@ class TestActivationNotificationFlow:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         # Nothing sent
-        assert sent == 0
+        assert tg_sent == 0
         mock_notifier.send_alert.assert_not_called()
 
     @pytest.mark.asyncio
@@ -138,12 +140,14 @@ class TestActivationNotificationFlow:
         mock_repo.mark_notified.side_effect = [True, False]
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
-        # Both alerts were attempted to send
+        # Both alerts were sent successfully
         assert mock_notifier.send_alert.call_count == 2
-        # But only one was counted as sent (won the mark race)
-        assert sent == 1
+        # Both count as sent (send count, not mark race count)
+        assert tg_sent == 2
 
 
 class TestRecoveryNotificationFlow:
@@ -181,15 +185,15 @@ class TestRecoveryNotificationFlow:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
-        assert sent == 1
+        assert tg_sent == 1
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=True, is_escalation=False
         )
-        mock_repo.mark_notified.assert_called_once_with(
-            alert.id, "recovery", "tg_recovery"
-        )
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "recovery", None)
 
     @pytest.mark.asyncio
     async def test_already_recovery_notified_not_resent(self, mock_notifier, mock_repo):
@@ -201,9 +205,11 @@ class TestRecoveryNotificationFlow:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
-        assert sent == 0
+        assert tg_sent == 0
         mock_notifier.send_alert.assert_not_called()
 
 
@@ -246,15 +252,15 @@ class TestEscalationNotificationFlow:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
-        assert sent == 1
+        assert tg_sent == 1
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=True
         )
-        mock_repo.mark_notified.assert_called_once_with(
-            alert.id, "escalation", "tg_escalation"
-        )
+        mock_repo.mark_notified.assert_called_once_with(alert.id, "escalation", None)
 
     @pytest.mark.asyncio
     async def test_escalation_requires_prior_activation(self, mock_notifier, mock_repo):
@@ -275,10 +281,12 @@ class TestEscalationNotificationFlow:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         # Only activation is sent, not escalation
-        assert sent == 1
+        assert tg_sent == 1
         mock_notifier.send_alert.assert_called_once_with(
             alert, is_recovery=False, is_escalation=False
         )
@@ -312,16 +320,18 @@ class TestDeliveryFailureHandling:
         mock_notifier.send_alert.return_value = SendResult(ok=False)
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         # Send failed, not counted
-        assert sent == 0
+        assert tg_sent == 0
         # mark_notified not called on failure
         mock_repo.mark_notified.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_exception_records_delivery_failed(self, mock_notifier, mock_repo):
-        """Exception during send records delivery failure."""
+    async def test_exception_logs_error_and_continues(self, mock_notifier, mock_repo):
+        """Exception during send is logged but processing continues."""
         alert = make_alert()
 
         mock_repo.get_pending_notifications.return_value = {
@@ -332,12 +342,14 @@ class TestDeliveryFailureHandling:
         mock_notifier.send_alert.side_effect = Exception("Connection timeout")
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
-
-        assert sent == 0
-        mock_repo.mark_delivery_failed.assert_called_once_with(
-            alert.id, "activation", "Connection timeout"
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
         )
+
+        # Send failed, not counted
+        assert tg_sent == 0
+        # mark_notified not called on failure (no channel succeeded)
+        mock_repo.mark_notified.assert_not_called()
 
 
 class TestFullNotificationCycle:
@@ -383,10 +395,12 @@ class TestFullNotificationCycle:
         }
 
         workspace_id = uuid4()
-        sent = await _send_notifications(mock_notifier, mock_repo, workspace_id)
+        tg_sent, dc_sent = await _send_notifications(
+            mock_notifier, None, mock_repo, workspace_id
+        )
 
         # All three types sent
-        assert sent == 3
+        assert tg_sent == 3
         assert mock_notifier.send_alert.call_count == 3
         assert mock_repo.mark_notified.call_count == 3
 

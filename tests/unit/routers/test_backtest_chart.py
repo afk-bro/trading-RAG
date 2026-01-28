@@ -568,8 +568,7 @@ class TestDownsampleEquity:
 
         # Create 50 points with distinctive endpoints
         points = [
-            EquityPoint(t=f"2024-01-{i:02d}", equity=10000.0 + i)
-            for i in range(50)
+            EquityPoint(t=f"2024-01-{i:02d}", equity=10000.0 + i) for i in range(50)
         ]
         points[0] = EquityPoint(t="2024-01-00", equity=99999.0)  # Distinctive first
         points[-1] = EquityPoint(t="2024-02-18", equity=88888.0)  # Distinctive last

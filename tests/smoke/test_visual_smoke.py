@@ -37,9 +37,9 @@ class TestDesignSystemLoaded:
         response = client.get("/")
         html = response.text
 
-        assert "class=\"hero\"" in html
-        assert "class=\"features\"" in html
-        assert "class=\"how-it-works\"" in html
+        assert 'class="hero"' in html
+        assert 'class="features"' in html
+        assert 'class="how-it-works"' in html
 
 
 class TestStaticAssets:

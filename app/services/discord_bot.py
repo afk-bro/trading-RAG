@@ -211,7 +211,9 @@ class TradingBot(discord.Client):
         for row in rows:
             emoji = severity_emoji.get(row["severity"], ":white_circle:")
             rule = row["rule_type"].replace("_", " ").title()
-            count = f" (x{row['occurrence_count']})" if row["occurrence_count"] > 1 else ""
+            count = (
+                f" (x{row['occurrence_count']})" if row["occurrence_count"] > 1 else ""
+            )
             ack = " :ballot_box_with_check:" if row["acknowledged_at"] else ""
             lines.append(f"{emoji} **{rule}**{count}{ack}")
 
@@ -254,33 +256,47 @@ class TradingBot(discord.Client):
                     name="Database", value=f":red_circle: {str(e)[:20]}", inline=True
                 )
         else:
-            embed.add_field(name="Database", value=":red_circle: Not connected", inline=True)
+            embed.add_field(
+                name="Database", value=":red_circle: Not connected", inline=True
+            )
 
         # Check Qdrant
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{settings.qdrant_url}/healthz")
                 if resp.status_code == 200:
-                    embed.add_field(name="Qdrant", value=":green_circle: OK", inline=True)
+                    embed.add_field(
+                        name="Qdrant", value=":green_circle: OK", inline=True
+                    )
                 else:
                     embed.add_field(
-                        name="Qdrant", value=f":yellow_circle: {resp.status_code}", inline=True
+                        name="Qdrant",
+                        value=f":yellow_circle: {resp.status_code}",
+                        inline=True,
                     )
         except Exception:
-            embed.add_field(name="Qdrant", value=":red_circle: Unreachable", inline=True)
+            embed.add_field(
+                name="Qdrant", value=":red_circle: Unreachable", inline=True
+            )
 
         # Check Ollama
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{settings.ollama_base_url}/api/tags")
                 if resp.status_code == 200:
-                    embed.add_field(name="Ollama", value=":green_circle: OK", inline=True)
+                    embed.add_field(
+                        name="Ollama", value=":green_circle: OK", inline=True
+                    )
                 else:
                     embed.add_field(
-                        name="Ollama", value=f":yellow_circle: {resp.status_code}", inline=True
+                        name="Ollama",
+                        value=f":yellow_circle: {resp.status_code}",
+                        inline=True,
                     )
         except Exception:
-            embed.add_field(name="Ollama", value=":red_circle: Unreachable", inline=True)
+            embed.add_field(
+                name="Ollama", value=":red_circle: Unreachable", inline=True
+            )
 
         # Set color based on status
         field_values = [f.value for f in embed.fields]
@@ -338,7 +354,9 @@ class TradingBot(discord.Client):
                 "indicator": ":bar_chart:",
                 "library": ":books:",
             }.get(script_type, ":page_facing_up:")
-            status_emoji = ":green_circle:" if row["status"] == "indexed" else ":white_circle:"
+            status_emoji = (
+                ":green_circle:" if row["status"] == "indexed" else ":white_circle:"
+            )
             lines.append(f"{type_emoji} {status_emoji} **{row['title'][:40]}**")
 
         embed = discord.Embed(
@@ -389,6 +407,7 @@ class TradingBot(discord.Client):
         """Get database pool from ingest router."""
         try:
             from app.routers.ingest import _db_pool
+
             return _db_pool
         except Exception:
             return None
