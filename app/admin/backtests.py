@@ -539,25 +539,28 @@ async def admin_leaderboard(
 
         enriched_entries.append(e)
 
-    return templates.TemplateResponse(
-        "leaderboard.html",
-        {
-            "request": request,
-            "entries": enriched_entries,
-            "total": total,
-            "workspace_id": str(workspace_id),
-            "valid_only": valid_only,
-            "include_canceled": include_canceled,
-            "objective_type_filter": objective_type or "",
-            "oos_enabled_filter": oos_enabled or "",
-            "limit": limit,
-            "offset": offset,
-            "has_prev": offset > 0,
-            "has_next": offset + limit < total,
-            "prev_offset": max(0, offset - limit),
-            "next_offset": offset + limit,
-        },
-    )
+    context = {
+        "request": request,
+        "entries": enriched_entries,
+        "total": total,
+        "workspace_id": str(workspace_id),
+        "valid_only": valid_only,
+        "include_canceled": include_canceled,
+        "objective_type_filter": objective_type or "",
+        "oos_enabled_filter": oos_enabled or "",
+        "limit": limit,
+        "offset": offset,
+        "has_prev": offset > 0,
+        "has_next": offset + limit < total,
+        "prev_offset": max(0, offset - limit),
+        "next_offset": offset + limit,
+    }
+
+    # HTMX partial response (filter/pagination without full page reload)
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("leaderboard_partial.html", context)
+
+    return templates.TemplateResponse("leaderboard.html", context)
 
 
 @router.get("/backtests/compare")

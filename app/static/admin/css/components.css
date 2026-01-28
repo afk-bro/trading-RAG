@@ -545,3 +545,21 @@ tr:hover {
     25% { transform: translateX(-4px); }
     75% { transform: translateX(4px); }
 }
+
+/* =============================================================================
+   HTMX Loading States
+   ============================================================================= */
+
+.htmx-indicator {
+    display: none;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+}
+
+.htmx-request .htmx-indicator {
+    display: inline;
+}
+
+.htmx-settling {
+    opacity: 1;
+}

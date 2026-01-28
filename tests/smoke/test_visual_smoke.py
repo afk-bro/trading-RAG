@@ -92,3 +92,24 @@ class TestKeyPagesStructure:
         """API docs page loads."""
         response = client.get("/docs")
         assert response.status_code == 200
+
+
+class TestHTMXSupport:
+    """Verify HTMX is properly integrated."""
+
+    def test_layout_template_includes_htmx(self):
+        """Layout template includes HTMX script tag."""
+        import os
+
+        layout_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "app",
+            "admin",
+            "templates",
+            "layout.html",
+        )
+        with open(layout_path) as f:
+            html = f.read()
+        assert "htmx.org" in html

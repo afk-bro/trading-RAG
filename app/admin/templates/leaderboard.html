@@ -14,18 +14,23 @@
         </div>
     </div>
 
-    <!-- Filters -->
-    <form method="get" class="filters">
+    <!-- Filters (HTMX-powered) -->
+    <form method="get" class="filters"
+          hx-get=""
+          hx-target="#leaderboard-content"
+          hx-push-url="true"
+          hx-trigger="change from:input, change from:select"
+          hx-indicator="#loading-indicator">
         <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
         <label class="filter-checkbox" title="Only show tunes with valid results (default)">
-            <input type="checkbox" name="valid_only" value="true" {% if valid_only %}checked{% endif %} onchange="this.form.submit()">
+            <input type="checkbox" name="valid_only" value="true" {% if valid_only %}checked{% endif %}>
             Valid only
         </label>
         <label class="filter-checkbox" title="Include canceled tunes">
-            <input type="checkbox" name="include_canceled" value="true" {% if include_canceled %}checked{% endif %} onchange="this.form.submit()">
+            <input type="checkbox" name="include_canceled" value="true" {% if include_canceled %}checked{% endif %}>
             Include canceled
         </label>
-        <select name="objective_type" onchange="this.form.submit()">
+        <select name="objective_type">
             <option value="">All Objectives</option>
             <option value="sharpe" {% if objective_type_filter == 'sharpe' %}selected{% endif %}>sharpe</option>
             <option value="sharpe_dd_penalty" {% if objective_type_filter == 'sharpe_dd_penalty' %}selected{% endif %}>sharpe_dd_penalty</option>
@@ -33,165 +38,18 @@
             <option value="return_dd_penalty" {% if objective_type_filter == 'return_dd_penalty' %}selected{% endif %}>return_dd_penalty</option>
             <option value="calmar" {% if objective_type_filter == 'calmar' %}selected{% endif %}>calmar</option>
         </select>
-        <select name="oos_enabled" onchange="this.form.submit()">
+        <select name="oos_enabled">
             <option value="">All OOS</option>
             <option value="true" {% if oos_enabled_filter == 'true' %}selected{% endif %}>With OOS</option>
             <option value="false" {% if oos_enabled_filter == 'false' %}selected{% endif %}>IS only</option>
         </select>
+        <span id="loading-indicator" class="htmx-indicator">Loading...</span>
     </form>
 
-    {% if error %}
-    <div class="empty-state">
-        <h3>Error</h3>
-        <p>{{ error }}</p>
+    <!-- HTMX target for table content -->
+    <div id="leaderboard-content">
+        {% include "leaderboard_partial.html" %}
     </div>
-    {% elif entries %}
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th class="select-col" title="Select for comparison">
-                        Compare
-                    </th>
-                    <th class="rank-col">#</th>
-                    <th class="sparkline-col">Equity</th>
-                    <th>Strategy</th>
-                    <th>Objective Score</th>
-                    <th>Return %</th>
-                    <th>Sharpe</th>
-                    <th>Max DD %</th>
-                    <th>Trades</th>
-                    <th>Overfit Gap</th>
-                    <th>Objective</th>
-                    <th>OOS</th>
-                    <th>Created</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for entry in entries %}
-                <tr class="clickable-row" data-href="/admin/backtests/tunes/{{ entry.tune_id }}" data-tune-id="{{ entry.tune_id }}">
-                    <td class="select-col" onclick="event.stopPropagation()">
-                        {% if entry.best_run_id %}
-                        <input type="checkbox" class="js-compare-toggle" data-id="{{ entry.best_run_id }}" title="Add to compare">
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td class="rank-col">
-                        <span class="rank-badge {% if loop.index <= 3 %}rank-top{% endif %}">{{ loop.index + offset }}</span>
-                    </td>
-                    <td class="sparkline-col">
-                        {% if entry.best_run_id %}
-                        <div class="sparkline" data-run-id="{{ entry.best_run_id }}"></div>
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.strategy_name %}
-                            <a href="/admin/kb/entities/{{ entry.strategy_entity_id }}" onclick="event.stopPropagation()">{{ entry.strategy_name }}</a>
-                        {% else %}
-                            <span class="text-muted">{{ entry.strategy_entity_id[:8] }}...</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.best_objective_score is not none %}
-                            <strong class="score-value">{{ "%.4f"|format(entry.best_objective_score) }}</strong>
-                        {% elif entry.score_oos is not none %}
-                            <strong class="score-value">{{ "%.4f"|format(entry.score_oos) }}</strong>
-                        {% elif entry.best_score is not none %}
-                            <strong class="score-value">{{ "%.4f"|format(entry.best_score) }}</strong>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.best_metrics_oos and entry.best_metrics_oos.return_pct is not none %}
-                            <span class="{{ 'positive' if entry.best_metrics_oos.return_pct > 0 else 'negative' }}">
-                                {{ "%.2f"|format(entry.best_metrics_oos.return_pct) }}%
-                            </span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.best_metrics_oos and entry.best_metrics_oos.sharpe is not none %}
-                            <span class="{{ 'positive' if entry.best_metrics_oos.sharpe > 0 else 'negative' }}">
-                                {{ "%.2f"|format(entry.best_metrics_oos.sharpe) }}
-                            </span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.best_metrics_oos and entry.best_metrics_oos.max_drawdown_pct is not none %}
-                            <span class="negative">{{ "%.1f"|format(entry.best_metrics_oos.max_drawdown_pct) }}%</span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.best_metrics_oos and entry.best_metrics_oos.trades is not none %}
-                            {{ entry.best_metrics_oos.trades }}
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.overfit_gap is not none %}
-                            <span class="overfit-gap {% if entry.overfit_gap > 0.3 %}overfit-warning{% elif entry.overfit_gap > 0.5 %}overfit-danger{% endif %}"
-                                  title="IS - OOS score difference">
-                                {{ "%.3f"|format(entry.overfit_gap) }}
-                            </span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.objective_type and entry.objective_type != 'sharpe' %}
-                        <span class="objective-badge" title="{{ entry.objective_type }}">{{ entry.objective_type }}</span>
-                        {% else %}
-                        <span class="text-muted">sharpe</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if entry.oos_ratio %}
-                        <span class="oos-badge">{{ "%.0f"|format(entry.oos_ratio * 100) }}%</span>
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="relative-time" data-timestamp="{{ entry.created_at.isoformat() }}" title="{{ entry.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
-                            {{ entry.created_at.strftime('%Y-%m-%d') }}
-                        </span>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Pagination -->
-    <div class="pagination">
-        <div class="pagination-info">
-            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
-        </div>
-        <div class="pagination-buttons">
-            {% if has_prev %}
-            <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
-            {% endif %}
-            {% if has_next %}
-            <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
-            {% endif %}
-        </div>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <h3>No entries on leaderboard</h3>
-        <p>{% if valid_only %}No tunes with valid results match the current filters. Try unchecking "Valid only" or changing filters.{% else %}Complete some tuning sessions to see results here.{% endif %}</p>
-    </div>
-    {% endif %}
 </div>
 
 <style>
@@ -273,21 +131,42 @@
         font-size: 11px;
         font-weight: 500;
     }
+
+    /* HTMX loading indicator */
+    .htmx-indicator {
+        display: none;
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+    .htmx-request .htmx-indicator {
+        display: inline;
+    }
+    .htmx-request #leaderboard-content {
+        opacity: 0.5;
+        pointer-events: none;
+        transition: opacity 0.15s;
+    }
 </style>
 
 <script>
-// Clickable rows with Ctrl/Cmd+click for new tab
-document.querySelectorAll('.clickable-row').forEach(row => {
-    row.addEventListener('click', (e) => {
-        if (e.target.closest('a, button, input')) return;
-        const href = row.dataset.href;
-        if (e.ctrlKey || e.metaKey) {
-            window.open(href, '_blank');
-        } else {
-            window.location.href = href;
-        }
+// Initialize clickable rows with Ctrl/Cmd+click for new tab
+function initClickableRows() {
+    document.querySelectorAll('.clickable-row').forEach(row => {
+        // Remove existing listener to avoid duplicates
+        row.removeEventListener('click', handleRowClick);
+        row.addEventListener('click', handleRowClick);
     });
-});
+}
+
+function handleRowClick(e) {
+    if (e.target.closest('a, button, input')) return;
+    const href = this.dataset.href;
+    if (e.ctrlKey || e.metaKey) {
+        window.open(href, '_blank');
+    } else {
+        window.location.href = href;
+    }
+}
 
 // Highlight selected rows based on compare tray state
 function highlightSelectedRows() {
@@ -300,10 +179,6 @@ function highlightSelectedRows() {
         }
     });
 }
-
-// Listen for compare changes
-window.addEventListener('compare:changed', highlightSelectedRows);
-document.addEventListener('DOMContentLoaded', highlightSelectedRows);
 
 // Relative time formatting
 function formatRelativeTime(date) {
@@ -331,8 +206,28 @@ function updateRelativeTimes() {
     });
 }
 
-updateRelativeTimes();
-setInterval(updateRelativeTimes, 60000); // Update every minute
+// Initialize everything
+function initLeaderboard() {
+    initClickableRows();
+    highlightSelectedRows();
+    updateRelativeTimes();
+}
+
+// Listen for compare changes
+window.addEventListener('compare:changed', highlightSelectedRows);
+
+// Initial setup
+document.addEventListener('DOMContentLoaded', initLeaderboard);
+
+// Re-initialize after HTMX swaps
+document.body.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id === 'leaderboard-content') {
+        initLeaderboard();
+    }
+});
+
+// Update relative times periodically
+setInterval(updateRelativeTimes, 60000);
 </script>
 {% endblock %}
 
