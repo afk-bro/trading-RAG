@@ -751,7 +751,7 @@ async def admin_run_compare(
                 """
                 SELECT
                     r.id, r.status, r.created_at,
-                    r.strategy_entity_id, r.tune_id,
+                    r.strategy_entity_id,
                     r.params, r.summary, r.dataset_meta,
                     r.regime_is, r.regime_oos,
                     e.name as strategy_name
