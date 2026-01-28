@@ -76,6 +76,10 @@ class TradingBot(discord.Client):
         ):
             await self._cmd_pine(interaction, search, limit)
 
+        @self.tree.command(name="help", description="Show available commands")
+        async def help_cmd(interaction: discord.Interaction):
+            await self._cmd_help(interaction)
+
     async def setup_hook(self):
         """Sync commands on startup."""
         if self.guild_id:
@@ -342,6 +346,43 @@ class TradingBot(discord.Client):
             description="\n".join(lines[:15]),
             color=0x5865F2,
         )
+        await interaction.response.send_message(embed=embed)
+
+    async def _cmd_help(self, interaction: discord.Interaction):
+        """Handle /help command."""
+        embed = discord.Embed(
+            title="Trading RAG Bot Commands",
+            description="Available slash commands:",
+            color=0x5865F2,
+        )
+
+        embed.add_field(
+            name="/health",
+            value="Check system health (database, Qdrant, Ollama)",
+            inline=False,
+        )
+        embed.add_field(
+            name="/strategies",
+            value="List trading strategies\n`status`: filter by active/draft/paused/archived\n`limit`: max results (default 10)",
+            inline=False,
+        )
+        embed.add_field(
+            name="/alerts",
+            value="Show operational alerts\n`include_resolved`: show resolved alerts too",
+            inline=False,
+        )
+        embed.add_field(
+            name="/pine",
+            value="List Pine scripts in knowledge base\n`search`: filter by name\n`limit`: max results (default 10)",
+            inline=False,
+        )
+        embed.add_field(
+            name="/help",
+            value="Show this help message",
+            inline=False,
+        )
+
+        embed.set_footer(text="Trading RAG Pipeline")
         await interaction.response.send_message(embed=embed)
 
     def _get_pool(self):
