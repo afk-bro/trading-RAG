@@ -345,6 +345,16 @@ class Settings(BaseSettings):
         description="Bot avatar URL for Discord messages",
     )
 
+    # Discord Bot Configuration (slash commands via gateway)
+    discord_bot_token: Optional[str] = Field(
+        default=None,
+        description="Discord Bot token for gateway connection (starts bot if set)",
+    )
+    discord_guild_id: Optional[str] = Field(
+        default=None,
+        description="Guild ID for instant command sync (optional, global if not set)",
+    )
+
     # Pine Repo Polling Configuration
     pine_repo_poll_enabled: bool = Field(
         default=False,

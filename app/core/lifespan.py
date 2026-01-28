@@ -31,6 +31,7 @@ from app.services.market_data.poller import (
     LivePricePoller,
     set_poller as set_price_poller,
 )
+from app.services.discord_bot import start_bot as start_discord_bot, stop_bot as stop_discord_bot
 
 logger = structlog.get_logger(__name__)
 
@@ -352,10 +353,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     elif not settings.live_price_poll_enabled:
         logger.info("Live price polling disabled (LIVE_PRICE_POLL_ENABLED=false)")
 
+    # Start Discord bot (if token configured)
+    await start_discord_bot()
+
     yield
 
     # Cleanup on shutdown
     logger.info("Shutting down Trading RAG Service")
+
+    # Stop Discord bot
+    await stop_discord_bot()
 
     # Stop pollers first (before DB pool closes)
     if _price_poller:
