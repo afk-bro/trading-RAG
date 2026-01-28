@@ -20,7 +20,6 @@ from app.admin.utils import (
     json_serializable,
     parse_bool_param,
     parse_jsonb_fields,
-    prepare_for_template,
     require_db_pool,
 )
 from app.deps.security import require_admin_token

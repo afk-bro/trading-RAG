@@ -11,7 +11,6 @@ Usage:
 
 import asyncio
 from typing import Optional
-from uuid import UUID
 
 import discord
 from discord import app_commands
@@ -381,7 +380,11 @@ class TradingBot(discord.Client):
         )
         embed.add_field(
             name="/strategies",
-            value="List trading strategies\n`status`: filter by active/draft/paused/archived\n`limit`: max results (default 10)",
+            value=(
+                "List trading strategies\n"
+                "`status`: filter by active/draft/paused/archived\n"
+                "`limit`: max results (default 10)"
+            ),
             inline=False,
         )
         embed.add_field(
@@ -391,7 +394,11 @@ class TradingBot(discord.Client):
         )
         embed.add_field(
             name="/pine",
-            value="List Pine scripts in knowledge base\n`search`: filter by name\n`limit`: max results (default 10)",
+            value=(
+                "List Pine scripts in knowledge base\n"
+                "`search`: filter by name\n"
+                "`limit`: max results (default 10)"
+            ),
             inline=False,
         )
         embed.add_field(
@@ -438,7 +445,6 @@ async def start_bot():
 
 async def _run_bot(token: str):
     """Run the bot (handles reconnection)."""
-    global _bot
     try:
         await _bot.start(token)
     except Exception as e:
