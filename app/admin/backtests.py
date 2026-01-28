@@ -448,25 +448,28 @@ async def admin_tunes_list(
         tune["counts"] = counts
         enriched_tunes.append(tune)
 
-    return templates.TemplateResponse(
-        "tunes_list.html",
-        {
-            "request": request,
-            "tunes": enriched_tunes,
-            "total": total,
-            "workspace_id": str(workspace_id),
-            "status_filter": status or "",
-            "valid_only": valid_only,
-            "objective_type_filter": objective_type or "",
-            "oos_enabled_filter": oos_enabled or "",
-            "limit": limit,
-            "offset": offset,
-            "has_prev": offset > 0,
-            "has_next": offset + limit < total,
-            "prev_offset": max(0, offset - limit),
-            "next_offset": offset + limit,
-        },
-    )
+    context = {
+        "request": request,
+        "tunes": enriched_tunes,
+        "total": total,
+        "workspace_id": str(workspace_id),
+        "status_filter": status or "",
+        "valid_only": valid_only,
+        "objective_type_filter": objective_type or "",
+        "oos_enabled_filter": oos_enabled or "",
+        "limit": limit,
+        "offset": offset,
+        "has_prev": offset > 0,
+        "has_next": offset + limit < total,
+        "prev_offset": max(0, offset - limit),
+        "next_offset": offset + limit,
+    }
+
+    # HTMX partial response
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("tunes_list_partial.html", context)
+
+    return templates.TemplateResponse("tunes_list.html", context)
 
 
 @router.get("/backtests/leaderboard")
@@ -1086,22 +1089,25 @@ async def admin_wfo_list(
         )
         enriched_wfos.append(wfo)
 
-    return templates.TemplateResponse(
-        "wfo_list.html",
-        {
-            "request": request,
-            "wfos": enriched_wfos,
-            "total": total,
-            "workspace_id": str(workspace_id),
-            "status_filter": status_filter or "",
-            "limit": limit,
-            "offset": offset,
-            "has_prev": offset > 0,
-            "has_next": offset + limit < total,
-            "prev_offset": max(0, offset - limit),
-            "next_offset": offset + limit,
-        },
-    )
+    context = {
+        "request": request,
+        "wfos": enriched_wfos,
+        "total": total,
+        "workspace_id": str(workspace_id),
+        "status_filter": status_filter or "",
+        "limit": limit,
+        "offset": offset,
+        "has_prev": offset > 0,
+        "has_next": offset + limit < total,
+        "prev_offset": max(0, offset - limit),
+        "next_offset": offset + limit,
+    }
+
+    # HTMX partial response
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("wfo_list_partial.html", context)
+
+    return templates.TemplateResponse("wfo_list.html", context)
 
 
 @router.get("/backtests/wfo/{wfo_id}", response_class=HTMLResponse)

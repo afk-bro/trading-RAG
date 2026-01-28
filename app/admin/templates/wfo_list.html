@@ -3,19 +3,23 @@
 {% block title %}WFO Runs - KB Admin{% endblock %}
 
 {% block content %}
-<div class="detail-header">
-    <h1>Walk-Forward Optimization Runs</h1>
-    <div class="detail-meta">
-        <span>Workspace: {{ workspace_id[:8] }}...</span>
-        <span>Total: {{ total }}</span>
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Walk-Forward Optimization Runs</h2>
+        <div class="header-right">
+            <span class="pagination-info">{{ total }} total</span>
+        </div>
     </div>
-</div>
 
-<!-- Filters -->
-<div class="filters">
-    <form method="get" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+    <!-- Filters (HTMX-powered) -->
+    <form method="get" class="filters"
+          hx-get="/admin/backtests/wfo"
+          hx-target="#wfo-content"
+          hx-push-url="true"
+          hx-trigger="change from:select"
+          hx-indicator="#loading-indicator">
         <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
-        <select name="status" onchange="this.form.submit()">
+        <select name="status">
             <option value="">All Status</option>
             <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
             <option value="running" {% if status_filter == 'running' %}selected{% endif %}>Running</option>
@@ -23,109 +27,119 @@
             <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
             <option value="canceled" {% if status_filter == 'canceled' %}selected{% endif %}>Canceled</option>
         </select>
-        <a href="/admin/backtests/wfo?workspace_id={{ workspace_id }}" class="btn btn-secondary">Clear</a>
+        <select name="limit" class="page-size-select" title="Items per page">
+            <option value="20" {% if limit == 20 %}selected{% endif %}>20 / page</option>
+            <option value="50" {% if limit == 50 %}selected{% endif %}>50 / page</option>
+            <option value="100" {% if limit == 100 %}selected{% endif %}>100 / page</option>
+        </select>
+        <span id="loading-indicator" class="htmx-indicator">Loading...</span>
+        {% if status_filter %}
+        <a href="/admin/backtests/wfo?workspace_id={{ workspace_id }}" class="btn btn-secondary btn-sm">Clear</a>
+        {% endif %}
     </form>
-</div>
 
-{% if error %}
-<div class="card">
-    <div class="empty-state">
-        <h3>Error</h3>
-        <p>{{ error }}</p>
+    <!-- HTMX target for table content -->
+    <div id="wfo-content">
+        {% include "wfo_list_partial.html" %}
     </div>
 </div>
-{% elif wfos|length == 0 %}
-<div class="card">
-    <div class="empty-state">
-        <h3>No WFO Runs</h3>
-        <p>No Walk-Forward Optimization runs found for this workspace.</p>
-    </div>
-</div>
-{% else %}
-<div class="card">
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Created</th>
-                <th>Strategy</th>
-                <th>Status</th>
-                <th>Folds</th>
-                <th>Config</th>
-                <th>Best Params</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for wfo in wfos %}
-            <tr>
-                <td>
-                    <a href="/admin/backtests/wfo/{{ wfo.id }}" title="{{ wfo.id }}">
-                        {{ wfo.id[:8] }}...
-                    </a>
-                </td>
-                <td>{{ wfo.created_at.strftime('%Y-%m-%d %H:%M') if wfo.created_at else '-' }}</td>
-                <td>
-                    <span title="{{ wfo.strategy_entity_id }}">
-                        {{ wfo.strategy_name or wfo.strategy_entity_id[:8] + '...' }}
-                    </span>
-                </td>
-                <td>
-                    <span class="badge badge-{{ wfo.status }}">{{ wfo.status }}</span>
-                </td>
-                <td>
-                    {% set completed = wfo.folds_completed or 0 %}
-                    {% set failed = wfo.folds_failed or 0 %}
-                    {% set total = wfo.n_folds or 0 %}
-                    <span title="Completed: {{ completed }}, Failed: {{ failed }}, Total: {{ total }}">
-                        {{ completed }}/{{ total }}
-                        {% if failed > 0 %}
-                        <span class="badge badge-failed" style="margin-left: 4px;">{{ failed }} failed</span>
-                        {% endif %}
-                    </span>
-                </td>
-                <td>
-                    {% if wfo.wfo_config %}
-                    <span title="Train: {{ wfo.wfo_config.train_days }}d, Test: {{ wfo.wfo_config.test_days }}d, Step: {{ wfo.wfo_config.step_days }}d">
-                        {{ wfo.wfo_config.train_days }}/{{ wfo.wfo_config.test_days }}/{{ wfo.wfo_config.step_days }}d
-                    </span>
-                    {% else %}
-                    -
-                    {% endif %}
-                </td>
-                <td class="truncate" style="max-width: 200px;">
-                    {% if wfo.best_params %}
-                    {{ wfo.best_params | tojson }}
-                    {% else %}
-                    -
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <!-- Pagination -->
-    <div class="pagination">
-        <div class="pagination-info">
-            Showing {{ offset + 1 }}-{{ [offset + limit, total] | min }} of {{ total }}
-        </div>
-        <div class="pagination-buttons">
-            {% if has_prev %}
-            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter }}&offset={{ prev_offset }}&limit={{ limit }}" class="btn btn-secondary">Prev</a>
-            {% endif %}
-            {% if has_next %}
-            <a href="?workspace_id={{ workspace_id }}&status={{ status_filter }}&offset={{ next_offset }}&limit={{ limit }}" class="btn btn-secondary">Next</a>
-            {% endif %}
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <style>
+    .header-right { display: flex; align-items: center; gap: 16px; }
+
+    .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .page-size-select { min-width: 90px; }
+    .btn-sm { font-size: 12px; padding: 4px 10px; }
+
+    /* Pagination styles */
+    .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .pagination-info { color: var(--text-muted); font-size: 13px; }
+    .pagination-controls { display: flex; align-items: center; gap: 8px; }
+    .page-numbers { display: flex; gap: 4px; }
+    .page-num { min-width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; text-decoration: none; color: var(--text); background: var(--bg); border: 1px solid var(--border); cursor: pointer; }
+    .page-num:hover { background: var(--bg-secondary); text-decoration: none; }
+    .page-num.active { background: var(--link); color: white; border-color: var(--link); }
+    .page-num.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+    .page-ellipsis { color: var(--text-muted); padding: 0 4px; }
+
+    .table-container { overflow-x: auto; }
+
+    .clickable-row { cursor: pointer; transition: background 0.15s; }
+    .clickable-row:hover { background: rgba(56, 139, 253, 0.15); }
+
     .badge-pending { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
     .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
     .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
     .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
     .badge-canceled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+
+    /* HTMX loading states */
+    .htmx-indicator { display: none; color: var(--text-muted); font-size: 12px; }
+    .htmx-request .htmx-indicator { display: inline; }
+    .htmx-request #wfo-content { opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
 </style>
+
+<script>
+// Clickable rows with Ctrl/Cmd+click for new tab
+function initClickableRows() {
+    document.querySelectorAll('.clickable-row').forEach(row => {
+        row.removeEventListener('click', handleRowClick);
+        row.addEventListener('click', handleRowClick);
+    });
+}
+
+function handleRowClick(e) {
+    if (e.target.closest('a, button')) return;
+    const href = this.dataset.href;
+    if (e.ctrlKey || e.metaKey) {
+        window.open(href, '_blank');
+    } else {
+        window.location.href = href;
+    }
+}
+
+// Relative time formatting
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+}
+
+function updateRelativeTimes() {
+    document.querySelectorAll('.relative-time').forEach(el => {
+        const timestamp = el.dataset.timestamp;
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = formatRelativeTime(date);
+        }
+    });
+}
+
+function initWfoList() {
+    initClickableRows();
+    updateRelativeTimes();
+}
+
+// Initial setup
+document.addEventListener('DOMContentLoaded', initWfoList);
+
+// Re-initialize after HTMX swaps
+document.body.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id === 'wfo-content') {
+        initWfoList();
+    }
+});
+
+// Update relative times periodically
+setInterval(updateRelativeTimes, 60000);
+</script>
 {% endblock %}

@@ -1,0 +1,197 @@
+{# Partial template for HTMX - table and pagination #}
+
+{% if error %}
+<div class="empty-state">
+    <h3>Error</h3>
+    <p>{{ error }}</p>
+</div>
+{% elif tunes %}
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Validity</th>
+                <th>Strategy</th>
+                <th>Objective</th>
+                <th>OOS</th>
+                <th>Gates</th>
+                <th>Trials</th>
+                <th>Best Score</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tune in tunes %}
+            <tr class="clickable-row" data-href="/admin/backtests/tunes/{{ tune.id }}">
+                <td>
+                    <span class="relative-time" data-timestamp="{{ tune.created_at.isoformat() }}" title="{{ tune.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                        {{ tune.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge badge-{{ tune.status }}">{{ tune.status }}</span>
+                </td>
+                <td>
+                    {% if tune.status == 'canceled' %}
+                    <span class="validity-badge validity-canceled" title="Tune was canceled">Canceled</span>
+                    {% elif tune.status in ['completed', 'failed'] %}
+                        {% if tune.best_run_id %}
+                        <span class="validity-badge validity-valid" title="At least one trial passed gates">Valid</span>
+                        {% else %}
+                        <span class="validity-badge validity-invalid" title="No trials passed gates">Invalid</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tune.strategy_name %}
+                        <a href="/admin/kb/entities/{{ tune.strategy_entity_id }}" onclick="event.stopPropagation()">{{ tune.strategy_name }}</a>
+                    {% else %}
+                        <span class="text-muted">{{ tune.strategy_entity_id[:8] }}...</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tune.objective_type and tune.objective_type != 'sharpe' %}
+                    <span class="objective-badge" title="{{ tune.objective_type }}">{{ tune.objective_type }}</span>
+                    {% else %}
+                    <span class="text-muted">sharpe</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tune.oos_ratio %}
+                    <span class="oos-badge">{{ "%.0f"|format(tune.oos_ratio * 100) }}%</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tune.gates %}
+                    <span class="gates-compact" title="DD ≤ {{ tune.gates.max_drawdown_pct }}%, Trades ≥ {{ tune.gates.min_trades }}, Eval: {{ tune.gates.evaluated_on }}">
+                        DD≤{{ tune.gates.max_drawdown_pct }} T≥{{ tune.gates.min_trades }}
+                    </span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tune.counts %}
+                    <span class="trials-breakdown">
+                        <span class="trial-stat valid" title="Valid (completed)">{{ tune.counts.completed }}</span>
+                        {% if tune.counts.skipped > 0 %}
+                        <span class="trial-stat skipped" title="Skipped">{{ tune.counts.skipped }}</span>
+                        {% endif %}
+                        {% if tune.counts.failed > 0 %}
+                        <span class="trial-stat failed" title="Failed">{{ tune.counts.failed }}</span>
+                        {% endif %}
+                        {% if tune.counts.running > 0 %}
+                        <span class="trial-stat running" title="Running">{{ tune.counts.running }}</span>
+                        {% endif %}
+                        {% if tune.counts.queued > 0 %}
+                        <span class="trial-stat queued" title="Queued">{{ tune.counts.queued }}</span>
+                        {% endif %}
+                        <span class="trial-total">/ {{ tune.n_trials }}</span>
+                    </span>
+                    {% else %}
+                        {{ tune.trials_completed }} / {{ tune.n_trials }}
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tune.best_score is not none %}
+                        <strong>{{ "%.4f"|format(tune.best_score) }}</strong>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="row-actions">
+                        <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('{{ tune.id }}')" title="Copy tune ID">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                        </button>
+                        <a href="/admin/backtests/tunes/{{ tune.id }}" class="btn btn-secondary" onclick="event.stopPropagation()">View</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% set current_page = (offset // limit) + 1 %}
+{% set total_pages = ((total - 1) // limit) + 1 if total > 0 else 1 %}
+{# Build base URL with only non-empty params #}
+{% set base_url = "/admin/backtests/tunes?workspace_id=" ~ workspace_id ~ "&limit=" ~ limit %}
+{% if status_filter %}{% set base_url = base_url ~ "&status=" ~ status_filter %}{% endif %}
+{% if valid_only %}{% set base_url = base_url ~ "&valid_only=true" %}{% endif %}
+{% if objective_type_filter %}{% set base_url = base_url ~ "&objective_type=" ~ objective_type_filter %}{% endif %}
+{% if oos_enabled_filter %}{% set base_url = base_url ~ "&oos_enabled=" ~ oos_enabled_filter %}{% endif %}
+<div class="pagination">
+    <div class="pagination-info">
+        Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+    </div>
+    <div class="pagination-controls">
+        <a href="{{ base_url }}&offset={{ prev_offset }}"
+           hx-get="{{ base_url }}&offset={{ prev_offset }}"
+           hx-target="#tunes-content"
+           hx-push-url="true"
+           class="page-num {% if not has_prev %}disabled{% endif %}"
+           {% if not has_prev %}tabindex="-1"{% endif %}>&laquo;</a>
+
+        <div class="page-numbers">
+            {% if total_pages <= 7 %}
+                {% for p in range(1, total_pages + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#tunes-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+            {% else %}
+                {% if current_page > 3 %}
+                <a href="{{ base_url }}&offset=0" hx-get="{{ base_url }}&offset=0" hx-target="#tunes-content" hx-push-url="true" class="page-num">1</a>
+                {% if current_page > 4 %}<span class="page-ellipsis">...</span>{% endif %}
+                {% endif %}
+
+                {% for p in range([1, current_page - 2]|max, [total_pages, current_page + 2]|min + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#tunes-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+
+                {% if current_page < total_pages - 2 %}
+                {% if current_page < total_pages - 3 %}<span class="page-ellipsis">...</span>{% endif %}
+                <a href="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-get="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-target="#tunes-content" hx-push-url="true" class="page-num">{{ total_pages }}</a>
+                {% endif %}
+            {% endif %}
+        </div>
+
+        <a href="{{ base_url }}&offset={{ next_offset }}"
+           hx-get="{{ base_url }}&offset={{ next_offset }}"
+           hx-target="#tunes-content"
+           hx-push-url="true"
+           class="page-num {% if not has_next %}disabled{% endif %}"
+           {% if not has_next %}tabindex="-1"{% endif %}>&raquo;</a>
+    </div>
+</div>
+{% else %}
+<div class="empty-state">
+    <h3>No tuning sessions found</h3>
+    <p>{% if valid_only or objective_type_filter or oos_enabled_filter or status_filter %}No tunes match the current filters.{% else %}Start a parameter tune to see results here.{% endif %}</p>
+    {% if not (valid_only or objective_type_filter or oos_enabled_filter or status_filter) %}
+    <div class="empty-hint">
+        <code>POST /backtests/tune</code>
+        <pre>{
+  "workspace_id": "{{ workspace_id }}",
+  "strategy_entity_id": "&lt;strategy-uuid&gt;",
+  "search_type": "grid",
+  "n_trials": 10
+}</pre>
+    </div>
+    {% endif %}
+</div>
+{% endif %}

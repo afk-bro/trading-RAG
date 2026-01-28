@@ -1,0 +1,137 @@
+{# Partial template for HTMX - table and pagination #}
+
+{% if error %}
+<div class="empty-state">
+    <h3>Error</h3>
+    <p>{{ error }}</p>
+</div>
+{% elif wfos|length == 0 %}
+<div class="empty-state">
+    <h3>No WFO Runs</h3>
+    <p>{% if status_filter %}No WFO runs match the current filter.{% else %}No Walk-Forward Optimization runs found for this workspace.{% endif %}</p>
+</div>
+{% else %}
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Created</th>
+                <th>Strategy</th>
+                <th>Status</th>
+                <th>Folds</th>
+                <th>Config</th>
+                <th>Best Params</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for wfo in wfos %}
+            <tr class="clickable-row" data-href="/admin/backtests/wfo/{{ wfo.id }}">
+                <td>
+                    <a href="/admin/backtests/wfo/{{ wfo.id }}" title="{{ wfo.id }}" onclick="event.stopPropagation()">
+                        {{ wfo.id[:8] }}...
+                    </a>
+                </td>
+                <td>
+                    <span class="relative-time" data-timestamp="{{ wfo.created_at.isoformat() if wfo.created_at else '' }}" title="{{ wfo.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if wfo.created_at else '' }}">
+                        {{ wfo.created_at.strftime('%Y-%m-%d %H:%M') if wfo.created_at else '-' }}
+                    </span>
+                </td>
+                <td>
+                    <span title="{{ wfo.strategy_entity_id }}">
+                        {{ wfo.strategy_name or wfo.strategy_entity_id[:8] + '...' }}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge badge-{{ wfo.status }}">{{ wfo.status }}</span>
+                </td>
+                <td>
+                    {% set completed = wfo.folds_completed or 0 %}
+                    {% set failed = wfo.folds_failed or 0 %}
+                    {% set total_folds = wfo.n_folds or 0 %}
+                    <span title="Completed: {{ completed }}, Failed: {{ failed }}, Total: {{ total_folds }}">
+                        {{ completed }}/{{ total_folds }}
+                        {% if failed > 0 %}
+                        <span class="badge badge-failed" style="margin-left: 4px;">{{ failed }} failed</span>
+                        {% endif %}
+                    </span>
+                </td>
+                <td>
+                    {% if wfo.wfo_config %}
+                    <span title="Train: {{ wfo.wfo_config.train_days }}d, Test: {{ wfo.wfo_config.test_days }}d, Step: {{ wfo.wfo_config.step_days }}d">
+                        {{ wfo.wfo_config.train_days }}/{{ wfo.wfo_config.test_days }}/{{ wfo.wfo_config.step_days }}d
+                    </span>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td class="truncate" style="max-width: 200px;">
+                    {% if wfo.best_params %}
+                    {{ wfo.best_params | tojson }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% set current_page = (offset // limit) + 1 %}
+{% set total_pages = ((total - 1) // limit) + 1 if total > 0 else 1 %}
+{# Build base URL with only non-empty params #}
+{% set base_url = "/admin/backtests/wfo?workspace_id=" ~ workspace_id ~ "&limit=" ~ limit %}
+{% if status_filter %}{% set base_url = base_url ~ "&status=" ~ status_filter %}{% endif %}
+<div class="pagination">
+    <div class="pagination-info">
+        Showing {{ offset + 1 }}-{{ [offset + limit, total] | min }} of {{ total }}
+    </div>
+    <div class="pagination-controls">
+        <a href="{{ base_url }}&offset={{ prev_offset }}"
+           hx-get="{{ base_url }}&offset={{ prev_offset }}"
+           hx-target="#wfo-content"
+           hx-push-url="true"
+           class="page-num {% if not has_prev %}disabled{% endif %}"
+           {% if not has_prev %}tabindex="-1"{% endif %}>&laquo;</a>
+
+        <div class="page-numbers">
+            {% if total_pages <= 7 %}
+                {% for p in range(1, total_pages + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#wfo-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+            {% else %}
+                {% if current_page > 3 %}
+                <a href="{{ base_url }}&offset=0" hx-get="{{ base_url }}&offset=0" hx-target="#wfo-content" hx-push-url="true" class="page-num">1</a>
+                {% if current_page > 4 %}<span class="page-ellipsis">...</span>{% endif %}
+                {% endif %}
+
+                {% for p in range([1, current_page - 2]|max, [total_pages, current_page + 2]|min + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#wfo-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+
+                {% if current_page < total_pages - 2 %}
+                {% if current_page < total_pages - 3 %}<span class="page-ellipsis">...</span>{% endif %}
+                <a href="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-get="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-target="#wfo-content" hx-push-url="true" class="page-num">{{ total_pages }}</a>
+                {% endif %}
+            {% endif %}
+        </div>
+
+        <a href="{{ base_url }}&offset={{ next_offset }}"
+           hx-get="{{ base_url }}&offset={{ next_offset }}"
+           hx-target="#wfo-content"
+           hx-push-url="true"
+           class="page-num {% if not has_next %}disabled{% endif %}"
+           {% if not has_next %}tabindex="-1"{% endif %}>&raquo;</a>
+    </div>
+</div>
+{% endif %}

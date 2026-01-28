@@ -1,0 +1,148 @@
+{# Partial template for HTMX - table and pagination #}
+
+{% if alerts %}
+<table>
+    <thead>
+        <tr>
+            <th>Last Seen</th>
+            <th>Severity</th>
+            <th>Type</th>
+            <th>Strategy</th>
+            <th>Regime</th>
+            <th>Status</th>
+            <th>Ack</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for alert in alerts %}
+        <tr class="clickable-row" data-href="/admin/alerts/{{ alert.id }}/detail">
+            <td>
+                {% if alert.last_seen %}
+                <span class="relative-time" data-timestamp="{{ alert.last_seen.isoformat() }}" title="{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
+                    {{ alert.last_seen.strftime('%Y-%m-%d %H:%M') }}
+                </span>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if alert.severity == 'high' %}
+                <span class="badge badge-rejected">HIGH</span>
+                {% elif alert.severity == 'medium' %}
+                <span class="badge badge-pending">MEDIUM</span>
+                {% else %}
+                <span class="badge badge-weak">LOW</span>
+                {% endif %}
+            </td>
+            <td>
+                <span class="badge badge-type">{{ alert.rule_type }}</span>
+            </td>
+            <td>
+                {% if alert.strategy_entity_id %}
+                <a href="/admin/kb/entities/{{ alert.strategy_entity_id }}" onclick="event.stopPropagation()">
+                    {{ (alert.strategy_entity_id | string)[:8] }}...
+                </a>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if alert.regime_key %}
+                <code class="regime-key" title="{{ alert.regime_key }}">{{ alert.regime_key[:20] }}{% if alert.regime_key|length > 20 %}...{% endif %}</code>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if alert.status == 'active' %}
+                <span class="badge badge-type">active</span>
+                {% else %}
+                <span class="badge badge-verified">resolved</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if alert.acknowledged %}
+                <span class="ack-badge ack-yes" title="Acknowledged{% if alert.acknowledged_by %} by {{ alert.acknowledged_by }}{% endif %}{% if alert.acknowledged_at %} at {{ alert.acknowledged_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}">Yes</span>
+                {% else %}
+                <span class="ack-badge ack-no">No</span>
+                {% endif %}
+            </td>
+            <td>
+                <div class="row-actions">
+                    {% if not alert.acknowledged %}
+                    <button class="btn btn-sm" onclick="event.stopPropagation(); acknowledgeAlert('{{ alert.id }}')" title="Acknowledge">Ack</button>
+                    {% endif %}
+                    <a href="/admin/alerts/{{ alert.id }}/detail" class="btn btn-secondary btn-sm" onclick="event.stopPropagation()">View</a>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Pagination -->
+{% set current_page = (offset // limit) + 1 %}
+{% set total_pages = ((total - 1) // limit) + 1 if total > 0 else 1 %}
+{# Build base URL with only non-empty params #}
+{% set base_url = "/admin/alerts?workspace_id=" ~ workspace_id ~ "&limit=" ~ limit %}
+{% if status_filter %}{% set base_url = base_url ~ "&status=" ~ status_filter %}{% endif %}
+{% if severity_filter %}{% set base_url = base_url ~ "&severity=" ~ severity_filter %}{% endif %}
+{% if rule_type_filter %}{% set base_url = base_url ~ "&rule_type=" ~ rule_type_filter %}{% endif %}
+{% if acknowledged_filter is not none %}{% set base_url = base_url ~ "&acknowledged=" ~ ('true' if acknowledged_filter else 'false') %}{% endif %}
+<div class="pagination">
+    <div class="pagination-info">
+        Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
+    </div>
+    <div class="pagination-controls">
+        <a href="{{ base_url }}&offset={{ prev_offset }}"
+           hx-get="{{ base_url }}&offset={{ prev_offset }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
+           class="page-num {% if not has_prev %}disabled{% endif %}"
+           {% if not has_prev %}tabindex="-1"{% endif %}>&laquo;</a>
+
+        <div class="page-numbers">
+            {% if total_pages <= 7 %}
+                {% for p in range(1, total_pages + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#alerts-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+            {% else %}
+                {% if current_page > 3 %}
+                <a href="{{ base_url }}&offset=0" hx-get="{{ base_url }}&offset=0" hx-target="#alerts-content" hx-push-url="true" class="page-num">1</a>
+                {% if current_page > 4 %}<span class="page-ellipsis">...</span>{% endif %}
+                {% endif %}
+
+                {% for p in range([1, current_page - 2]|max, [total_pages, current_page + 2]|min + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#alerts-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+
+                {% if current_page < total_pages - 2 %}
+                {% if current_page < total_pages - 3 %}<span class="page-ellipsis">...</span>{% endif %}
+                <a href="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-get="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-target="#alerts-content" hx-push-url="true" class="page-num">{{ total_pages }}</a>
+                {% endif %}
+            {% endif %}
+        </div>
+
+        <a href="{{ base_url }}&offset={{ next_offset }}"
+           hx-get="{{ base_url }}&offset={{ next_offset }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
+           class="page-num {% if not has_next %}disabled{% endif %}"
+           {% if not has_next %}tabindex="-1"{% endif %}>&raquo;</a>
+    </div>
+</div>
+{% else %}
+<div class="empty-state">
+    <h3>No alerts found</h3>
+    <p>{% if status_filter or severity_filter or rule_type_filter or acknowledged_filter is not none %}No alerts match the current filters.{% else %}No alert events have been recorded yet.{% endif %}</p>
+</div>
+{% endif %}

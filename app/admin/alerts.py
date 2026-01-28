@@ -120,26 +120,29 @@ async def alerts_page(
     prev_offset = max(0, offset - limit)
     next_offset = offset + limit
 
-    return templates.TemplateResponse(
-        "alerts.html",
-        {
-            "request": request,
-            "workspace_id": str(workspace_id),
-            "admin_token": admin_token,
-            "alerts": events,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "has_prev": has_prev,
-            "has_next": has_next,
-            "prev_offset": prev_offset,
-            "next_offset": next_offset,
-            "status_filter": status_filter.value if status_filter else None,
-            "severity_filter": severity.value if severity else None,
-            "rule_type_filter": rule_type.value if rule_type else None,
-            "acknowledged_filter": acknowledged,
-        },
-    )
+    context = {
+        "request": request,
+        "workspace_id": str(workspace_id),
+        "admin_token": admin_token,
+        "alerts": events,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_prev": has_prev,
+        "has_next": has_next,
+        "prev_offset": prev_offset,
+        "next_offset": next_offset,
+        "status_filter": status_filter.value if status_filter else None,
+        "severity_filter": severity.value if severity else None,
+        "rule_type_filter": rule_type.value if rule_type else None,
+        "acknowledged_filter": acknowledged,
+    }
+
+    # HTMX partial response
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("alerts_partial.html", context)
+
+    return templates.TemplateResponse("alerts.html", context)
 
 
 @router.get("/{event_id}/detail", response_class=HTMLResponse)

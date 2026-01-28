@@ -9,36 +9,53 @@
         <span class="pagination-info">{{ total }} alerts</span>
     </div>
 
-    <!-- Quick Filter Chips -->
+    <!-- Quick Filter Chips (HTMX-powered) -->
     <div class="quick-filters">
-        <a href="?workspace_id={{ workspace_id }}&status=active&acknowledged=false&limit={{ limit }}"
+        <a href="/admin/alerts?workspace_id={{ workspace_id }}&status=active&acknowledged=false&limit={{ limit }}"
+           hx-get="/admin/alerts?workspace_id={{ workspace_id }}&status=active&acknowledged=false&limit={{ limit }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
            class="chip {% if status_filter == 'active' and acknowledged_filter == false %}chip-active{% endif %}">
             Needs Attention
         </a>
-        <a href="?workspace_id={{ workspace_id }}&status=active&limit={{ limit }}"
+        <a href="/admin/alerts?workspace_id={{ workspace_id }}&status=active&limit={{ limit }}"
+           hx-get="/admin/alerts?workspace_id={{ workspace_id }}&status=active&limit={{ limit }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
            class="chip {% if status_filter == 'active' and acknowledged_filter is none %}chip-active{% endif %}">
             Active
         </a>
-        <a href="?workspace_id={{ workspace_id }}&status=resolved&limit={{ limit }}"
+        <a href="/admin/alerts?workspace_id={{ workspace_id }}&status=resolved&limit={{ limit }}"
+           hx-get="/admin/alerts?workspace_id={{ workspace_id }}&status=resolved&limit={{ limit }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
            class="chip {% if status_filter == 'resolved' %}chip-active{% endif %}">
             Resolved
         </a>
-        <a href="?workspace_id={{ workspace_id }}&limit={{ limit }}"
+        <a href="/admin/alerts?workspace_id={{ workspace_id }}&limit={{ limit }}"
+           hx-get="/admin/alerts?workspace_id={{ workspace_id }}&limit={{ limit }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
            class="chip {% if status_filter is none and severity_filter is none and rule_type_filter is none %}chip-active{% endif %}">
             All
         </a>
     </div>
 
-    <!-- Filters -->
-    <form method="get" class="filters">
+    <!-- Filters (HTMX-powered) -->
+    <form method="get" class="filters"
+          hx-get="/admin/alerts"
+          hx-target="#alerts-content"
+          hx-push-url="true"
+          hx-trigger="change from:select"
+          hx-indicator="#loading-indicator">
         <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
-        <select name="severity" onchange="this.form.submit()">
+        <select name="severity">
             <option value="">All Severities</option>
             <option value="high" {% if severity_filter == 'high' %}selected{% endif %}>High</option>
             <option value="medium" {% if severity_filter == 'medium' %}selected{% endif %}>Medium</option>
             <option value="low" {% if severity_filter == 'low' %}selected{% endif %}>Low</option>
         </select>
-        <select name="rule_type" onchange="this.form.submit()">
+        <select name="rule_type">
             <option value="">All Rule Types</option>
             <option value="regime_drift" {% if rule_type_filter == 'regime_drift' %}selected{% endif %}>Regime Drift</option>
             <option value="confidence_drop" {% if rule_type_filter == 'confidence_drop' %}selected{% endif %}>Confidence Drop</option>
@@ -46,117 +63,30 @@
             <option value="drawdown_breach" {% if rule_type_filter == 'drawdown_breach' %}selected{% endif %}>Drawdown Breach</option>
             <option value="manual" {% if rule_type_filter == 'manual' %}selected{% endif %}>Manual</option>
         </select>
-        <select name="status" onchange="this.form.submit()">
+        <select name="status">
             <option value="">All Statuses</option>
             <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
             <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>Resolved</option>
         </select>
+        <select name="limit" class="page-size-select" title="Items per page">
+            <option value="20" {% if limit == 20 %}selected{% endif %}>20 / page</option>
+            <option value="50" {% if limit == 50 %}selected{% endif %}>50 / page</option>
+            <option value="100" {% if limit == 100 %}selected{% endif %}>100 / page</option>
+        </select>
+        <span id="loading-indicator" class="htmx-indicator">Loading...</span>
         {% if status_filter or severity_filter or rule_type_filter or acknowledged_filter is not none %}
-        <a href="?workspace_id={{ workspace_id }}&limit={{ limit }}" class="btn btn-secondary" style="font-size: 13px;">Clear Filters</a>
+        <a href="/admin/alerts?workspace_id={{ workspace_id }}&limit={{ limit }}"
+           hx-get="/admin/alerts?workspace_id={{ workspace_id }}&limit={{ limit }}"
+           hx-target="#alerts-content"
+           hx-push-url="true"
+           class="btn btn-secondary btn-sm">Clear Filters</a>
         {% endif %}
     </form>
 
-    {% if alerts %}
-    <table>
-        <thead>
-            <tr>
-                <th>Last Seen</th>
-                <th>Severity</th>
-                <th>Type</th>
-                <th>Strategy</th>
-                <th>Regime</th>
-                <th>Status</th>
-                <th>Ack</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for alert in alerts %}
-            <tr class="clickable-row" data-href="/admin/alerts/{{ alert.id }}/detail">
-                <td>
-                    {% if alert.last_seen %}
-                    <span class="relative-time" data-timestamp="{{ alert.last_seen.isoformat() }}" title="{{ alert.last_seen.strftime('%Y-%m-%d %H:%M:%S UTC') }}">
-                        {{ alert.last_seen.strftime('%Y-%m-%d %H:%M') }}
-                    </span>
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if alert.severity == 'high' %}
-                    <span class="badge badge-rejected">HIGH</span>
-                    {% elif alert.severity == 'medium' %}
-                    <span class="badge badge-pending">MEDIUM</span>
-                    {% else %}
-                    <span class="badge badge-weak">LOW</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <span class="badge badge-type">{{ alert.rule_type }}</span>
-                </td>
-                <td>
-                    {% if alert.strategy_entity_id %}
-                    <a href="/admin/kb/entities/{{ alert.strategy_entity_id }}" onclick="event.stopPropagation()">
-                        {{ (alert.strategy_entity_id | string)[:8] }}...
-                    </a>
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if alert.regime_key %}
-                    <code class="regime-key" title="{{ alert.regime_key }}">{{ alert.regime_key[:20] }}{% if alert.regime_key|length > 20 %}...{% endif %}</code>
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if alert.status == 'active' %}
-                    <span class="badge badge-type">active</span>
-                    {% else %}
-                    <span class="badge badge-verified">resolved</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if alert.acknowledged %}
-                    <span class="ack-badge ack-yes" title="Acknowledged{% if alert.acknowledged_by %} by {{ alert.acknowledged_by }}{% endif %}{% if alert.acknowledged_at %} at {{ alert.acknowledged_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}">Yes</span>
-                    {% else %}
-                    <span class="ack-badge ack-no">No</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <div class="row-actions">
-                        {% if not alert.acknowledged %}
-                        <button class="btn btn-sm" onclick="event.stopPropagation(); acknowledgeAlert('{{ alert.id }}')" title="Acknowledge">Ack</button>
-                        {% endif %}
-                        <a href="/admin/alerts/{{ alert.id }}/detail" class="btn btn-secondary btn-sm" onclick="event.stopPropagation()">View</a>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <!-- Pagination -->
-    <div class="pagination">
-        <div class="pagination-info">
-            Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
-        </div>
-        <div class="pagination-buttons">
-            {% if has_prev %}
-            <a href="?workspace_id={{ workspace_id }}&status={{ (status_filter or '') | urlencode }}&severity={{ (severity_filter or '') | urlencode }}&rule_type={{ (rule_type_filter or '') | urlencode }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ prev_offset }}" class="btn btn-secondary">Previous</a>
-            {% endif %}
-            {% if has_next %}
-            <a href="?workspace_id={{ workspace_id }}&status={{ (status_filter or '') | urlencode }}&severity={{ (severity_filter or '') | urlencode }}&rule_type={{ (rule_type_filter or '') | urlencode }}&acknowledged={{ acknowledged_filter if acknowledged_filter is not none else '' }}&limit={{ limit }}&offset={{ next_offset }}" class="btn btn-secondary">Next</a>
-            {% endif %}
-        </div>
+    <!-- HTMX target for table content -->
+    <div id="alerts-content">
+        {% include "alerts_partial.html" %}
     </div>
-    {% else %}
-    <div class="empty-state">
-        <h3>No alerts found</h3>
-        <p>{% if status_filter or severity_filter or rule_type_filter or acknowledged_filter is not none %}No alerts match the current filters.{% else %}No alert events have been recorded yet.{% endif %}</p>
-    </div>
-    {% endif %}
 </div>
 
 <style>
@@ -189,6 +119,21 @@
         border-color: var(--link);
         color: var(--link);
     }
+
+    .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .page-size-select { min-width: 90px; }
+    .btn-sm { font-size: 12px; padding: 4px 10px; }
+
+    /* Pagination styles */
+    .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .pagination-info { color: var(--text-muted); font-size: 13px; }
+    .pagination-controls { display: flex; align-items: center; gap: 8px; }
+    .page-numbers { display: flex; gap: 4px; }
+    .page-num { min-width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; text-decoration: none; color: var(--text); background: var(--bg); border: 1px solid var(--border); cursor: pointer; }
+    .page-num:hover { background: var(--bg-secondary); text-decoration: none; }
+    .page-num.active { background: var(--link); color: white; border-color: var(--link); }
+    .page-num.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+    .page-ellipsis { color: var(--text-muted); padding: 0 4px; }
 
     .clickable-row {
         cursor: pointer;
@@ -234,27 +179,32 @@
         justify-content: flex-end;
     }
 
-    .btn-sm {
-        font-size: 12px;
-        padding: 4px 8px;
-    }
+    /* HTMX loading states */
+    .htmx-indicator { display: none; color: var(--text-muted); font-size: 12px; }
+    .htmx-request .htmx-indicator { display: inline; }
+    .htmx-request #alerts-content { opacity: 0.5; pointer-events: none; transition: opacity 0.15s; }
 </style>
 
 <script>
 // Clickable rows with Ctrl/Cmd+click for new tab
-document.querySelectorAll('.clickable-row').forEach(row => {
-    row.addEventListener('click', (e) => {
-        if (e.target.closest('a, button')) return;
-        const href = row.dataset.href;
-        if (e.ctrlKey || e.metaKey) {
-            window.open(href, '_blank');
-        } else {
-            window.location.href = href;
-        }
+function initClickableRows() {
+    document.querySelectorAll('.clickable-row').forEach(row => {
+        row.removeEventListener('click', handleRowClick);
+        row.addEventListener('click', handleRowClick);
     });
-});
+}
 
-// Acknowledge alert via API
+function handleRowClick(e) {
+    if (e.target.closest('a, button')) return;
+    const href = this.dataset.href;
+    if (e.ctrlKey || e.metaKey) {
+        window.open(href, '_blank');
+    } else {
+        window.location.href = href;
+    }
+}
+
+// Acknowledge alert via API then refresh via HTMX
 async function acknowledgeAlert(eventId) {
     try {
         const response = await fetch(`/admin/alerts/${eventId}/acknowledge`, {
@@ -267,7 +217,9 @@ async function acknowledgeAlert(eventId) {
         });
 
         if (response.ok) {
-            window.location.reload();
+            // Refresh the content via HTMX
+            const form = document.querySelector('form.filters');
+            if (form) htmx.trigger(form, 'change');
         } else {
             const data = await response.json();
             alert('Failed to acknowledge: ' + (data.detail || 'Unknown error'));
@@ -303,7 +255,22 @@ function updateRelativeTimes() {
     });
 }
 
-updateRelativeTimes();
-setInterval(updateRelativeTimes, 60000); // Update every minute
+function initAlertsList() {
+    initClickableRows();
+    updateRelativeTimes();
+}
+
+// Initial setup
+document.addEventListener('DOMContentLoaded', initAlertsList);
+
+// Re-initialize after HTMX swaps
+document.body.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id === 'alerts-content') {
+        initAlertsList();
+    }
+});
+
+// Update relative times periodically
+setInterval(updateRelativeTimes, 60000);
 </script>
 {% endblock %}
