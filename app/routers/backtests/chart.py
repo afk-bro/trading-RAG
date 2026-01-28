@@ -312,8 +312,8 @@ def _parse_regime_info(raw: Any) -> Optional[RegimeInfo]:
         efficiency_tag = data.get("efficiency_tag")
 
     # If no tags found, try to infer from numeric values
-    if not trend_tag and data.get("trend_dir") is not None:
-        td = data.get("trend_dir")
+    td = data.get("trend_dir")
+    if not trend_tag and td is not None:
         if td > 0:
             trend_tag = "uptrend"
         elif td < 0:

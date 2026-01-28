@@ -298,15 +298,15 @@ class TradingBot(discord.Client):
             )
 
         # Set color based on status
-        field_values = [f.value for f in embed.fields]
+        field_values = [f.value or "" for f in embed.fields]
         if any(":red_circle:" in v for v in field_values):
-            embed.color = 0xED4245
+            embed.colour = discord.Colour(0xED4245)  # type: ignore[assignment]
             embed.title = ":x: System Degraded"
         elif any(":yellow_circle:" in v for v in field_values):
-            embed.color = 0xFEE75C
+            embed.colour = discord.Colour(0xFEE75C)  # type: ignore[assignment]
             embed.title = ":warning: System Warning"
         else:
-            embed.color = 0x57F287
+            embed.colour = discord.Colour(0x57F287)  # type: ignore[assignment]
             embed.title = ":white_check_mark: System Healthy"
 
         await interaction.response.send_message(embed=embed)
@@ -445,6 +445,8 @@ async def start_bot():
 
 async def _run_bot(token: str):
     """Run the bot (handles reconnection)."""
+    if _bot is None:
+        return
     try:
         await _bot.start(token)
     except Exception as e:
