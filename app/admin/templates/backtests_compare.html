@@ -1,0 +1,297 @@
+{% extends "layout.html" %}
+
+{% block title %}Compare Runs ({{ runs|length }}) - KB Admin{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/admin/backtests/leaderboard{% if workspace_id %}?workspace_id={{ workspace_id }}{% endif %}">Leaderboard</a> /
+    <span>Compare {{ runs|length }} Runs</span>
+</div>
+
+<!-- Header -->
+<div class="detail-header">
+    <h1>Compare Backtest Runs</h1>
+    <div class="detail-meta">
+        <span>{{ runs|length }} runs selected</span>
+        <button onclick="clearAndReturn()" class="btn btn-secondary btn-sm">Clear & Return</button>
+    </div>
+</div>
+
+<!-- Comparison Table -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Side-by-Side Comparison</h3>
+    </div>
+    <div class="table-container">
+        <table class="compare-table">
+            <thead>
+                <tr>
+                    <th class="metric-col">Metric</th>
+                    {% for run in runs %}
+                    <th class="run-col">
+                        <div class="run-header">
+                            <a href="/admin/backtests/runs/{{ run.id }}" class="run-link">{{ run.id[:8] }}...</a>
+                            <span class="run-strategy">{{ run.strategy_name }}</span>
+                        </div>
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Sparkline Row -->
+                <tr>
+                    <td class="metric-label">Equity Curve</td>
+                    {% for run in runs %}
+                    <td class="sparkline-cell">
+                        <div class="sparkline compare-sparkline" data-run-id="{{ run.id }}"></div>
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <!-- Status -->
+                <tr>
+                    <td class="metric-label">Status</td>
+                    {% for run in runs %}
+                    <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td>
+                    {% endfor %}
+                </tr>
+
+                <!-- Regime -->
+                <tr>
+                    <td class="metric-label">Regime</td>
+                    {% for run in runs %}
+                    <td class="regime-cell">
+                        {% if run.trend_tag %}
+                        <span class="regime-tag regime-{{ run.trend_tag }}">{{ run.trend_tag }}</span>
+                        {% endif %}
+                        {% if run.vol_tag %}
+                        <span class="regime-tag regime-{{ run.vol_tag }}">{{ run.vol_tag }}</span>
+                        {% endif %}
+                        {% if not run.trend_tag and not run.vol_tag %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <!-- Symbol/Timeframe -->
+                <tr>
+                    <td class="metric-label">Symbol</td>
+                    {% for run in runs %}
+                    <td>{{ run.symbol }}</td>
+                    {% endfor %}
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Timeframe</td>
+                    {% for run in runs %}
+                    <td>{{ run.timeframe }}</td>
+                    {% endfor %}
+                </tr>
+
+                <!-- Performance Metrics -->
+                <tr class="section-header">
+                    <td colspan="{{ runs|length + 1 }}">Performance</td>
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Return %</td>
+                    {% for run in runs %}
+                    <td class="{% if run.return_pct is not none %}{% if run.return_pct >= 0 %}text-success{% else %}text-danger{% endif %}{% endif %}">
+                        {% if run.return_pct is not none %}
+                        {{ "%.2f"|format(run.return_pct) }}%
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Sharpe</td>
+                    {% for run in runs %}
+                    <td class="{% if run.sharpe is not none and run.sharpe >= 1.0 %}text-success{% elif run.sharpe is not none and run.sharpe < 0 %}text-danger{% endif %}">
+                        {% if run.sharpe is not none %}
+                        {{ "%.3f"|format(run.sharpe) }}
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Max Drawdown</td>
+                    {% for run in runs %}
+                    <td class="text-danger">
+                        {% if run.max_drawdown_pct is not none %}
+                        {{ "%.2f"|format(run.max_drawdown_pct) }}%
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Trades</td>
+                    {% for run in runs %}
+                    <td>{{ run.trades if run.trades is not none else '-' }}</td>
+                    {% endfor %}
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Profit Factor</td>
+                    {% for run in runs %}
+                    <td class="{% if run.profit_factor is not none and run.profit_factor >= 1.5 %}text-success{% elif run.profit_factor is not none and run.profit_factor < 1.0 %}text-danger{% endif %}">
+                        {% if run.profit_factor is not none %}
+                        {{ "%.2f"|format(run.profit_factor) }}
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Win Rate</td>
+                    {% for run in runs %}
+                    <td>
+                        {% if run.win_rate is not none %}
+                        {% set wr = run.win_rate * 100 if run.win_rate <= 1 else run.win_rate %}
+                        {{ "%.1f"|format(wr) }}%
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+
+                <!-- Metadata -->
+                <tr class="section-header">
+                    <td colspan="{{ runs|length + 1 }}">Metadata</td>
+                </tr>
+
+                <tr>
+                    <td class="metric-label">Created</td>
+                    {% for run in runs %}
+                    <td class="text-muted">
+                        {% if run.created_at %}
+                        {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}-{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function clearAndReturn() {
+    // Clear compare selection
+    if (window.CompareTray) {
+        window.CompareTray.clearSelection();
+    }
+    // Return to leaderboard
+    {% if workspace_id %}
+    window.location.href = '/admin/backtests/leaderboard?workspace_id={{ workspace_id }}';
+    {% else %}
+    window.history.back();
+    {% endif %}
+}
+</script>
+
+<style>
+    .compare-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .compare-table th,
+    .compare-table td {
+        padding: 12px;
+        text-align: center;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .metric-col {
+        width: 150px;
+        text-align: left !important;
+        font-weight: 500;
+    }
+
+    .metric-label {
+        text-align: left !important;
+        color: var(--text-muted);
+    }
+
+    .run-col {
+        min-width: 140px;
+    }
+
+    .run-header {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .run-link {
+        font-family: 'SF Mono', Consolas, monospace;
+        font-size: 13px;
+    }
+
+    .run-strategy {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .section-header td {
+        background: var(--bg-secondary);
+        font-weight: 600;
+        text-align: left !important;
+        padding: 8px 12px;
+        font-size: 13px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .sparkline-cell {
+        padding: 8px !important;
+    }
+
+    .compare-sparkline {
+        width: 120px;
+        height: 32px;
+        margin: 0 auto;
+    }
+
+    .regime-cell {
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .regime-tag {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    /* Regime tag colors */
+    .regime-uptrend { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .regime-downtrend { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .regime-flat, .regime-ranging { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .regime-high_vol { background: rgba(255, 166, 87, 0.2); color: #f7a141; }
+    .regime-low_vol { background: rgba(88, 166, 255, 0.15); color: var(--info); }
+
+    .text-success { color: var(--success); }
+    .text-danger { color: var(--danger); }
+    .text-muted { color: var(--text-muted); }
+
+    .badge-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .badge-failed { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .badge-running { background: rgba(88, 166, 255, 0.2); color: var(--info); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<!-- uPlot for sparklines -->
+<link rel="stylesheet" href="https://unpkg.com/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<script src="/static/admin/js/sparklines.js"></script>
+{% endblock %}

@@ -451,6 +451,157 @@
 
         /* Hide uPlot internals we don't need */
         .sparkline .u-legend { display: none !important; }
+
+        /* Compare Tray */
+        #compare-tray {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            z-index: 1000;
+            transition: transform 0.2s ease;
+        }
+
+        #compare-tray.tray-hidden {
+            transform: translateY(100%);
+        }
+
+        #compare-tray.tray-collapsed .tray-chips,
+        #compare-tray.tray-collapsed .tray-actions {
+            display: none;
+        }
+
+        .tray-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .tray-label {
+            font-size: 14px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .tray-count {
+            background: var(--info);
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        .tray-chips {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .tray-chip {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: 'SF Mono', Consolas, monospace;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chip-remove {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .chip-remove:hover {
+            color: var(--danger);
+        }
+
+        .tray-more {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .tray-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+        }
+
+        .tray-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: none;
+            font-weight: 500;
+        }
+
+        .tray-btn-compare {
+            background: var(--info);
+            color: #fff;
+        }
+
+        .tray-btn-compare:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tray-btn-clear {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        .tray-btn-clear:hover {
+            background: var(--bg);
+        }
+
+        .tray-collapse {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px;
+        }
+
+        .tray-collapse:hover {
+            color: var(--text);
+        }
+
+        @keyframes tray-shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-4px); }
+            75% { transform: translateX(4px); }
+        }
+
+        .tray-shake {
+            animation: tray-shake 0.3s ease;
+        }
+
+        /* Add padding to container when tray is visible */
+        body:has(#compare-tray:not(.tray-hidden)) .container {
+            padding-bottom: 70px;
+        }
     </style>
     {% block head_extra %}{% endblock %}
 </head>
@@ -479,6 +630,22 @@
     <div class="container">
         {% block content %}{% endblock %}
     </div>
+
+    <!-- Compare Tray (global) -->
+    <div id="compare-tray" class="tray-hidden">
+        <div class="tray-left">
+            <button class="tray-collapse" title="Toggle tray">&#9660;</button>
+            <span class="tray-label">Selected: <span class="tray-count">0</span></span>
+        </div>
+        <div class="tray-chips"></div>
+        <div class="tray-actions">
+            <button class="tray-btn tray-btn-compare" disabled>Compare</button>
+            <button class="tray-btn tray-btn-clear">Clear</button>
+        </div>
+    </div>
+
+    <!-- Global scripts -->
+    <script src="/static/admin/js/compare_tray.js"></script>
 
     {% block scripts %}{% endblock %}
 </body>

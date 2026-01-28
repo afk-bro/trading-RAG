@@ -707,6 +707,119 @@ async def admin_tune_compare(
 
 
 # ===========================================
+# Run Compare Endpoint (for compare tray)
+# ===========================================
+
+
+@router.get("/backtests/compare-runs", response_class=HTMLResponse)
+async def admin_run_compare(
+    request: Request,
+    run_ids: str = Query(..., description="Comma-separated run UUIDs"),
+    workspace_id: Optional[UUID] = Query(None, description="Workspace UUID"),
+    _: bool = Depends(require_admin_token),
+):
+    """Compare multiple backtest runs side-by-side."""
+    # Parse run IDs
+    try:
+        run_id_list = [UUID(rid.strip()) for rid in run_ids.split(",") if rid.strip()]
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid run ID format: {e}",
+        )
+
+    if len(run_id_list) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least 2 run IDs required",
+        )
+    if len(run_id_list) > 12:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 12 runs can be compared",
+        )
+
+    pool = require_db_pool(_db_pool)
+
+    # Fetch run summaries
+    runs = []
+    async with pool.acquire() as conn:
+        for rid in run_id_list:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    r.id, r.status, r.created_at,
+                    r.strategy_entity_id, r.tune_id,
+                    r.params, r.summary, r.dataset_meta,
+                    r.regime_is, r.regime_oos,
+                    e.name as strategy_name
+                FROM backtest_runs r
+                LEFT JOIN kb_entities e ON r.strategy_entity_id = e.id
+                WHERE r.id = $1
+                """,
+                rid,
+            )
+            if row:
+                run = dict(row)
+                # Parse JSONB fields
+                parse_jsonb_fields(
+                    run, ["params", "summary", "dataset_meta", "regime_is", "regime_oos"]
+                )
+                runs.append(run)
+
+    if len(runs) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Some runs were not found",
+        )
+
+    # Extract comparison data
+    comparison_data = []
+    for run in runs:
+        summary = run.get("summary") or {}
+        dataset = run.get("dataset_meta") or {}
+        regime_oos = run.get("regime_oos") or {}
+        regime_is = run.get("regime_is") or {}
+
+        # Get regime tags
+        regime = regime_oos or regime_is
+        tags = regime.get("regime_tags", []) if regime else []
+        trend_tag = next(
+            (t for t in tags if t in ("uptrend", "downtrend", "flat", "ranging")), None
+        )
+        vol_tag = next((t for t in tags if t in ("high_vol", "low_vol")), None)
+
+        comparison_data.append(
+            {
+                "id": str(run["id"]),
+                "status": run.get("status", "unknown"),
+                "strategy_name": run.get("strategy_name") or str(run["strategy_entity_id"])[:8],
+                "symbol": dataset.get("symbol", "-"),
+                "timeframe": dataset.get("timeframe", "-"),
+                "return_pct": summary.get("return_pct"),
+                "sharpe": summary.get("sharpe"),
+                "max_drawdown_pct": summary.get("max_drawdown_pct"),
+                "trades": summary.get("trades"),
+                "profit_factor": summary.get("profit_factor"),
+                "win_rate": summary.get("win_rate"),
+                "trend_tag": trend_tag,
+                "vol_tag": vol_tag,
+                "created_at": run.get("created_at"),
+            }
+        )
+
+    return templates.TemplateResponse(
+        "backtests_compare.html",
+        {
+            "request": request,
+            "runs": comparison_data,
+            "run_ids": [str(rid) for rid in run_id_list],
+            "workspace_id": str(workspace_id) if workspace_id else None,
+        },
+    )
+
+
+# ===========================================
 # Regime Backfill Endpoint
 # ===========================================
 

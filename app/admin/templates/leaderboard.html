@@ -7,12 +7,6 @@
     <div class="card-header">
         <h2 class="card-title">Global Leaderboard</h2>
         <div class="header-right">
-            <button id="compare-btn" class="btn btn-primary btn-sm" onclick="compareSelected()" disabled title="Select 2+ tunes to compare">
-                Compare (<span id="selected-count">0</span>)
-            </button>
-            <button id="copy-link-btn" class="btn btn-secondary btn-sm" onclick="copyCompareLink()" disabled title="Copy compare link to clipboard" style="display: none;">
-                Copy Link
-            </button>
             <a href="?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ offset }}&format=csv" class="btn btn-secondary btn-sm" title="Download current view as CSV">
                 Download CSV
             </a>
@@ -56,8 +50,8 @@
         <table>
             <thead>
                 <tr>
-                    <th class="select-col">
-                        <input type="checkbox" id="select-all" onclick="toggleSelectAll(this)" title="Select all">
+                    <th class="select-col" title="Select for comparison">
+                        Compare
                     </th>
                     <th class="rank-col">#</th>
                     <th class="sparkline-col">Equity</th>
@@ -77,7 +71,11 @@
                 {% for entry in entries %}
                 <tr class="clickable-row" data-href="/admin/backtests/tunes/{{ entry.tune_id }}" data-tune-id="{{ entry.tune_id }}">
                     <td class="select-col" onclick="event.stopPropagation()">
-                        <input type="checkbox" class="tune-checkbox" value="{{ entry.tune_id }}" onchange="updateSelection()">
+                        {% if entry.best_run_id %}
+                        <input type="checkbox" class="js-compare-toggle" data-id="{{ entry.best_run_id }}" title="Add to compare">
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
                     </td>
                     <td class="rank-col">
                         <span class="rank-badge {% if loop.index <= 3 %}rank-top{% endif %}">{{ loop.index + offset }}</span>
@@ -291,75 +289,21 @@ document.querySelectorAll('.clickable-row').forEach(row => {
     });
 });
 
-// Selection management
-function updateSelection() {
-    const checkboxes = document.querySelectorAll('.tune-checkbox:checked');
-    const count = checkboxes.length;
-    const compareBtn = document.getElementById('compare-btn');
-    const copyLinkBtn = document.getElementById('copy-link-btn');
-    const countSpan = document.getElementById('selected-count');
-
-    countSpan.textContent = count;
-    compareBtn.disabled = count < 2;
-
-    // Show/hide copy link button when 2+ selected
-    if (count >= 2) {
-        copyLinkBtn.style.display = 'inline-block';
-        copyLinkBtn.disabled = false;
-    } else {
-        copyLinkBtn.style.display = 'none';
-    }
-
-    // Update row highlighting
+// Highlight selected rows based on compare tray state
+function highlightSelectedRows() {
     document.querySelectorAll('.clickable-row').forEach(row => {
-        const checkbox = row.querySelector('.tune-checkbox');
+        const checkbox = row.querySelector('.js-compare-toggle');
         if (checkbox && checkbox.checked) {
             row.classList.add('selected');
         } else {
             row.classList.remove('selected');
         }
     });
-
-    // Update select-all checkbox state
-    const allCheckboxes = document.querySelectorAll('.tune-checkbox');
-    const selectAll = document.getElementById('select-all');
-    if (selectAll) {
-        selectAll.checked = count > 0 && count === allCheckboxes.length;
-        selectAll.indeterminate = count > 0 && count < allCheckboxes.length;
-    }
 }
 
-function toggleSelectAll(el) {
-    const checkboxes = document.querySelectorAll('.tune-checkbox');
-    checkboxes.forEach(cb => cb.checked = el.checked);
-    updateSelection();
-}
-
-function getCompareUrl() {
-    const checkboxes = document.querySelectorAll('.tune-checkbox:checked');
-    if (checkboxes.length < 2) return null;
-
-    const tuneIds = Array.from(checkboxes).map(cb => cb.value);
-    const params = tuneIds.map(id => `tune_id=${id}`).join('&');
-    return `${window.location.origin}/admin/backtests/compare?${params}&workspace_id={{ workspace_id }}`;
-}
-
-function compareSelected() {
-    const url = getCompareUrl();
-    if (url) window.location.href = url;
-}
-
-function copyCompareLink() {
-    const url = getCompareUrl();
-    if (!url) return;
-
-    navigator.clipboard.writeText(url).then(() => {
-        const btn = document.getElementById('copy-link-btn');
-        const originalText = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => { btn.textContent = originalText; }, 1500);
-    });
-}
+// Listen for compare changes
+window.addEventListener('compare:changed', highlightSelectedRows);
+document.addEventListener('DOMContentLoaded', highlightSelectedRows);
 
 // Relative time formatting
 function formatRelativeTime(date) {
