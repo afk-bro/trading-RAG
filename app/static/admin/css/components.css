@@ -1,0 +1,547 @@
+/**
+ * Component Styles - Shared UI components for the admin UI
+ *
+ * Requires tokens.css to be loaded first.
+ */
+
+/* =============================================================================
+   Base Reset & Defaults
+   ============================================================================= */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-family);
+    background: var(--bg);
+    color: var(--text);
+    line-height: var(--line-height);
+    font-size: var(--font-size-base);
+}
+
+/* =============================================================================
+   Links
+   ============================================================================= */
+
+a {
+    color: var(--link);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* =============================================================================
+   Buttons
+   ============================================================================= */
+
+button, .btn {
+    background: var(--link);
+    color: white;
+    border: none;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: opacity var(--transition-fast);
+}
+
+button:hover, .btn:hover {
+    opacity: 0.9;
+    text-decoration: none;
+}
+
+button:disabled, .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.btn-secondary:hover {
+    background: var(--bg-secondary);
+}
+
+.btn-primary {
+    background: var(--link);
+    color: white;
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-sm {
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--font-size-sm);
+}
+
+/* =============================================================================
+   Forms & Inputs
+   ============================================================================= */
+
+input, select, textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-base);
+    font-family: inherit;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--link);
+}
+
+input[type="text"], input[type="search"], input[type="email"] {
+    min-width: 200px;
+}
+
+input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.filters {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-5);
+}
+
+.filter-checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+.filter-checkbox input {
+    margin: 0;
+}
+
+/* =============================================================================
+   Cards
+   ============================================================================= */
+
+.card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+}
+
+/* =============================================================================
+   Tables
+   ============================================================================= */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-base);
+}
+
+th, td {
+    padding: var(--space-3);
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    font-weight: var(--font-weight-medium);
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+tr:hover {
+    background: rgba(56, 139, 253, 0.1);
+}
+
+.table-container {
+    overflow-x: auto;
+}
+
+.clickable-row {
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.clickable-row:hover {
+    background: rgba(56, 139, 253, 0.15);
+}
+
+.clickable-row.selected {
+    background: rgba(56, 139, 253, 0.2);
+}
+
+/* =============================================================================
+   Badges
+   ============================================================================= */
+
+.badge {
+    display: inline-block;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+}
+
+/* Status badges */
+.badge-verified, .badge-completed, .badge-valid {
+    background: rgba(63, 185, 80, 0.2);
+    color: var(--success);
+}
+
+.badge-weak, .badge-warning {
+    background: rgba(210, 153, 34, 0.2);
+    color: var(--warning);
+}
+
+.badge-rejected, .badge-failed, .badge-danger {
+    background: rgba(248, 81, 73, 0.2);
+    color: var(--danger);
+}
+
+.badge-pending, .badge-queued {
+    background: rgba(139, 148, 158, 0.2);
+    color: var(--text-muted);
+}
+
+.badge-type, .badge-info, .badge-running {
+    background: rgba(88, 166, 255, 0.2);
+    color: var(--info);
+}
+
+/* Directional badges */
+.badge-long {
+    background: rgba(63, 185, 80, 0.2);
+    color: var(--success);
+}
+
+.badge-short {
+    background: rgba(248, 81, 73, 0.2);
+    color: var(--danger);
+}
+
+/* =============================================================================
+   Stats Display
+   ============================================================================= */
+
+.stats {
+    display: flex;
+    gap: var(--space-6);
+    margin-bottom: var(--space-5);
+}
+
+.stat {
+    text-align: center;
+}
+
+.stat-value {
+    font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-semibold);
+}
+
+.stat-label {
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+}
+
+/* =============================================================================
+   Pagination
+   ============================================================================= */
+
+.pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border);
+}
+
+.pagination-info {
+    color: var(--text-muted);
+    font-size: var(--font-size-base);
+}
+
+.pagination-buttons {
+    display: flex;
+    gap: var(--space-2);
+}
+
+/* =============================================================================
+   Confidence Bars
+   ============================================================================= */
+
+.confidence {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.confidence-bar {
+    width: 60px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.confidence-fill {
+    height: 100%;
+    border-radius: 3px;
+}
+
+.confidence-high { background: var(--success); }
+.confidence-medium { background: var(--warning); }
+.confidence-low { background: var(--danger); }
+
+/* =============================================================================
+   Evidence & Quotes
+   ============================================================================= */
+
+.evidence-list {
+    margin-top: var(--space-4);
+}
+
+.evidence-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.evidence-quote {
+    font-style: italic;
+    color: var(--text-muted);
+    margin-bottom: var(--space-2);
+    padding-left: var(--space-3);
+    border-left: 3px solid var(--border);
+}
+
+.evidence-meta {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+/* =============================================================================
+   Detail Headers
+   ============================================================================= */
+
+.detail-header {
+    margin-bottom: var(--space-6);
+}
+
+.detail-header h1 {
+    font-size: var(--font-size-2xl);
+    margin-bottom: var(--space-2);
+}
+
+.detail-meta {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    color: var(--text-muted);
+    font-size: var(--font-size-base);
+}
+
+/* =============================================================================
+   Breadcrumbs
+   ============================================================================= */
+
+.breadcrumb {
+    font-size: var(--font-size-base);
+    color: var(--text-muted);
+    margin-bottom: var(--space-4);
+}
+
+.breadcrumb a {
+    color: var(--text-muted);
+}
+
+.breadcrumb a:hover {
+    color: var(--link);
+}
+
+/* =============================================================================
+   Code Blocks
+   ============================================================================= */
+
+.code-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* =============================================================================
+   Aliases & Tags
+   ============================================================================= */
+
+.aliases {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.alias {
+    background: var(--bg);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+/* =============================================================================
+   Empty State
+   ============================================================================= */
+
+.empty-state {
+    text-align: center;
+    padding: var(--space-12);
+    color: var(--text-muted);
+}
+
+.empty-state h3 {
+    margin-bottom: var(--space-2);
+    color: var(--text);
+}
+
+/* =============================================================================
+   Utility Text Classes
+   ============================================================================= */
+
+.text-success { color: var(--success); }
+.text-warning { color: var(--warning); }
+.text-danger { color: var(--danger); }
+.text-info { color: var(--info); }
+.text-muted { color: var(--text-muted); }
+
+.truncate {
+    max-width: 400px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.description {
+    color: var(--text-muted);
+    margin-top: var(--space-2);
+}
+
+/* =============================================================================
+   Sparklines
+   ============================================================================= */
+
+.sparkline {
+    width: 96px;
+    height: 28px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.sparkline-loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--link);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.sparkline-empty {
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+}
+
+/* Hide uPlot internals */
+.sparkline .u-legend { display: none !important; }
+
+/* =============================================================================
+   Regime Tags
+   ============================================================================= */
+
+.regime-tags {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+.regime-tag {
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+}
+
+/* Trend tags */
+.regime-uptrend { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+.regime-downtrend { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+.regime-trending { background: rgba(136, 87, 229, 0.2); color: var(--purple); }
+.regime-flat, .regime-ranging { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+
+/* Volatility tags */
+.regime-high_vol { background: rgba(255, 166, 87, 0.2); color: var(--orange); }
+.regime-low_vol { background: rgba(88, 166, 255, 0.15); color: var(--info); }
+
+/* Efficiency tags */
+.regime-efficient { background: rgba(63, 185, 80, 0.15); color: var(--success); }
+.regime-noisy { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+
+/* =============================================================================
+   Animations
+   ============================================================================= */
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+}

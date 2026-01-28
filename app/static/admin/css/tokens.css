@@ -1,0 +1,121 @@
+/**
+ * Design Tokens - Core CSS variables for the admin UI
+ *
+ * These tokens define the visual language of the application.
+ * Import this file before components.css.
+ */
+
+:root {
+    /* ==========================================================================
+       Colors - GitHub Dark Theme Inspired
+       ========================================================================== */
+
+    /* Backgrounds */
+    --bg: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+
+    /* Borders */
+    --border: #30363d;
+    --border-subtle: #21262d;
+
+    /* Text */
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --text-emphasis: #f0f6fc;
+    --text-bright: #f0f6fc;
+
+    /* Accent (alias for primary action color) */
+    --accent: #58a6ff;
+
+    /* Semantic Colors */
+    --link: #58a6ff;
+    --success: #3fb950;
+    --warning: #d29922;
+    --danger: #f85149;
+    --info: #58a6ff;
+
+    /* Accent Colors */
+    --purple: #a371f7;
+    --orange: #f7a141;
+
+    /* ==========================================================================
+       Typography
+       ========================================================================== */
+
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+
+    --font-size-xs: 11px;
+    --font-size-sm: 12px;
+    --font-size-base: 14px;
+    --font-size-md: 15px;
+    --font-size-lg: 16px;
+    --font-size-xl: 18px;
+    --font-size-2xl: 24px;
+
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    --line-height: 1.6;
+    --line-height-tight: 1.4;
+    --line-height-loose: 1.8;
+
+    /* ==========================================================================
+       Spacing
+       ========================================================================== */
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+
+    /* ==========================================================================
+       Border Radius
+       ========================================================================== */
+
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-full: 9999px;
+
+    /* ==========================================================================
+       Shadows
+       ========================================================================== */
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+
+    /* ==========================================================================
+       Transitions
+       ========================================================================== */
+
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.2s ease;
+    --transition-slow: 0.3s ease;
+
+    /* ==========================================================================
+       Z-Index Scale
+       ========================================================================== */
+
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-fixed: 500;
+    --z-modal: 1000;
+    --z-tooltip: 1100;
+
+    /* ==========================================================================
+       Layout
+       ========================================================================== */
+
+    --container-max-width: 1400px;
+    --nav-height: 56px;
+}
