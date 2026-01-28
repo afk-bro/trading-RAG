@@ -43,6 +43,11 @@
             <option value="true" {% if oos_enabled_filter == 'true' %}selected{% endif %}>With OOS</option>
             <option value="false" {% if oos_enabled_filter == 'false' %}selected{% endif %}>IS only</option>
         </select>
+        <select name="limit" class="page-size-select" title="Items per page">
+            <option value="25" {% if limit == 25 %}selected{% endif %}>25 / page</option>
+            <option value="50" {% if limit == 50 %}selected{% endif %}>50 / page</option>
+            <option value="100" {% if limit == 100 %}selected{% endif %}>100 / page</option>
+        </select>
         <span id="loading-indicator" class="htmx-indicator">Loading...</span>
     </form>
 
@@ -62,6 +67,18 @@
     .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .filter-checkbox { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
     .filter-checkbox input { cursor: pointer; }
+    .page-size-select { min-width: 90px; }
+
+    /* Pagination styles */
+    .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .pagination-info { color: var(--text-muted); font-size: 13px; }
+    .pagination-controls { display: flex; align-items: center; gap: 8px; }
+    .page-numbers { display: flex; gap: 4px; }
+    .page-num { min-width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; text-decoration: none; color: var(--text); background: var(--bg); border: 1px solid var(--border); cursor: pointer; }
+    .page-num:hover { background: var(--bg-secondary); text-decoration: none; }
+    .page-num.active { background: var(--link); color: white; border-color: var(--link); }
+    .page-num.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+    .page-ellipsis { color: var(--text-muted); padding: 0 4px; }
 
     .table-container { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }

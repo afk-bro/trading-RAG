@@ -133,25 +133,67 @@
 </div>
 
 <!-- Pagination -->
+{% set current_page = (offset // limit) + 1 %}
+{% set total_pages = ((total - 1) // limit) + 1 if total > 0 else 1 %}
+{# Build base URL with only non-empty params to avoid 422 errors #}
+{% set base_url = "/admin/backtests/leaderboard?workspace_id=" ~ workspace_id ~ "&limit=" ~ limit %}
+{% if valid_only %}{% set base_url = base_url ~ "&valid_only=true" %}{% endif %}
+{% if include_canceled %}{% set base_url = base_url ~ "&include_canceled=true" %}{% endif %}
+{% if objective_type_filter %}{% set base_url = base_url ~ "&objective_type=" ~ objective_type_filter %}{% endif %}
+{% if oos_enabled_filter %}{% set base_url = base_url ~ "&oos_enabled=" ~ oos_enabled_filter %}{% endif %}
 <div class="pagination">
     <div class="pagination-info">
         Showing {{ offset + 1 }} - {{ [offset + limit, total]|min }} of {{ total }}
     </div>
-    <div class="pagination-buttons">
-        {% if has_prev %}
-        <a href="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}"
-           hx-get="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ prev_offset }}"
+    <div class="pagination-controls">
+        <!-- Previous -->
+        <a href="{{ base_url }}&offset={{ prev_offset }}"
+           hx-get="{{ base_url }}&offset={{ prev_offset }}"
            hx-target="#leaderboard-content"
            hx-push-url="true"
-           class="btn btn-secondary">Previous</a>
-        {% endif %}
-        {% if has_next %}
-        <a href="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}"
-           hx-get="/admin/backtests/leaderboard?workspace_id={{ workspace_id }}&valid_only={{ 'true' if valid_only else '' }}&include_canceled={{ 'true' if include_canceled else '' }}&objective_type={{ objective_type_filter or '' }}&oos_enabled={{ oos_enabled_filter or '' }}&limit={{ limit }}&offset={{ next_offset }}"
+           class="page-num {% if not has_prev %}disabled{% endif %}"
+           {% if not has_prev %}tabindex="-1"{% endif %}>&laquo;</a>
+
+        <!-- Page numbers -->
+        <div class="page-numbers">
+            {% if total_pages <= 7 %}
+                {# Show all pages if 7 or fewer #}
+                {% for p in range(1, total_pages + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#leaderboard-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+            {% else %}
+                {# Show first, last, and pages around current #}
+                {% if current_page > 3 %}
+                <a href="{{ base_url }}&offset=0" hx-get="{{ base_url }}&offset=0" hx-target="#leaderboard-content" hx-push-url="true" class="page-num">1</a>
+                {% if current_page > 4 %}<span class="page-ellipsis">...</span>{% endif %}
+                {% endif %}
+
+                {% for p in range([1, current_page - 2]|max, [total_pages, current_page + 2]|min + 1) %}
+                <a href="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-get="{{ base_url }}&offset={{ (p - 1) * limit }}"
+                   hx-target="#leaderboard-content"
+                   hx-push-url="true"
+                   class="page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+                {% endfor %}
+
+                {% if current_page < total_pages - 2 %}
+                {% if current_page < total_pages - 3 %}<span class="page-ellipsis">...</span>{% endif %}
+                <a href="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-get="{{ base_url }}&offset={{ (total_pages - 1) * limit }}" hx-target="#leaderboard-content" hx-push-url="true" class="page-num">{{ total_pages }}</a>
+                {% endif %}
+            {% endif %}
+        </div>
+
+        <!-- Next -->
+        <a href="{{ base_url }}&offset={{ next_offset }}"
+           hx-get="{{ base_url }}&offset={{ next_offset }}"
            hx-target="#leaderboard-content"
            hx-push-url="true"
-           class="btn btn-secondary">Next</a>
-        {% endif %}
+           class="page-num {% if not has_next %}disabled{% endif %}"
+           {% if not has_next %}tabindex="-1"{% endif %}>&raquo;</a>
     </div>
 </div>
 {% else %}
