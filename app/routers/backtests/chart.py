@@ -88,6 +88,16 @@ class ExportLinks(BaseModel):
     json_snapshot: str
 
 
+class RegimeInfo(BaseModel):
+    """Regime information for chart overlay."""
+
+    trend_tag: Optional[str] = Field(None, description="uptrend, downtrend, flat, etc.")
+    vol_tag: Optional[str] = Field(None, description="high_vol, low_vol")
+    efficiency_tag: Optional[str] = Field(None, description="efficient, noisy")
+    ts_start: Optional[str] = Field(None, description="Window start timestamp")
+    ts_end: Optional[str] = Field(None, description="Window end timestamp")
+
+
 class BacktestChartData(BaseModel):
     """Full chart data response - powers the entire visualization page."""
 
@@ -102,6 +112,9 @@ class BacktestChartData(BaseModel):
     trades_pagination: TradesPagination
     exports: ExportLinks
     notes: list[str] = Field(default_factory=list)
+    # Regime data (for overlay)
+    regime_is: Optional[RegimeInfo] = Field(None, description="In-sample regime")
+    regime_oos: Optional[RegimeInfo] = Field(None, description="Out-of-sample regime")
 
 
 # =============================================================================
@@ -269,6 +282,57 @@ def _parse_jsonb_field(raw: Any) -> dict:
     return {}
 
 
+def _parse_regime_info(raw: Any) -> Optional[RegimeInfo]:
+    """Parse regime snapshot from JSONB into RegimeInfo."""
+    data = _parse_jsonb_field(raw)
+    if not data:
+        return None
+
+    # Extract tags from regime snapshot
+    tags = data.get("regime_tags") or data.get("tags") or []
+    trend_tag = None
+    vol_tag = None
+    efficiency_tag = None
+
+    for tag in tags:
+        tag_lower = tag.lower() if isinstance(tag, str) else ""
+        if tag_lower in ("uptrend", "downtrend", "flat", "ranging", "trending"):
+            trend_tag = tag_lower
+        elif tag_lower in ("high_vol", "low_vol"):
+            vol_tag = tag_lower
+        elif tag_lower in ("efficient", "noisy"):
+            efficiency_tag = tag_lower
+
+    # Also check denormalized fields
+    if not trend_tag:
+        trend_tag = data.get("trend_tag")
+    if not vol_tag:
+        vol_tag = data.get("vol_tag")
+    if not efficiency_tag:
+        efficiency_tag = data.get("efficiency_tag")
+
+    # If no tags found, try to infer from numeric values
+    if not trend_tag and data.get("trend_dir") is not None:
+        td = data.get("trend_dir")
+        if td > 0:
+            trend_tag = "uptrend"
+        elif td < 0:
+            trend_tag = "downtrend"
+        else:
+            trend_tag = "flat"
+
+    if not any([trend_tag, vol_tag, efficiency_tag]):
+        return None
+
+    return RegimeInfo(
+        trend_tag=trend_tag,
+        vol_tag=vol_tag,
+        efficiency_tag=efficiency_tag,
+        ts_start=_normalize_timestamp(data.get("ts_start")),
+        ts_end=_normalize_timestamp(data.get("ts_end")),
+    )
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -301,7 +365,8 @@ async def get_chart_data(
             """
             SELECT
                 id, status, params, summary, dataset_meta,
-                equity_curve, trades, run_kind
+                equity_curve, trades, run_kind,
+                regime_is, regime_oos
             FROM backtest_runs
             WHERE id = $1
             """,
@@ -350,6 +415,10 @@ async def get_chart_data(
         json_snapshot=f"{base_url}/snapshot.json",
     )
 
+    # Parse regime data
+    regime_is = _parse_regime_info(row.get("regime_is"))
+    regime_oos = _parse_regime_info(row.get("regime_oos"))
+
     return BacktestChartData(
         run_id=str(run_id),
         status=row["status"],
@@ -366,6 +435,8 @@ async def get_chart_data(
         ),
         exports=exports,
         notes=notes,
+        regime_is=regime_is,
+        regime_oos=regime_oos,
     )
 
 
