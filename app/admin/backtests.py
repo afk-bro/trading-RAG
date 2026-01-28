@@ -881,17 +881,10 @@ async def admin_backtest_run_detail(
 
     run = dict(run)
 
-    # Convert UUID fields to strings for template
-    prepare_for_template(
-        run,
-        uuid_fields=[
-            "id",
-            "workspace_id",
-            "strategy_entity_id",
-            "strategy_spec_id",
-            "tune_id",
-        ],
-    )
+    # Convert UUID fields to strings for template (but keep datetime as-is for strftime)
+    for field in ["id", "workspace_id", "strategy_entity_id", "strategy_spec_id", "tune_id"]:
+        if run.get(field) is not None:
+            run[field] = str(run[field])
 
     # Parse JSONB fields
     parse_jsonb_fields(run, ["params", "metrics_is", "metrics_oos"])
@@ -1006,11 +999,10 @@ async def admin_wfo_detail(
 
     wfo = dict(wfo)
 
-    # Convert UUID fields to strings
-    prepare_for_template(
-        wfo,
-        uuid_fields=["id", "workspace_id", "strategy_entity_id", "job_id"],
-    )
+    # Convert UUID fields to strings (but keep datetime as-is for strftime)
+    for field in ["id", "workspace_id", "strategy_entity_id", "job_id"]:
+        if wfo.get(field) is not None:
+            wfo[field] = str(wfo[field])
 
     # Parse JSONB fields
     parse_jsonb_fields(
