@@ -13,6 +13,7 @@ from pathlib import Path
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
@@ -54,6 +55,10 @@ setup_middleware(app, settings)
 # Include all API routers
 app.include_router(api_router)
 
+# Mount static files
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # Setup templates for landing page
 _templates_dir = Path(__file__).parent / "admin" / "templates"

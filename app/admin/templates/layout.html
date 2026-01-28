@@ -421,7 +421,38 @@
             color: var(--text-muted);
             margin-top: 8px;
         }
+
+        /* Sparklines */
+        .sparkline {
+            width: 96px;
+            height: 28px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .sparkline-loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--link);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .sparkline-empty {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* Hide uPlot internals we don't need */
+        .sparkline .u-legend { display: none !important; }
     </style>
+    {% block head_extra %}{% endblock %}
 </head>
 <body>
     <nav>
@@ -448,5 +479,7 @@
     <div class="container">
         {% block content %}{% endblock %}
     </div>
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>

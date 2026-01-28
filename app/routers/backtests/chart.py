@@ -565,3 +565,96 @@ async def export_json_snapshot(run_id: UUID):
     }
 
     return snapshot
+
+
+# =============================================================================
+# Sparkline Endpoint
+# =============================================================================
+
+SPARKLINE_MAX_POINTS = 96
+
+
+class SparklineData(BaseModel):
+    """Sparkline data for table display."""
+
+    y: list[float] = Field(..., description="Equity values (downsampled)")
+    status: str = Field("ok", description="ok, empty, or error")
+
+
+def _downsample_equity(points: list[EquityPoint], max_points: int) -> list[float]:
+    """
+    Downsample equity curve to max_points using even spacing.
+
+    Args:
+        points: Full equity curve
+        max_points: Maximum number of points to return
+
+    Returns:
+        List of equity values (y-axis only)
+    """
+    n = len(points)
+    if n == 0:
+        return []
+    if n <= max_points:
+        return [p.equity for p in points]
+
+    # Even spacing: pick indices at regular intervals
+    indices = [int(i * (n - 1) / (max_points - 1)) for i in range(max_points)]
+    return [points[i].equity for i in indices]
+
+
+@router.get(
+    "/runs/{run_id}/sparkline",
+    response_model=SparklineData,
+    responses={
+        200: {"description": "Sparkline data"},
+        404: {"description": "Run not found"},
+    },
+    summary="Get sparkline data for table display",
+    description=(
+        f"Returns downsampled equity curve (max {SPARKLINE_MAX_POINTS} points) "
+        "for sparkline rendering."
+    ),
+)
+async def get_sparkline(
+    run_id: UUID,
+    max_points: int = Query(
+        SPARKLINE_MAX_POINTS, ge=10, le=200, description="Maximum points to return"
+    ),
+):
+    """Get sparkline data for a backtest run."""
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    async with _db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT equity_curve, status
+            FROM backtest_runs
+            WHERE id = $1
+            """,
+            run_id,
+        )
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backtest run {run_id} not found",
+        )
+
+    # Don't return sparkline for non-completed runs
+    if row["status"] != "completed":
+        return SparklineData(y=[], status="pending")
+
+    # Parse and downsample
+    equity, source = _parse_equity_curve(row.get("equity_curve"))
+
+    if not equity:
+        return SparklineData(y=[], status="empty")
+
+    downsampled = _downsample_equity(equity, max_points)
+
+    return SparklineData(y=downsampled, status="ok")

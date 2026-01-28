@@ -437,3 +437,144 @@ class TestExportEndpoints:
         assert len(result["equity"]) == 3
         assert len(result["trades"]) == 2
         assert "exported_at" in result
+
+
+# =============================================================================
+# Sparkline Endpoint Tests
+# =============================================================================
+
+
+class TestSparklineEndpoint:
+    """Tests for GET /backtests/runs/{run_id}/sparkline endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_sparkline_returns_downsampled_data(
+        self, sample_run_id, mock_pool, sample_backtest_row
+    ):
+        """Test sparkline returns downsampled equity values."""
+        from app.routers.backtests import chart
+
+        pool, conn = mock_pool
+        chart.set_db_pool(pool)
+        conn.fetchrow.return_value = sample_backtest_row
+
+        result = await chart.get_sparkline(sample_run_id, max_points=96)
+
+        assert result.status == "ok"
+        assert len(result.y) == 3  # Original has 3 points, no downsampling needed
+        assert result.y[0] == 10000.0
+        assert result.y[1] == 10500.0
+        assert result.y[2] == 10200.0
+
+    @pytest.mark.asyncio
+    async def test_sparkline_404_on_missing_run(self, sample_run_id, mock_pool):
+        """Test 404 for non-existent run."""
+        from fastapi import HTTPException
+
+        from app.routers.backtests import chart
+
+        pool, conn = mock_pool
+        chart.set_db_pool(pool)
+        conn.fetchrow.return_value = None
+
+        with pytest.raises(HTTPException) as exc_info:
+            await chart.get_sparkline(sample_run_id)
+
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_sparkline_pending_run_returns_empty(
+        self, sample_run_id, mock_pool, sample_backtest_row
+    ):
+        """Test pending run returns empty sparkline with pending status."""
+        from app.routers.backtests import chart
+
+        pool, conn = mock_pool
+        chart.set_db_pool(pool)
+
+        sample_backtest_row["status"] = "running"
+        conn.fetchrow.return_value = sample_backtest_row
+
+        result = await chart.get_sparkline(sample_run_id)
+
+        assert result.status == "pending"
+        assert len(result.y) == 0
+
+    @pytest.mark.asyncio
+    async def test_sparkline_empty_equity_returns_empty(
+        self, sample_run_id, mock_pool, sample_backtest_row
+    ):
+        """Test run without equity returns empty sparkline."""
+        from app.routers.backtests import chart
+
+        pool, conn = mock_pool
+        chart.set_db_pool(pool)
+
+        sample_backtest_row["equity_curve"] = []
+        conn.fetchrow.return_value = sample_backtest_row
+
+        result = await chart.get_sparkline(sample_run_id)
+
+        assert result.status == "empty"
+        assert len(result.y) == 0
+
+
+class TestDownsampleEquity:
+    """Tests for _downsample_equity helper function."""
+
+    def test_downsample_returns_all_if_under_max(self):
+        """Test returns all points when under max."""
+        from app.routers.backtests.chart import EquityPoint, _downsample_equity
+
+        points = [
+            EquityPoint(t="2024-01-01", equity=10000.0),
+            EquityPoint(t="2024-01-02", equity=10500.0),
+            EquityPoint(t="2024-01-03", equity=10200.0),
+        ]
+
+        result = _downsample_equity(points, max_points=10)
+
+        assert len(result) == 3
+        assert result == [10000.0, 10500.0, 10200.0]
+
+    def test_downsample_reduces_to_max(self):
+        """Test downsamples to max points."""
+        from app.routers.backtests.chart import EquityPoint, _downsample_equity
+
+        # Create 100 points
+        points = [
+            EquityPoint(t=f"2024-01-{i:02d}", equity=10000.0 + i * 10)
+            for i in range(1, 101)
+        ]
+
+        result = _downsample_equity(points, max_points=10)
+
+        assert len(result) == 10
+        # First and last should be included
+        assert result[0] == 10010.0  # First point
+        assert result[-1] == 11000.0  # Last point
+
+    def test_downsample_empty_returns_empty(self):
+        """Test empty input returns empty."""
+        from app.routers.backtests.chart import _downsample_equity
+
+        result = _downsample_equity([], max_points=10)
+
+        assert result == []
+
+    def test_downsample_preserves_endpoints(self):
+        """Test downsampling always includes first and last points."""
+        from app.routers.backtests.chart import EquityPoint, _downsample_equity
+
+        # Create 50 points with distinctive endpoints
+        points = [
+            EquityPoint(t=f"2024-01-{i:02d}", equity=10000.0 + i)
+            for i in range(50)
+        ]
+        points[0] = EquityPoint(t="2024-01-00", equity=99999.0)  # Distinctive first
+        points[-1] = EquityPoint(t="2024-02-18", equity=88888.0)  # Distinctive last
+
+        result = _downsample_equity(points, max_points=10)
+
+        assert result[0] == 99999.0  # First preserved
+        assert result[-1] == 88888.0  # Last preserved

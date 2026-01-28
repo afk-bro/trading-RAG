@@ -60,6 +60,7 @@
                         <input type="checkbox" id="select-all" onclick="toggleSelectAll(this)" title="Select all">
                     </th>
                     <th class="rank-col">#</th>
+                    <th class="sparkline-col">Equity</th>
                     <th>Strategy</th>
                     <th>Objective Score</th>
                     <th>Return %</th>
@@ -80,6 +81,13 @@
                     </td>
                     <td class="rank-col">
                         <span class="rank-badge {% if loop.index <= 3 %}rank-top{% endif %}">{{ loop.index + offset }}</span>
+                    </td>
+                    <td class="sparkline-col">
+                        {% if entry.best_run_id %}
+                        <div class="sparkline" data-run-id="{{ entry.best_run_id }}"></div>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
                     </td>
                     <td>
                         {% if entry.strategy_name %}
@@ -191,6 +199,7 @@
 <style>
     .header-right { display: flex; align-items: center; gap: 12px; }
     .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .sparkline-col { width: 110px; text-align: center; }
     .btn-primary { background: var(--info); color: #fff; border: none; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -381,4 +390,11 @@ function updateRelativeTimes() {
 updateRelativeTimes();
 setInterval(updateRelativeTimes, 60000); // Update every minute
 </script>
+{% endblock %}
+
+{% block scripts %}
+<!-- uPlot for sparklines -->
+<link rel="stylesheet" href="https://unpkg.com/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<script src="/static/admin/js/sparklines.js"></script>
 {% endblock %}
