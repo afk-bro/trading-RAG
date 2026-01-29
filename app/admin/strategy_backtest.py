@@ -142,7 +142,7 @@ async def run_strategy_backtest(
             if reason not in exit_breakdown:
                 exit_breakdown[reason] = {"count": 0, "pnl": 0.0, "wins": 0}
             exit_breakdown[reason]["count"] += 1
-            exit_breakdown[reason]["pnl"] += trade.pnl_handles
+            exit_breakdown[reason]["pnl"] += trade.pnl_points
             if trade.pnl_dollars > 0:
                 exit_breakdown[reason]["wins"] += 1
 
@@ -160,7 +160,7 @@ async def run_strategy_backtest(
                 "wins": stats.wins,
                 "losses": stats.losses,
                 "win_rate": stats.win_rate,
-                "pnl": stats.total_pnl_handles,
+                "pnl": stats.total_pnl_points,
             }
 
         # Build confidence buckets for template
@@ -251,15 +251,15 @@ async def run_strategy_backtest(
             "losses": result.losses,
             "win_rate": result.win_rate,
             "profit_factor": result.profit_factor if result.profit_factor != float("inf") else 999.99,
-            "total_pnl_handles": result.total_pnl_handles,
+            "total_pnl_points": result.total_pnl_points,
             "total_pnl_dollars": result.total_pnl_dollars,
-            "expectancy_handles": result.expectancy_handles,
+            "expectancy_points": result.expectancy_points,
             "avg_r_multiple": result.avg_r_multiple,
             "avg_mfe": result.avg_mfe,
             "avg_mae": result.avg_mae,
             "mfe_capture_rate": result.mfe_capture_rate,
-            "largest_win": result.largest_win_handles,
-            "largest_loss": result.largest_loss_handles,
+            "largest_win": result.largest_win_points,
+            "largest_loss": result.largest_loss_points,
             "best_r": result.best_r_multiple,
             "worst_r": result.worst_r_multiple,
             "total_r": r_metrics["total_r"],
@@ -278,7 +278,7 @@ async def run_strategy_backtest(
             symbol=symbol,
             trades=result.trades_taken,
             pf=result.profit_factor,
-            pnl=result.total_pnl_handles,
+            pnl=result.total_pnl_points,
         )
 
         return templates.TemplateResponse(

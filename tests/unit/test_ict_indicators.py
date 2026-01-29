@@ -4,7 +4,7 @@ Unit tests for ICT pattern detection indicators.
 Tests Fair Value Gap, Breaker Block, Liquidity Sweep, and MSS detection.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.services.strategy.models import OHLCVBar
@@ -44,7 +44,7 @@ def make_bar(
 def make_bars_from_closes(closes: list[float], base_ts: datetime = None) -> list[OHLCVBar]:
     """Create bars from a list of close prices (simple test data)."""
     if base_ts is None:
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
     bars = []
     for i, close in enumerate(closes):
@@ -65,7 +65,7 @@ class TestFairValueGapDetection:
 
     def test_detects_bullish_fvg(self):
         """Bullish FVG: bar[i-2].high < bar[i].low (gap up)."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 100, 102, 99, 101),  # bar 0
             make_bar(base_ts + timedelta(hours=1), 101, 110, 101, 109),  # bar 1 (big up)
@@ -83,7 +83,7 @@ class TestFairValueGapDetection:
 
     def test_detects_bearish_fvg(self):
         """Bearish FVG: bar[i-2].low > bar[i].high (gap down)."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 110, 112, 108, 109),  # bar 0
             make_bar(base_ts + timedelta(hours=1), 109, 109, 100, 101),  # bar 1 (big down)
@@ -100,7 +100,7 @@ class TestFairValueGapDetection:
 
     def test_no_fvg_when_overlapping(self):
         """No FVG when bars overlap."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 100, 105, 98, 103),
             make_bar(base_ts + timedelta(hours=1), 103, 107, 102, 106),
@@ -112,7 +112,7 @@ class TestFairValueGapDetection:
 
     def test_respects_min_gap_size(self):
         """FVG detection respects minimum gap size filter."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 100, 102, 99, 101),
             make_bar(base_ts + timedelta(hours=1), 101, 106, 101, 105),
@@ -127,13 +127,123 @@ class TestFairValueGapDetection:
         fvgs = detect_fvgs(bars, min_gap_size=5)
         assert len(fvgs) == 0
 
+    def test_as_of_ts_excludes_future_bars(self):
+        """FVG created by bar 2 but as_of_ts cuts before bar 2 => no FVG."""
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        bars = [
+            make_bar(base_ts, 100, 102, 99, 101),
+            make_bar(base_ts + timedelta(hours=1), 101, 110, 101, 109),
+            make_bar(base_ts + timedelta(hours=2), 109, 115, 108, 114),
+        ]
+
+        # Cutoff before bar 2 => only 2 bars visible, not enough for FVG
+        fvgs = detect_fvgs(bars, as_of_ts=base_ts + timedelta(hours=1))
+        assert len(fvgs) == 0
+
+        # No cutoff => FVG detected
+        fvgs = detect_fvgs(bars)
+        assert len(fvgs) == 1
+
+    def test_as_of_ts_prevents_premature_fill(self):
+        """FVG should be unfilled when as_of_ts is before the fill bar."""
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        bars = [
+            make_bar(base_ts, 100, 102, 99, 101),                       # bar 0
+            make_bar(base_ts + timedelta(hours=1), 101, 110, 101, 109),  # bar 1
+            make_bar(base_ts + timedelta(hours=2), 109, 115, 108, 114),  # bar 2 (creates bullish FVG: 102..108)
+            make_bar(base_ts + timedelta(hours=3), 114, 116, 110, 115),  # bar 3 (no new FVG, no fill)
+            make_bar(base_ts + timedelta(hours=4), 115, 115, 98, 99),   # bar 4 (fills FVG, low=98 < gap_low=102)
+        ]
+
+        # Before the fill bar: original FVG should be unfilled
+        fvgs_before = detect_fvgs(bars, as_of_ts=base_ts + timedelta(hours=3))
+        original_fvgs = [f for f in fvgs_before if f.gap_low == 102]
+        assert len(original_fvgs) == 1
+        assert original_fvgs[0].filled is False
+
+        # After the fill bar: original FVG should be filled
+        fvgs_after = detect_fvgs(bars)
+        original_fvgs_after = [f for f in fvgs_after if f.gap_low == 102]
+        assert len(original_fvgs_after) == 1
+        assert original_fvgs_after[0].filled is True
+
+    def test_no_as_of_ts_backward_compat(self):
+        """Omitting as_of_ts preserves original behavior."""
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        bars = [
+            make_bar(base_ts, 100, 102, 99, 101),
+            make_bar(base_ts + timedelta(hours=1), 101, 110, 101, 109),
+            make_bar(base_ts + timedelta(hours=2), 109, 115, 108, 114),
+        ]
+
+        fvgs_default = detect_fvgs(bars)
+        fvgs_none = detect_fvgs(bars, as_of_ts=None)
+        assert len(fvgs_default) == len(fvgs_none)
+
+
+class TestFVGInvalidation:
+    """Tests for the FairValueGap.invalidated() method."""
+
+    def test_unfilled_fvg_not_invalidated(self):
+        """An unfilled FVG is not invalidated at any threshold."""
+        from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
+
+        fvg = FairValueGap(
+            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
+            gap_size=6.0, bar_index=1,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            filled=False, fill_percent=0.0,
+        )
+        assert fvg.invalidated(max_fill_pct=1.0) is False
+        assert fvg.invalidated(max_fill_pct=0.5) is False
+
+    def test_partially_filled_invalidated_at_threshold(self):
+        """FVG with 75% fill is invalidated when threshold is 0.75."""
+        from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
+
+        fvg = FairValueGap(
+            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
+            gap_size=6.0, bar_index=1,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            filled=False, fill_percent=0.75,
+        )
+        assert fvg.invalidated(max_fill_pct=0.75) is True
+        assert fvg.invalidated(max_fill_pct=0.80) is False
+        assert fvg.invalidated(max_fill_pct=1.0) is False
+
+    def test_fully_filled_always_invalidated(self):
+        """A 100% filled FVG is invalidated at any threshold."""
+        from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
+
+        fvg = FairValueGap(
+            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
+            gap_size=6.0, bar_index=1,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            filled=True, fill_percent=1.0,
+        )
+        assert fvg.invalidated(max_fill_pct=1.0) is True
+        assert fvg.invalidated(max_fill_pct=0.5) is True
+
+    def test_default_threshold_matches_filled(self):
+        """Default max_fill_pct=1.0 behaves like the old filled check."""
+        from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
+
+        fvg_partial = FairValueGap(
+            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
+            gap_size=6.0, bar_index=1,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            filled=False, fill_percent=0.5,
+        )
+        # With default threshold, partial fill is NOT invalidated
+        assert fvg_partial.invalidated() is False
+
 
 class TestLiquiditySweepDetection:
     """Tests for liquidity sweep detection."""
 
     def test_detects_sweep_of_swing_low(self):
         """Detect when price sweeps below swing low then reverses."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 105, 107, 104, 106),
             make_bar(base_ts + timedelta(hours=1), 106, 108, 105, 107),
@@ -156,7 +266,7 @@ class TestMSSDetection:
 
     def test_detects_bullish_mss(self):
         """Detect bullish MSS (break of swing high)."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         # Create a downtrend then break of structure
         bars = [
             make_bar(base_ts, 110, 112, 108, 109),
@@ -180,7 +290,7 @@ class TestDisplacementDetection:
 
     def test_detects_large_displacement(self):
         """Detect displacement moves (large impulsive candles)."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         # Normal bars then a big displacement
         bars = []
         for i in range(20):
@@ -269,7 +379,7 @@ class TestTFBiasIndicators:
 
     def test_hh_hl_pattern_bullish(self):
         """Detect bullish HH/HL pattern."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         # Create higher highs and higher lows
         bars = []
         for i in range(15):
@@ -293,7 +403,7 @@ class TestTFBiasComputation:
 
     def test_bias_with_insufficient_data(self):
         """Bias computation handles insufficient data gracefully."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [make_bar(base_ts, 100, 102, 99, 101)]  # Only 1 bar
 
         bias = compute_tf_bias(m5_bars=bars)
@@ -304,7 +414,7 @@ class TestTFBiasComputation:
 
     def test_bias_with_trending_data(self):
         """Bias computation detects trending market."""
-        base_ts = datetime(2024, 1, 1)
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         # Create strong uptrend
         bars = []
         for i in range(250):  # Need enough for EMA(200)
@@ -338,23 +448,26 @@ class TestUnicornModelHelpers:
     def test_macro_window_check(self):
         """Test macro time window validation."""
         from app.services.strategy.strategies.unicorn_model import is_in_macro_window
+        from zoneinfo import ZoneInfo
+
+        ET = ZoneInfo("America/New_York")
 
         # NY AM session (9:30-11:00 ET)
-        in_window = datetime(2024, 1, 15, 10, 0)  # 10:00 AM
+        in_window = datetime(2024, 1, 15, 10, 0, tzinfo=ET)  # 10:00 AM ET
         assert is_in_macro_window(in_window) is True
 
         # Outside window
-        out_window = datetime(2024, 1, 15, 12, 0)  # 12:00 PM
+        out_window = datetime(2024, 1, 15, 12, 0, tzinfo=ET)  # 12:00 PM ET
         assert is_in_macro_window(out_window) is False
 
-    def test_max_stop_handles(self):
-        """Test max stop handle lookup."""
-        from app.services.strategy.strategies.unicorn_model import get_max_stop_handles
+    def test_max_stop_points(self):
+        """Test max stop points lookup."""
+        from app.services.strategy.strategies.unicorn_model import get_max_stop_points
 
-        assert get_max_stop_handles("NQ") == 30
-        assert get_max_stop_handles("MNQ") == 30
-        assert get_max_stop_handles("ES") == 10
-        assert get_max_stop_handles("MES") == 10
+        assert get_max_stop_points("NQ") == 30
+        assert get_max_stop_points("MNQ") == 30
+        assert get_max_stop_points("ES") == 10
+        assert get_max_stop_points("MES") == 10
 
     def test_point_value(self):
         """Test point value lookup."""

@@ -32,6 +32,8 @@ from math import floor
 from typing import Optional
 from uuid import UUID
 
+from app.utils.time import to_eastern_time
+
 from app.schemas import IntentAction, PaperState, TradeIntent
 from app.services.strategy.indicators.ict_patterns import (
     FairValueGap,
@@ -117,12 +119,15 @@ class UnicornConfig:
     fvg_min_atr_mult: float = 0.3      # FVG must be >= 0.3 * ATR
     stop_max_atr_mult: float = 3.0     # Stop must be <= 3.0 * ATR
 
-    # Stop placement buffer (handles beyond FVG/sweep edge)
-    stop_buffer_handles: float = 2.0
+    # FVG invalidation threshold (partial fill)
+    max_fvg_fill_pct: float = 1.0      # 1.0 = only 100% fill invalidates (legacy)
+
+    # Stop placement buffer (points beyond FVG/sweep edge)
+    stop_buffer_points: float = 2.0
 
     # Legacy absolute thresholds (used if ATR not available)
-    max_stop_handles_nq: float = 30.0
-    max_stop_handles_es: float = 10.0
+    max_stop_points_nq: float = 30.0
+    max_stop_points_es: float = 10.0
 
     # Point values
     point_value_nq: float = 20.0
@@ -144,8 +149,8 @@ class UnicornConfig:
 DEFAULT_CONFIG = UnicornConfig()
 
 # Risk parameters for NQ/ES (legacy, for backward compatibility)
-MAX_STOP_HANDLES_NQ = 30  # 30 points max stop for NQ
-MAX_STOP_HANDLES_ES = 10  # 10 points max stop for ES
+MAX_STOP_POINTS_NQ = 30  # 30 points max stop for NQ
+MAX_STOP_POINTS_ES = 10  # 10 points max stop for ES
 POINT_VALUE_NQ = 20.0  # $20 per point for NQ
 POINT_VALUE_ES = 50.0  # $50 per point for ES
 
@@ -243,7 +248,7 @@ class UnicornSetup:
     entry_price_model: float     # Same as entry_price; backtest overrides with fill_price
     stop_price: float
     target_price: float
-    risk_handles: float
+    risk_points: float
 
     # Component confirmations
     htf_bias: TimeframeBias
@@ -285,13 +290,13 @@ def is_in_macro_window(
     Check if timestamp is within a valid macro trading window.
 
     Args:
-        ts: Timestamp to check
+        ts: Timezone-aware datetime to check (any timezone).
         profile: Session profile (STRICT, NORMAL, WIDE)
 
-    Note: This assumes the timestamp is in ET timezone.
-    In production, proper timezone conversion would be needed.
+    Raises:
+        ValueError: If ts is a naive datetime.
     """
-    current_time = ts.time()
+    current_time = to_eastern_time(ts)
     windows = SESSION_WINDOWS.get(profile, MACRO_WINDOWS)
 
     for start, end in windows:
@@ -348,13 +353,13 @@ def _calculate_atr(
     return atr_values
 
 
-def get_max_stop_handles(
+def get_max_stop_points(
     symbol: str,
     atr: Optional[float] = None,
     config: Optional[UnicornConfig] = None,
 ) -> float:
     """
-    Get maximum allowed stop distance in handles for the instrument.
+    Get maximum allowed stop distance in points for the instrument.
 
     Args:
         symbol: Trading symbol
@@ -374,11 +379,11 @@ def get_max_stop_handles(
     # Fall back to absolute limits
     symbol_upper = symbol.upper()
     if "NQ" in symbol_upper or "MNQ" in symbol_upper:
-        return config.max_stop_handles_nq
+        return config.max_stop_points_nq
     elif "ES" in symbol_upper or "MES" in symbol_upper:
-        return config.max_stop_handles_es
+        return config.max_stop_points_es
     else:
-        return config.max_stop_handles_nq  # Default to NQ
+        return config.max_stop_points_nq  # Default to NQ
 
 
 def get_point_value(symbol: str) -> float:
@@ -403,6 +408,7 @@ def find_entry_zone(
     mitigations: list[MitigationBlock],
     direction: BiasDirection,
     current_price: float,
+    max_fvg_fill_pct: float = 1.0,
 ) -> tuple[Optional[FairValueGap], Optional[BreakerBlock | MitigationBlock], float]:
     """
     Find the best entry zone combining FVG with Breaker/Mitigation block.
@@ -414,11 +420,11 @@ def find_entry_zone(
     best_block: Optional[BreakerBlock | MitigationBlock] = None
     entry_price = current_price
 
-    # Filter FVGs by direction and unfilled status
+    # Filter FVGs by direction and invalidation status
     relevant_fvgs = [
         f
         for f in fvgs
-        if not f.filled
+        if not f.invalidated(max_fvg_fill_pct)
         and (
             (direction == BiasDirection.BULLISH and f.fvg_type == FVGType.BULLISH)
             or (direction == BiasDirection.BEARISH and f.fvg_type == FVGType.BEARISH)
@@ -510,13 +516,13 @@ def calculate_stop_and_target(
         config: Strategy configuration
 
     Returns:
-        Tuple of (stop_price, target_price, risk_handles, stop_valid)
+        Tuple of (stop_price, target_price, risk_points, stop_valid)
     """
     if config is None:
         config = DEFAULT_CONFIG
 
-    max_handles = get_max_stop_handles(symbol, atr=atr, config=config)
-    buf = config.stop_buffer_handles
+    max_points = get_max_stop_points(symbol, atr=atr, config=config)
+    buf = config.stop_buffer_points
 
     if direction == BiasDirection.BULLISH:
         # Stop below FVG or sweep low
@@ -525,12 +531,12 @@ def calculate_stop_and_target(
         elif liquidity_sweep:
             stop_price = liquidity_sweep.sweep_low - buf
         else:
-            stop_price = entry_price - max_handles
+            stop_price = entry_price - max_points
 
-        risk_handles = entry_price - stop_price
+        risk_points = entry_price - stop_price
 
         # Target at 2R or next liquidity
-        target_price = entry_price + (risk_handles * 2)
+        target_price = entry_price + (risk_points * 2)
 
     else:  # BEARISH
         # Stop above FVG or sweep high
@@ -539,16 +545,16 @@ def calculate_stop_and_target(
         elif liquidity_sweep:
             stop_price = liquidity_sweep.sweep_high + buf
         else:
-            stop_price = entry_price + max_handles
+            stop_price = entry_price + max_points
 
-        risk_handles = stop_price - entry_price
+        risk_points = stop_price - entry_price
 
         # Target at 2R
-        target_price = entry_price - (risk_handles * 2)
+        target_price = entry_price - (risk_points * 2)
 
-    stop_valid = risk_handles <= max_handles
+    stop_valid = risk_points <= max_points
 
-    return stop_price, target_price, risk_handles, stop_valid
+    return stop_price, target_price, risk_points, stop_valid
 
 
 def analyze_unicorn_setup(
@@ -604,7 +610,7 @@ def analyze_unicorn_setup(
             entry_price_model=current_price,
             stop_price=current_price,
             target_price=current_price,
-            risk_handles=0,
+            risk_points=0,
             htf_bias=htf_bias,
             liquidity_sweep=None,
             entry_fvg=None,
@@ -651,7 +657,8 @@ def analyze_unicorn_setup(
 
     # 3. Find entry zone (HTF FVG)
     entry_fvg, entry_block, entry_price = find_entry_zone(
-        htf_fvgs, htf_breakers, htf_mitigations, direction, current_price
+        htf_fvgs, htf_breakers, htf_mitigations, direction, current_price,
+        max_fvg_fill_pct=config.max_fvg_fill_pct,
     )
     score.htf_fvg = entry_fvg is not None
 
@@ -673,7 +680,7 @@ def analyze_unicorn_setup(
     # 6. Check for LTF FVG (DOL confirmation)
     relevant_ltf_fvg: Optional[FairValueGap] = None
     for fvg in ltf_fvgs:
-        if not fvg.filled:
+        if not fvg.invalidated(config.max_fvg_fill_pct):
             if (
                 direction == BiasDirection.BULLISH and fvg.fvg_type == FVGType.BULLISH
             ) or (
@@ -688,7 +695,7 @@ def analyze_unicorn_setup(
     score.macro_window = in_macro
 
     # 8. Calculate stop and target (ATR-based validation)
-    stop_price, target_price, risk_handles, stop_valid = calculate_stop_and_target(
+    stop_price, target_price, risk_points, stop_valid = calculate_stop_and_target(
         entry_price,
         direction,
         entry_fvg,
@@ -706,7 +713,7 @@ def analyze_unicorn_setup(
         entry_price_model=entry_price,  # Theoretical FVG midpoint
         stop_price=stop_price,
         target_price=target_price,
-        risk_handles=risk_handles,
+        risk_points=risk_points,
         htf_bias=htf_bias,
         liquidity_sweep=relevant_sweep,
         entry_fvg=entry_fvg,
@@ -741,7 +748,7 @@ def evaluate_unicorn_model(
     4. Breaker or Mitigation block confluence
     5. LTF FVG confirmation (5-15m)
     6. MSS (Market Structure Shift)
-    7. Valid stop placement (within max handles)
+    7. Valid stop placement (within max points)
     8. Valid macro time window
 
     Args:
@@ -847,7 +854,7 @@ def evaluate_unicorn_model(
                     else:
                         signals.append("htf_bias_not_tradeable")
                 if not cs.stop_valid:
-                    signals.append(f"stop_too_wide_{setup.risk_handles:.1f}_handles")
+                    signals.append(f"stop_too_wide_{setup.risk_points:.1f}_points")
                 if not cs.macro_window:
                     signals.append("outside_macro_window")
             else:
@@ -860,7 +867,7 @@ def evaluate_unicorn_model(
         else:
             # Entry criteria met - generate entry intent
             point_value = get_point_value(symbol)
-            risk_per_contract = setup.risk_handles * point_value
+            risk_per_contract = setup.risk_points * point_value
 
             # Position sizing based on risk
             if risk_per_contract > 0:
@@ -886,7 +893,7 @@ def evaluate_unicorn_model(
                         signal_strength=setup.confidence,
                         reason=f"Unicorn {setup.direction.value}: "
                         f"FVG@{setup.entry_price:.2f}, "
-                        f"stop={setup.risk_handles:.1f}h, "
+                        f"stop={setup.risk_points:.1f}pt, "
                         f"conf={setup.confidence:.2f}",
                     )
                 )
@@ -912,7 +919,7 @@ def evaluate_unicorn_model(
                     "entry_price": setup.entry_price,
                     "stop_price": setup.stop_price,
                     "target_price": setup.target_price,
-                    "risk_handles": setup.risk_handles,
+                    "risk_points": setup.risk_points,
                     "all_criteria_met": setup.all_criteria_met,
                     "entry_decision": setup.criteria_score.decide_entry(
                         min_scored=config.min_scored_criteria

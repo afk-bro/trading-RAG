@@ -12,7 +12,7 @@ Each timeframe contributes to a final bias with confidence scoring.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -709,7 +709,7 @@ def compute_tf_bias(
         TimeframeBias with all components and final direction
     """
     if timestamp is None:
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
 
     # Compute individual biases
     daily_bias = compute_daily_bias(daily_bars) if daily_bars else None

@@ -47,13 +47,26 @@ class FairValueGap:
     gap_size: float  # Size in price units
     bar_index: int  # Index of the middle candle (N-1)
     timestamp: datetime
-    filled: bool = False  # Has price returned to fill this gap?
+    filled: bool = False  # Has price returned to fully (100%) fill this gap?
     fill_percent: float = 0.0  # How much of gap has been filled (0-1)
 
     @property
     def midpoint(self) -> float:
         """Midpoint of the gap (potential entry level)."""
         return (self.gap_high + self.gap_low) / 2
+
+    def invalidated(self, max_fill_pct: float = 1.0) -> bool:
+        """Whether the FVG is invalidated (fill exceeds threshold).
+
+        Args:
+            max_fill_pct: Maximum fill percentage before FVG is considered
+                          invalidated. 1.0 means only 100% fill invalidates
+                          (same as ``filled``). 0.75 means 75%+ fill invalidates.
+
+        Returns:
+            True if the FVG should no longer be used for entries.
+        """
+        return self.fill_percent >= max_fill_pct
 
 
 @dataclass
@@ -150,6 +163,7 @@ def detect_fvgs(
     lookback: int = 50,
     min_gap_atr_mult: Optional[float] = None,
     atr_period: int = 14,
+    as_of_ts: Optional[datetime] = None,
 ) -> list[FairValueGap]:
     """
     Detect Fair Value Gaps in price data.
@@ -164,10 +178,15 @@ def detect_fvgs(
         lookback: Number of bars to analyze
         min_gap_atr_mult: Minimum gap size as ATR multiple (overrides min_gap_size)
         atr_period: ATR period for volatility normalization
+        as_of_ts: Causal cutoff — only consider bars with ts <= as_of_ts.
+                  None means use all bars (backward compatible).
 
     Returns:
         List of detected FVGs, newest first
     """
+    if as_of_ts is not None:
+        bars = [b for b in bars if b.ts <= as_of_ts]
+
     if len(bars) < 3:
         return []
 
@@ -229,17 +248,24 @@ def detect_fvgs(
 
     # Check if FVGs have been filled
     if fvgs and len(bars) > start_idx:
-        _check_fvg_fills(fvgs, bars)
+        _check_fvg_fills(fvgs, bars, as_of_ts=as_of_ts)
 
     return list(reversed(fvgs))  # Return newest first
 
 
-def _check_fvg_fills(fvgs: list[FairValueGap], bars: list[OHLCVBar]) -> None:
+def _check_fvg_fills(
+    fvgs: list[FairValueGap],
+    bars: list[OHLCVBar],
+    as_of_ts: Optional[datetime] = None,
+) -> None:
     """Check if FVGs have been filled by subsequent price action."""
     for fvg in fvgs:
         # Look at bars after the FVG formed
         for i in range(fvg.bar_index + 2, len(bars)):
             bar = bars[i]
+
+            if as_of_ts is not None and bar.ts > as_of_ts:
+                break
 
             if fvg.fvg_type == FVGType.BULLISH:
                 # Bullish FVG filled when price trades down into it

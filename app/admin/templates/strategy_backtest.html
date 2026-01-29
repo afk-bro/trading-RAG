@@ -291,16 +291,16 @@ function renderSessionChart(sessionStats) {
         marker: {
             color: sessions.map(s => sessionStats[s].pnl >= 0 ? '#3fb950' : '#f85149')
         },
-        text: sessions.map(s => sessionStats[s].pnl.toFixed(1) + 'h'),
+        text: sessions.map(s => sessionStats[s].pnl.toFixed(1) + 'pt'),
         textposition: 'outside',
-        hovertemplate: '%{x}<br>PnL: %{y:.1f} handles<br>Trades: ' +
+        hovertemplate: '%{x}<br>PnL: %{y:.1f} points<br>Trades: ' +
             sessions.map(s => sessionStats[s].trades).join(',') + '<extra></extra>'
     }];
 
     const layout = {
         title: { text: 'PnL by Session', font: { size: 14, color: '#8b949e' } },
         xaxis: { gridcolor: '#30363d' },
-        yaxis: { title: 'PnL (handles)', gridcolor: '#30363d' },
+        yaxis: { title: 'PnL (points)', gridcolor: '#30363d' },
         margin: { l: 60, r: 40, t: 40, b: 60 },
         paper_bgcolor: '#161b22',
         plot_bgcolor: '#0d1117',

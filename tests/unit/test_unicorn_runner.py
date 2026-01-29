@@ -2,8 +2,11 @@
 Unit tests for Unicorn Model backtest runner.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import pytest
+
+ET = ZoneInfo("America/New_York")
 
 from app.services.strategy.models import OHLCVBar
 from app.services.backtest.engines.unicorn_runner import (
@@ -21,7 +24,7 @@ from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
     SessionProfile,
     is_in_macro_window,
-    get_max_stop_handles,
+    get_max_stop_points,
     _ranges_overlap,
     analyze_unicorn_setup,
 )
@@ -79,27 +82,27 @@ class TestSessionClassification:
 
     def test_ny_am_session(self):
         """Correctly identifies NY AM session."""
-        ts = datetime(2024, 1, 15, 10, 30)
+        ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
         assert classify_session(ts) == TradingSession.NY_AM
 
     def test_ny_pm_session(self):
         """Correctly identifies NY PM session."""
-        ts = datetime(2024, 1, 15, 14, 0)
+        ts = datetime(2024, 1, 15, 14, 0, tzinfo=ET)
         assert classify_session(ts) == TradingSession.NY_PM
 
     def test_london_session(self):
         """Correctly identifies London session."""
-        ts = datetime(2024, 1, 15, 3, 30)
+        ts = datetime(2024, 1, 15, 3, 30, tzinfo=ET)
         assert classify_session(ts) == TradingSession.LONDON
 
     def test_asia_session(self):
         """Correctly identifies Asia session."""
-        ts = datetime(2024, 1, 15, 19, 30)
+        ts = datetime(2024, 1, 15, 19, 30, tzinfo=ET)
         assert classify_session(ts) == TradingSession.ASIA
 
     def test_off_hours(self):
         """Correctly identifies off-hours."""
-        ts = datetime(2024, 1, 15, 12, 0)  # Between sessions
+        ts = datetime(2024, 1, 15, 12, 0, tzinfo=ET)  # Between sessions
         assert classify_session(ts) == TradingSession.OFF_HOURS
 
 
@@ -150,7 +153,7 @@ class TestBacktestRunner:
 
     def test_insufficient_data_raises(self):
         """Runner raises on insufficient data."""
-        bars = [make_bar(datetime.now(), 100, 101, 99, 100)]
+        bars = [make_bar(datetime.now(timezone.utc), 100, 101, 99, 100)]
 
         with pytest.raises(ValueError, match="Insufficient bars"):
             run_unicorn_backtest("NQ", bars, bars)
@@ -158,7 +161,7 @@ class TestBacktestRunner:
     def test_backtest_with_synthetic_data(self):
         """Runner completes with synthetic data."""
         # Generate enough bars for backtest
-        start_ts = datetime(2024, 1, 2, 9, 30)  # Start in NY AM
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)  # Start in NY AM
         htf_bars = generate_trending_bars(
             start_ts, 200, 17000, trend=2.0, interval_minutes=15
         )
@@ -180,7 +183,7 @@ class TestBacktestRunner:
 
     def test_report_formatting(self):
         """Report formatter produces valid output."""
-        start_ts = datetime(2024, 1, 2, 9, 30)
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
         htf_bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
         ltf_bars = generate_trending_bars(start_ts, 300, 17000, interval_minutes=5)
 
@@ -200,11 +203,11 @@ class TestCriteriaChecker:
 
     def test_check_criteria_returns_check_object(self):
         """check_criteria returns a CriteriaCheck object."""
-        start_ts = datetime(2024, 1, 2, 10, 0)  # In NY AM
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)  # In NY AM
         bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
 
         # Use timestamp within NY AM window (10:30)
-        check_ts = datetime(2024, 1, 2, 10, 30)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
 
         result = check_criteria(
             bars=bars,
@@ -220,14 +223,14 @@ class TestCriteriaChecker:
     def test_check_criteria_detects_macro_window(self):
         """Macro window detection works."""
         # In macro window
-        ts_in = datetime(2024, 1, 2, 10, 0)
+        ts_in = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
         bars = generate_trending_bars(ts_in, 60, 17000, interval_minutes=15)
 
         result = check_criteria(bars, bars, bars[-30:], "NQ", ts_in)
         assert result.in_macro_window is True
 
         # Outside macro window
-        ts_out = datetime(2024, 1, 2, 12, 0)
+        ts_out = datetime(2024, 1, 2, 12, 0, tzinfo=ET)
         bars_out = generate_trending_bars(ts_out, 60, 17000, interval_minutes=15)
 
         result_out = check_criteria(bars_out, bars_out, bars_out[-30:], "NQ", ts_out)
@@ -334,22 +337,22 @@ class TestMacroWindowProfile:
 
     def test_wide_only_window_fails_under_normal(self):
         """19:30 ET is in WIDE (Asia) but NOT in NORMAL."""
-        ts = datetime(2024, 1, 15, 19, 30)
+        ts = datetime(2024, 1, 15, 19, 30, tzinfo=ET)
         assert is_in_macro_window(ts, SessionProfile.WIDE) is True
         assert is_in_macro_window(ts, SessionProfile.NORMAL) is False
 
     def test_strict_only_allows_ny_am(self):
         """3:30 ET (London) is in NORMAL but NOT in STRICT."""
-        ts = datetime(2024, 1, 15, 3, 30)
+        ts = datetime(2024, 1, 15, 3, 30, tzinfo=ET)
         assert is_in_macro_window(ts, SessionProfile.NORMAL) is True
         assert is_in_macro_window(ts, SessionProfile.STRICT) is False
 
     def test_boundary_end_exclusive(self):
         """Exact end time (11:00:00) should be excluded (half-open interval)."""
-        ts_end = datetime(2024, 1, 15, 11, 0, 0)
+        ts_end = datetime(2024, 1, 15, 11, 0, 0, tzinfo=ET)
         assert is_in_macro_window(ts_end, SessionProfile.STRICT) is False
 
-        ts_just_before = datetime(2024, 1, 15, 10, 59, 59)
+        ts_just_before = datetime(2024, 1, 15, 10, 59, 59, tzinfo=ET)
         assert is_in_macro_window(ts_just_before, SessionProfile.STRICT) is True
 
 
@@ -359,7 +362,7 @@ class TestBacktestUsesSessionProfile:
     def test_check_criteria_respects_normal_profile(self):
         """Asia-window timestamp with NORMAL profile => macro_window False."""
         # 19:30 is inside WIDE (Asia) but outside NORMAL
-        ts = datetime(2024, 1, 15, 19, 30)
+        ts = datetime(2024, 1, 15, 19, 30, tzinfo=ET)
         bars = generate_trending_bars(ts, 60, 17000, interval_minutes=15)
 
         config = UnicornConfig(session_profile=SessionProfile.NORMAL)
@@ -368,7 +371,7 @@ class TestBacktestUsesSessionProfile:
 
     def test_check_criteria_respects_wide_profile(self):
         """Same timestamp with WIDE profile => macro_window True."""
-        ts = datetime(2024, 1, 15, 19, 30)
+        ts = datetime(2024, 1, 15, 19, 30, tzinfo=ET)
         bars = generate_trending_bars(ts, 60, 17000, interval_minutes=15)
 
         config = UnicornConfig(session_profile=SessionProfile.WIDE)
@@ -383,18 +386,18 @@ class TestStopDistanceBoundary:
         """risk_handles == 3.0 * ATR => stop_valid = True."""
         atr = 10.0
         config = UnicornConfig(stop_max_atr_mult=3.0)
-        max_handles = get_max_stop_handles("NQ", atr=atr, config=config)
-        # max_handles = 30.0
-        assert max_handles == 30.0
-        # risk_handles <= max_handles => valid
-        assert 30.0 <= max_handles  # boundary: exactly equal passes
+        max_points = get_max_stop_points("NQ", atr=atr, config=config)
+        # max_points = 30.0
+        assert max_points == 30.0
+        # risk_handles <= max_points => valid
+        assert 30.0 <= max_points  # boundary: exactly equal passes
 
     def test_stop_above_max_atr_fails(self):
         """risk_handles > 3.0 * ATR => stop_valid = False."""
         atr = 10.0
         config = UnicornConfig(stop_max_atr_mult=3.0)
-        max_handles = get_max_stop_handles("NQ", atr=atr, config=config)
-        assert 30.1 > max_handles  # 30.1 exceeds 30.0 => would fail
+        max_points = get_max_stop_points("NQ", atr=atr, config=config)
+        assert 30.1 > max_points  # 30.1 exceeds 30.0 => would fail
 
 
 class TestConfidenceGate:
@@ -502,7 +505,7 @@ class TestParityDiagnostics:
 
     def test_setup_occurrence_has_parity_fields(self):
         """Parity fields are populated on setup records."""
-        start_ts = datetime(2024, 1, 2, 10, 0)
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
         htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
         ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
 
@@ -544,3 +547,43 @@ class TestParityDiagnostics:
             valid_scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"}
             for name in setup.scored_missing:
                 assert name in valid_scored, f"Invalid scored criterion: {name}"
+
+
+class TestTimezoneConversion:
+    """Timezone-aware session classification and macro window tests."""
+
+    def test_utc_timestamp_converts_to_et_for_session(self):
+        """UTC timestamp at 15:30 = 10:30 ET (winter) => NY_AM."""
+        ts = datetime(2024, 1, 15, 15, 30, tzinfo=timezone.utc)
+        assert classify_session(ts) == TradingSession.NY_AM
+
+    def test_summer_dst_utc_to_et(self):
+        """UTC 13:30 in July = 9:30 EDT => NY_AM."""
+        ts = datetime(2024, 7, 15, 13, 30, tzinfo=timezone.utc)
+        assert classify_session(ts) == TradingSession.NY_AM
+
+    def test_winter_utc_to_et(self):
+        """UTC 14:30 in January = 9:30 EST => NY_AM."""
+        ts = datetime(2024, 1, 15, 14, 30, tzinfo=timezone.utc)
+        assert classify_session(ts) == TradingSession.NY_AM
+
+    def test_naive_datetime_raises(self):
+        """Naive datetime must raise ValueError."""
+        ts = datetime(2024, 1, 15, 10, 30)  # naive
+        with pytest.raises(ValueError, match="tz-aware"):
+            classify_session(ts)
+
+    def test_naive_datetime_raises_in_macro_window(self):
+        """is_in_macro_window rejects naive datetime."""
+        ts = datetime(2024, 1, 15, 10, 30)  # naive
+        with pytest.raises(ValueError, match="tz-aware"):
+            is_in_macro_window(ts)
+
+    def test_boundary_after_conversion(self):
+        """UTC 16:00 = 11:00 ET (winter) => end of NY_AM, should be excluded."""
+        ts = datetime(2024, 1, 15, 16, 0, 0, tzinfo=timezone.utc)
+        assert is_in_macro_window(ts, SessionProfile.STRICT) is False
+
+        # Just before boundary
+        ts_before = datetime(2024, 1, 15, 15, 59, 59, tzinfo=timezone.utc)
+        assert is_in_macro_window(ts_before, SessionProfile.STRICT) is True

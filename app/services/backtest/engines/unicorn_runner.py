@@ -16,6 +16,8 @@ from typing import Optional
 import random
 import statistics
 
+from app.utils.time import to_eastern_time
+
 from app.services.strategy.models import OHLCVBar
 from app.services.strategy.indicators.ict_patterns import (
     detect_fvgs,
@@ -38,7 +40,7 @@ from app.services.strategy.strategies.unicorn_model import (
     CriteriaScore as StrategyCriteriaScore,
     analyze_unicorn_setup,
     is_in_macro_window,
-    get_max_stop_handles,
+    get_max_stop_points,
     get_point_value,
     find_entry_zone,
     calculate_stop_and_target,
@@ -104,7 +106,7 @@ class CriteriaCheck:
     htf_bias_confidence: float = 0.0
     sweep_type: Optional[str] = None
     fvg_size: float = 0.0
-    stop_handles: float = 0.0
+    stop_points: float = 0.0
     session: TradingSession = TradingSession.OFF_HOURS
 
     @property
@@ -206,7 +208,7 @@ class TradeRecord:
     # Risk management
     stop_price: float
     target_price: float
-    risk_handles: float
+    risk_points: float
 
     # MFE/MAE tracking
     mfe: float = 0.0  # Maximum Favorable Excursion (best unrealized profit)
@@ -220,7 +222,7 @@ class TradeRecord:
     exit_reason: Optional[str] = None
 
     # Result
-    pnl_handles: float = 0.0
+    pnl_points: float = 0.0
     pnl_dollars: float = 0.0
     outcome: TradeOutcome = TradeOutcome.OPEN
     r_multiple: float = 0.0  # PnL as multiple of risk
@@ -257,7 +259,7 @@ class SessionStats:
     trades_taken: int = 0
     wins: int = 0
     losses: int = 0
-    total_pnl_handles: float = 0.0
+    total_pnl_points: float = 0.0
     avg_mfe: float = 0.0
     avg_mae: float = 0.0
     avg_r_multiple: float = 0.0
@@ -327,10 +329,10 @@ class UnicornBacktestResult:
     breakevens: int = 0
 
     # PnL
-    total_pnl_handles: float = 0.0
+    total_pnl_points: float = 0.0
     total_pnl_dollars: float = 0.0
-    largest_win_handles: float = 0.0
-    largest_loss_handles: float = 0.0
+    largest_win_points: float = 0.0
+    largest_loss_points: float = 0.0
 
     # MFE/MAE analysis
     avg_mfe: float = 0.0
@@ -363,18 +365,18 @@ class UnicornBacktestResult:
 
     @property
     def profit_factor(self) -> float:
-        gross_profit = sum(t.pnl_handles for t in self.trades if t.pnl_handles > 0)
-        gross_loss = abs(sum(t.pnl_handles for t in self.trades if t.pnl_handles < 0))
+        gross_profit = sum(t.pnl_points for t in self.trades if t.pnl_points > 0)
+        gross_loss = abs(sum(t.pnl_points for t in self.trades if t.pnl_points < 0))
         if gross_loss == 0:
             return float('inf') if gross_profit > 0 else 0.0
         return gross_profit / gross_loss
 
     @property
-    def expectancy_handles(self) -> float:
-        """Expected value per trade in handles."""
+    def expectancy_points(self) -> float:
+        """Expected value per trade in points."""
         if self.trades_taken == 0:
             return 0.0
-        return self.total_pnl_handles / self.trades_taken
+        return self.total_pnl_points / self.trades_taken
 
     @property
     def setup_to_trade_ratio(self) -> float:
@@ -385,8 +387,15 @@ class UnicornBacktestResult:
 
 
 def classify_session(ts: datetime) -> TradingSession:
-    """Classify timestamp into trading session."""
-    t = ts.time()
+    """Classify timestamp into trading session.
+
+    Args:
+        ts: Timezone-aware datetime (any timezone).
+
+    Raises:
+        ValueError: If ts is a naive datetime.
+    """
+    t = to_eastern_time(ts)
 
     # NY AM: 9:30-11:00
     if time(9, 30) <= t <= time(11, 0):
@@ -478,7 +487,7 @@ def check_criteria(
         atr_period=config.atr_period,
     )
     for fvg in htf_fvgs:
-        if not fvg.filled:
+        if not fvg.invalidated(config.max_fvg_fill_pct):
             if (direction == BiasDirection.BULLISH and fvg.fvg_type == FVGType.BULLISH):
                 check.htf_fvg_found = True
                 check.fvg_size = fvg.gap_size
@@ -493,7 +502,8 @@ def check_criteria(
     mitigations = detect_mitigation_blocks(htf_bars, lookback=50)
 
     _, entry_block_check, _ = find_entry_zone(
-        htf_fvgs, breakers, mitigations, direction, current_price
+        htf_fvgs, breakers, mitigations, direction, current_price,
+        max_fvg_fill_pct=config.max_fvg_fill_pct,
     )
     check.breaker_block_found = entry_block_check is not None
 
@@ -505,7 +515,7 @@ def check_criteria(
         atr_period=config.atr_period,
     )
     for fvg in ltf_fvgs:
-        if not fvg.filled:
+        if not fvg.invalidated(config.max_fvg_fill_pct):
             if (direction == BiasDirection.BULLISH and fvg.fvg_type == FVGType.BULLISH):
                 check.ltf_fvg_found = True
                 break
@@ -524,9 +534,10 @@ def check_criteria(
             break
 
     # 7. Stop validation (ATR-based max stop)
-    max_handles = get_max_stop_handles(symbol, atr=current_atr, config=config)
+    max_points = get_max_stop_points(symbol, atr=current_atr, config=config)
     entry_fvg, entry_block, entry_price = find_entry_zone(
-        htf_fvgs, breakers, mitigations, direction, current_price
+        htf_fvgs, breakers, mitigations, direction, current_price,
+        max_fvg_fill_pct=config.max_fvg_fill_pct,
     )
 
     if entry_fvg:
@@ -535,10 +546,10 @@ def check_criteria(
         else:
             stop_distance = entry_fvg.gap_high - current_price
 
-        check.stop_handles = abs(stop_distance)
-        check.stop_valid = check.stop_handles <= max_handles
+        check.stop_points = abs(stop_distance)
+        check.stop_valid = check.stop_points <= max_points
     else:
-        check.stop_handles = max_handles + 1  # Invalid
+        check.stop_points = max_points + 1  # Invalid
         check.stop_valid = False
 
     # 8. Macro window
@@ -640,7 +651,7 @@ def run_unicorn_backtest(
 
     # Tick size for slippage calculation (NQ/ES = 0.25)
     tick_size = 0.25
-    slippage_handles = slippage_ticks * tick_size  # Per side
+    slippage_points = slippage_ticks * tick_size  # Per side
 
     # ATR for volatility-normalized stops (computed per-bar in loop)
     htf_atr_values = _calculate_atr(htf_bars, config.atr_period)
@@ -719,28 +730,28 @@ def run_unicorn_backtest(
 
                     if stop_wins:
                         # Exit at stop with slippage (worse for long = lower)
-                        trade.exit_price = trade.stop_price - slippage_handles
+                        trade.exit_price = trade.stop_price - slippage_points
                         trade.exit_reason = "stop_loss"
                     else:
                         # Exit at target with slippage (worse for long = lower)
-                        trade.exit_price = trade.target_price - slippage_handles
+                        trade.exit_price = trade.target_price - slippage_points
                         trade.exit_reason = "target"
                     trade.exit_time = ts
-                    trade.pnl_handles = trade.exit_price - trade.entry_price
+                    trade.pnl_points = trade.exit_price - trade.entry_price
 
                 elif stop_hit:
                     # Exit at stop with slippage
-                    trade.exit_price = trade.stop_price - slippage_handles
+                    trade.exit_price = trade.stop_price - slippage_points
                     trade.exit_time = ts
                     trade.exit_reason = "stop_loss"
-                    trade.pnl_handles = trade.exit_price - trade.entry_price
+                    trade.pnl_points = trade.exit_price - trade.entry_price
 
                 elif target_hit:
                     # Exit at target with slippage
-                    trade.exit_price = trade.target_price - slippage_handles
+                    trade.exit_price = trade.target_price - slippage_points
                     trade.exit_time = ts
                     trade.exit_reason = "target"
-                    trade.pnl_handles = trade.exit_price - trade.entry_price
+                    trade.pnl_points = trade.exit_price - trade.entry_price
 
             else:  # Short trade
                 unrealized = trade.entry_price - bar.close
@@ -766,28 +777,28 @@ def run_unicorn_backtest(
 
                     if stop_wins:
                         # Exit at stop with slippage (worse for short = higher)
-                        trade.exit_price = trade.stop_price + slippage_handles
+                        trade.exit_price = trade.stop_price + slippage_points
                         trade.exit_reason = "stop_loss"
                     else:
                         # Exit at target with slippage (worse for short = higher)
-                        trade.exit_price = trade.target_price + slippage_handles
+                        trade.exit_price = trade.target_price + slippage_points
                         trade.exit_reason = "target"
                     trade.exit_time = ts
-                    trade.pnl_handles = trade.entry_price - trade.exit_price
+                    trade.pnl_points = trade.entry_price - trade.exit_price
 
                 elif stop_hit:
                     # Exit at stop with slippage
-                    trade.exit_price = trade.stop_price + slippage_handles
+                    trade.exit_price = trade.stop_price + slippage_points
                     trade.exit_time = ts
                     trade.exit_reason = "stop_loss"
-                    trade.pnl_handles = trade.entry_price - trade.exit_price
+                    trade.pnl_points = trade.entry_price - trade.exit_price
 
                 elif target_hit:
                     # Exit at target with slippage
-                    trade.exit_price = trade.target_price + slippage_handles
+                    trade.exit_price = trade.target_price + slippage_points
                     trade.exit_time = ts
                     trade.exit_reason = "target"
-                    trade.pnl_handles = trade.entry_price - trade.exit_price
+                    trade.pnl_points = trade.entry_price - trade.exit_price
 
             # Time-stop: exit if not at +threshold R within N minutes
             # ICT-style entries often work fast; cut grindy losers early
@@ -798,29 +809,29 @@ def run_unicorn_backtest(
             ):
                 # Calculate unrealized R-multiple
                 if trade.direction == BiasDirection.BULLISH:
-                    unrealized_r = (bar.close - trade.entry_price) / trade.risk_handles if trade.risk_handles > 0 else 0
+                    unrealized_r = (bar.close - trade.entry_price) / trade.risk_points if trade.risk_points > 0 else 0
                 else:
-                    unrealized_r = (trade.entry_price - bar.close) / trade.risk_handles if trade.risk_handles > 0 else 0
+                    unrealized_r = (trade.entry_price - bar.close) / trade.risk_points if trade.risk_points > 0 else 0
 
                 # Exit if below threshold
                 if unrealized_r < time_stop_r_threshold:
                     if trade.direction == BiasDirection.BULLISH:
-                        trade.exit_price = bar.close - slippage_handles
-                        trade.pnl_handles = trade.exit_price - trade.entry_price
+                        trade.exit_price = bar.close - slippage_points
+                        trade.pnl_points = trade.exit_price - trade.entry_price
                     else:
-                        trade.exit_price = bar.close + slippage_handles
-                        trade.pnl_handles = trade.entry_price - trade.exit_price
+                        trade.exit_price = bar.close + slippage_points
+                        trade.pnl_points = trade.entry_price - trade.exit_price
                     trade.exit_time = ts
                     trade.exit_reason = "time_stop"
 
             # EOD exit (with slippage) - use bar.close since we're exiting at EOD
-            if eod_exit and ts.time() >= eod_time and trade.exit_time is None:
+            if eod_exit and to_eastern_time(ts) >= eod_time and trade.exit_time is None:
                 if trade.direction == BiasDirection.BULLISH:
-                    trade.exit_price = bar.close - slippage_handles
-                    trade.pnl_handles = trade.exit_price - trade.entry_price
+                    trade.exit_price = bar.close - slippage_points
+                    trade.pnl_points = trade.exit_price - trade.entry_price
                 else:
-                    trade.exit_price = bar.close + slippage_handles
-                    trade.pnl_handles = trade.entry_price - trade.exit_price
+                    trade.exit_price = bar.close + slippage_points
+                    trade.pnl_points = trade.entry_price - trade.exit_price
                 trade.exit_time = ts
                 trade.exit_reason = "eod"
 
@@ -829,13 +840,13 @@ def run_unicorn_backtest(
         open_trades = [t for t in open_trades if t.exit_time is None]
 
         for trade in closed:
-            # Calculate PnL including slippage (already in pnl_handles) and commission
+            # Calculate PnL including slippage (already in pnl_points) and commission
             commission_total = commission_per_contract * trade.quantity
-            trade.pnl_dollars = (trade.pnl_handles * point_value * trade.quantity) - commission_total
+            trade.pnl_dollars = (trade.pnl_points * point_value * trade.quantity) - commission_total
             trade.duration_minutes = int((trade.exit_time - trade.entry_time).total_seconds() / 60)
 
-            if trade.risk_handles > 0:
-                trade.r_multiple = trade.pnl_handles / trade.risk_handles
+            if trade.risk_points > 0:
+                trade.r_multiple = trade.pnl_points / trade.risk_points
 
             if trade.pnl_dollars > 0:  # Use dollars (includes commission) for outcome
                 trade.outcome = TradeOutcome.WIN
@@ -848,13 +859,13 @@ def run_unicorn_backtest(
                 result.breakevens += 1
 
             result.trades.append(trade)
-            result.total_pnl_handles += trade.pnl_handles
+            result.total_pnl_points += trade.pnl_points
             result.total_pnl_dollars += trade.pnl_dollars
 
             # Update session stats
             session_stat = result.session_stats[trade.session]
             session_stat.trades_taken += 1
-            session_stat.total_pnl_handles += trade.pnl_handles
+            session_stat.total_pnl_points += trade.pnl_points
             if trade.outcome == TradeOutcome.WIN:
                 session_stat.wins += 1
             elif trade.outcome == TradeOutcome.LOSS:
@@ -934,16 +945,17 @@ def run_unicorn_backtest(
 
             # Get FVG info for stop/target calculation (but NOT for entry price)
             entry_fvg, entry_block, _ = find_entry_zone(
-                htf_fvgs, breakers, mitigations, direction, entry_price_raw
+                htf_fvgs, breakers, mitigations, direction, entry_price_raw,
+                max_fvg_fill_pct=config.max_fvg_fill_pct,
             )
 
             # CRITICAL: Entry is at MARKET (bar.open), not at theoretical FVG level
             # We can only enter at prices that actually traded
             # Apply slippage: worse price for our direction
             if direction == BiasDirection.BULLISH:
-                entry_price = bar.open + slippage_handles  # Buy at open + slip
+                entry_price = bar.open + slippage_points  # Buy at open + slip
             else:
-                entry_price = bar.open - slippage_handles  # Sell at open - slip
+                entry_price = bar.open - slippage_points  # Sell at open - slip
 
             # Calculate stop and target (ATR-based validation)
             # Uses signal_atr from previous closed bar
@@ -957,13 +969,13 @@ def run_unicorn_backtest(
                     relevant_sweep = sweep
                     break
 
-            stop_price, target_price, risk_handles, _ = calculate_stop_and_target(
+            stop_price, target_price, risk_points, _ = calculate_stop_and_target(
                 entry_price, direction, entry_fvg, relevant_sweep, symbol,
                 atr=signal_atr, config=config,  # Use causal ATR
             )
 
             # Position sizing (account for slippage in risk)
-            risk_dollars = (risk_handles + slippage_handles) * point_value
+            risk_dollars = (risk_points + slippage_points) * point_value
             if risk_dollars > 0:
                 quantity = max(1, int(dollars_per_trade / risk_dollars))
             else:
@@ -979,7 +991,7 @@ def run_unicorn_backtest(
                 criteria=criteria,
                 stop_price=stop_price,
                 target_price=target_price,
-                risk_handles=risk_handles,
+                risk_points=risk_points,
             )
 
             open_trades.append(trade)
@@ -1011,19 +1023,19 @@ def run_unicorn_backtest(
 
         # Apply slippage to exit (worse for trade direction)
         if trade.direction == BiasDirection.BULLISH:
-            trade.exit_price = last_close - slippage_handles
-            trade.pnl_handles = trade.exit_price - trade.entry_price
+            trade.exit_price = last_close - slippage_points
+            trade.pnl_points = trade.exit_price - trade.entry_price
         else:
-            trade.exit_price = last_close + slippage_handles
-            trade.pnl_handles = trade.entry_price - trade.exit_price
+            trade.exit_price = last_close + slippage_points
+            trade.pnl_points = trade.entry_price - trade.exit_price
 
         # Apply commission
         commission_total = commission_per_contract * trade.quantity
-        trade.pnl_dollars = (trade.pnl_handles * point_value * trade.quantity) - commission_total
+        trade.pnl_dollars = (trade.pnl_points * point_value * trade.quantity) - commission_total
         trade.duration_minutes = int((trade.exit_time - trade.entry_time).total_seconds() / 60)
 
-        if trade.risk_handles > 0:
-            trade.r_multiple = trade.pnl_handles / trade.risk_handles
+        if trade.risk_points > 0:
+            trade.r_multiple = trade.pnl_points / trade.risk_points
 
         if trade.pnl_dollars > 0:  # Use dollars (includes commission) for outcome
             trade.outcome = TradeOutcome.WIN
@@ -1036,7 +1048,7 @@ def run_unicorn_backtest(
             result.breakevens += 1
 
         result.trades.append(trade)
-        result.total_pnl_handles += trade.pnl_handles
+        result.total_pnl_points += trade.pnl_points
         result.total_pnl_dollars += trade.pnl_dollars
 
     # Calculate aggregate stats
@@ -1046,14 +1058,14 @@ def run_unicorn_backtest(
         result.avg_r_multiple = statistics.mean(t.r_multiple for t in result.trades)
         result.best_r_multiple = max(t.r_multiple for t in result.trades)
         result.worst_r_multiple = min(t.r_multiple for t in result.trades)
-        result.largest_win_handles = max((t.pnl_handles for t in result.trades), default=0)
-        result.largest_loss_handles = min((t.pnl_handles for t in result.trades), default=0)
+        result.largest_win_points = max((t.pnl_points for t in result.trades), default=0)
+        result.largest_loss_points = min((t.pnl_points for t in result.trades), default=0)
 
         # MFE capture rate
         mfe_captures = []
         for t in result.trades:
             if t.mfe > 0:
-                mfe_captures.append(t.pnl_handles / t.mfe if t.pnl_handles > 0 else 0)
+                mfe_captures.append(t.pnl_points / t.mfe if t.pnl_points > 0 else 0)
         result.mfe_capture_rate = statistics.mean(mfe_captures) if mfe_captures else 0
 
         # Session averages
@@ -1096,7 +1108,7 @@ def run_unicorn_backtest(
             max_confidence=max_conf,
             trade_count=len(bucket_trades),
             win_count=sum(1 for t in bucket_trades if t.outcome == TradeOutcome.WIN),
-            total_pnl=sum(t.pnl_handles for t in bucket_trades),
+            total_pnl=sum(t.pnl_points for t in bucket_trades),
         )
 
         if bucket_trades:
@@ -1151,11 +1163,11 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append(f"Wins / Losses / BE:    {result.wins} / {result.losses} / {result.breakevens}")
     lines.append(f"Win rate:              {result.win_rate*100:.1f}%")
     lines.append(f"Profit factor:         {result.profit_factor:.2f}")
-    lines.append(f"Total PnL (handles):   {result.total_pnl_handles:+.2f}")
+    lines.append(f"Total PnL (points):    {result.total_pnl_points:+.2f}")
     lines.append(f"Total PnL (dollars):   ${result.total_pnl_dollars:+,.2f}")
-    lines.append(f"Expectancy/trade:      {result.expectancy_handles:+.2f} handles")
-    lines.append(f"Largest win:           {result.largest_win_handles:+.2f} handles")
-    lines.append(f"Largest loss:          {result.largest_loss_handles:+.2f} handles")
+    lines.append(f"Expectancy/trade:      {result.expectancy_points:+.2f} points")
+    lines.append(f"Largest win:           {result.largest_win_points:+.2f} points")
+    lines.append(f"Largest loss:          {result.largest_loss_points:+.2f} points")
     lines.append("")
 
     # R-Multiple Analysis
@@ -1171,8 +1183,8 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append("-" * 40)
     lines.append("MFE / MAE ANALYSIS")
     lines.append("-" * 40)
-    lines.append(f"Avg MFE:               {result.avg_mfe:.2f} handles")
-    lines.append(f"Avg MAE:               {result.avg_mae:.2f} handles")
+    lines.append(f"Avg MFE:               {result.avg_mfe:.2f} points")
+    lines.append(f"Avg MAE:               {result.avg_mae:.2f} points")
     lines.append(f"MFE capture rate:      {result.mfe_capture_rate*100:.1f}%")
     lines.append("")
 
@@ -1187,7 +1199,7 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
         stats = result.session_stats[session]
         lines.append(
             f"{session.value:<12} {stats.total_setups:>8} {stats.valid_setups:>8} "
-            f"{stats.trades_taken:>8} {stats.win_rate*100:>7.1f}% {stats.total_pnl_handles:>+10.2f}"
+            f"{stats.trades_taken:>8} {stats.win_rate*100:>7.1f}% {stats.total_pnl_points:>+10.2f}"
         )
     lines.append("")
 

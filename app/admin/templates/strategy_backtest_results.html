@@ -151,8 +151,8 @@
             <div class="stat-label">Profit Factor</div>
         </div>
         <div class="stat">
-            <div class="stat-value{% if result.total_pnl_handles >= 0 %} text-success{% else %} text-danger{% endif %}">
-                {{ '%+.1f' | format(result.total_pnl_handles) }}h
+            <div class="stat-value{% if result.total_pnl_points >= 0 %} text-success{% else %} text-danger{% endif %}">
+                {{ '%+.1f' | format(result.total_pnl_points) }}pt
             </div>
             <div class="stat-label">Total PnL</div>
         </div>
