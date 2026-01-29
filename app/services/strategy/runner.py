@@ -16,7 +16,10 @@ from app.services.strategy.models import (
     MarketSnapshot,
     StrategyEvaluation,
 )
-from app.services.strategy.strategies import evaluate_breakout_52w_high
+from app.services.strategy.strategies import (
+    evaluate_breakout_52w_high,
+    evaluate_unicorn_model,
+)
 
 # Type alias for strategy function signature
 StrategyFn = Callable[
@@ -54,6 +57,7 @@ class StrategyRunner:
     def _register_default_strategies(self) -> None:
         """Register built-in strategies."""
         self.register_strategy("breakout_52w_high", evaluate_breakout_52w_high)
+        self.register_strategy("unicorn_model", evaluate_unicorn_model)
 
     def evaluate(
         self,
