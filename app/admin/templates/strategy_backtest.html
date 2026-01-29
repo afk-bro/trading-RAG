@@ -65,14 +65,23 @@
 
         <div class="form-section">
             <h4>Friction Settings</h4>
-            <div class="form-grid form-grid-3">
+            <div class="form-grid form-grid-4">
+                <div class="form-group">
+                    <label for="platform">Trading Platform</label>
+                    <select id="platform" name="platform">
+                        <option value="apex_rithmic" selected>Apex (Rithmic) - $3.98</option>
+                        <option value="apex_tradovate">Apex (Tradovate) - $3.10</option>
+                        <option value="topstep">Topstep - $2.80</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
                 <div class="form-group">
                     <label for="slippage">Slippage (ticks)</label>
                     <input type="number" id="slippage" name="slippage" value="2" min="0" max="10" step="0.5">
                 </div>
                 <div class="form-group">
-                    <label for="commission">Commission ($/contract)</label>
-                    <input type="number" id="commission" name="commission" value="5.00" min="0" max="20" step="0.50">
+                    <label for="commission">Commission ($/RT)</label>
+                    <input type="number" id="commission" name="commission" value="3.98" min="0" max="20" step="0.01">
                 </div>
                 <div class="form-group">
                     <label for="intrabar_policy">Intrabar Policy</label>
@@ -83,6 +92,7 @@
                     </select>
                 </div>
             </div>
+            <p class="form-hint">Commission is round-turn (entry + exit). Apex Rithmic: $1.99/side, Tradovate: $1.55/side, Topstep: ~$1.40/side.</p>
         </div>
 
         <div class="form-actions">
@@ -191,6 +201,29 @@ document.addEventListener('DOMContentLoaded', function() {
     endDate.addEventListener('change', function() {
         startDate.max = this.value;
     });
+
+    // Platform commission auto-fill
+    const platform = document.getElementById('platform');
+    const commission = document.getElementById('commission');
+    const commissionRates = {
+        'apex_rithmic': 3.98,
+        'apex_tradovate': 3.10,
+        'topstep': 2.80,
+        'custom': null
+    };
+
+    platform.addEventListener('change', function() {
+        const rate = commissionRates[this.value];
+        if (rate !== null) {
+            commission.value = rate.toFixed(2);
+            commission.readOnly = true;
+        } else {
+            commission.readOnly = false;
+        }
+    });
+
+    // Set initial state
+    commission.readOnly = true;
 });
 
 // Called after HTMX loads results - renders charts
@@ -327,6 +360,10 @@ function renderExitChart(exitBreakdown) {
         grid-template-columns: repeat(3, 1fr);
     }
 
+    .form-grid-4 {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
     .form-group {
         display: flex;
         flex-direction: column;
@@ -366,6 +403,19 @@ function renderExitChart(exitBreakdown) {
         color: var(--text-muted);
         margin-bottom: var(--space-3);
         font-weight: var(--font-weight-medium);
+    }
+
+    .form-hint {
+        font-size: var(--font-size-xs);
+        color: var(--text-muted);
+        margin-top: var(--space-2);
+        opacity: 0.8;
+    }
+
+    .form-group input[readonly] {
+        background: var(--bg-secondary);
+        cursor: not-allowed;
+        opacity: 0.8;
     }
 
     .form-actions {
@@ -433,8 +483,15 @@ function renderExitChart(exitBreakdown) {
         color: var(--text-muted);
     }
 
+    @media (max-width: 992px) {
+        .form-grid-4 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
     @media (max-width: 768px) {
-        .form-grid-3 {
+        .form-grid-3,
+        .form-grid-4 {
             grid-template-columns: 1fr;
         }
     }
