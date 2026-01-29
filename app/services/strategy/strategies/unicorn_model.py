@@ -102,8 +102,12 @@ MACRO_WINDOWS = SESSION_WINDOWS[SessionProfile.WIDE]
 class UnicornConfig:
     """Configuration for Unicorn Model strategy."""
 
-    # Scoring
-    min_criteria_score: int = 6  # Minimum criteria to enter (out of 8)
+    # Scoring: minimum scored criteria to enter (out of 5 scored items)
+    # Mandatory criteria (htf_bias, stop_valid, macro_window) always required.
+    min_scored_criteria: int = 3
+
+    # Confidence gate (None = metric-only, not used for entry filtering)
+    min_confidence: Optional[float] = None
 
     # Session
     session_profile: SessionProfile = SessionProfile.NORMAL
@@ -113,6 +117,9 @@ class UnicornConfig:
     fvg_min_atr_mult: float = 0.3      # FVG must be >= 0.3 * ATR
     stop_max_atr_mult: float = 3.0     # Stop must be <= 3.0 * ATR
 
+    # Stop placement buffer (handles beyond FVG/sweep edge)
+    stop_buffer_handles: float = 2.0
+
     # Legacy absolute thresholds (used if ATR not available)
     max_stop_handles_nq: float = 30.0
     max_stop_handles_es: float = 10.0
@@ -120,6 +127,17 @@ class UnicornConfig:
     # Point values
     point_value_nq: float = 20.0
     point_value_es: float = 50.0
+
+    def __post_init__(self):
+        if not (0 <= self.min_scored_criteria <= 5):
+            raise ValueError(
+                f"min_scored_criteria must be 0-5 (got {self.min_scored_criteria}). "
+                f"There are only 5 scored criteria; mandatory gates are always enforced."
+            )
+        if self.min_confidence is not None and not (0.0 <= self.min_confidence <= 1.0):
+            raise ValueError(
+                f"min_confidence must be 0.0-1.0 or None (got {self.min_confidence})"
+            )
 
 
 # Default config
@@ -180,8 +198,32 @@ class CriteriaScore:
             missing.append("macro_window")
         return missing
 
+    @property
+    def mandatory_met(self) -> bool:
+        """All 3 mandatory criteria must pass: htf_bias, stop_valid, macro_window."""
+        return self.htf_bias and self.stop_valid and self.macro_window
+
+    @property
+    def scored_count(self) -> int:
+        """Count of passed scored criteria (out of 5)."""
+        return sum([
+            self.liquidity_sweep,
+            self.htf_fvg,
+            self.breaker_block,
+            self.ltf_fvg,
+            self.mss,
+        ])
+
+    def decide_entry(self, min_scored: int = 3) -> bool:
+        """
+        Canonical entry gate used by both live evaluator and backtest.
+
+        Requires all 3 mandatory criteria AND at least min_scored of 5 scored criteria.
+        """
+        return self.mandatory_met and self.scored_count >= min_scored
+
     def meets_threshold(self, threshold: int = 6) -> bool:
-        """Check if score meets minimum threshold."""
+        """Check if score meets minimum threshold (legacy flat count)."""
         return self.score >= threshold
 
 
@@ -191,7 +233,8 @@ class UnicornSetup:
 
     direction: BiasDirection
     confidence: float
-    entry_price: float
+    entry_price: float           # Theoretical signal price (FVG midpoint)
+    entry_price_model: float     # Same as entry_price; backtest overrides with fill_price
     stop_price: float
     target_price: float
     risk_handles: float
@@ -246,7 +289,7 @@ def is_in_macro_window(
     windows = SESSION_WINDOWS.get(profile, MACRO_WINDOWS)
 
     for start, end in windows:
-        if start <= current_time <= end:
+        if start <= current_time < end:
             return True
 
     return False
@@ -463,14 +506,18 @@ def calculate_stop_and_target(
     Returns:
         Tuple of (stop_price, target_price, risk_handles, stop_valid)
     """
+    if config is None:
+        config = DEFAULT_CONFIG
+
     max_handles = get_max_stop_handles(symbol, atr=atr, config=config)
+    buf = config.stop_buffer_handles
 
     if direction == BiasDirection.BULLISH:
         # Stop below FVG or sweep low
         if entry_fvg:
-            stop_price = entry_fvg.gap_low - 2  # 2 handles buffer
+            stop_price = entry_fvg.gap_low - buf
         elif liquidity_sweep:
-            stop_price = liquidity_sweep.sweep_low - 2
+            stop_price = liquidity_sweep.sweep_low - buf
         else:
             stop_price = entry_price - max_handles
 
@@ -482,9 +529,9 @@ def calculate_stop_and_target(
     else:  # BEARISH
         # Stop above FVG or sweep high
         if entry_fvg:
-            stop_price = entry_fvg.gap_high + 2
+            stop_price = entry_fvg.gap_high + buf
         elif liquidity_sweep:
-            stop_price = liquidity_sweep.sweep_high + 2
+            stop_price = liquidity_sweep.sweep_high + buf
         else:
             stop_price = entry_price + max_handles
 
@@ -531,10 +578,15 @@ def analyze_unicorn_setup(
     atr_values = _calculate_atr(htf_bars, config.atr_period)
     current_atr = atr_values[-1] if atr_values else 0.0
 
-    # 1. HTF Bias check
+    # 1. HTF Bias check (+ optional confidence gate)
+    confidence_ok = (
+        config.min_confidence is None
+        or htf_bias.final_confidence >= config.min_confidence
+    )
     score.htf_bias = (
         htf_bias.is_tradeable
         and direction != BiasDirection.NEUTRAL
+        and confidence_ok
     )
 
     if direction == BiasDirection.NEUTRAL:
@@ -543,6 +595,7 @@ def analyze_unicorn_setup(
             direction=direction,
             confidence=htf_bias.final_confidence,
             entry_price=current_price,
+            entry_price_model=current_price,
             stop_price=current_price,
             target_price=current_price,
             risk_handles=0,
@@ -644,6 +697,7 @@ def analyze_unicorn_setup(
         direction=direction,
         confidence=htf_bias.final_confidence,
         entry_price=entry_price,
+        entry_price_model=entry_price,  # Theoretical FVG midpoint
         stop_price=stop_price,
         target_price=target_price,
         risk_handles=risk_handles,
@@ -669,6 +723,7 @@ def evaluate_unicorn_model(
     htf_bias: Optional[TimeframeBias] = None,
     htf_bars: Optional[list[OHLCVBar]] = None,
     ltf_bars: Optional[list[OHLCVBar]] = None,
+    config: Optional[UnicornConfig] = None,
 ) -> StrategyEvaluation:
     """
     Evaluate ICT Unicorn Model strategy.
@@ -696,6 +751,9 @@ def evaluate_unicorn_model(
     Returns:
         StrategyEvaluation with intents, signals, and debug metadata
     """
+    if config is None:
+        config = DEFAULT_CONFIG
+
     symbol = snapshot.symbol
     position = paper_state.positions.get(symbol)
     has_position = position is not None and position.quantity > 0
@@ -766,30 +824,38 @@ def evaluate_unicorn_model(
 
     # ENTRY: Analyze for Unicorn setup
     if not has_position:
-        setup = analyze_unicorn_setup(snapshot, htf_bias, htf_bars, ltf_bars)
+        setup = analyze_unicorn_setup(snapshot, htf_bias, htf_bars, ltf_bars, config=config)
 
         if setup is None:
             signals.append("no_setup_detected")
-        elif not setup.all_criteria_met:
+        elif not setup.criteria_score.decide_entry(min_scored=config.min_scored_criteria):
             # Log which criteria failed
-            if not setup.htf_bias.is_tradeable:
-                signals.append("htf_bias_not_tradeable")
-            if setup.liquidity_sweep is None:
-                signals.append("no_liquidity_sweep")
-            if setup.entry_fvg is None:
-                signals.append("no_entry_fvg")
-            if setup.entry_block is None:
-                signals.append("no_entry_block")
-            if setup.ltf_fvg is None:
-                signals.append("no_ltf_fvg")
-            if setup.mss is None:
-                signals.append("no_mss")
-            if not setup.in_macro_window:
-                signals.append("outside_macro_window")
-            if not setup.stop_valid:
-                signals.append(f"stop_too_wide_{setup.risk_handles:.1f}_handles")
+            cs = setup.criteria_score
+            if not cs.mandatory_met:
+                if not cs.htf_bias:
+                    if (
+                        config.min_confidence is not None
+                        and setup.confidence < config.min_confidence
+                    ):
+                        signals.append(
+                            f"htf_bias_confidence_{setup.confidence:.2f}"
+                            f"_below_{config.min_confidence:.2f}"
+                        )
+                    else:
+                        signals.append("htf_bias_not_tradeable")
+                if not cs.stop_valid:
+                    signals.append(f"stop_too_wide_{setup.risk_handles:.1f}_handles")
+                if not cs.macro_window:
+                    signals.append("outside_macro_window")
+            else:
+                signals.append(
+                    f"scored_{cs.scored_count}/5_below_{config.min_scored_criteria}"
+                )
+            for name in cs.missing:
+                if name not in ("htf_bias", "stop_valid", "macro_window"):
+                    signals.append(f"no_{name}")
         else:
-            # All criteria met - generate entry intent
+            # Entry criteria met - generate entry intent
             point_value = get_point_value(symbol)
             risk_per_contract = setup.risk_handles * point_value
 
@@ -832,7 +898,7 @@ def evaluate_unicorn_model(
             "htf_bias_confidence": htf_bias.final_confidence,
             "htf_alignment_score": htf_bias.alignment_score,
             "at_max_positions": at_max_positions,
-            "in_macro_window": is_in_macro_window(snapshot.ts),
+            "in_macro_window": is_in_macro_window(snapshot.ts, config.session_profile),
         }
 
         if setup:
@@ -845,6 +911,11 @@ def evaluate_unicorn_model(
                     "target_price": setup.target_price,
                     "risk_handles": setup.risk_handles,
                     "all_criteria_met": setup.all_criteria_met,
+                    "entry_decision": setup.criteria_score.decide_entry(
+                        min_scored=config.min_scored_criteria
+                    ),
+                    "scored_count": setup.criteria_score.scored_count,
+                    "mandatory_met": setup.criteria_score.mandatory_met,
                     "has_sweep": setup.liquidity_sweep is not None,
                     "has_fvg": setup.entry_fvg is not None,
                     "has_block": setup.entry_block is not None,

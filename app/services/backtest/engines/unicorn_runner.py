@@ -239,6 +239,13 @@ class SetupOccurrence:
     taken: bool = False
     reason_not_taken: Optional[str] = None
 
+    # Parity diagnostics: record the gating inputs so live vs backtest
+    # decisions can be compared on the same snapshot set.
+    mandatory_met: bool = False
+    scored_count: int = 0
+    min_scored_required: int = 0
+    decide_entry_result: bool = False
+
 
 @dataclass
 class SessionStats:
@@ -480,26 +487,14 @@ def check_criteria(
                 check.fvg_size = fvg.gap_size
                 break
 
-    # 4. Breaker/Mitigation Block
+    # 4. Breaker/Mitigation Block (must overlap with HTF FVG, matching strategy logic)
     breakers = detect_breaker_blocks(htf_bars, lookback=50)
     mitigations = detect_mitigation_blocks(htf_bars, lookback=50)
 
-    for breaker in breakers:
-        if (direction == BiasDirection.BULLISH and breaker.block_type == BlockType.BULLISH):
-            check.breaker_block_found = True
-            break
-        elif (direction == BiasDirection.BEARISH and breaker.block_type == BlockType.BEARISH):
-            check.breaker_block_found = True
-            break
-
-    if not check.breaker_block_found:
-        for mit in mitigations:
-            if (direction == BiasDirection.BULLISH and mit.block_type == BlockType.BULLISH):
-                check.breaker_block_found = True
-                break
-            elif (direction == BiasDirection.BEARISH and mit.block_type == BlockType.BEARISH):
-                check.breaker_block_found = True
-                break
+    _, entry_block_check, _ = find_entry_zone(
+        htf_fvgs, breakers, mitigations, direction, current_price
+    )
+    check.breaker_block_found = entry_block_check is not None
 
     # 5. LTF FVG (ATR-normalized, looser threshold for LTF)
     ltf_fvgs = detect_fvgs(
@@ -546,7 +541,7 @@ def check_criteria(
         check.stop_valid = False
 
     # 8. Macro window
-    check.in_macro_window = is_in_macro_window(ts)
+    check.in_macro_window = is_in_macro_window(ts, profile=config.session_profile)
 
     return check
 
@@ -607,9 +602,9 @@ def run_unicorn_backtest(
         - This prevents bypassing core risk management via scoring
     """
     if config is None:
-        config = UnicornConfig(min_criteria_score=min_criteria_score)
+        config = UnicornConfig(min_scored_criteria=min_criteria_score)
     else:
-        config.min_criteria_score = min_criteria_score
+        config.min_scored_criteria = min_criteria_score
 
     if len(htf_bars) < 50 or len(ltf_bars) < 30:
         raise ValueError("Insufficient bars for backtest (need 50 HTF, 30 LTF minimum)")
@@ -882,11 +877,16 @@ def run_unicorn_backtest(
         session = criteria.session
         result.session_stats[session].total_setups += 1
 
-        # Track setup occurrence
+        # Track setup occurrence with parity diagnostics
+        entry_decision = criteria.meets_entry_requirements(min_scored=min_criteria_score)
         setup_record = SetupOccurrence(
             timestamp=ts,
             direction=criteria.htf_bias_direction or BiasDirection.NEUTRAL,
             criteria=criteria,
+            mandatory_met=criteria.mandatory_criteria_met,
+            scored_count=criteria.scored_criteria_count,
+            min_scored_required=min_criteria_score,
+            decide_entry_result=entry_decision,
         )
 
         if criteria.criteria_met_count > 0:
@@ -904,7 +904,7 @@ def run_unicorn_backtest(
         # SOFT SCORING with mandatory/scored separation:
         # - 3 MANDATORY must all pass: htf_bias, stop_valid, macro_window
         # - 5 SCORED: min_criteria_score of these must pass
-        if criteria.meets_entry_requirements(min_scored=min_criteria_score):
+        if entry_decision:
             direction = criteria.htf_bias_direction
 
             # Direction filter: skip if direction doesn't match filter
