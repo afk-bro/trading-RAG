@@ -50,6 +50,9 @@ numpy>=1.24.0
 # Market data (CCXT for exchange APIs)
 ccxt>=4.0.0
 
+# Market data (Databento for CME futures)
+databento>=0.30.0
+
 # Admin UI
 jinja2==3.1.3
 

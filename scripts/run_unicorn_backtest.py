@@ -253,6 +253,15 @@ Examples:
 
     # Customize risk parameters
     python scripts/run_unicorn_backtest.py --symbol ES --synthetic --dollars-per-trade 2000
+
+    # Fetch real NQ data from Databento (requires DATABENTO_API_KEY env var)
+    python scripts/run_unicorn_backtest.py --symbol NQ --databento --start-date 2024-01-01 --end-date 2024-01-31
+
+    # Estimate Databento API cost before fetching
+    python scripts/run_unicorn_backtest.py --symbol NQ --databento --start-date 2024-01-01 --end-date 2024-01-31 --cost-only
+
+    # Realistic friction settings
+    python scripts/run_unicorn_backtest.py --symbol NQ --synthetic --slippage-ticks 2 --commission 4.50 --intrabar-policy worst
         """
     )
 
@@ -279,6 +288,30 @@ Examples:
         type=int,
         default=30,
         help="Days of synthetic data to generate (default: 30)"
+    )
+    # Databento real data options
+    parser.add_argument(
+        "--databento",
+        action="store_true",
+        help="Fetch real data from Databento API (requires DATABENTO_API_KEY)"
+    )
+    parser.add_argument(
+        "--start-date",
+        help="Start date for Databento data (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--end-date",
+        help="End date for Databento data (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--cost-only",
+        action="store_true",
+        help="Only estimate Databento API cost, don't fetch data"
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Bypass local cache for Databento data"
     )
     parser.add_argument(
         "--dollars-per-trade",
@@ -362,14 +395,58 @@ Examples:
     args = parser.parse_args()
 
     # Load or generate data
-    if args.synthetic:
+    if args.databento:
+        # Fetch real data from Databento API
+        from app.services.backtest.data import DatabentoFetcher, get_continuous_symbols
+
+        if not args.start_date or not args.end_date:
+            parser.error("--start-date and --end-date are required when using --databento")
+
+        fetcher = DatabentoFetcher()
+
+        if args.cost_only:
+            # Just estimate cost and exit
+            from datetime import datetime
+            start_dt = datetime.fromisoformat(args.start_date)
+            end_dt = datetime.fromisoformat(args.end_date)
+            contracts = get_continuous_symbols(args.symbol, start_dt, end_dt)
+
+            total_cost = 0.0
+            print(f"\nContracts needed for {args.symbol} {args.start_date} to {args.end_date}:")
+            for contract, period_start, period_end in contracts:
+                cost = fetcher.estimate_cost(
+                    symbol=contract,
+                    start_date=period_start.strftime("%Y-%m-%d"),
+                    end_date=period_end.strftime("%Y-%m-%d"),
+                )
+                print(f"  {contract}: {period_start.date()} to {period_end.date()} - ${cost:.2f}")
+                total_cost += cost
+
+            print(f"\nTotal estimated cost: ${total_cost:.2f}")
+            print("(Note: New accounts get $125 free credits)")
+            sys.exit(0)
+
+        print(f"Fetching {args.symbol} data from Databento ({args.start_date} to {args.end_date})...")
+        htf_bars, ltf_bars = fetcher.fetch_futures_data(
+            symbol=args.symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            htf_interval="15m",
+            ltf_interval="5m",
+            use_cache=not args.no_cache,
+        )
+        print(f"Fetched {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
+
+    elif args.synthetic:
         htf_bars, ltf_bars = generate_sample_data(
             args.symbol, args.days, profile=args.synthetic_profile
         )
         print(f"Generated {len(htf_bars)} HTF bars and {len(ltf_bars)} LTF bars")
+
     else:
+        # Load from CSV files
         if not args.htf or not args.ltf:
-            parser.error("--htf and --ltf are required unless using --synthetic")
+            parser.error("--htf and --ltf are required unless using --synthetic or --databento")
 
         print(f"Loading HTF data from {args.htf}...")
         htf_bars = load_bars_from_csv(args.htf)
