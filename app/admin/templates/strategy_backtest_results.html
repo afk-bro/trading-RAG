@@ -15,18 +15,23 @@
         <h3 class="card-title">R-Metrics</h3>
         <div class="result-badges">
             <span class="badge badge-{{ 'success' if result.avg_r_multiple >= 0 else 'danger' }}">
-                {{ '%+.2f' | format(result.avg_r_multiple) }}R Avg
+                {{ '%+.3f' | format(result.avg_r_multiple) }}R Edge
             </span>
             <span class="badge badge-type">{{ result.symbol }}</span>
             <span class="badge badge-type">{{ result.direction_filter or 'Both' }}</span>
+            {% set plus2r_count = result.r_distribution[-1].count if result.r_distribution else 0 %}
+            {% if plus2r_count == 0 %}
+            <span class="badge badge-warning" title="Consider reviewing exit logic">No +2R+ wins</span>
+            {% endif %}
         </div>
     </div>
     <div class="stats stats-primary">
         <div class="stat stat-large">
             <div class="stat-value{% if result.avg_r_multiple >= 0 %} text-success{% else %} text-danger{% endif %}">
-                {{ '%+.2f' | format(result.avg_r_multiple) }}R
+                {{ '%+.3f' | format(result.avg_r_multiple) }}R
             </div>
             <div class="stat-label">Avg R per Trade</div>
+            <div class="stat-sublabel">Edge (portable)</div>
         </div>
         <div class="stat stat-large">
             <div class="stat-value{% if result.total_r >= 0 %} text-success{% else %} text-danger{% endif %}">
@@ -87,7 +92,17 @@
 <div class="card">
     <div class="card-header">
         <h3 class="card-title">R Distribution</h3>
-        <span class="badge badge-type">{{ result.trades_taken }} trades</span>
+        <div class="result-badges">
+            {% set wins_1r_plus = (result.r_distribution[3].count + result.r_distribution[4].count) if result.r_distribution|length >= 5 else 0 %}
+            {% set wins_2r_plus = result.r_distribution[4].count if result.r_distribution|length >= 5 else 0 %}
+            <span class="badge badge-type">{{ result.trades_taken }} trades</span>
+            <span class="badge badge-{{ 'success' if wins_1r_plus > 0 else 'muted' }}">
+                P(≥+1R): {{ '%.0f' | format(wins_1r_plus / result.trades_taken * 100 if result.trades_taken else 0) }}%
+            </span>
+            <span class="badge badge-{{ 'success' if wins_2r_plus > 0 else 'muted' }}">
+                P(≥+2R): {{ '%.0f' | format(wins_2r_plus / result.trades_taken * 100 if result.trades_taken else 0) }}%
+            </span>
+        </div>
     </div>
     <div class="r-distribution">
         {% for bucket in result.r_distribution %}
@@ -461,6 +476,25 @@ function toggleConfig() {
     .stat-large .stat-value {
         font-size: 1.75rem;
         font-weight: 700;
+    }
+
+    .stat-sublabel {
+        font-size: var(--font-size-xs);
+        color: var(--text-muted);
+        opacity: 0.7;
+        margin-top: 2px;
+    }
+
+    .badge-warning {
+        background: rgba(210, 153, 34, 0.2);
+        color: var(--warning);
+        border: 1px solid var(--warning);
+    }
+
+    .badge-muted {
+        background: var(--bg);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
     }
 
     /* Expectancy Formula */
