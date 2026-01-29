@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from enum import Enum
 from typing import Optional
+import random
 import statistics
 
 from app.services.strategy.models import OHLCVBar
@@ -62,6 +63,28 @@ class TradeOutcome(str, Enum):
     LOSS = "loss"
     BREAKEVEN = "breakeven"
     OPEN = "open"
+
+
+class IntrabarPolicy(str, Enum):
+    """
+    Policy for resolving stop/target ambiguity when both are hit in same bar.
+
+    This is critical for realistic backtesting - assuming "TP wins" leads to
+    artificially inflated win rates. Default to WORST for conservative estimates.
+    """
+    WORST = "worst"   # Assume stop hit first (conservative)
+    BEST = "best"     # Assume target hit first (optimistic, unrealistic)
+    RANDOM = "random" # 50/50 coin flip
+
+
+# Mandatory criteria that MUST pass before soft scoring applies.
+# These protect core risk logic and cannot be bypassed by scoring.
+MANDATORY_CRITERIA = frozenset({"htf_bias", "stop_valid", "macro_window"})
+
+# Scored criteria - soft scoring threshold applies to these
+SCORED_CRITERIA = frozenset({
+    "liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"
+})
 
 
 @dataclass
@@ -123,6 +146,48 @@ class CriteriaCheck:
         if not self.in_macro_window:
             missing.append("macro_window")
         return missing
+
+    @property
+    def mandatory_criteria_met(self) -> bool:
+        """
+        Check if all MANDATORY criteria are satisfied.
+
+        Mandatory criteria (htf_bias, stop_valid, macro_window) MUST pass
+        before soft scoring can be applied. These protect core risk logic.
+        """
+        return (
+            self.htf_bias_aligned and
+            self.stop_valid and
+            self.in_macro_window
+        )
+
+    @property
+    def scored_criteria_count(self) -> int:
+        """
+        Count how many SCORED criteria are satisfied.
+
+        Scored criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg, mss
+        Soft scoring threshold applies only to these.
+        """
+        return sum([
+            self.liquidity_sweep_found,
+            self.htf_fvg_found,
+            self.breaker_block_found,
+            self.ltf_fvg_found,
+            self.mss_found,
+        ])
+
+    def meets_entry_requirements(self, min_scored: int = 3) -> bool:
+        """
+        Check if criteria meet entry requirements with guardrails.
+
+        Args:
+            min_scored: Minimum scored criteria required (out of 5)
+
+        Returns:
+            True if all mandatory criteria pass AND scored count >= threshold
+        """
+        return self.mandatory_criteria_met and self.scored_criteria_count >= min_scored
 
 
 @dataclass
@@ -495,8 +560,12 @@ def run_unicorn_backtest(
     max_concurrent_trades: int = 1,
     eod_exit: bool = True,
     eod_time: time = time(15, 45),
-    min_criteria_score: int = 6,  # Soft scoring: enter at >= N/8
+    min_criteria_score: int = 6,  # Soft scoring: enter at >= N/8 (now 3/5 scored)
     config: Optional[UnicornConfig] = None,
+    # Friction parameters (critical for realistic backtesting)
+    slippage_ticks: float = 1.0,  # Slippage per side in ticks
+    commission_per_contract: float = 2.50,  # Round-trip commission per contract
+    intrabar_policy: IntrabarPolicy = IntrabarPolicy.WORST,  # Stop/target ambiguity
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -510,11 +579,22 @@ def run_unicorn_backtest(
         max_concurrent_trades: Maximum simultaneous positions
         eod_exit: Exit all positions at EOD
         eod_time: Time for EOD exit
-        min_criteria_score: Minimum criteria to enter (default 6/8)
+        min_criteria_score: Minimum SCORED criteria to enter (out of 5, not 8)
         config: Strategy configuration (ATR thresholds, session profile)
+        slippage_ticks: Slippage per side in ticks (default 1 tick each way)
+        commission_per_contract: Round-trip commission per contract (default $2.50)
+        intrabar_policy: How to resolve stop/target ambiguity when both hit in
+                        same bar. WORST=stop first (conservative), BEST=target
+                        first (optimistic), RANDOM=50/50. Default WORST.
 
     Returns:
         UnicornBacktestResult with complete analytics
+
+    Note on soft scoring:
+        - 3 MANDATORY criteria must always pass: htf_bias, stop_valid, macro_window
+        - 5 SCORED criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg, mss
+        - min_criteria_score applies only to the scored set (default 3/5)
+        - This prevents bypassing core risk management via scoring
     """
     if config is None:
         config = UnicornConfig(min_criteria_score=min_criteria_score)
@@ -552,6 +632,10 @@ def run_unicorn_backtest(
     open_trades: list[TradeRecord] = []
     point_value = get_point_value(symbol)
 
+    # Tick size for slippage calculation (NQ/ES = 0.25)
+    tick_size = 0.25
+    slippage_handles = slippage_ticks * tick_size  # Per side
+
     # ATR for volatility-normalized stops (computed per-bar in loop)
     htf_atr_values = _calculate_atr(htf_bars, config.atr_period)
 
@@ -584,10 +668,10 @@ def run_unicorn_backtest(
         if not ltf_window:
             continue
 
-        # Update open trades (MFE/MAE tracking)
+        # Update open trades (MFE/MAE tracking + exit checks)
         for trade in open_trades:
             if trade.direction == BiasDirection.BULLISH:
-                # Long trade
+                # Long trade - MFE/MAE tracking
                 unrealized = current_price - trade.entry_price
                 if unrealized > trade.mfe:
                     trade.mfe = unrealized
@@ -596,19 +680,43 @@ def run_unicorn_backtest(
                     trade.mae = abs(unrealized)
                     trade.mae_time = ts
 
-                # Check stop hit
-                if bar.low <= trade.stop_price:
-                    trade.exit_price = trade.stop_price
+                # Check stop/target hits with intrabar policy
+                stop_hit = bar.low <= trade.stop_price
+                target_hit = bar.high >= trade.target_price
+
+                if stop_hit and target_hit:
+                    # Both hit in same bar - apply intrabar policy
+                    if intrabar_policy == IntrabarPolicy.WORST:
+                        stop_wins = True  # Conservative: stop hit first
+                    elif intrabar_policy == IntrabarPolicy.BEST:
+                        stop_wins = False  # Optimistic: target hit first
+                    else:  # RANDOM
+                        stop_wins = random.random() < 0.5
+
+                    if stop_wins:
+                        # Exit at stop with slippage (worse for long = lower)
+                        trade.exit_price = trade.stop_price - slippage_handles
+                        trade.exit_reason = "stop_loss"
+                    else:
+                        # Exit at target with slippage (worse for long = lower)
+                        trade.exit_price = trade.target_price - slippage_handles
+                        trade.exit_reason = "target"
+                    trade.exit_time = ts
+                    trade.pnl_handles = trade.exit_price - trade.entry_price
+
+                elif stop_hit:
+                    # Exit at stop with slippage
+                    trade.exit_price = trade.stop_price - slippage_handles
                     trade.exit_time = ts
                     trade.exit_reason = "stop_loss"
-                    trade.pnl_handles = trade.stop_price - trade.entry_price
+                    trade.pnl_handles = trade.exit_price - trade.entry_price
 
-                # Check target hit
-                elif bar.high >= trade.target_price:
-                    trade.exit_price = trade.target_price
+                elif target_hit:
+                    # Exit at target with slippage
+                    trade.exit_price = trade.target_price - slippage_handles
                     trade.exit_time = ts
                     trade.exit_reason = "target"
-                    trade.pnl_handles = trade.target_price - trade.entry_price
+                    trade.pnl_handles = trade.exit_price - trade.entry_price
 
             else:  # Short trade
                 unrealized = trade.entry_price - current_price
@@ -619,45 +727,72 @@ def run_unicorn_backtest(
                     trade.mae = abs(unrealized)
                     trade.mae_time = ts
 
-                # Check stop hit
-                if bar.high >= trade.stop_price:
-                    trade.exit_price = trade.stop_price
+                # Check stop/target hits with intrabar policy
+                stop_hit = bar.high >= trade.stop_price
+                target_hit = bar.low <= trade.target_price
+
+                if stop_hit and target_hit:
+                    # Both hit in same bar - apply intrabar policy
+                    if intrabar_policy == IntrabarPolicy.WORST:
+                        stop_wins = True
+                    elif intrabar_policy == IntrabarPolicy.BEST:
+                        stop_wins = False
+                    else:  # RANDOM
+                        stop_wins = random.random() < 0.5
+
+                    if stop_wins:
+                        # Exit at stop with slippage (worse for short = higher)
+                        trade.exit_price = trade.stop_price + slippage_handles
+                        trade.exit_reason = "stop_loss"
+                    else:
+                        # Exit at target with slippage (worse for short = higher)
+                        trade.exit_price = trade.target_price + slippage_handles
+                        trade.exit_reason = "target"
+                    trade.exit_time = ts
+                    trade.pnl_handles = trade.entry_price - trade.exit_price
+
+                elif stop_hit:
+                    # Exit at stop with slippage
+                    trade.exit_price = trade.stop_price + slippage_handles
                     trade.exit_time = ts
                     trade.exit_reason = "stop_loss"
-                    trade.pnl_handles = trade.entry_price - trade.stop_price
+                    trade.pnl_handles = trade.entry_price - trade.exit_price
 
-                # Check target hit
-                elif bar.low <= trade.target_price:
-                    trade.exit_price = trade.target_price
+                elif target_hit:
+                    # Exit at target with slippage
+                    trade.exit_price = trade.target_price + slippage_handles
                     trade.exit_time = ts
                     trade.exit_reason = "target"
-                    trade.pnl_handles = trade.entry_price - trade.target_price
+                    trade.pnl_handles = trade.entry_price - trade.exit_price
 
-            # EOD exit
+            # EOD exit (with slippage)
             if eod_exit and ts.time() >= eod_time and trade.exit_time is None:
-                trade.exit_price = current_price
+                if trade.direction == BiasDirection.BULLISH:
+                    trade.exit_price = current_price - slippage_handles
+                    trade.pnl_handles = trade.exit_price - trade.entry_price
+                else:
+                    trade.exit_price = current_price + slippage_handles
+                    trade.pnl_handles = trade.entry_price - trade.exit_price
                 trade.exit_time = ts
                 trade.exit_reason = "eod"
-                if trade.direction == BiasDirection.BULLISH:
-                    trade.pnl_handles = current_price - trade.entry_price
-                else:
-                    trade.pnl_handles = trade.entry_price - current_price
 
-        # Finalize closed trades
+        # Finalize closed trades (apply commission)
         closed = [t for t in open_trades if t.exit_time is not None]
         open_trades = [t for t in open_trades if t.exit_time is None]
 
         for trade in closed:
-            trade.pnl_dollars = trade.pnl_handles * point_value * trade.quantity
+            # Calculate PnL including slippage (already in pnl_handles) and commission
+            commission_total = commission_per_contract * trade.quantity
+            trade.pnl_dollars = (trade.pnl_handles * point_value * trade.quantity) - commission_total
             trade.duration_minutes = int((trade.exit_time - trade.entry_time).total_seconds() / 60)
 
             if trade.risk_handles > 0:
                 trade.r_multiple = trade.pnl_handles / trade.risk_handles
 
-            if trade.pnl_handles > 0:
+            if trade.pnl_dollars > 0:  # Use dollars (includes commission) for outcome
                 trade.outcome = TradeOutcome.WIN
                 result.wins += 1
-            elif trade.pnl_handles < 0:
+            elif trade.pnl_dollars < 0:
                 trade.outcome = TradeOutcome.LOSS
                 result.losses += 1
             else:
@@ -714,8 +849,10 @@ def run_unicorn_backtest(
             result.valid_setups += 1
             result.session_stats[session].valid_setups += 1
 
-        # SOFT SCORING: Enter if score >= threshold (configurable, default 6/8)
-        if criteria.criteria_met_count >= min_criteria_score:
+        # SOFT SCORING with mandatory/scored separation:
+        # - 3 MANDATORY must all pass: htf_bias, stop_valid, macro_window
+        # - 5 SCORED: min_criteria_score of these must pass
+        if criteria.meets_entry_requirements(min_scored=min_criteria_score):
             direction = criteria.htf_bias_direction
 
             # Get current ATR for volatility-normalized calculations
@@ -731,9 +868,15 @@ def run_unicorn_backtest(
             breakers = detect_breaker_blocks(htf_window, lookback=50)
             mitigations = detect_mitigation_blocks(htf_window, lookback=50)
 
-            entry_fvg, entry_block, entry_price = find_entry_zone(
+            entry_fvg, entry_block, base_entry_price = find_entry_zone(
                 htf_fvgs, breakers, mitigations, direction, current_price
             )
+
+            # Apply entry slippage (worse for the trade)
+            if direction == BiasDirection.BULLISH:
+                entry_price = base_entry_price + slippage_handles  # Pay more
+            else:
+                entry_price = base_entry_price - slippage_handles  # Receive less
 
             # Calculate stop and target (ATR-based validation)
             sweeps = detect_liquidity_sweeps(htf_window, lookback=50)
@@ -751,8 +894,8 @@ def run_unicorn_backtest(
                 atr=current_atr, config=config,
             )
 
-            # Position sizing
-            risk_dollars = risk_handles * point_value
+            # Position sizing (account for slippage in risk)
+            risk_dollars = (risk_handles + slippage_handles) * point_value
             if risk_dollars > 0:
                 quantity = max(1, int(dollars_per_trade / risk_dollars))
             else:
@@ -777,30 +920,47 @@ def run_unicorn_backtest(
             setup_record.taken = True
         else:
             setup_record.taken = False
-            setup_record.reason_not_taken = f"score {criteria.criteria_met_count}/8 < {min_criteria_score}"
+            # Build detailed reason
+            if not criteria.mandatory_criteria_met:
+                missing_mandatory = []
+                if not criteria.htf_bias_aligned:
+                    missing_mandatory.append("htf_bias")
+                if not criteria.stop_valid:
+                    missing_mandatory.append("stop_valid")
+                if not criteria.in_macro_window:
+                    missing_mandatory.append("macro_window")
+                setup_record.reason_not_taken = f"mandatory failed: {', '.join(missing_mandatory)}"
+            else:
+                setup_record.reason_not_taken = f"scored {criteria.scored_criteria_count}/5 < {min_criteria_score}"
 
         result.all_setups.append(setup_record)
 
-    # Close any remaining open trades at last bar
+    # Close any remaining open trades at last bar (with slippage + commission)
     for trade in open_trades:
-        trade.exit_price = htf_bars[-1].close
+        last_close = htf_bars[-1].close
         trade.exit_time = htf_bars[-1].ts
         trade.exit_reason = "backtest_end"
+
+        # Apply slippage to exit (worse for trade direction)
         if trade.direction == BiasDirection.BULLISH:
+            trade.exit_price = last_close - slippage_handles
             trade.pnl_handles = trade.exit_price - trade.entry_price
         else:
+            trade.exit_price = last_close + slippage_handles
             trade.pnl_handles = trade.entry_price - trade.exit_price
 
-        trade.pnl_dollars = trade.pnl_handles * point_value * trade.quantity
+        # Apply commission
+        commission_total = commission_per_contract * trade.quantity
+        trade.pnl_dollars = (trade.pnl_handles * point_value * trade.quantity) - commission_total
         trade.duration_minutes = int((trade.exit_time - trade.entry_time).total_seconds() / 60)
 
         if trade.risk_handles > 0:
             trade.r_multiple = trade.pnl_handles / trade.risk_handles
 
-        if trade.pnl_handles > 0:
+        if trade.pnl_dollars > 0:  # Use dollars (includes commission) for outcome
             trade.outcome = TradeOutcome.WIN
             result.wins += 1
-        elif trade.pnl_handles < 0:
+        elif trade.pnl_dollars < 0:
             trade.outcome = TradeOutcome.LOSS
             result.losses += 1
         else:

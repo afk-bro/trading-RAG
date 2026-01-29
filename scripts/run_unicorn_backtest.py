@@ -23,6 +23,7 @@ from app.services.strategy.models import OHLCVBar
 from app.services.backtest.engines.unicorn_runner import (
     run_unicorn_backtest,
     format_backtest_report,
+    IntrabarPolicy,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
@@ -52,26 +53,88 @@ def load_bars_from_csv(filepath: str) -> list[OHLCVBar]:
     return bars
 
 
-def generate_sample_data(symbol: str, days: int = 30) -> tuple[list[OHLCVBar], list[OHLCVBar]]:
-    """Generate synthetic data for testing when no CSV is provided."""
-    import random
+def generate_sample_data(
+    symbol: str,
+    days: int = 30,
+    profile: str = "realistic",
+) -> tuple[list[OHLCVBar], list[OHLCVBar]]:
+    """
+    Generate synthetic data for testing with different realism profiles.
 
-    print(f"Generating {days} days of synthetic {symbol} data...")
+    Profiles:
+        easy: Clean Gaussian random walk. Patterns are easy to detect, exits
+              hit reliably. Good for sanity checking logic, NOT for validation.
+
+        realistic: More realistic market microstructure:
+            - Fat tails (Student-t distribution for shocks)
+            - Vol clustering (GARCH-ish: high vol begets high vol)
+            - Regime switching (trend vs range periods)
+            - Occasional large wicks
+
+        evil: Adversarial conditions that break naive strategies:
+            - Everything in realistic, plus:
+            - Overnight gaps (jump process)
+            - Extreme wicks that hunt stops
+            - More frequent regime changes
+            - Fakeouts and failed patterns
+    """
+    import random
+    import math
+
+    print(f"Generating {days} days of synthetic {symbol} data (profile: {profile})...")
 
     # Start price based on symbol
     if "NQ" in symbol.upper():
         base_price = 17500.0
         tick_size = 0.25
+        base_vol = 15.0  # NQ is more volatile
     else:  # ES
         base_price = 4800.0
         tick_size = 0.25
+        base_vol = 5.0
+
+    # Profile-specific parameters
+    if profile == "easy":
+        # Clean gaussian, low vol, no regime switching
+        fat_tail_df = 100  # Effectively normal (high df = normal)
+        vol_persistence = 0.0  # No vol clustering
+        regime_switch_prob = 0.0
+        gap_prob = 0.0
+        wick_prob = 0.0
+        wick_mult = 1.0
+    elif profile == "realistic":
+        # Student-t with ~5 df (fat tails), GARCH-ish vol
+        fat_tail_df = 5
+        vol_persistence = 0.7  # Vol clusters
+        regime_switch_prob = 0.05  # ~5% chance to switch trend/range
+        gap_prob = 0.02  # 2% overnight gap
+        wick_prob = 0.08  # 8% large wick bars
+        wick_mult = 2.5
+    else:  # evil
+        fat_tail_df = 3  # Very fat tails
+        vol_persistence = 0.85  # Strong vol clustering
+        regime_switch_prob = 0.12  # Frequent regime changes
+        gap_prob = 0.08  # More gaps
+        wick_prob = 0.15  # Many stop-hunting wicks
+        wick_mult = 4.0
+
+    def student_t_sample(df: float) -> float:
+        """Sample from Student-t distribution (fat tails)."""
+        if df >= 100:
+            return random.gauss(0, 1)
+        # Use ratio of normals approximation
+        chi2 = sum(random.gauss(0, 1) ** 2 for _ in range(int(df))) / df
+        return random.gauss(0, 1) / math.sqrt(chi2) if chi2 > 0 else 0
 
     htf_bars = []
     ltf_bars = []
 
-    # Generate data for each trading day
+    # State variables
     start_date = datetime(2024, 1, 2, 0, 0)
     price = base_price
+    current_vol = base_vol
+    trend_bias = 0.0  # Positive = bullish, negative = bearish
+    in_trend = random.random() < 0.5  # Start in trend or range
 
     for day in range(days):
         current_date = start_date.replace(day=start_date.day + day)
@@ -80,19 +143,52 @@ def generate_sample_data(symbol: str, days: int = 30) -> tuple[list[OHLCVBar], l
         if current_date.weekday() >= 5:
             continue
 
-        # Generate 15m bars (HTF) for the day: 6:00 AM to 5:00 PM = ~44 bars
+        # Overnight gap (jump process) at day start
+        if random.random() < gap_prob:
+            gap_size = student_t_sample(fat_tail_df) * base_vol * 3
+            price += gap_size
+            if profile != "easy":
+                print(f"  Gap at {current_date.date()}: {gap_size:+.2f}")
+
+        # Regime switching
+        if random.random() < regime_switch_prob:
+            in_trend = not in_trend
+            if in_trend:
+                trend_bias = random.choice([-1, 1]) * random.uniform(0.3, 0.8)
+            else:
+                trend_bias = 0.0
+
+        # Generate 15m bars (HTF) for the day: 6:00 AM to 5:00 PM
         for hour in range(6, 17):
             for minute in [0, 15, 30, 45]:
                 ts = current_date.replace(hour=hour, minute=minute)
 
-                # Add trend and noise
-                trend = random.gauss(0, 0.5)  # Small random walk
-                volatility = random.uniform(5, 20)
+                # GARCH-ish vol clustering
+                vol_shock = abs(student_t_sample(fat_tail_df))
+                current_vol = (vol_persistence * current_vol +
+                              (1 - vol_persistence) * base_vol +
+                              vol_shock * 0.5)
+                current_vol = max(base_vol * 0.5, min(base_vol * 3, current_vol))
+
+                # Price move with fat tails
+                noise = student_t_sample(fat_tail_df) * current_vol * 0.1
+                move = trend_bias + noise
 
                 open_ = price
-                close = price + trend
-                high = max(open_, close) + random.uniform(0, volatility)
-                low = min(open_, close) - random.uniform(0, volatility)
+                close = price + move
+
+                # Normal high/low
+                high = max(open_, close) + random.uniform(0, current_vol * 0.3)
+                low = min(open_, close) - random.uniform(0, current_vol * 0.3)
+
+                # Occasional large wicks (stop hunting)
+                if random.random() < wick_prob:
+                    if random.random() < 0.5:
+                        # Wick down then recover
+                        low = min(open_, close) - current_vol * wick_mult
+                    else:
+                        # Wick up then drop
+                        high = max(open_, close) + current_vol * wick_mult
 
                 htf_bars.append(OHLCVBar(
                     ts=ts,
@@ -105,20 +201,29 @@ def generate_sample_data(symbol: str, days: int = 30) -> tuple[list[OHLCVBar], l
 
                 price = close
 
-        # Generate 5m bars (LTF) - 3x as many
-        price = base_price + (day * random.gauss(0, 10))
+        # Generate 5m bars (LTF) - track HTF price but with more noise
+        ltf_price = htf_bars[-44].open if len(htf_bars) >= 44 else price
 
         for hour in range(6, 17):
             for minute in range(0, 60, 5):
                 ts = current_date.replace(hour=hour, minute=minute)
 
-                trend = random.gauss(0, 0.2)
-                volatility = random.uniform(2, 8)
+                # LTF has same vol characteristics but smaller moves
+                noise = student_t_sample(fat_tail_df) * current_vol * 0.03
+                move = (trend_bias * 0.33) + noise
 
-                open_ = price
-                close = price + trend
-                high = max(open_, close) + random.uniform(0, volatility)
-                low = min(open_, close) - random.uniform(0, volatility)
+                open_ = ltf_price
+                close = ltf_price + move
+
+                high = max(open_, close) + random.uniform(0, current_vol * 0.1)
+                low = min(open_, close) - random.uniform(0, current_vol * 0.1)
+
+                # LTF wicks
+                if random.random() < wick_prob * 0.5:
+                    if random.random() < 0.5:
+                        low = min(open_, close) - current_vol * wick_mult * 0.5
+                    else:
+                        high = max(open_, close) + current_vol * wick_mult * 0.5
 
                 ltf_bars.append(OHLCVBar(
                     ts=ts,
@@ -129,7 +234,7 @@ def generate_sample_data(symbol: str, days: int = 30) -> tuple[list[OHLCVBar], l
                     volume=random.randint(100, 1500),
                 ))
 
-                price = close
+                ltf_price = close
 
     return htf_bars, ltf_bars
 
@@ -204,8 +309,8 @@ Examples:
     parser.add_argument(
         "--min-criteria",
         type=int,
-        default=6,
-        help="Minimum criteria score for soft scoring (default: 6 of 8)"
+        default=3,
+        help="Minimum SCORED criteria (out of 5, not 8). Mandatory criteria always required. (default: 3)"
     )
     parser.add_argument(
         "--session-profile",
@@ -225,12 +330,42 @@ Examples:
         default=3.0,
         help="Max stop distance as ATR multiple (default: 3.0)"
     )
+    # Friction parameters (critical for realistic backtesting)
+    parser.add_argument(
+        "--slippage-ticks",
+        type=float,
+        default=1.0,
+        help="Slippage per side in ticks (default: 1 tick each way)"
+    )
+    parser.add_argument(
+        "--commission",
+        type=float,
+        default=2.50,
+        help="Round-trip commission per contract in dollars (default: $2.50)"
+    )
+    parser.add_argument(
+        "--intrabar-policy",
+        choices=["worst", "best", "random"],
+        default="worst",
+        help="How to resolve stop/target ambiguity when both hit in same bar. "
+             "worst=stop first (conservative), best=target first, random=50/50 (default: worst)"
+    )
+    # Synthetic data profiles
+    parser.add_argument(
+        "--synthetic-profile",
+        choices=["easy", "realistic", "evil"],
+        default="realistic",
+        help="Synthetic data profile: easy (clean gaussian), realistic (fat tails, vol clustering), "
+             "evil (extreme conditions, gaps, wicks). (default: realistic)"
+    )
 
     args = parser.parse_args()
 
     # Load or generate data
     if args.synthetic:
-        htf_bars, ltf_bars = generate_sample_data(args.symbol, args.days)
+        htf_bars, ltf_bars = generate_sample_data(
+            args.symbol, args.days, profile=args.synthetic_profile
+        )
         print(f"Generated {len(htf_bars)} HTF bars and {len(ltf_bars)} LTF bars")
     else:
         if not args.htf or not args.ltf:
@@ -256,9 +391,11 @@ Examples:
     print(f"\nRunning Unicorn Model backtest for {args.symbol}...")
     print(f"Risk per trade: ${args.dollars_per_trade:,.2f}")
     print(f"Max concurrent positions: {args.max_concurrent}")
-    print(f"Min criteria score: {args.min_criteria}/8 (soft scoring)")
+    print(f"Criteria: 3 mandatory + {args.min_criteria}/5 scored (guardrailed soft scoring)")
     print(f"Session profile: {args.session_profile}")
     print(f"FVG ATR mult: {args.fvg_atr_mult}, Stop ATR mult: {args.stop_atr_mult}")
+    print(f"Friction: {args.slippage_ticks} ticks slippage, ${args.commission:.2f} commission")
+    print(f"Intrabar policy: {args.intrabar_policy}")
     print("")
 
     result = run_unicorn_backtest(
@@ -270,6 +407,9 @@ Examples:
         eod_exit=not args.no_eod_exit,
         min_criteria_score=args.min_criteria,
         config=config,
+        slippage_ticks=args.slippage_ticks,
+        commission_per_contract=args.commission,
+        intrabar_policy=IntrabarPolicy(args.intrabar_policy),
     )
 
     # Format output
