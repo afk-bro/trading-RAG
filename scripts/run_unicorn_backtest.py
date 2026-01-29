@@ -28,6 +28,7 @@ from app.services.backtest.engines.unicorn_runner import (
 from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
     SessionProfile,
+    BiasDirection,
 )
 
 
@@ -398,6 +399,25 @@ Examples:
         help="Synthetic data profile: easy (clean gaussian), realistic (fat tails, vol clustering), "
              "evil (extreme conditions, gaps, wicks). (default: realistic)"
     )
+    # Direction filter (diagnostics showed longs profitable, shorts bleed)
+    parser.add_argument(
+        "--long-only",
+        action="store_true",
+        help="Only take long trades. Diagnostics showed longs are profitable, shorts bleed."
+    )
+    # Time-stop: cut grindy losers early
+    parser.add_argument(
+        "--time-stop",
+        type=int,
+        metavar="MINUTES",
+        help="Exit if not at +0.25R within N minutes. ICT entries that work tend to move fast."
+    )
+    parser.add_argument(
+        "--time-stop-threshold",
+        type=float,
+        default=0.25,
+        help="R-multiple threshold for time-stop (default: 0.25R)"
+    )
 
     args = parser.parse_args()
 
@@ -501,6 +521,10 @@ Examples:
     print(f"FVG ATR mult: {args.fvg_atr_mult}, Stop ATR mult: {args.stop_atr_mult}")
     print(f"Friction: {args.slippage_ticks} ticks slippage, ${args.commission:.2f} commission")
     print(f"Intrabar policy: {args.intrabar_policy}")
+    if args.long_only:
+        print(f"Direction filter: LONG ONLY")
+    if args.time_stop:
+        print(f"Time-stop: exit if not at +{args.time_stop_threshold}R within {args.time_stop} minutes")
     print("")
 
     result = run_unicorn_backtest(
@@ -515,6 +539,9 @@ Examples:
         slippage_ticks=args.slippage_ticks,
         commission_per_contract=args.commission,
         intrabar_policy=IntrabarPolicy(args.intrabar_policy),
+        direction_filter=BiasDirection.BULLISH if args.long_only else None,
+        time_stop_minutes=args.time_stop,
+        time_stop_r_threshold=args.time_stop_threshold,
     )
 
     # Format output

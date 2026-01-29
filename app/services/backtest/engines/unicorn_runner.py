@@ -566,6 +566,11 @@ def run_unicorn_backtest(
     slippage_ticks: float = 1.0,  # Slippage per side in ticks
     commission_per_contract: float = 2.50,  # Round-trip commission per contract
     intrabar_policy: IntrabarPolicy = IntrabarPolicy.WORST,  # Stop/target ambiguity
+    # Direction filter (diagnostics showed longs profitable, shorts not)
+    direction_filter: Optional[BiasDirection] = None,  # None=both, BULLISH=long-only
+    # Time-stop: exit if not profitable within N minutes
+    time_stop_minutes: Optional[int] = None,  # None=disabled, e.g., 30=exit if not +0.25R in 30 min
+    time_stop_r_threshold: float = 0.25,  # R-multiple to reach within time_stop_minutes
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -586,6 +591,11 @@ def run_unicorn_backtest(
         intrabar_policy: How to resolve stop/target ambiguity when both hit in
                         same bar. WORST=stop first (conservative), BEST=target
                         first (optimistic), RANDOM=50/50. Default WORST.
+        direction_filter: Only take trades in this direction. None=both directions,
+                         BULLISH=long-only (diagnostics showed longs profitable).
+        time_stop_minutes: Exit if not at +time_stop_r_threshold R within N minutes.
+                          None=disabled. Helps cut grindy losers early.
+        time_stop_r_threshold: R-multiple to reach within time_stop_minutes (default 0.25R).
 
     Returns:
         UnicornBacktestResult with complete analytics
@@ -783,6 +793,30 @@ def run_unicorn_backtest(
                     trade.exit_reason = "target"
                     trade.pnl_handles = trade.entry_price - trade.exit_price
 
+            # Time-stop: exit if not at +threshold R within N minutes
+            # ICT-style entries often work fast; cut grindy losers early
+            if (
+                time_stop_minutes is not None
+                and trade.exit_time is None
+                and (ts - trade.entry_time).total_seconds() / 60 >= time_stop_minutes
+            ):
+                # Calculate unrealized R-multiple
+                if trade.direction == BiasDirection.BULLISH:
+                    unrealized_r = (bar.close - trade.entry_price) / trade.risk_handles if trade.risk_handles > 0 else 0
+                else:
+                    unrealized_r = (trade.entry_price - bar.close) / trade.risk_handles if trade.risk_handles > 0 else 0
+
+                # Exit if below threshold
+                if unrealized_r < time_stop_r_threshold:
+                    if trade.direction == BiasDirection.BULLISH:
+                        trade.exit_price = bar.close - slippage_handles
+                        trade.pnl_handles = trade.exit_price - trade.entry_price
+                    else:
+                        trade.exit_price = bar.close + slippage_handles
+                        trade.pnl_handles = trade.entry_price - trade.exit_price
+                    trade.exit_time = ts
+                    trade.exit_reason = "time_stop"
+
             # EOD exit (with slippage) - use bar.close since we're exiting at EOD
             if eod_exit and ts.time() >= eod_time and trade.exit_time is None:
                 if trade.direction == BiasDirection.BULLISH:
@@ -872,6 +906,14 @@ def run_unicorn_backtest(
         # - 5 SCORED: min_criteria_score of these must pass
         if criteria.meets_entry_requirements(min_scored=min_criteria_score):
             direction = criteria.htf_bias_direction
+
+            # Direction filter: skip if direction doesn't match filter
+            # Diagnostics showed longs are profitable, shorts bleed
+            if direction_filter is not None and direction != direction_filter:
+                setup_record.taken = False
+                setup_record.reason_not_taken = f"direction_filter: {direction.value} != {direction_filter.value}"
+                result.all_setups.append(setup_record)
+                continue
 
             # CRITICAL: Use signal_atr (from previous bar) for sizing, not current bar
             # signal_atr was computed above from htf_atr_values[i-1]
