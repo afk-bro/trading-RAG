@@ -40,6 +40,8 @@ A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading kn
 - **Answer Generation**: Optional LLM synthesis with citations (graceful degradation)
 - **Model Migration**: Re-embed support for model upgrades
 - **Backtest Parameter Tuning**: Grid/random search, IS/OOS splits, overfit detection
+- **Strategy Backtest UI**: Interactive backtesting with R-metrics, expectancy analysis, session breakdown
+- **ICT Unicorn Model**: Discretionary strategy with 8-criteria checklist, direction filter, time-stops
 - **Trading KB Recommend**: Strategy parameter recommendations with confidence scoring
 - **Regime Fingerprints**: Materialized regime vectors for instant similarity queries
 - **Pine Script Registry**: Parse, lint, and catalog Pine Script files with CLI tooling
@@ -228,6 +230,7 @@ Deep dependency health check for Kubernetes readiness probes. Returns 200 when a
 | `/admin/backtests/tunes` | Filterable tune list |
 | `/admin/backtests/leaderboard` | Global ranking (CSV export) |
 | `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
+| `/admin/backtests/strategy-test` | Interactive strategy backtest UI |
 | `/admin/ops/snapshot` | Go-live verification (release, config, health) |
 | `/admin/system/health` | System health dashboard (status cards) |
 | `/admin/system/health.json` | System health (machine-readable) |

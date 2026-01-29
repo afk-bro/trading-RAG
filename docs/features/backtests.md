@@ -104,3 +104,85 @@ ExecutionSpec → Test Generator → RunPlan → Run Orchestrator → RunResult
 **Admin UI**:
 - `/admin/testing/run-plans` - List page
 - `/admin/testing/run-plans/{id}` - Detail page
+
+## Strategy Backtest UI
+
+Interactive backtesting interface for running and analyzing strategy performance.
+
+**Route**: `/admin/backtests/strategy-test`
+
+**Features**:
+- Strategy selection (ICT Unicorn Model)
+- Symbol selection (ES, NQ futures)
+- Date range picker with data availability validation
+- Direction filter (long-only, short-only, both)
+- Min criteria score (3-5 of 5)
+- Trading platform presets with realistic commissions:
+  - Apex (Rithmic): $3.98/RT ($1.99/side)
+  - Apex (Tradovate): $3.10/RT ($1.55/side)
+  - Topstep: $2.80/RT (~$1.40/side)
+  - Custom: user-defined
+- Friction settings: slippage (ticks), intrabar policy
+
+**R-Metrics Display** (prioritized over dollar-based metrics):
+- **Avg R per Trade**: Edge metric, portable across contract sizes
+- **Total R**: Sum of all R-multiples
+- **Max Win/Loss**: Best and worst R-multiple trades
+- **Expectancy Analysis**: Visual formula breakdown
+  - `E = (Win% × Avg Win R) − (Loss% × |Avg Loss R|)`
+- **R Distribution**: Bar chart showing trade bucketing by R-multiple
+  - `< -1.0R`, `-1.0 to 0R`, `0 to +1R`, `+1 to +2R`, `+2R+`
+  - P(≥+1R) and P(≥+2R) probability badges
+- **Warning Badges**: "No +2R+ wins" when fat tails missing (capped exits)
+
+**Additional Analytics**:
+- Session breakdown (London, NY AM, NY PM, Asia) with win rate and PnL
+- Exit reasons pie chart (target, stop_loss, time_stop, session_end)
+- Criteria bottleneck analysis (why setups fail)
+- MFE/MAE analysis (maximum favorable/adverse excursion)
+- Confidence buckets correlation
+
+**Implementation**:
+- Backend: `app/admin/strategy_backtest.py`
+- Templates: `app/admin/templates/strategy_backtest.html`, `strategy_backtest_results.html`
+- Engine: `app/services/backtest/engines/unicorn_runner.py`
+
+## ICT Unicorn Model Strategy
+
+Discretionary trading strategy based on ICT methodology.
+
+**8-Criteria Checklist**:
+
+*Mandatory (must pass all 3)*:
+1. Previous day closed in premium/discount (>60% or <40% of range)
+2. Current price in opposite zone (discount if prev premium, vice versa)
+3. FVG present in LTF for entry
+
+*Scored (need 3+ of 5)*:
+4. HTF trend alignment (SMA slope)
+5. Session timing (London/NY AM preferred)
+6. Liquidity sweep before entry
+7. Displacement candle confirmation
+8. Order block alignment
+
+**Key Features**:
+- Multi-timeframe analysis (HTF: 15m, LTF: 1m)
+- Session filtering (London, NY AM, NY PM, Asia)
+- Volatility-normalized sizing via ATR
+- Direction filter support (long-only outperforms on NQ)
+- Time-stop: Exit trades not hitting TP/SL within session
+- Look-ahead bias prevention in entry logic
+
+**Configuration** (`UnicornModelConfig`):
+- `htf_bars`, `ltf_bars`: Data window sizes
+- `min_criteria_score`: Minimum scored criteria (default 3)
+- `slippage_ticks`: Entry/exit slippage
+- `commission_per_contract`: Round-turn commission
+- `intrabar_policy`: worst (conservative), best (optimistic), random
+- `direction_filter`: long_only, short_only, both
+
+**Lessons Learned**:
+- Direction matters: Long-only on NQ improved PF from 0.91 to 1.34
+- Time-stops reduce exposure without hurting edge
+- 40% full-stop rate with 0% +2R+ wins indicates capped exits
+- See `docs/unicorn-model-analysis.md` for forensic analysis

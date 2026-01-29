@@ -8,6 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ICT Unicorn Model Strategy** - Discretionary trading strategy implementation
+  - 8-criteria checklist (3 mandatory + 5 scored) for trade qualification
+  - HTF/LTF multi-timeframe analysis with session filtering
+  - Volatility-normalized position sizing via ATR
+  - Direction filter support (long-only, short-only, both)
+  - Time-stop exit for trades not hitting TP/SL within session
+  - Look-ahead bias fixes in entry logic
+
+- **Strategy Backtest UI** - Interactive backtesting interface at `/admin/backtests/strategy-test`
+  - Strategy and symbol selection (ICT Unicorn Model, ES/NQ futures)
+  - Date range picker with data availability validation
+  - Direction filter dropdown (long-only recommended based on analysis)
+  - Min criteria score selector (3-5 of 5)
+  - Trading platform selector with realistic commission rates:
+    - Apex (Rithmic): $3.98/RT
+    - Apex (Tradovate): $3.10/RT
+    - Topstep: $2.80/RT
+    - Custom: user-defined
+  - Friction settings: slippage (ticks), commission, intrabar policy
+  - Loading animation with chart bars and cycling status messages
+  - Rich results display:
+    - **R-Metrics card** (highlighted): Avg R, Total R, Max Win, Max Loss
+    - **Expectancy Analysis**: Visual formula E = (Win% × Avg Win R) − (Loss% × |Avg Loss R|)
+    - **R Distribution**: Horizontal bar chart with P(≥+1R) and P(≥+2R) badges
+    - "No +2R+ wins" warning badge when fat tails missing
+    - Session breakdown chart (London, NY, Asia)
+    - Exit reasons pie chart (target, stop_loss, time_stop, session_end)
+    - Criteria bottleneck analysis
+    - MFE/MAE analysis
+    - Confidence buckets correlation
+  - HTMX-powered form submission with real-time updates
+
+- **Databento Integration** - CME futures historical data
+  - API client for batch data requests
+  - Local CSV loading with front-month contract filtering
+  - OHLCV-1m data for ES and NQ futures (2021-2026)
+  - Zstd-compressed storage with manifest/metadata files
+
 - **Document Detail Page** - Comprehensive document viewer at `/admin/documents/{doc_id}`
   - Document metadata display (title, author, source type, timestamps)
   - Stats bar: chunks, tokens, concepts, tickers
