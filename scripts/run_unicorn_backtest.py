@@ -254,11 +254,14 @@ Examples:
     # Customize risk parameters
     python scripts/run_unicorn_backtest.py --symbol ES --synthetic --dollars-per-trade 2000
 
-    # Fetch real NQ data from Databento (requires DATABENTO_API_KEY env var)
+    # Fetch real NQ data from Databento API (requires DATABENTO_API_KEY env var)
     python scripts/run_unicorn_backtest.py --symbol NQ --databento --start-date 2024-01-01 --end-date 2024-01-31
 
     # Estimate Databento API cost before fetching
     python scripts/run_unicorn_backtest.py --symbol NQ --databento --start-date 2024-01-01 --end-date 2024-01-31 --cost-only
+
+    # Load from local Databento CSV (no API key needed)
+    python scripts/run_unicorn_backtest.py --symbol NQ --databento-csv path/to/glbx-data.csv --start-date 2024-01-01 --end-date 2024-01-31
 
     # Realistic friction settings
     python scripts/run_unicorn_backtest.py --symbol NQ --synthetic --slippage-ticks 2 --commission 4.50 --intrabar-policy worst
@@ -294,6 +297,10 @@ Examples:
         "--databento",
         action="store_true",
         help="Fetch real data from Databento API (requires DATABENTO_API_KEY)"
+    )
+    parser.add_argument(
+        "--databento-csv",
+        help="Load from local Databento CSV file instead of API (can be .csv or .csv.zst)"
     )
     parser.add_argument(
         "--start-date",
@@ -395,7 +402,28 @@ Examples:
     args = parser.parse_args()
 
     # Load or generate data
-    if args.databento:
+    if args.databento_csv:
+        # Load from local Databento CSV file
+        from app.services.backtest.data import DatabentoFetcher
+
+        if not args.start_date or not args.end_date:
+            parser.error("--start-date and --end-date are required when using --databento-csv")
+
+        fetcher = DatabentoFetcher()
+
+        print(f"Loading {args.symbol} data from {args.databento_csv}...")
+        print(f"  Date range: {args.start_date} to {args.end_date}")
+        htf_bars, ltf_bars = fetcher.load_from_csv(
+            csv_path=args.databento_csv,
+            symbol=args.symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            htf_interval="15m",
+            ltf_interval="5m",
+        )
+        print(f"Loaded {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
+
+    elif args.databento:
         # Fetch real data from Databento API
         from app.services.backtest.data import DatabentoFetcher, get_continuous_symbols
 

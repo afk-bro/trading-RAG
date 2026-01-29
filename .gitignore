@@ -108,3 +108,9 @@ playwright-report/
 
 # Feature list (generated)
 # feature_list.json
+
+# Historical data (large files from Databento, etc.)
+docs/historical_data/
+
+# Databento cache
+.databento_cache/

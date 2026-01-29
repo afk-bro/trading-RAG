@@ -124,3 +124,46 @@ class TestSymbolRoots:
         symbol = get_front_month_symbol("NQ", date)
         assert symbol.startswith("NQ")
         assert symbol == "NQM4"
+
+
+class TestLoadFromCSV:
+    """Tests for loading data from local Databento CSV files."""
+
+    def test_front_month_filtering(self):
+        """Front month filtering maps correct contracts to dates."""
+        from app.services.backtest.data import DatabentoFetcher
+
+        fetcher = DatabentoFetcher()
+
+        # Get contracts for a 6-month period
+        start = datetime(2024, 1, 1)
+        end = datetime(2024, 6, 30)
+        contracts = get_continuous_symbols("NQ", start, end)
+
+        # Should have 3 contracts: H4, M4, U4
+        symbols = [c[0] for c in contracts]
+        assert "NQH4" in symbols  # Jan-Mar
+        assert "NQM4" in symbols  # Mar-Jun
+        assert "NQU4" in symbols  # Jun onwards
+
+    def test_roll_date_boundaries(self):
+        """Roll dates correctly transition between contracts."""
+        # March 2024 roll: H4 -> M4 around March 5-10
+        contracts = get_continuous_symbols("NQ", datetime(2024, 2, 1), datetime(2024, 4, 1))
+
+        h4_end = None
+        m4_start = None
+        for sym, start, end in contracts:
+            if sym == "NQH4":
+                h4_end = end
+            if sym == "NQM4":
+                m4_start = start
+
+        # H4 should end before M4 starts (no overlap)
+        if h4_end and m4_start:
+            assert h4_end < m4_start
+
+        # Roll should happen in early-to-mid March
+        if h4_end:
+            assert h4_end.month == 3
+            assert h4_end.day < 15

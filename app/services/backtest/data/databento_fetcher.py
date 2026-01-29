@@ -2,8 +2,9 @@
 Databento API data fetcher for futures backtesting.
 
 Fetches historical OHLCV data for NQ/ES futures from Databento's CME Globex feed.
+Supports both live API fetching and loading from downloaded CSV files.
 
-Usage:
+Usage (API):
     from app.services.backtest.data import DatabentoFetcher
 
     fetcher = DatabentoFetcher()  # Uses DATABENTO_API_KEY env var
@@ -15,8 +16,21 @@ Usage:
         ltf_interval="5m",
     )
 
+Usage (Local CSV):
+    from app.services.backtest.data import DatabentoFetcher
+
+    fetcher = DatabentoFetcher()
+    htf_bars, ltf_bars = fetcher.load_from_csv(
+        csv_path="path/to/glbx-mdp3-data.csv",
+        symbol="NQ",  # Filter by symbol root
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        htf_interval="15m",
+        ltf_interval="5m",
+    )
+
 Environment Variables:
-    DATABENTO_API_KEY: Your Databento API key
+    DATABENTO_API_KEY: Your Databento API key (optional for local files)
 
 References:
     - https://databento.com/docs/schemas-and-data-formats/ohlcv
@@ -554,6 +568,202 @@ class DatabentoFetcher:
             close=bars[-1].close,
             volume=sum(b.volume for b in bars),
         )
+
+    def load_from_csv(
+        self,
+        csv_path: str | Path,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        htf_interval: str = "15m",
+        ltf_interval: str = "5m",
+        front_month_only: bool = True,
+    ) -> tuple[list, list]:
+        """
+        Load futures data from a local Databento CSV file.
+
+        Handles the standard Databento CSV format with columns:
+        ts_event, rtype, publisher_id, instrument_id, open, high, low, close, volume, symbol
+
+        Args:
+            csv_path: Path to the CSV file (can be .csv or .csv.zst)
+            symbol: Root symbol to filter (e.g., "NQ", "ES")
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            htf_interval: Higher timeframe interval (15m, 1h)
+            ltf_interval: Lower timeframe interval (1m, 5m)
+            front_month_only: If True, only load front-month contracts (handles rolls)
+
+        Returns:
+            Tuple of (htf_bars, ltf_bars) as lists of OHLCVBar objects
+        """
+        from app.services.strategy.models import OHLCVBar
+
+        csv_path = Path(csv_path)
+
+        # Handle zstd compressed files
+        if csv_path.suffix == ".zst":
+            csv_path = self._decompress_zst(csv_path)
+
+        if not csv_path.exists():
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        # Parse dates
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        # Build front-month contract mapping if needed
+        front_month_contracts: dict[str, str] = {}  # date_str -> contract symbol
+        if front_month_only:
+            contracts = get_continuous_symbols(symbol, start_dt, end_dt)
+            for contract_symbol, period_start, period_end in contracts:
+                # Map each date in the period to this contract
+                current = period_start
+                while current <= period_end:
+                    front_month_contracts[current.strftime("%Y-%m-%d")] = contract_symbol
+                    current += timedelta(days=1)
+
+            logger.info(
+                "Front-month contracts for period",
+                contracts=[(c[0], str(c[1].date()), str(c[2].date())) for c in contracts],
+            )
+
+        logger.info(
+            "Loading from local CSV",
+            path=str(csv_path),
+            symbol=symbol,
+            start=start_date,
+            end=end_date,
+            front_month_only=front_month_only,
+        )
+
+        # Read and filter CSV
+        ohlcv_bars = []
+        rows_processed = 0
+        rows_matched = 0
+        rows_skipped_contract = 0
+
+        with open(csv_path, "r") as f:
+            # Read header
+            header = f.readline().strip().split(",")
+            col_idx = {name: i for i, name in enumerate(header)}
+
+            # Validate required columns
+            required = ["ts_event", "open", "high", "low", "close", "volume", "symbol"]
+            missing = [c for c in required if c not in col_idx]
+            if missing:
+                raise ValueError(f"CSV missing required columns: {missing}")
+
+            for line in f:
+                rows_processed += 1
+                parts = line.strip().split(",")
+
+                # Filter by symbol - match symbol root (NQ, ES)
+                sym = parts[col_idx["symbol"]]
+
+                # Symbol format is like "NQH4", "ESM5", "NQH1-NQM1" (spread)
+                # Skip spreads (contain hyphen)
+                if "-" in sym:
+                    continue
+
+                # Check if symbol starts with our root
+                if not sym.startswith(symbol):
+                    continue
+
+                # Parse timestamp
+                ts_str = parts[col_idx["ts_event"]]
+                try:
+                    # Handle Databento timestamp format: 2021-01-28T00:00:00.000000000Z
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+
+                # Filter by date range
+                ts_naive = ts.replace(tzinfo=None)
+                if ts_naive.date() < start_dt.date() or ts_naive.date() > end_dt.date():
+                    continue
+
+                # Filter by front-month contract if enabled
+                if front_month_only:
+                    date_str = ts_naive.strftime("%Y-%m-%d")
+                    expected_contract = front_month_contracts.get(date_str)
+                    if expected_contract and sym != expected_contract:
+                        rows_skipped_contract += 1
+                        continue
+
+                # Parse OHLCV values
+                try:
+                    bar = OHLCVBar(
+                        ts=ts_naive,
+                        open=float(parts[col_idx["open"]]),
+                        high=float(parts[col_idx["high"]]),
+                        low=float(parts[col_idx["low"]]),
+                        close=float(parts[col_idx["close"]]),
+                        volume=float(parts[col_idx["volume"]]),
+                    )
+                    ohlcv_bars.append(bar)
+                    rows_matched += 1
+                except (ValueError, IndexError):
+                    continue
+
+        logger.info(
+            "Loaded from CSV",
+            rows_processed=rows_processed,
+            rows_matched=rows_matched,
+            rows_skipped_wrong_contract=rows_skipped_contract,
+            bars_loaded=len(ohlcv_bars),
+        )
+
+        if not ohlcv_bars:
+            raise ValueError(
+                f"No data found for {symbol} between {start_date} and {end_date}"
+            )
+
+        # Sort by timestamp
+        ohlcv_bars.sort(key=lambda b: b.ts)
+
+        # Resample to HTF and LTF
+        htf_bars = self._resample_bars(ohlcv_bars, htf_interval)
+        ltf_bars = self._resample_bars(ohlcv_bars, ltf_interval)
+
+        logger.info(
+            "Resampled local data",
+            htf_interval=htf_interval,
+            htf_count=len(htf_bars),
+            ltf_interval=ltf_interval,
+            ltf_count=len(ltf_bars),
+        )
+
+        return htf_bars, ltf_bars
+
+    def _decompress_zst(self, zst_path: Path) -> Path:
+        """Decompress a .zst file if the uncompressed version doesn't exist."""
+        csv_path = zst_path.with_suffix("")  # Remove .zst extension
+
+        if csv_path.exists():
+            logger.info("Using existing decompressed file", path=str(csv_path))
+            return csv_path
+
+        logger.info("Decompressing zst file", src=str(zst_path), dst=str(csv_path))
+
+        try:
+            import zstandard as zstd
+        except ImportError:
+            raise ImportError(
+                "zstandard package not installed. "
+                "Install with: pip install zstandard"
+            )
+
+        dctx = zstd.ZstdDecompressor()
+        with open(zst_path, "rb") as ifh, open(csv_path, "wb") as ofh:
+            dctx.copy_stream(ifh, ofh)
+
+        logger.info(
+            "Decompressed zst file",
+            size_mb=csv_path.stat().st_size / 1024 / 1024,
+        )
+
+        return csv_path
 
 
 def main():
