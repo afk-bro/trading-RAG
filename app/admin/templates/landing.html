@@ -72,6 +72,24 @@
             transform: translateY(-2px);
         }
 
+        .hero-buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .cta-secondary {
+            background: transparent;
+            border: 2px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .cta-secondary:hover {
+            background: var(--accent);
+            color: white;
+        }
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -104,6 +122,23 @@
         .feature-card p {
             color: var(--text-muted);
             font-size: 0.95rem;
+        }
+
+        .feature-highlight {
+            border-color: var(--accent);
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(124, 58, 237, 0.1) 100%);
+        }
+
+        .feature-link {
+            display: inline-block;
+            margin-top: 12px;
+            color: var(--accent);
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .feature-link:hover {
+            color: var(--accent-hover);
         }
 
         .icon {
@@ -231,7 +266,10 @@
             A multi-tenant Retrieval-Augmented Generation system for trading knowledge.
             Ingest documents, generate embeddings, and get AI-powered answers from your knowledge base.
         </p>
-        <a href="/admin/login" class="cta-button">Login to Admin</a>
+        <div class="hero-buttons">
+            <a href="/admin/login" class="cta-button">Login to Admin</a>
+            <a href="/admin/backtests/strategy-test" class="cta-button cta-secondary">Run Backtest</a>
+        </div>
     </div>
 
     <div class="container">
@@ -253,9 +291,10 @@
                 <h3><span class="icon">🤖</span> AI-Powered Answers</h3>
                 <p>Query your knowledge base and get LLM-generated answers with source citations. Retrieve or answer modes available.</p>
             </div>
-            <div class="feature-card">
-                <h3><span class="icon">📊</span> Backtest Integration</h3>
-                <p>Run backtests, walk-forward optimization, and track strategy performance with built-in analytics dashboards.</p>
+            <div class="feature-card feature-highlight">
+                <h3><span class="icon">📊</span> Strategy Backtesting</h3>
+                <p>Run backtests on historical futures data (ES, NQ). Test the ICT Unicorn Model with customizable parameters, friction settings, and direction filters. View detailed analytics including session breakdown, exit analysis, and criteria bottlenecks.</p>
+                <a href="/admin/backtests/strategy-test" class="feature-link">Try Backtest →</a>
             </div>
             <div class="feature-card">
                 <h3><span class="icon">🏢</span> Multi-Tenant</h3>

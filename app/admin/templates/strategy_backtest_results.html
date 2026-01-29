@@ -1,0 +1,371 @@
+<!-- Backtest Results Partial (loaded via HTMX) -->
+
+{% if error %}
+<div class="card card-error">
+    <div class="error-content">
+        <h3>Backtest Failed</h3>
+        <p>{{ error }}</p>
+    </div>
+</div>
+{% else %}
+
+<!-- Summary Stats -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Results Summary</h3>
+        <div class="result-badges">
+            <span class="badge badge-{{ 'success' if result.profit_factor >= 1.0 else 'danger' }}">
+                PF {{ '%.2f' | format(result.profit_factor) }}
+            </span>
+            <span class="badge badge-type">{{ result.symbol }}</span>
+            <span class="badge badge-type">{{ result.direction_filter or 'Both' }}</span>
+        </div>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-value">{{ result.trades_taken }}</div>
+            <div class="stat-label">Trades</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ result.wins }}/{{ result.losses }}</div>
+            <div class="stat-label">Wins/Losses</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value{% if result.win_rate >= 0.4 %} text-success{% else %} text-danger{% endif %}">
+                {{ '%.1f' | format(result.win_rate * 100) }}%
+            </div>
+            <div class="stat-label">Win Rate</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value{% if result.profit_factor >= 1.0 %} text-success{% else %} text-danger{% endif %}">
+                {{ '%.2f' | format(result.profit_factor) }}
+            </div>
+            <div class="stat-label">Profit Factor</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value{% if result.total_pnl_handles >= 0 %} text-success{% else %} text-danger{% endif %}">
+                {{ '%+.1f' | format(result.total_pnl_handles) }}h
+            </div>
+            <div class="stat-label">Total PnL</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value{% if result.total_pnl_dollars >= 0 %} text-success{% else %} text-danger{% endif %}">
+                ${{ '{:+,.0f}'.format(result.total_pnl_dollars) }}
+            </div>
+            <div class="stat-label">PnL (Dollars)</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ '%+.2f' | format(result.expectancy_handles) }}h</div>
+            <div class="stat-label">Expectancy</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ '%+.2f' | format(result.avg_r_multiple) }}R</div>
+            <div class="stat-label">Avg R</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="charts-grid">
+    <!-- Session Breakdown -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Session Breakdown</h3>
+        </div>
+        <div id="session-chart"></div>
+        <table class="mini-table">
+            <thead>
+                <tr>
+                    <th>Session</th>
+                    <th>Trades</th>
+                    <th>Win Rate</th>
+                    <th>PnL</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for session, stats in result.session_stats.items() %}
+                {% if stats.trades > 0 %}
+                <tr>
+                    <td>{{ session.replace('_', ' ').upper() }}</td>
+                    <td>{{ stats.trades }}</td>
+                    <td>{{ '%.1f' | format(stats.win_rate * 100) }}%</td>
+                    <td class="{% if stats.pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {{ '%+.1f' | format(stats.pnl) }}h
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Exit Breakdown -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Exit Reasons</h3>
+        </div>
+        <div id="exit-chart"></div>
+        <table class="mini-table">
+            <thead>
+                <tr>
+                    <th>Reason</th>
+                    <th>Count</th>
+                    <th>Win Rate</th>
+                    <th>PnL</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for reason, data in result.exit_breakdown.items() %}
+                <tr>
+                    <td>{{ reason.replace('_', ' ').title() }}</td>
+                    <td>{{ data.count }}</td>
+                    <td>{{ '%.1f' | format(data.win_rate * 100) }}%</td>
+                    <td class="{% if data.pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {{ '%+.1f' | format(data.pnl) }}h
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Criteria Bottleneck -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Criteria Bottleneck Analysis</h3>
+        <span class="badge badge-type">Why setups fail</span>
+    </div>
+    <div id="bottleneck-chart"></div>
+</div>
+
+<!-- MFE/MAE Analysis -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">MFE / MAE Analysis</h3>
+    </div>
+    <div class="stats stats-small">
+        <div class="stat">
+            <div class="stat-value">{{ '%.1f' | format(result.avg_mfe) }}h</div>
+            <div class="stat-label">Avg MFE</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ '%.1f' | format(result.avg_mae) }}h</div>
+            <div class="stat-label">Avg MAE</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ '%.1f' | format(result.mfe_capture_rate * 100) }}%</div>
+            <div class="stat-label">MFE Capture</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ '%+.1f' | format(result.largest_win) }}h</div>
+            <div class="stat-label">Largest Win</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value text-danger">{{ '%.1f' | format(result.largest_loss) }}h</div>
+            <div class="stat-label">Largest Loss</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ '%+.2f' | format(result.best_r) }}R</div>
+            <div class="stat-label">Best R</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value text-danger">{{ '%.2f' | format(result.worst_r) }}R</div>
+            <div class="stat-label">Worst R</div>
+        </div>
+    </div>
+</div>
+
+<!-- Confidence Buckets -->
+{% if result.confidence_buckets %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Confidence vs Win Rate</h3>
+        <span class="badge badge-type">Correlation: {{ '%+.3f' | format(result.confidence_correlation) }}</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Confidence Range</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Avg R</th>
+                <th>Total PnL</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bucket in result.confidence_buckets %}
+            <tr>
+                <td>{{ '%.1f' | format(bucket.min_conf) }} - {{ '%.1f' | format(bucket.max_conf) }}</td>
+                <td>{{ bucket.trades }}</td>
+                <td>{{ '%.1f' | format(bucket.win_rate * 100) }}%</td>
+                <td>{{ '%+.2f' | format(bucket.avg_r) }}R</td>
+                <td class="{% if bucket.pnl >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ '%+.1f' | format(bucket.pnl) }}h
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Configuration Used -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Configuration</h3>
+        <button onclick="toggleConfig()" class="btn btn-secondary btn-sm">Toggle</button>
+    </div>
+    <div id="config-details" style="display: none;">
+        <div class="config-grid">
+            <div class="config-item">
+                <span class="config-label">Period:</span>
+                <span>{{ result.start_date }} to {{ result.end_date }}</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">Symbol:</span>
+                <span>{{ result.symbol }}</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">Direction:</span>
+                <span>{{ result.direction_filter or 'Both' }}</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">Min Criteria:</span>
+                <span>{{ result.min_criteria }}/5 scored</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">Slippage:</span>
+                <span>{{ result.slippage }} ticks</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">Commission:</span>
+                <span>${{ '%.2f' | format(result.commission) }}/contract</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">Intrabar Policy:</span>
+                <span>{{ result.intrabar_policy }}</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">HTF Bars:</span>
+                <span>{{ result.htf_bars }}</span>
+            </div>
+            <div class="config-item">
+                <span class="config-label">LTF Bars:</span>
+                <span>{{ result.ltf_bars }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Initialize Charts -->
+<script>
+(function() {
+    const chartData = {{ chart_data | tojson }};
+    renderResultCharts(chartData);
+})();
+
+function toggleConfig() {
+    const el = document.getElementById('config-details');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+
+<style>
+    .card-error {
+        background: rgba(248, 81, 73, 0.1);
+        border-color: var(--danger);
+    }
+
+    .error-content {
+        text-align: center;
+        padding: var(--space-4);
+    }
+
+    .error-content h3 {
+        color: var(--danger);
+        margin-bottom: var(--space-2);
+    }
+
+    .result-badges {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
+        margin-bottom: var(--space-4);
+    }
+
+    .mini-table {
+        width: 100%;
+        font-size: var(--font-size-sm);
+        margin-top: var(--space-3);
+    }
+
+    .mini-table th {
+        font-weight: var(--font-weight-medium);
+        color: var(--text-muted);
+        text-align: left;
+        padding: var(--space-2);
+        border-bottom: 1px solid var(--border);
+    }
+
+    .mini-table td {
+        padding: var(--space-2);
+        border-bottom: 1px solid var(--border);
+    }
+
+    .stats-small .stat {
+        padding: var(--space-3);
+    }
+
+    .stats-small .stat-value {
+        font-size: var(--font-size-lg);
+    }
+
+    .config-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: var(--space-3);
+        padding: var(--space-3);
+    }
+
+    .config-item {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .config-label {
+        color: var(--text-muted);
+        font-size: var(--font-size-sm);
+    }
+
+    .btn-sm {
+        padding: var(--space-1) var(--space-2);
+        font-size: var(--font-size-sm);
+    }
+
+    .btn-secondary {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+    }
+
+    .btn-secondary:hover {
+        background: var(--bg-secondary);
+    }
+
+    .text-success { color: var(--success); }
+    .text-danger { color: var(--danger); }
+
+    @media (max-width: 768px) {
+        .charts-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+{% endif %}

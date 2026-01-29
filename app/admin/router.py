@@ -20,6 +20,7 @@ from app.admin import evals as evals_router
 from app.admin import kb_admin as kb_admin_router
 from app.admin import kb_trials as kb_trials_router
 from app.admin import backtests as backtests_router
+from app.admin import strategy_backtest as strategy_backtest_router
 from app.admin import run_plans as run_plans_router
 from app.admin import jobs as jobs_router
 from app.admin import pine_discovery as pine_discovery_router
@@ -78,6 +79,9 @@ router.include_router(kb_trials_router.router)
 
 # Backtests
 router.include_router(backtests_router.router)
+
+# Strategy Backtest (interactive UI for running backtests)
+router.include_router(strategy_backtest_router.router)
 
 # Run Plans
 router.include_router(run_plans_router.router)
