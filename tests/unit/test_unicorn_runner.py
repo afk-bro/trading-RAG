@@ -533,3 +533,14 @@ class TestParityDiagnostics:
                 f"mandatory={setup.mandatory_met}, scored={setup.scored_count}, "
                 f"min={setup.min_scored_required}, result={setup.decide_entry_result}"
             )
+
+            # scored_missing must be consistent with scored_count
+            assert isinstance(setup.scored_missing, list)
+            assert len(setup.scored_missing) == 5 - setup.scored_count, (
+                f"scored_missing length mismatch at {setup.timestamp}: "
+                f"missing={setup.scored_missing}, scored_count={setup.scored_count}"
+            )
+            # All items must be valid scored criteria names
+            valid_scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"}
+            for name in setup.scored_missing:
+                assert name in valid_scored, f"Invalid scored criterion: {name}"

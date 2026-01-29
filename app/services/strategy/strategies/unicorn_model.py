@@ -214,6 +214,12 @@ class CriteriaScore:
             self.mss,
         ])
 
+    @property
+    def scored_missing(self) -> list[str]:
+        """Names of scored criteria that failed (subset of missing)."""
+        _scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"}
+        return [name for name in self.missing if name in _scored]
+
     def decide_entry(self, min_scored: int = 3) -> bool:
         """
         Canonical entry gate used by both live evaluator and backtest.
@@ -837,10 +843,7 @@ def evaluate_unicorn_model(
                         config.min_confidence is not None
                         and setup.confidence < config.min_confidence
                     ):
-                        signals.append(
-                            f"htf_bias_confidence_{setup.confidence:.2f}"
-                            f"_below_{config.min_confidence:.2f}"
-                        )
+                        signals.append("htf_bias_confidence_below_threshold")
                     else:
                         signals.append("htf_bias_not_tradeable")
                 if not cs.stop_valid:
@@ -921,6 +924,8 @@ def evaluate_unicorn_model(
                     "has_block": setup.entry_block is not None,
                     "has_ltf_fvg": setup.ltf_fvg is not None,
                     "has_mss": setup.mss is not None,
+                    "confidence_threshold": config.min_confidence,
+                    "scored_missing": setup.criteria_score.scored_missing,
                 }
             )
 

@@ -245,6 +245,7 @@ class SetupOccurrence:
     scored_count: int = 0
     min_scored_required: int = 0
     decide_entry_result: bool = False
+    scored_missing: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -887,6 +888,9 @@ def run_unicorn_backtest(
             scored_count=criteria.scored_criteria_count,
             min_scored_required=min_criteria_score,
             decide_entry_result=entry_decision,
+            scored_missing=[
+                c for c in criteria.missing_criteria() if c in SCORED_CRITERIA
+            ],
         )
 
         if criteria.criteria_met_count > 0:
