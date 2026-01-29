@@ -560,7 +560,7 @@ def run_unicorn_backtest(
     max_concurrent_trades: int = 1,
     eod_exit: bool = True,
     eod_time: time = time(15, 45),
-    min_criteria_score: int = 6,  # Soft scoring: enter at >= N/8 (now 3/5 scored)
+    min_criteria_score: int = 3,  # Soft scoring: enter at >= N of 5 scored criteria
     config: Optional[UnicornConfig] = None,
     # Friction parameters (critical for realistic backtesting)
     slippage_ticks: float = 1.0,  # Slippage per side in ticks
@@ -643,17 +643,29 @@ def run_unicorn_backtest(
     ltf_by_time = {b.ts: b for b in ltf_bars}
 
     # Main backtest loop
-    warmup = 50  # Need history for indicators
+    # Warmup needs extra bar because we use i-1 for signals
+    warmup = 51  # Need history for indicators + 1 for causal signal
 
     for i in range(warmup, len(htf_bars), scan_interval):
         bar = htf_bars[i]
         ts = bar.ts
-        current_price = bar.close
 
-        # Get historical windows
-        htf_window = htf_bars[max(0, i-100):i+1]
+        # CRITICAL: Use bar OPEN for entry price (we know open at start of bar)
+        # We do NOT use bar.close - that's future information
+        entry_price_raw = bar.open
 
-        # Find corresponding LTF bars
+        # CRITICAL: Signal window uses PREVIOUS closed bars only (excludes current bar)
+        # Pattern detection at time t uses data from bars [0..t-1]
+        htf_window = htf_bars[max(0, i-100):i]  # Excludes bar[i]
+
+        if len(htf_window) < 3:
+            continue
+
+        # CRITICAL: ATR for sizing uses previous bar's ATR (not current)
+        # htf_atr_values[i] includes bar[i]'s TR, so use i-1
+        signal_atr = htf_atr_values[i-1] if i > 0 else htf_atr_values[0]
+
+        # Find corresponding LTF bars - must be BEFORE current HTF bar timestamp
         ltf_end_idx = None
         for j, lb in enumerate(ltf_bars):
             if lb.ts >= ts:
@@ -663,16 +675,22 @@ def run_unicorn_backtest(
         if ltf_end_idx is None:
             ltf_end_idx = len(ltf_bars)
 
+        # LTF window: bars strictly before current timestamp
         ltf_window = ltf_bars[max(0, ltf_end_idx-60):ltf_end_idx]
 
         if not ltf_window:
             continue
 
+        # For stop/target checks, we use the CURRENT bar's OHLC (this is correct -
+        # we're checking if price hit levels during bar[i], not predicting)
+
         # Update open trades (MFE/MAE tracking + exit checks)
+        # For exit checking, we use the current bar's OHLC (this is correct -
+        # checking if stop/target were hit during bar execution is not look-ahead)
         for trade in open_trades:
             if trade.direction == BiasDirection.BULLISH:
-                # Long trade - MFE/MAE tracking
-                unrealized = current_price - trade.entry_price
+                # Long trade - MFE/MAE tracking (use close for unrealized, OHLC for exits)
+                unrealized = bar.close - trade.entry_price
                 if unrealized > trade.mfe:
                     trade.mfe = unrealized
                     trade.mfe_time = ts
@@ -719,7 +737,7 @@ def run_unicorn_backtest(
                     trade.pnl_handles = trade.exit_price - trade.entry_price
 
             else:  # Short trade
-                unrealized = trade.entry_price - current_price
+                unrealized = trade.entry_price - bar.close
                 if unrealized > trade.mfe:
                     trade.mfe = unrealized
                     trade.mfe_time = ts
@@ -765,13 +783,13 @@ def run_unicorn_backtest(
                     trade.exit_reason = "target"
                     trade.pnl_handles = trade.entry_price - trade.exit_price
 
-            # EOD exit (with slippage)
+            # EOD exit (with slippage) - use bar.close since we're exiting at EOD
             if eod_exit and ts.time() >= eod_time and trade.exit_time is None:
                 if trade.direction == BiasDirection.BULLISH:
-                    trade.exit_price = current_price - slippage_handles
+                    trade.exit_price = bar.close - slippage_handles
                     trade.pnl_handles = trade.exit_price - trade.entry_price
                 else:
-                    trade.exit_price = current_price + slippage_handles
+                    trade.exit_price = bar.close + slippage_handles
                     trade.pnl_handles = trade.entry_price - trade.exit_price
                 trade.exit_time = ts
                 trade.exit_reason = "eod"
@@ -855,10 +873,10 @@ def run_unicorn_backtest(
         if criteria.meets_entry_requirements(min_scored=min_criteria_score):
             direction = criteria.htf_bias_direction
 
-            # Get current ATR for volatility-normalized calculations
-            current_atr = htf_atr_values[i] if i < len(htf_atr_values) else htf_atr_values[-1]
+            # CRITICAL: Use signal_atr (from previous bar) for sizing, not current bar
+            # signal_atr was computed above from htf_atr_values[i-1]
 
-            # Find entry zone (with ATR-normalized FVG detection)
+            # Find FVG/blocks for stop placement (htf_window excludes current bar, causal)
             htf_fvgs = detect_fvgs(
                 htf_window,
                 lookback=50,
@@ -868,17 +886,21 @@ def run_unicorn_backtest(
             breakers = detect_breaker_blocks(htf_window, lookback=50)
             mitigations = detect_mitigation_blocks(htf_window, lookback=50)
 
-            entry_fvg, entry_block, base_entry_price = find_entry_zone(
-                htf_fvgs, breakers, mitigations, direction, current_price
+            # Get FVG info for stop/target calculation (but NOT for entry price)
+            entry_fvg, entry_block, _ = find_entry_zone(
+                htf_fvgs, breakers, mitigations, direction, entry_price_raw
             )
 
-            # Apply entry slippage (worse for the trade)
+            # CRITICAL: Entry is at MARKET (bar.open), not at theoretical FVG level
+            # We can only enter at prices that actually traded
+            # Apply slippage: worse price for our direction
             if direction == BiasDirection.BULLISH:
-                entry_price = base_entry_price + slippage_handles  # Pay more
+                entry_price = bar.open + slippage_handles  # Buy at open + slip
             else:
-                entry_price = base_entry_price - slippage_handles  # Receive less
+                entry_price = bar.open - slippage_handles  # Sell at open - slip
 
             # Calculate stop and target (ATR-based validation)
+            # Uses signal_atr from previous closed bar
             sweeps = detect_liquidity_sweeps(htf_window, lookback=50)
             relevant_sweep = None
             for sweep in sweeps:
@@ -891,7 +913,7 @@ def run_unicorn_backtest(
 
             stop_price, target_price, risk_handles, _ = calculate_stop_and_target(
                 entry_price, direction, entry_fvg, relevant_sweep, symbol,
-                atr=current_atr, config=config,
+                atr=signal_atr, config=config,  # Use causal ATR
             )
 
             # Position sizing (account for slippage in risk)
