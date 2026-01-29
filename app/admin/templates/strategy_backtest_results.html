@@ -9,16 +9,109 @@
 </div>
 {% else %}
 
-<!-- Summary Stats -->
+<!-- R-Metrics (Primary) -->
+<div class="card card-highlight">
+    <div class="card-header">
+        <h3 class="card-title">R-Metrics</h3>
+        <div class="result-badges">
+            <span class="badge badge-{{ 'success' if result.avg_r_multiple >= 0 else 'danger' }}">
+                {{ '%+.2f' | format(result.avg_r_multiple) }}R Avg
+            </span>
+            <span class="badge badge-type">{{ result.symbol }}</span>
+            <span class="badge badge-type">{{ result.direction_filter or 'Both' }}</span>
+        </div>
+    </div>
+    <div class="stats stats-primary">
+        <div class="stat stat-large">
+            <div class="stat-value{% if result.avg_r_multiple >= 0 %} text-success{% else %} text-danger{% endif %}">
+                {{ '%+.2f' | format(result.avg_r_multiple) }}R
+            </div>
+            <div class="stat-label">Avg R per Trade</div>
+        </div>
+        <div class="stat stat-large">
+            <div class="stat-value{% if result.total_r >= 0 %} text-success{% else %} text-danger{% endif %}">
+                {{ '%+.1f' | format(result.total_r) }}R
+            </div>
+            <div class="stat-label">Total R</div>
+        </div>
+        <div class="stat stat-large">
+            <div class="stat-value text-success">{{ '%+.2f' | format(result.best_r) }}R</div>
+            <div class="stat-label">Max Win</div>
+        </div>
+        <div class="stat stat-large">
+            <div class="stat-value text-danger">{{ '%.2f' | format(result.worst_r) }}R</div>
+            <div class="stat-label">Max Loss</div>
+        </div>
+    </div>
+</div>
+
+<!-- Expectancy Analysis -->
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Results Summary</h3>
+        <h3 class="card-title">Expectancy Analysis</h3>
+        <span class="badge badge-type">E = (Win% × Avg Win R) − (Loss% × |Avg Loss R|)</span>
+    </div>
+    <div class="expectancy-grid">
+        <div class="expectancy-formula">
+            <div class="formula-part">
+                <span class="formula-value text-success">{{ '%.1f' | format(result.win_rate * 100) }}%</span>
+                <span class="formula-label">Win Rate</span>
+            </div>
+            <span class="formula-op">×</span>
+            <div class="formula-part">
+                <span class="formula-value text-success">{{ '%+.2f' | format(result.avg_win_r) }}R</span>
+                <span class="formula-label">Avg Win</span>
+            </div>
+            <span class="formula-op">−</span>
+            <div class="formula-part">
+                <span class="formula-value text-danger">{{ '%.1f' | format((1 - result.win_rate) * 100) }}%</span>
+                <span class="formula-label">Loss Rate</span>
+            </div>
+            <span class="formula-op">×</span>
+            <div class="formula-part">
+                <span class="formula-value text-danger">{{ '%.2f' | format(result.avg_loss_r|abs) }}R</span>
+                <span class="formula-label">Avg Loss</span>
+            </div>
+            <span class="formula-op">=</span>
+            <div class="formula-part formula-result">
+                <span class="formula-value{% if result.expectancy_r >= 0 %} text-success{% else %} text-danger{% endif %}">
+                    {{ '%+.3f' | format(result.expectancy_r) }}R
+                </span>
+                <span class="formula-label">Expectancy</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- R Distribution -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">R Distribution</h3>
+        <span class="badge badge-type">{{ result.trades_taken }} trades</span>
+    </div>
+    <div class="r-distribution">
+        {% for bucket in result.r_distribution %}
+        <div class="r-bucket">
+            <div class="r-bucket-label">{{ bucket.label }}</div>
+            <div class="r-bucket-bar-container">
+                <div class="r-bucket-bar {% if '< -1' in bucket.label or '-1.0 to 0' in bucket.label %}bar-loss{% elif '0 to +1' in bucket.label %}bar-neutral{% else %}bar-win{% endif %}"
+                     style="width: {{ bucket.pct }}%;">
+                </div>
+            </div>
+            <div class="r-bucket-count">{{ bucket.count }} ({{ '%.0f' | format(bucket.pct) }}%)</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Trade Stats -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Trade Statistics</h3>
         <div class="result-badges">
             <span class="badge badge-{{ 'success' if result.profit_factor >= 1.0 else 'danger' }}">
                 PF {{ '%.2f' | format(result.profit_factor) }}
             </span>
-            <span class="badge badge-type">{{ result.symbol }}</span>
-            <span class="badge badge-type">{{ result.direction_filter or 'Both' }}</span>
         </div>
     </div>
     <div class="stats">
@@ -52,15 +145,7 @@
             <div class="stat-value{% if result.total_pnl_dollars >= 0 %} text-success{% else %} text-danger{% endif %}">
                 ${{ '{:+,.0f}'.format(result.total_pnl_dollars) }}
             </div>
-            <div class="stat-label">PnL (Dollars)</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value">{{ '%+.2f' | format(result.expectancy_handles) }}h</div>
-            <div class="stat-label">Expectancy</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value">{{ '%+.2f' | format(result.avg_r_multiple) }}R</div>
-            <div class="stat-label">Avg R</div>
+            <div class="stat-label">PnL ($)</div>
         </div>
     </div>
 </div>
@@ -361,9 +446,123 @@ function toggleConfig() {
     .text-success { color: var(--success); }
     .text-danger { color: var(--danger); }
 
+    /* R-Metrics Card Highlight */
+    .card-highlight {
+        border-color: var(--info);
+        background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(88, 166, 255, 0.05) 100%);
+    }
+
+    .stats-primary {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--space-4);
+    }
+
+    .stat-large .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+    }
+
+    /* Expectancy Formula */
+    .expectancy-grid {
+        padding: var(--space-4);
+    }
+
+    .expectancy-formula {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+    }
+
+    .formula-part {
+        text-align: center;
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg);
+        border-radius: var(--radius-md);
+    }
+
+    .formula-result {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+    }
+
+    .formula-value {
+        font-size: 1.25rem;
+        font-weight: 600;
+        display: block;
+    }
+
+    .formula-label {
+        font-size: var(--font-size-xs);
+        color: var(--text-muted);
+    }
+
+    .formula-op {
+        font-size: 1.25rem;
+        color: var(--text-muted);
+        font-weight: 300;
+    }
+
+    /* R Distribution */
+    .r-distribution {
+        padding: var(--space-3);
+    }
+
+    .r-bucket {
+        display: grid;
+        grid-template-columns: 100px 1fr 80px;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-2);
+    }
+
+    .r-bucket-label {
+        font-size: var(--font-size-sm);
+        color: var(--text-muted);
+        text-align: right;
+    }
+
+    .r-bucket-bar-container {
+        height: 20px;
+        background: var(--bg);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+    }
+
+    .r-bucket-bar {
+        height: 100%;
+        min-width: 2px;
+        border-radius: var(--radius-sm);
+        transition: width 0.3s ease;
+    }
+
+    .bar-loss { background: var(--danger); }
+    .bar-neutral { background: var(--warning); }
+    .bar-win { background: var(--success); }
+
+    .r-bucket-count {
+        font-size: var(--font-size-sm);
+        color: var(--text);
+    }
+
     @media (max-width: 768px) {
         .charts-grid {
             grid-template-columns: 1fr;
+        }
+
+        .stats-primary {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .expectancy-formula {
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+
+        .formula-op {
+            display: none;
         }
     }
 </style>

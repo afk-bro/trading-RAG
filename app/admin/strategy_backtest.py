@@ -184,9 +184,52 @@ async def run_strategy_backtest(
                 "fail_count": b.fail_count,
             })
 
+        # Calculate R-metrics
+        r_metrics = {
+            "total_r": 0.0,
+            "avg_win_r": 0.0,
+            "avg_loss_r": 0.0,
+            "expectancy_r": 0.0,
+            "r_distribution": [],
+        }
+
+        if result.trades:
+            r_values = [t.r_multiple for t in result.trades]
+            r_metrics["total_r"] = sum(r_values)
+
+            win_r_values = [t.r_multiple for t in result.trades if t.pnl_dollars > 0]
+            loss_r_values = [t.r_multiple for t in result.trades if t.pnl_dollars <= 0]
+
+            if win_r_values:
+                r_metrics["avg_win_r"] = sum(win_r_values) / len(win_r_values)
+            if loss_r_values:
+                r_metrics["avg_loss_r"] = sum(loss_r_values) / len(loss_r_values)
+
+            # Expectancy in R: E = (Win% × Avg Win R) − (Loss% × |Avg Loss R|)
+            win_pct = len(win_r_values) / len(result.trades)
+            loss_pct = len(loss_r_values) / len(result.trades)
+            r_metrics["expectancy_r"] = (win_pct * r_metrics["avg_win_r"]) - (loss_pct * abs(r_metrics["avg_loss_r"]))
+
+            # R Distribution buckets
+            buckets = [
+                ("< -1.0R", lambda r: r < -1.0),
+                ("-1.0 to 0R", lambda r: -1.0 <= r < 0),
+                ("0 to +1R", lambda r: 0 <= r < 1.0),
+                ("+1 to +2R", lambda r: 1.0 <= r < 2.0),
+                ("+2R+", lambda r: r >= 2.0),
+            ]
+            for label, condition in buckets:
+                count = len([r for r in r_values if condition(r)])
+                r_metrics["r_distribution"].append({
+                    "label": label,
+                    "count": count,
+                    "pct": count / len(result.trades) * 100 if result.trades else 0,
+                })
+
         # Chart data for JavaScript
         chart_data = {
             "criteria_bottlenecks": criteria_bottlenecks,
+            "r_distribution": r_metrics["r_distribution"],
             "session_stats": session_stats,
             "exit_breakdown": exit_breakdown,
         }
@@ -219,6 +262,11 @@ async def run_strategy_backtest(
             "largest_loss": result.largest_loss_handles,
             "best_r": result.best_r_multiple,
             "worst_r": result.worst_r_multiple,
+            "total_r": r_metrics["total_r"],
+            "avg_win_r": r_metrics["avg_win_r"],
+            "avg_loss_r": r_metrics["avg_loss_r"],
+            "expectancy_r": r_metrics["expectancy_r"],
+            "r_distribution": r_metrics["r_distribution"],
             "session_stats": session_stats,
             "exit_breakdown": exit_breakdown,
             "confidence_buckets": confidence_buckets,
