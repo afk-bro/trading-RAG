@@ -1099,6 +1099,9 @@ class TestNYOpenProfile:
             assert isinstance(counts["rejected"], int)
             assert isinstance(counts["macro_rejected"], int)
             assert isinstance(counts["take_pct"], float)
+            assert isinstance(counts["in_macro_total"], int)
+            assert isinstance(counts["take_pct_in_macro"], float)
+            assert counts["in_macro_total"] == counts["total"] - counts["macro_rejected"]
 
         # Validate confidence_by_session entries
         for sess_key, stats in diag["confidence_by_session"].items():

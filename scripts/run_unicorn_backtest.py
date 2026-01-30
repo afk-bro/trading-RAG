@@ -520,7 +520,7 @@ Examples:
 
     # Build config
     config = UnicornConfig(
-        min_criteria_score=args.min_criteria,
+        min_scored_criteria=args.min_criteria,
         session_profile=SessionProfile(args.session_profile),
         fvg_min_atr_mult=args.fvg_atr_mult,
         stop_max_atr_mult=args.stop_atr_mult,

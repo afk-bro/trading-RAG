@@ -1319,6 +1319,8 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
                     "rejected":       int,   # setups not taken
                     "macro_rejected": int,   # subset of rejected where macro window failed
                     "take_pct":       float, # taken / total * 100
+                    "in_macro_total": int,   # total - macro_rejected (setups inside allowed window)
+                    "take_pct_in_macro": float, # taken / in_macro_total * 100 (quality metric)
                 },
                 ...
             },
@@ -1355,6 +1357,11 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
 
     for counts in setup_disposition.values():
         counts["take_pct"] = counts["taken"] / max(1, counts["total"]) * 100
+        counts["in_macro_total"] = counts["total"] - counts["macro_rejected"]
+        counts["take_pct_in_macro"] = (
+            counts["taken"] / counts["in_macro_total"] * 100
+            if counts["in_macro_total"] > 0 else 0.0
+        )
 
     # --- Confidence by session ---
     # Build entry_time → setup_session index from taken setups
