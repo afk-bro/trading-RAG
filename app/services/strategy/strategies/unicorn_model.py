@@ -74,13 +74,17 @@ QUANTITY_DECIMALS = 2  # NQ/ES use 2 decimal places
 
 class SessionProfile(str, Enum):
     """Trading session window profiles."""
-    STRICT = "strict"   # NY AM only
-    NORMAL = "normal"   # London + NY AM
-    WIDE = "wide"       # London + NY AM + NY PM
+    NY_OPEN = "ny_open"  # First 60 min of NY session
+    STRICT = "strict"    # NY AM only
+    NORMAL = "normal"    # London + NY AM
+    WIDE = "wide"        # London + NY AM + NY PM
 
 
 # Session windows by profile
 SESSION_WINDOWS = {
+    SessionProfile.NY_OPEN: [
+        (time(9, 30), time(10, 30)),  # First 60 min of NY
+    ],
     SessionProfile.STRICT: [
         (time(9, 30), time(11, 0)),   # NY AM only
     ],

@@ -1026,3 +1026,49 @@ class TestDisplacementGuard:
             for setup in qualifying:
                 assert isinstance(setup.signal_displacement_atr, float)
                 assert isinstance(setup.signal_mss_found, bool)
+
+
+# =============================================================================
+# NY_OPEN session profile tests
+# =============================================================================
+
+
+class TestNYOpenProfile:
+    """Tests for NY_OPEN session profile and session diagnostics."""
+
+    def test_ny_open_profile_pure_function(self):
+        """is_in_macro_window: 10:45 ET is True with STRICT, False with NY_OPEN."""
+        ts = datetime(2024, 6, 10, 10, 45, tzinfo=ET)
+        assert is_in_macro_window(ts, SessionProfile.STRICT) is True
+        assert is_in_macro_window(ts, SessionProfile.NY_OPEN) is False
+
+    def test_session_profile_ny_open_boundaries(self):
+        """NY_OPEN uses half-open [9:30, 10:30) interval."""
+        ts_before = datetime(2024, 6, 10, 9, 29, tzinfo=ET)
+        ts_start = datetime(2024, 6, 10, 9, 30, tzinfo=ET)
+        ts_inside = datetime(2024, 6, 10, 10, 29, tzinfo=ET)
+        ts_end = datetime(2024, 6, 10, 10, 30, tzinfo=ET)
+
+        assert is_in_macro_window(ts_before, SessionProfile.NY_OPEN) is False
+        assert is_in_macro_window(ts_start, SessionProfile.NY_OPEN) is True
+        assert is_in_macro_window(ts_inside, SessionProfile.NY_OPEN) is True
+        assert is_in_macro_window(ts_end, SessionProfile.NY_OPEN) is False
+
+    def test_setup_session_diagnostic_always_set(self):
+        """Every SetupOccurrence has setup_session populated and setup_in_macro_window is bool."""
+        start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
+        htf_bars = generate_trending_bars(start, 100, 17500.0, trend=0.3, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start, 300, 17500.0, trend=0.1, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        assert len(result.all_setups) > 0, "Need at least one setup to test"
+        for setup in result.all_setups:
+            assert isinstance(setup.setup_session, str)
+            assert setup.setup_session != "", f"setup_session empty at {setup.timestamp}"
+            assert isinstance(setup.setup_in_macro_window, bool)

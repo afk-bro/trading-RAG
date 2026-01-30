@@ -585,3 +585,12 @@ class TestUnicornConfigGuardValidation:
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
         config = UnicornConfig(min_displacement_atr=0.5)
         assert config.min_displacement_atr == 0.5
+
+    def test_session_profile_ny_open_valid(self):
+        """UnicornConfig accepts SessionProfile.NY_OPEN without raising."""
+        from app.services.strategy.strategies.unicorn_model import (
+            UnicornConfig,
+            SessionProfile,
+        )
+        config = UnicornConfig(session_profile=SessionProfile.NY_OPEN)
+        assert config.session_profile == SessionProfile.NY_OPEN

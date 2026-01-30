@@ -423,6 +423,10 @@ class SetupOccurrence:
     decide_entry_result: bool = False
     scored_missing: list[str] = field(default_factory=list)
 
+    # Session diagnostics (set on ALL setups, taken and rejected)
+    setup_session: str = ""              # TradingSession value at setup bar
+    setup_in_macro_window: bool = False  # whether macro window passed for this profile
+
     # Bar-quality guard diagnostics
     signal_wick_ratio: float = 0.0       # adverse wick / range of signal bar
     signal_range_atr_mult: float = 0.0   # signal bar range / ATR
@@ -985,6 +989,8 @@ def run_unicorn_backtest(
                 c for c in criteria.missing_criteria() if c in SCORED_CRITERIA
             ],
         )
+        setup_record.setup_session = criteria.session.value
+        setup_record.setup_in_macro_window = criteria.in_macro_window
 
         if criteria.criteria_met_count > 0:
             result.partial_setups += 1

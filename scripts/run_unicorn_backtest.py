@@ -355,9 +355,10 @@ Examples:
     )
     parser.add_argument(
         "--session-profile",
-        choices=["strict", "normal", "wide"],
+        choices=["ny_open", "strict", "normal", "wide"],
         default="normal",
-        help="Session profile: strict (NY AM only), normal (London+NY AM), wide (all sessions)"
+        help="Session profile: ny_open (9:30-10:30), strict (NY AM 9:30-11:00), "
+             "normal (London+NY AM), wide (all sessions)"
     )
     parser.add_argument(
         "--fvg-atr-mult",
