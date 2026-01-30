@@ -32,6 +32,7 @@ from app.services.strategy.indicators.ict_patterns import (
 from app.services.strategy.indicators.tf_bias import (
     BiasDirection,
     TimeframeBias,
+    _is_component_usable,
     compute_tf_bias,
 )
 from app.services.strategy.strategies.unicorn_model import (
@@ -714,14 +715,15 @@ def check_criteria(
     check.htf_bias_aligned = htf_bias.is_tradeable
 
     # Build full bias snapshot for trace/audit
+    # used_tfs only lists TFs that actually contributed to scoring
     used_tfs: list[str] = []
-    if htf_bias.h4_bias is not None:
+    if _is_component_usable(htf_bias.h4_bias):
         used_tfs.append("h4")
-    if htf_bias.h1_bias is not None:
+    if _is_component_usable(htf_bias.h1_bias):
         used_tfs.append("h1")
-    if htf_bias.m15_bias is not None:
+    if _is_component_usable(htf_bias.m15_bias):
         used_tfs.append("m15")
-    if htf_bias.m5_bias is not None:
+    if _is_component_usable(htf_bias.m5_bias):
         used_tfs.append("m5")
 
     check.bias_snapshot = BiasSnapshot(
@@ -2232,6 +2234,8 @@ def format_trade_trace(
         for tf_name, direction, confidence in tf_fields:
             if direction is None:
                 lines.append(f"  {tf_name:>4}: not provided")
+            elif tf_name not in snap.used_tfs and direction is not None:
+                lines.append(f"  {tf_name:>4}: insufficient_data (excluded from scoring)")
             else:
                 lines.append(f"  {tf_name:>4}: {direction.value:<8} conf={confidence:.3f}")
         lines.append(f"  Final:  {snap.final_direction.value:<8} conf={snap.final_confidence:.3f}  alignment={snap.alignment_score:.3f}")

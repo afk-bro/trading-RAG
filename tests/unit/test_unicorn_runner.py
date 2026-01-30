@@ -1783,11 +1783,13 @@ class TestBiasSnapshot:
 
         assert result.bias_snapshot is not None
         snap = result.bias_snapshot
-        # With h4/h1 provided, those directions should not be None
+        # With h4/h1 provided, directions should not be None
         assert snap.h4_direction is not None
         assert snap.h1_direction is not None
         assert snap.m15_direction is not None
-        assert "h4" in snap.used_tfs
+        # H4 has insufficient data (25 bars < 210 needed), so it's excluded
+        # from used_tfs but still present in the snapshot for transparency
+        assert "h4" not in snap.used_tfs
         assert "h1" in snap.used_tfs
         assert isinstance(snap.final_confidence, float)
         assert isinstance(snap.alignment_score, float)

@@ -842,6 +842,10 @@ Examples:
         ltf_bars = load_bars_from_csv(args.ltf)
         print(f"Loaded {len(ltf_bars)} LTF bars")
 
+    # Ensure bar_bundle exists for trace replay in non-multi-tf mode
+    if bar_bundle is None:
+        bar_bundle = BarBundle(m15=htf_bars, m5=ltf_bars)
+
     # Build config
     config = UnicornConfig(
         min_scored_criteria=args.min_criteria,
