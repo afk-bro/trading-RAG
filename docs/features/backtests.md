@@ -199,8 +199,10 @@ The displacement guard was validated across multiple historical regimes, sub-win
 
 **Recommended production flags**:
 ```bash
---max-wick-ratio 0.6 --min-displacement-atr 0.5 --intrabar-policy worst
+--session-profile normal --max-wick-ratio 0.6 --min-displacement-atr 0.5 --intrabar-policy worst
 ```
+
+Session profile validated across 5 regime windows (2021-2025). STRICT and NY_OPEN failed decision criteria (expectancy >= baseline in >=4/5 windows). NORMAL remains default. See `docs/unicorn-model-analysis.md` for full tables.
 
 **Lessons Learned**:
 - Direction matters: Long-only on NQ improved PF from 0.91 to 1.34

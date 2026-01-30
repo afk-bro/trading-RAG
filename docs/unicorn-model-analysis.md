@@ -363,5 +363,42 @@ python scripts/diagnose_unicorn.py \
 
 ---
 
+## Session Filter Validation
+
+Sweep of 4 session profiles across 5 market regime windows (2021-2025, 180-day each), both NQ and ES. Production guards active: `max_wick_ratio=0.6`, `min_displacement_atr=0.5`, `intrabar_policy=WORST`.
+
+### NQ — Expectancy (pts/trade)
+
+| Window | Character | WIDE | NORMAL | STRICT | NY_OPEN |
+|--------|-----------|-----:|-------:|-------:|--------:|
+| W1 | Recovery | +0.93 | +5.85 | -0.15 | -1.98 |
+| W2 | Bear | +9.07 | +2.67 | +21.13 | -0.28 |
+| W3 | AI rally | +1.49 | -7.43 | -12.35 | -6.03 |
+| W4 | Bull cont. | -0.83 | -3.95 | -6.39 | -9.55 |
+| W5 | Recent | +5.06 | +1.63 | -11.19 | +4.82 |
+
+### ES — Expectancy (pts/trade)
+
+| Window | Character | WIDE | NORMAL | STRICT | NY_OPEN |
+|--------|-----------|-----:|-------:|-------:|--------:|
+| W1 | Recovery | +0.12 | -0.20 | +1.36 | +3.51 |
+| W2 | Bear | +2.35 | +2.17 | +5.31 | +4.19 |
+| W3 | AI rally | +2.01 | +2.21 | +1.22 | +4.22 |
+| W4 | Bull cont. | +2.06 | +3.12 | +0.66 | +0.45 |
+| W5 | Recent | +1.62 | +2.32 | -0.17 | -0.41 |
+
+### WIDE per-session breakdown (NQ, taken trades)
+
+NY AM is **not** the structural winner for NQ. It produces negative expectancy in 3 of 5 windows (W1, W3, W5). NY PM and London alternate as the strongest sessions. The "NY AM dominates" thesis holds for ES (positive in 4/5 windows) but not NQ.
+
+### Decision
+
+STRICT fails to beat NORMAL in >=4/5 windows for either instrument. NY_OPEN fails to beat STRICT. **NORMAL stays as default.** The session filter adds an `NY_OPEN` profile for future analysis but does not change production defaults.
+
+Sweep script: `scripts/run_session_sweep.py`
+
+---
+
 *Document created: 2026-01-28*
-*Based on analysis of NQ futures, Jan-Jun 2024*
+*Session filter validation added: 2026-01-29*
+*Based on analysis of NQ and ES futures, 2021-2025*

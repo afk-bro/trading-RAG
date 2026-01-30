@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Range guard** (`max_range_atr_mult`): skip entries where signal bar range exceeds ATR multiple
   - **Displacement guard** (`min_displacement_atr`): skip entries where MSS displacement is below ATR threshold — filters low-conviction structure shifts. Validated across 5 market regimes (2021-2025), sub-window splits, and ATR(10/14/21) normalizations using deterministic worst-case intrabar execution. Recommended production value: 0.5x ATR
   - MSS match order fix: prefer newest matching shift (reversed iteration) for both `check_criteria()` and `analyze_unicorn_setup()`
+  - **NY_OPEN session profile** (`session_profile=ny_open`): first 60 min of NY session (9:30-10:30 ET) for finer sub-bucket analysis
+  - **Setup session diagnostics** (`setup_session`, `setup_in_macro_window`): per-setup session classification and macro window status on all `SetupOccurrence` records (taken and rejected)
+  - **Session sensitivity sweep** (`scripts/run_session_sweep.py`): 5-window × 4-profile × 2-instrument sweep validated NORMAL as default session profile. STRICT and NY_OPEN failed decision criteria across regimes. See `docs/unicorn-model-analysis.md`
+
+### Fixed
+- `check_criteria()` in backtest loop now receives config (session profile was silently ignored)
 
 - **Strategy Backtest UI** - Interactive backtesting interface at `/admin/backtests/strategy-test`
   - Strategy and symbol selection (ICT Unicorn Model, ES/NQ futures)
