@@ -1334,6 +1334,34 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
                 },
                 ...
             },
+            "expectancy_by_session": {
+                "<session>": {
+                    "trades":       int,
+                    "wins":         int,
+                    "losses":       int,
+                    "win_rate":     float,   # wins / trades * 100 (0.0 if no trades)
+                    "avg_win_pts":  float,   # mean pnl of wins (0.0 if no wins)
+                    "avg_loss_pts": float,   # mean pnl of losses (0.0 if no losses, negative)
+                    "expectancy_per_trade": float,  # sum_pnl / trades (0.0 if no trades)
+                    "total_pnl_pts": float,
+                    "expectancy_per_in_macro_setup": float,  # total_pnl / in_macro_total (0.0 if 0)
+                    "avg_r_per_trade": float,   # mean R-multiple across trades
+                    "total_r":         float,   # sum of R-multiples
+                    "avg_win_r":       float,   # mean R of winning trades
+                    "avg_loss_r":      float,   # mean R of losing trades (negative)
+                    "expectancy_r_per_in_macro_setup": float,  # total_r / in_macro_total
+                    "rr_missing":      int,     # trades where risk=0 (R not computable)
+                },
+                ...
+            },
+            "confidence_outcome_by_session": {
+                "<session>": {
+                    "low":  {"trades": int, "wins": int, "win_rate": float, "avg_pnl_pts": float, "total_pnl_pts": float, "avg_r": float, "total_r": float},
+                    "mid":  {"trades": int, "wins": int, "win_rate": float, "avg_pnl_pts": float, "total_pnl_pts": float, "avg_r": float, "total_r": float},
+                    "high": {"trades": int, "wins": int, "win_rate": float, "avg_pnl_pts": float, "total_pnl_pts": float, "avg_r": float, "total_r": float},
+                },
+                ...
+            },
         }
 
     Session keys are ``TradingSession.value`` strings (e.g. "ny_am", "london")
@@ -1386,9 +1414,119 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
             "high": sum(1 for c in confs if c > 0.7),
         }
 
+    # --- Expectancy by session ---
+    sess_expect: dict[str, dict] = {}
+    for trade in result.trades:
+        sess = taken_setups_by_time.get(trade.entry_time, "unknown")
+        if sess not in sess_expect:
+            sess_expect[sess] = {
+                "trades": 0, "wins": 0, "losses": 0,
+                "sum_pnl": 0.0, "sum_win": 0.0, "n_win": 0, "sum_loss": 0.0, "n_loss": 0,
+                "r_values": [], "win_r_values": [], "loss_r_values": [],
+            }
+        acc = sess_expect[sess]
+        acc["trades"] += 1
+        acc["sum_pnl"] += trade.pnl_points
+
+        # R-multiple: pnl_points / initial_risk_points (abs(entry - stop))
+        initial_risk = abs(trade.entry_price - trade.stop_price)
+        r_val = trade.pnl_points / initial_risk if initial_risk > 0 else None
+
+        if trade.outcome == TradeOutcome.WIN:
+            acc["wins"] += 1
+            acc["sum_win"] += trade.pnl_points
+            acc["n_win"] += 1
+            if r_val is not None:
+                acc["win_r_values"].append(r_val)
+        elif trade.outcome == TradeOutcome.LOSS:
+            acc["losses"] += 1
+            acc["sum_loss"] += trade.pnl_points
+            acc["n_loss"] += 1
+            if r_val is not None:
+                acc["loss_r_values"].append(r_val)
+
+        if r_val is not None:
+            acc["r_values"].append(r_val)
+
+    expectancy_by_session: dict[str, dict] = {}
+    for sess_key, acc in sess_expect.items():
+        in_macro_total = setup_disposition.get(sess_key, {}).get("in_macro_total", 0)
+        total_pnl = acc["sum_pnl"]
+        r_vals = acc["r_values"]
+        total_r = sum(r_vals) if r_vals else 0.0
+        expectancy_by_session[sess_key] = {
+            "trades": acc["trades"],
+            "wins": acc["wins"],
+            "losses": acc["losses"],
+            "win_rate": acc["wins"] / acc["trades"] * 100 if acc["trades"] else 0.0,
+            "avg_win_pts": acc["sum_win"] / acc["n_win"] if acc["n_win"] else 0.0,
+            "avg_loss_pts": acc["sum_loss"] / acc["n_loss"] if acc["n_loss"] else 0.0,
+            "expectancy_per_trade": total_pnl / acc["trades"] if acc["trades"] else 0.0,
+            "total_pnl_pts": total_pnl,
+            "expectancy_per_in_macro_setup": total_pnl / in_macro_total if in_macro_total else 0.0,
+            # R-multiple stats
+            "avg_r_per_trade": total_r / len(r_vals) if r_vals else 0.0,
+            "total_r": total_r,
+            "avg_win_r": sum(acc["win_r_values"]) / len(acc["win_r_values"]) if acc["win_r_values"] else 0.0,
+            "avg_loss_r": sum(acc["loss_r_values"]) / len(acc["loss_r_values"]) if acc["loss_r_values"] else 0.0,
+            "expectancy_r_per_in_macro_setup": total_r / in_macro_total if in_macro_total else 0.0,
+            "rr_missing": acc["trades"] - len(r_vals),
+        }
+
+    # --- Confidence × outcome by session ---
+    def _empty_bucket() -> dict:
+        return {"trades": 0, "wins": 0, "sum_pnl": 0.0, "r_values": []}
+
+    conf_outcome: dict[str, dict[str, dict]] = {}
+    for trade in result.trades:
+        conf = trade.criteria.htf_bias_confidence
+        if conf is None:
+            continue
+        sess = taken_setups_by_time.get(trade.entry_time, "unknown")
+        if sess not in conf_outcome:
+            conf_outcome[sess] = {
+                "low": _empty_bucket(), "mid": _empty_bucket(), "high": _empty_bucket(),
+            }
+        if conf < 0.4:
+            bucket_key = "low"
+        elif conf <= 0.7:
+            bucket_key = "mid"
+        else:
+            bucket_key = "high"
+        b = conf_outcome[sess][bucket_key]
+        b["trades"] += 1
+        b["sum_pnl"] += trade.pnl_points
+        if trade.outcome == TradeOutcome.WIN:
+            b["wins"] += 1
+        initial_risk = abs(trade.entry_price - trade.stop_price)
+        if initial_risk > 0:
+            b["r_values"].append(trade.pnl_points / initial_risk)
+
+    confidence_outcome_by_session: dict[str, dict] = {}
+    for sess_key in sorted(set(list(conf_outcome.keys()) + list(sess_expect.keys()))):
+        buckets = conf_outcome.get(sess_key, {
+            "low": _empty_bucket(), "mid": _empty_bucket(), "high": _empty_bucket(),
+        })
+        entry: dict[str, dict] = {}
+        for bk in ("low", "mid", "high"):
+            raw = buckets.get(bk, _empty_bucket())
+            r_vals = raw["r_values"]
+            entry[bk] = {
+                "trades": raw["trades"],
+                "wins": raw["wins"],
+                "win_rate": raw["wins"] / raw["trades"] * 100 if raw["trades"] else 0.0,
+                "avg_pnl_pts": raw["sum_pnl"] / raw["trades"] if raw["trades"] else 0.0,
+                "total_pnl_pts": raw["sum_pnl"],
+                "avg_r": sum(r_vals) / len(r_vals) if r_vals else 0.0,
+                "total_r": sum(r_vals) if r_vals else 0.0,
+            }
+        confidence_outcome_by_session[sess_key] = entry
+
     return {
         "setup_disposition": setup_disposition,
         "confidence_by_session": confidence_by_session,
+        "expectancy_by_session": expectancy_by_session,
+        "confidence_outcome_by_session": confidence_outcome_by_session,
     }
 
 
@@ -1515,6 +1653,56 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
                 f"{c['low']:>8} {c['mid']:>8} {c['high']:>9}"
             )
         lines.append("")
+
+    # Expectancy by Session
+    if result.session_diagnostics:
+        diag = result.session_diagnostics
+        expect = diag.get("expectancy_by_session", {})
+        sessions_with_trades = {k: v for k, v in expect.items() if v["trades"] > 0}
+        if sessions_with_trades:
+            lines.append("-" * 40)
+            lines.append("EXPECTANCY BY SESSION")
+            lines.append("-" * 40)
+            lines.append(
+                f"{'Session':<12} {'Trades':>7} {'WinRate':>8} {'AvgWin':>8} "
+                f"{'AvgLoss':>8} {'E/Trade':>8} {'E/Setup':>8} "
+                f"{'E/Trade(R)':>11} {'AvgWin(R)':>10} {'AvgLoss(R)':>11}"
+            )
+            lines.append("-" * 96)
+
+            for sess_key in sorted(sessions_with_trades.keys()):
+                e = sessions_with_trades[sess_key]
+                lines.append(
+                    f"{sess_key:<12} {e['trades']:>7} {e['win_rate']:>7.1f}% "
+                    f"{e['avg_win_pts']:>+8.2f} {e['avg_loss_pts']:>+8.2f} "
+                    f"{e['expectancy_per_trade']:>+8.2f} {e['expectancy_per_in_macro_setup']:>+8.2f} "
+                    f"{e['avg_r_per_trade']:>+11.2f}R {e['avg_win_r']:>+9.2f}R {e['avg_loss_r']:>+10.2f}R"
+                )
+            lines.append("")
+
+    # Confidence × Outcome by Session
+    if result.session_diagnostics:
+        diag = result.session_diagnostics
+        co = diag.get("confidence_outcome_by_session", {})
+        if co:
+            lines.append("-" * 40)
+            lines.append("CONFIDENCE × OUTCOME BY SESSION")
+            lines.append("-" * 40)
+            lines.append(
+                f"{'Session':<12} {'Bucket':<8} {'Trades':>7} {'WinRate':>8} "
+                f"{'AvgPnL':>8} {'TotalPnL':>10} {'AvgR':>8} {'TotalR':>8}"
+            )
+            lines.append("-" * 72)
+
+            for sess_key in sorted(co.keys()):
+                for bk in ("low", "mid", "high"):
+                    b = co[sess_key][bk]
+                    lines.append(
+                        f"{sess_key:<12} {bk:<8} {b['trades']:>7} {b['win_rate']:>7.1f}% "
+                        f"{b['avg_pnl_pts']:>+8.2f} {b['total_pnl_pts']:>+10.2f} "
+                        f"{b['avg_r']:>+7.2f}R {b['total_r']:>+7.2f}R"
+                    )
+            lines.append("")
 
     # Criteria Bottleneck
     lines.append("-" * 40)

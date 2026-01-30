@@ -1112,6 +1112,43 @@ class TestNYOpenProfile:
             assert isinstance(stats["mid"], int)
             assert isinstance(stats["high"], int)
 
+        # Validate expectancy_by_session entries
+        assert "expectancy_by_session" in diag
+        for sess_key, e in diag["expectancy_by_session"].items():
+            assert isinstance(sess_key, str)
+            assert isinstance(e["trades"], int)
+            assert isinstance(e["wins"], int)
+            assert isinstance(e["losses"], int)
+            assert isinstance(e["win_rate"], float)
+            assert isinstance(e["avg_win_pts"], float)
+            assert isinstance(e["avg_loss_pts"], float)
+            assert isinstance(e["expectancy_per_trade"], float)
+            assert isinstance(e["total_pnl_pts"], float)
+            assert isinstance(e["expectancy_per_in_macro_setup"], float)
+            # R-multiple fields
+            assert isinstance(e["avg_r_per_trade"], float)
+            assert isinstance(e["total_r"], float)
+            assert isinstance(e["avg_win_r"], float)
+            assert isinstance(e["avg_loss_r"], float)
+            assert isinstance(e["expectancy_r_per_in_macro_setup"], float)
+            assert isinstance(e["rr_missing"], int)
+
+        # Validate confidence_outcome_by_session entries
+        assert "confidence_outcome_by_session" in diag
+        for sess_key, buckets in diag["confidence_outcome_by_session"].items():
+            assert isinstance(sess_key, str)
+            for bk in ("low", "mid", "high"):
+                assert bk in buckets, f"Missing bucket {bk} in session {sess_key}"
+                b = buckets[bk]
+                assert isinstance(b["trades"], int)
+                assert isinstance(b["wins"], int)
+                assert isinstance(b["win_rate"], float)
+                assert isinstance(b["avg_pnl_pts"], float)
+                assert isinstance(b["total_pnl_pts"], float)
+                # R-multiple fields
+                assert isinstance(b["avg_r"], float)
+                assert isinstance(b["total_r"], float)
+
     def test_report_contains_diagnostic_sections(self):
         """Report includes CONFIG, SETUP DISPOSITION BY SESSION, and CONFIDENCE BY SESSION."""
         start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
