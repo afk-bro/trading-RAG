@@ -114,3 +114,10 @@ docs/historical_data/
 
 # Databento cache
 .databento_cache/
+
+# Windows Zone.Identifier metadata
+*:Zone.Identifier
+
+# Archived images
+docs/archive/*.jpg
+docs/archive/*.png
