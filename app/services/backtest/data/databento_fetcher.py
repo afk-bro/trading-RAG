@@ -679,13 +679,12 @@ class DatabentoFetcher:
                     continue
 
                 # Filter by date range
-                ts_naive = ts.replace(tzinfo=None)
-                if ts_naive.date() < start_dt.date() or ts_naive.date() > end_dt.date():
+                if ts.date() < start_dt.date() or ts.date() > end_dt.date():
                     continue
 
                 # Filter by front-month contract if enabled
                 if front_month_only:
-                    date_str = ts_naive.strftime("%Y-%m-%d")
+                    date_str = ts.strftime("%Y-%m-%d")
                     expected_contract = front_month_contracts.get(date_str)
                     if expected_contract and sym != expected_contract:
                         rows_skipped_contract += 1
@@ -694,7 +693,7 @@ class DatabentoFetcher:
                 # Parse OHLCV values
                 try:
                     bar = OHLCVBar(
-                        ts=ts_naive,
+                        ts=ts,
                         open=float(parts[col_idx["open"]]),
                         high=float(parts[col_idx["high"]]),
                         low=float(parts[col_idx["low"]]),

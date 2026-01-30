@@ -7,7 +7,7 @@ Tests behavior of the strategy execution engine:
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -58,7 +58,7 @@ def make_bars():
             List of OHLCVBar with the specified highs
         """
         if base_ts is None:
-            base_ts = datetime.utcnow()
+            base_ts = datetime.now(timezone.utc)
         bars = []
         for i, high in enumerate(highs):
             ts = base_ts - timedelta(days=len(highs) - 1 - i)
@@ -105,7 +105,7 @@ def make_snapshot(make_bars):
         if highs is None:
             highs = [100.0, 102.0, 104.0]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         bars = make_bars(highs, base_ts=now)
 
         return MarketSnapshot(
@@ -292,7 +292,7 @@ class TestBreakoutStrategyDirect:
         eval_id = uuid.uuid4()
 
         # Create snapshot with 2 bars (minimum required)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         bars = [
             OHLCVBar(
                 ts=now - timedelta(days=1),
@@ -333,7 +333,7 @@ class TestBreakoutStrategyDirect:
         eval_id = uuid.uuid4()
 
         # Create snapshot with only 5 bars (4 prior, 1 current)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         bars = [
             OHLCVBar(
                 ts=now - timedelta(days=i),
@@ -615,7 +615,7 @@ class TestStrategyRunner:
         # For breakout_52w_high, we can only get one intent at a time
         # But we can verify the evaluation_id is used as correlation_id
         spec = make_spec(dollars_per_trade=1000.0)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         bars = [
             OHLCVBar(
                 ts=now - timedelta(days=1),
@@ -658,7 +658,7 @@ class TestStrategyRunner:
     ):
         """52w high computed from prior bars only, excluding current bar."""
         spec = make_spec(lookback_days=5)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Create bars where current bar has highest high
         # Prior bars: highs = [100, 102, 103, 104]
@@ -806,7 +806,7 @@ class TestStrategyRunner:
 
     def test_snapshot_validation_insufficient_bars(self):
         """MarketSnapshot with <2 bars raises ValueError."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Create snapshot with only 1 bar (less than minimum 2)
         bars = [

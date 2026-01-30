@@ -25,6 +25,11 @@ class Candle:
 
     def __post_init__(self):
         """Validate OHLCV constraints."""
+        if self.ts.tzinfo is None:
+            raise ValueError(
+                "Candle.ts must be timezone-aware (got naive datetime). "
+                "Hint: use datetime(..., tzinfo=timezone.utc)."
+            )
         if self.high < max(self.open, self.close, self.low):
             raise ValueError(f"high ({self.high}) must be >= open, close, and low")
         if self.low > min(self.open, self.close, self.high):

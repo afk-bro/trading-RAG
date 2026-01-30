@@ -15,12 +15,12 @@ Output:
 
 import csv
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Configuration
 NUM_BARS = 1000
-START_DATE = datetime(2023, 1, 1, 9, 30)  # Market open
+START_DATE = datetime(2023, 1, 1, 9, 30, tzinfo=timezone.utc)  # Market open
 INTERVAL = timedelta(hours=1)  # 1-hour bars
 BASE_PRICE = 100.0
 BASE_VOLUME = 1_000_000

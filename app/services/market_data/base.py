@@ -16,6 +16,13 @@ class MarketDataCandle:
     close: float
     volume: float
 
+    def __post_init__(self):
+        if self.ts.tzinfo is None:
+            raise ValueError(
+                "MarketDataCandle.ts must be timezone-aware (got naive datetime). "
+                "Hint: use datetime(..., tzinfo=timezone.utc)."
+            )
+
 
 # Timeframe normalization map
 TIMEFRAME_MAP = {

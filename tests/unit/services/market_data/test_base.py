@@ -1,5 +1,6 @@
 """Tests for market data provider interface."""
 
+import pytest
 from datetime import datetime, timezone
 
 from app.services.market_data.base import (
@@ -19,6 +20,18 @@ class TestMarketDataCandle:
             volume=1000.0,
         )
         assert candle.close == 103.0
+
+    def test_naive_ts_rejected(self):
+        """MarketDataCandle rejects naive datetime."""
+        with pytest.raises(ValueError, match="timezone-aware"):
+            MarketDataCandle(
+                ts=datetime(2024, 1, 1),  # naive
+                open=100.0,
+                high=105.0,
+                low=99.0,
+                close=103.0,
+                volume=1000.0,
+            )
 
 
 class TestNormalizeTimeframe:

@@ -83,6 +83,21 @@ class TestCandle:
         )
         assert candle.volume == 0.0
 
+    def test_naive_ts_rejected(self):
+        """Candle rejects naive datetime."""
+        with pytest.raises(ValueError, match="timezone-aware"):
+            Candle(
+                exchange_id="kucoin",
+                symbol="BTC-USDT",
+                timeframe="1h",
+                ts=datetime(2024, 1, 1),  # naive
+                open=42000.0,
+                high=42500.0,
+                low=41800.0,
+                close=42200.0,
+                volume=100.0,
+            )
+
 
 class TestOHLCVRepository:
     @pytest.fixture

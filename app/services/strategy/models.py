@@ -9,11 +9,11 @@ Provides:
 - StrategyEvaluation: Runner output with intents
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas import TradeIntent
 
@@ -27,6 +27,16 @@ class OHLCVBar(BaseModel):
     low: float = Field(..., description="Low price")
     close: float = Field(..., description="Close price")
     volume: float = Field(..., description="Volume")
+
+    @field_validator("ts")
+    @classmethod
+    def ts_must_be_tz_aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError(
+                "OHLCVBar.ts must be timezone-aware (got naive datetime). "
+                "Hint: use datetime(..., tzinfo=timezone.utc)."
+            )
+        return v
 
 
 class MarketSnapshot(BaseModel):
@@ -125,7 +135,8 @@ class ExecutionSpec(BaseModel):
     # Metadata
     enabled: bool = Field(default=True, description="Whether this instance is active")
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Creation timestamp"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Creation timestamp",
     )
 
 

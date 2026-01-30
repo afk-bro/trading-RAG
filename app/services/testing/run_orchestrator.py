@@ -817,6 +817,13 @@ class RunOrchestrator:
             row_num += 1
             try:
                 ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    logger.warning(
+                        "Naive timestamp assumed UTC",
+                        row=row_num,
+                        raw_value=row["ts"],
+                    )
+                    ts = ts.replace(tzinfo=timezone.utc)
 
                 # Validate monotonically increasing timestamps
                 if prev_ts is not None and ts <= prev_ts:
