@@ -12,7 +12,7 @@ Dedicated backtester for ICT Unicorn Model strategy with detailed analytics:
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from enum import Enum
-from typing import Optional
+from typing import NamedTuple, Optional
 import random
 import statistics
 
@@ -49,6 +49,13 @@ from app.services.strategy.strategies.unicorn_model import (
     DEFAULT_CONFIG,
     _calculate_atr,
 )
+
+
+class BiasState(NamedTuple):
+    """Lightweight bias snapshot at a point in time."""
+    ts: datetime
+    direction: BiasDirection  # BULLISH / BEARISH / NEUTRAL
+    confidence: float         # 0.0–1.0
 
 
 class TradingSession(str, Enum):
@@ -547,6 +554,13 @@ class UnicornBacktestResult:
     # Setup occurrences (for debugging)
     all_setups: list[SetupOccurrence] = field(default_factory=list)
 
+    # HTF bias series: one BiasState per scanned bar (observability)
+    htf_bias_series: list[BiasState] = field(default_factory=list)
+
+    # Optional reference bias series for intermarket agreement tagging
+    reference_bias_series: Optional[list[BiasState]] = None
+    reference_symbol: Optional[str] = None
+
     # Config snapshot (for diagnostics)
     config: Optional[UnicornConfig] = None
 
@@ -776,6 +790,9 @@ def run_unicorn_backtest(
     # Time-stop: exit if not profitable within N minutes
     time_stop_minutes: Optional[int] = None,  # None=disabled, e.g., 30=exit if not +0.25R in 30 min
     time_stop_r_threshold: float = 0.25,  # R-multiple to reach within time_stop_minutes
+    # Intermarket agreement (observability-only)
+    reference_bias_series: Optional[list[BiasState]] = None,  # Pre-computed bias from ref symbol
+    reference_symbol: Optional[str] = None,  # e.g., "ES"
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -801,6 +818,10 @@ def run_unicorn_backtest(
         time_stop_minutes: Exit if not at +time_stop_r_threshold R within N minutes.
                           None=disabled. Helps cut grindy losers early.
         time_stop_r_threshold: R-multiple to reach within time_stop_minutes (default 0.25R).
+        reference_bias_series: Pre-computed BiasState series from a reference symbol
+                              (e.g., ES). Used for intermarket agreement tagging in
+                              diagnostics only — does not affect trade decisions.
+        reference_symbol: Label for the reference instrument (e.g., "ES").
 
     Returns:
         UnicornBacktestResult with complete analytics
@@ -824,6 +845,8 @@ def run_unicorn_backtest(
         start_date=htf_bars[0].ts,
         end_date=htf_bars[-1].ts,
         total_bars=len(htf_bars),
+        reference_bias_series=reference_bias_series,
+        reference_symbol=reference_symbol,
     )
 
     # Initialize session stats
@@ -979,6 +1002,13 @@ def run_unicorn_backtest(
             ts=ts,
             config=config,
         )
+
+        # Capture primary HTF bias at every scanned bar (observability)
+        result.htf_bias_series.append(BiasState(
+            ts=ts,
+            direction=criteria.htf_bias_direction or BiasDirection.NEUTRAL,
+            confidence=criteria.htf_bias_confidence,
+        ))
 
         session = criteria.session
         result.session_stats[session].total_setups += 1
@@ -1302,6 +1332,30 @@ def run_unicorn_backtest(
     return result
 
 
+def _asof_lookup(series: list[BiasState], ts: datetime) -> Optional[BiasState]:
+    """Return the most recent BiasState at or before *ts*.
+
+    Returns None if no state is available (empty series or ts before first entry).
+    Assumes *series* is sorted chronologically.
+    """
+    best: Optional[BiasState] = None
+    for state in series:
+        if state.ts <= ts:
+            best = state
+        else:
+            break  # series is chronological, can stop early
+    return best
+
+
+def _conf_bucket(confidence: float) -> str:
+    """Map confidence to low/mid/high bucket."""
+    if confidence < 0.4:
+        return "low"
+    elif confidence <= 0.7:
+        return "mid"
+    return "high"
+
+
 def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
     """
     Build machine-readable session diagnostics from backtest result.
@@ -1361,6 +1415,23 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
                     "high": {"trades": int, "wins": int, "win_rate": float, "avg_pnl_pts": float, "total_pnl_pts": float, "avg_r": float, "total_r": float},
                 },
                 ...
+            },
+            "intermarket_agreement": {          # Only present when reference_bias_series provided
+                "reference_symbol": str,
+                "by_agreement": {
+                    "<label>": {                # aligned, divergent, neutral_involved, missing_ref, missing_primary
+                        "trades": int, "wins": int, "win_rate": float,
+                        "avg_pnl_pts": float, "total_pnl_pts": float,
+                        "avg_r": float, "total_r": float,
+                    }, ...
+                },
+                "by_session_agreement": {
+                    "<session>": { "<label>": { ... same fields ... }, ... }, ...
+                },
+                "both_high_conf": {
+                    "trades": int, "wins": int, "win_rate": float,
+                    "avg_r": float, "total_r": float,
+                },
             },
         }
 
@@ -1522,12 +1593,107 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
             }
         confidence_outcome_by_session[sess_key] = entry
 
-    return {
+    diagnostics: dict = {
         "setup_disposition": setup_disposition,
         "confidence_by_session": confidence_by_session,
         "expectancy_by_session": expectancy_by_session,
         "confidence_outcome_by_session": confidence_outcome_by_session,
     }
+
+    # --- Intermarket agreement (only when reference series provided) ---
+    if result.reference_bias_series is not None:
+        def _agreement_bucket() -> dict:
+            return {"trades": 0, "wins": 0, "sum_pnl": 0.0, "r_values": []}
+
+        by_agreement: dict[str, dict] = {}
+        by_session_agreement: dict[str, dict[str, dict]] = {}
+        both_high_acc = _agreement_bucket()
+
+        for trade in result.trades:
+            primary = _asof_lookup(result.htf_bias_series, trade.entry_time)
+            ref = _asof_lookup(result.reference_bias_series, trade.entry_time)
+
+            # Compute agreement label
+            if ref is None:
+                label = "missing_ref"
+            elif primary is None:
+                label = "missing_primary"
+            elif primary.direction == BiasDirection.NEUTRAL or ref.direction == BiasDirection.NEUTRAL:
+                label = "neutral_involved"
+            elif primary.direction == ref.direction:
+                label = "aligned"
+            else:
+                label = "divergent"
+
+            # Accumulate into by_agreement
+            if label not in by_agreement:
+                by_agreement[label] = _agreement_bucket()
+            bucket = by_agreement[label]
+            bucket["trades"] += 1
+            bucket["sum_pnl"] += trade.pnl_points
+            if trade.outcome == TradeOutcome.WIN:
+                bucket["wins"] += 1
+            initial_risk = abs(trade.entry_price - trade.stop_price)
+            r_val = trade.pnl_points / initial_risk if initial_risk > 0 else None
+            if r_val is not None:
+                bucket["r_values"].append(r_val)
+
+            # Accumulate into by_session_agreement
+            sess = taken_setups_by_time.get(trade.entry_time, "unknown")
+            if sess not in by_session_agreement:
+                by_session_agreement[sess] = {}
+            if label not in by_session_agreement[sess]:
+                by_session_agreement[sess][label] = _agreement_bucket()
+            sb = by_session_agreement[sess][label]
+            sb["trades"] += 1
+            sb["sum_pnl"] += trade.pnl_points
+            if trade.outcome == TradeOutcome.WIN:
+                sb["wins"] += 1
+            if r_val is not None:
+                sb["r_values"].append(r_val)
+
+            # Both-high-confidence accumulator
+            if primary is not None and ref is not None:
+                if primary.confidence > 0.7 and ref.confidence > 0.7:
+                    both_high_acc["trades"] += 1
+                    both_high_acc["sum_pnl"] += trade.pnl_points
+                    if trade.outcome == TradeOutcome.WIN:
+                        both_high_acc["wins"] += 1
+                    if r_val is not None:
+                        both_high_acc["r_values"].append(r_val)
+
+        def _finalize_bucket(raw: dict) -> dict:
+            r_vals = raw["r_values"]
+            return {
+                "trades": raw["trades"],
+                "wins": raw["wins"],
+                "win_rate": raw["wins"] / raw["trades"] * 100 if raw["trades"] else 0.0,
+                "avg_pnl_pts": raw["sum_pnl"] / raw["trades"] if raw["trades"] else 0.0,
+                "total_pnl_pts": raw["sum_pnl"],
+                "avg_r": sum(r_vals) / len(r_vals) if r_vals else 0.0,
+                "total_r": sum(r_vals) if r_vals else 0.0,
+            }
+
+        finalized_agreement = {k: _finalize_bucket(v) for k, v in by_agreement.items()}
+        finalized_session = {}
+        for sk, labels in by_session_agreement.items():
+            finalized_session[sk] = {lbl: _finalize_bucket(raw) for lbl, raw in labels.items()}
+
+        bh_r = both_high_acc["r_values"]
+        diagnostics["intermarket_agreement"] = {
+            "reference_symbol": result.reference_symbol or "unknown",
+            "by_agreement": finalized_agreement,
+            "by_session_agreement": finalized_session,
+            "both_high_conf": {
+                "trades": both_high_acc["trades"],
+                "wins": both_high_acc["wins"],
+                "win_rate": both_high_acc["wins"] / both_high_acc["trades"] * 100 if both_high_acc["trades"] else 0.0,
+                "avg_r": sum(bh_r) / len(bh_r) if bh_r else 0.0,
+                "total_r": sum(bh_r) if bh_r else 0.0,
+            },
+        }
+
+    return diagnostics
 
 
 def format_backtest_report(result: UnicornBacktestResult) -> str:
@@ -1702,6 +1868,58 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
                         f"{b['avg_pnl_pts']:>+8.2f} {b['total_pnl_pts']:>+10.2f} "
                         f"{b['avg_r']:>+7.2f}R {b['total_r']:>+7.2f}R"
                     )
+            lines.append("")
+
+    # Intermarket Agreement
+    if result.session_diagnostics and "intermarket_agreement" in result.session_diagnostics:
+        ia = result.session_diagnostics["intermarket_agreement"]
+        ref_sym = ia["reference_symbol"]
+        lines.append("-" * 40)
+        lines.append(f"INTERMARKET AGREEMENT (vs {ref_sym})")
+        lines.append("-" * 40)
+        lines.append(
+            f"{'Label':<20} {'Trades':>7} {'WinRate':>8} {'AvgPnL':>8} "
+            f"{'TotalPnL':>10} {'AvgR':>8} {'TotalR':>8}"
+        )
+        lines.append("-" * 72)
+
+        for label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"):
+            if label in ia["by_agreement"]:
+                b = ia["by_agreement"][label]
+                lines.append(
+                    f"{label:<20} {b['trades']:>7} {b['win_rate']:>7.1f}% "
+                    f"{b['avg_pnl_pts']:>+8.2f} {b['total_pnl_pts']:>+10.2f} "
+                    f"{b['avg_r']:>+7.2f}R {b['total_r']:>+7.2f}R"
+                )
+        lines.append("")
+
+        # Intermarket × Session
+        if ia["by_session_agreement"]:
+            lines.append("INTERMARKET × SESSION")
+            lines.append("-" * 40)
+            lines.append(
+                f"{'Session':<12} {'Label':<20} {'Trades':>7} {'WinRate':>8} "
+                f"{'AvgR':>8} {'TotalR':>8}"
+            )
+            lines.append("-" * 66)
+
+            for sess_key in sorted(ia["by_session_agreement"].keys()):
+                for label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"):
+                    if label in ia["by_session_agreement"][sess_key]:
+                        b = ia["by_session_agreement"][sess_key][label]
+                        lines.append(
+                            f"{sess_key:<12} {label:<20} {b['trades']:>7} {b['win_rate']:>7.1f}% "
+                            f"{b['avg_r']:>+7.2f}R {b['total_r']:>+7.2f}R"
+                        )
+            lines.append("")
+
+        # Both-high-confidence summary
+        bh = ia["both_high_conf"]
+        if bh["trades"] > 0:
+            lines.append(
+                f"Both-high-confidence trades: {bh['trades']} trades, "
+                f"{bh['win_rate']:.1f}% win rate, {bh['avg_r']:+.2f}R avg"
+            )
             lines.append("")
 
     # Criteria Bottleneck

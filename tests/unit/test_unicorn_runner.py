@@ -23,6 +23,8 @@ from app.services.backtest.engines.unicorn_runner import (
     TradeRecord,
     compute_adverse_wick_ratio,
     compute_range_atr_mult,
+    BiasState,
+    _asof_lookup,
 )
 from app.services.strategy.indicators.tf_bias import BiasDirection
 from app.services.strategy.strategies.unicorn_model import (
@@ -1169,3 +1171,205 @@ class TestNYOpenProfile:
         assert "CONFIG" in report
         assert "SETUP DISPOSITION BY SESSION" in report
         assert "CONFIDENCE BY SESSION" in report
+
+
+# =========================================================================
+# Intermarket agreement observability tests
+# =========================================================================
+
+
+class TestAsofLookup:
+    """Direct unit tests for _asof_lookup."""
+
+    def test_empty_series_returns_none(self):
+        """Empty series => None."""
+        ts = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        assert _asof_lookup([], ts) is None
+
+    def test_ts_before_first_entry_returns_none(self):
+        """ts earlier than all entries => None."""
+        series = [
+            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.8),
+        ]
+        early_ts = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        assert _asof_lookup(series, early_ts) is None
+
+    def test_ts_exactly_on_entry(self):
+        """ts exactly matching an entry => returns that entry."""
+        target_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+        series = [
+            BiasState(ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.6),
+            BiasState(ts=target_ts, direction=BiasDirection.BEARISH, confidence=0.9),
+            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.5),
+        ]
+        result = _asof_lookup(series, target_ts)
+        assert result is not None
+        assert result.ts == target_ts
+        assert result.direction == BiasDirection.BEARISH
+        assert result.confidence == 0.9
+
+    def test_ts_between_entries_returns_earlier(self):
+        """ts between two entries => returns the earlier one."""
+        series = [
+            BiasState(ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.6),
+            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BEARISH, confidence=0.9),
+        ]
+        between_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+        result = _asof_lookup(series, between_ts)
+        assert result is not None
+        assert result.direction == BiasDirection.BULLISH
+        assert result.confidence == 0.6
+
+
+class TestBiasSeriesPopulated:
+    """htf_bias_series must be populated after backtest."""
+
+    def test_bias_series_populated(self):
+        """Backtest populates htf_bias_series with BiasState tuples."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        assert isinstance(result.htf_bias_series, list)
+        assert len(result.htf_bias_series) > 0
+        for state in result.htf_bias_series:
+            assert isinstance(state, BiasState)
+            assert isinstance(state.ts, datetime)
+            assert isinstance(state.direction, BiasDirection)
+            assert isinstance(state.confidence, float)
+            assert 0.0 <= state.confidence <= 1.0
+
+
+class TestIntermarketAgreementWithRefSeries:
+    """intermarket_agreement diagnostics with a synthetic reference series."""
+
+    def test_agreement_present_with_ref_series(self):
+        """Passing reference_bias_series populates intermarket_agreement in diagnostics."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        # First run to get htf_bias_series timestamps
+        base_result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        # Build synthetic reference: all BULLISH, confidence 0.8
+        synth_ref = [
+            BiasState(ts=s.ts, direction=BiasDirection.BULLISH, confidence=0.8)
+            for s in base_result.htf_bias_series
+        ]
+
+        # Re-run with reference series
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            reference_bias_series=synth_ref,
+            reference_symbol="ES",
+        )
+
+        diag = result.session_diagnostics
+        assert diag is not None
+        assert "intermarket_agreement" in diag
+
+        ia = diag["intermarket_agreement"]
+        assert ia["reference_symbol"] == "ES"
+        assert isinstance(ia["by_agreement"], dict)
+        assert isinstance(ia["by_session_agreement"], dict)
+        assert isinstance(ia["both_high_conf"], dict)
+
+        # Validate structure of by_agreement entries
+        for label, entry in ia["by_agreement"].items():
+            assert label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary")
+            assert isinstance(entry["trades"], int)
+            assert isinstance(entry["wins"], int)
+            assert isinstance(entry["win_rate"], float)
+            assert isinstance(entry["avg_pnl_pts"], float)
+            assert isinstance(entry["total_pnl_pts"], float)
+            assert isinstance(entry["avg_r"], float)
+            assert isinstance(entry["total_r"], float)
+
+        # both_high_conf must have correct shape
+        bh = ia["both_high_conf"]
+        assert isinstance(bh["trades"], int)
+        assert isinstance(bh["wins"], int)
+        assert isinstance(bh["win_rate"], float)
+        assert isinstance(bh["avg_r"], float)
+        assert isinstance(bh["total_r"], float)
+
+
+class TestNoRefSeriesNoAgreementKey:
+    """Without reference series, intermarket_agreement must be absent."""
+
+    def test_no_ref_series_no_agreement_key(self):
+        """No reference_bias_series => no intermarket_agreement key."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        diag = result.session_diagnostics
+        assert diag is not None
+        assert "intermarket_agreement" not in diag
+
+
+class TestIntermarketReportRendering:
+    """Intermarket agreement report section renders correctly."""
+
+    def test_report_contains_intermarket_section(self):
+        """Report includes INTERMARKET AGREEMENT when ref series provided."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        # Build a simple all-bullish reference
+        ref_series = [
+            BiasState(ts=htf_bars[i].ts, direction=BiasDirection.BULLISH, confidence=0.8)
+            for i in range(len(htf_bars))
+        ]
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            reference_bias_series=ref_series,
+            reference_symbol="ES",
+        )
+
+        report = format_backtest_report(result)
+        assert "INTERMARKET AGREEMENT (vs ES)" in report
+
+    def test_report_no_intermarket_section_without_ref(self):
+        """Report omits INTERMARKET AGREEMENT when no ref series."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        report = format_backtest_report(result)
+        assert "INTERMARKET AGREEMENT" not in report
