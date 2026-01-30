@@ -550,6 +550,9 @@ class UnicornBacktestResult:
     # Config snapshot (for diagnostics)
     config: Optional[UnicornConfig] = None
 
+    # Machine-readable session diagnostics (populated by _build_session_diagnostics)
+    session_diagnostics: Optional[dict] = None
+
     @property
     def win_rate(self) -> float:
         if self.trades_taken == 0:
@@ -1295,7 +1298,91 @@ def run_unicorn_backtest(
                 result.confidence_win_correlation = numerator / (denom_conf * denom_win)
 
     result.config = config
+    result.session_diagnostics = _build_session_diagnostics(result)
     return result
+
+
+def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
+    """
+    Build machine-readable session diagnostics from backtest result.
+
+    Reads only from ``result.all_setups`` and ``result.trades``.
+    No printing — pure computation.
+
+    Returns::
+
+        {
+            "setup_disposition": {
+                "<session>": {
+                    "total":          int,   # setups scanned in this session
+                    "taken":          int,   # setups that became trades
+                    "rejected":       int,   # setups not taken
+                    "macro_rejected": int,   # subset of rejected where macro window failed
+                    "take_pct":       float, # taken / total * 100
+                },
+                ...
+            },
+            "confidence_by_session": {
+                "<session>": {
+                    "trades":         int,   # trades entered in this session
+                    "avg_confidence": float, # mean htf_bias_confidence
+                    "low":            int,   # count where confidence < 0.4
+                    "mid":            int,   # count where 0.4 <= confidence <= 0.7
+                    "high":           int,   # count where confidence > 0.7
+                },
+                ...
+            },
+        }
+
+    Session keys are ``TradingSession.value`` strings (e.g. "ny_am", "london")
+    or ``"unknown"`` if the setup_session field is empty.
+    """
+    # --- Setup disposition ---
+    setup_disposition: dict[str, dict] = {}
+    for s in result.all_setups:
+        key = s.setup_session or "unknown"
+        if key not in setup_disposition:
+            setup_disposition[key] = {
+                "total": 0, "taken": 0, "rejected": 0, "macro_rejected": 0, "take_pct": 0.0,
+            }
+        setup_disposition[key]["total"] += 1
+        if s.taken:
+            setup_disposition[key]["taken"] += 1
+        else:
+            setup_disposition[key]["rejected"] += 1
+            if not s.setup_in_macro_window:
+                setup_disposition[key]["macro_rejected"] += 1
+
+    for counts in setup_disposition.values():
+        counts["take_pct"] = counts["taken"] / max(1, counts["total"]) * 100
+
+    # --- Confidence by session ---
+    # Build entry_time → setup_session index from taken setups
+    taken_setups_by_time: dict[datetime, str] = {}
+    for s in result.all_setups:
+        if s.taken:
+            taken_setups_by_time[s.timestamp] = s.setup_session or "unknown"
+
+    # Group trade confidences by session
+    session_confs: dict[str, list[float]] = {}
+    for trade in result.trades:
+        sess = taken_setups_by_time.get(trade.entry_time, "unknown")
+        session_confs.setdefault(sess, []).append(trade.criteria.htf_bias_confidence)
+
+    confidence_by_session: dict[str, dict] = {}
+    for sess_key, confs in session_confs.items():
+        confidence_by_session[sess_key] = {
+            "trades": len(confs),
+            "avg_confidence": sum(confs) / len(confs) if confs else 0.0,
+            "low": sum(1 for c in confs if c < 0.4),
+            "mid": sum(1 for c in confs if 0.4 <= c <= 0.7),
+            "high": sum(1 for c in confs if c > 0.7),
+        }
+
+    return {
+        "setup_disposition": setup_disposition,
+        "confidence_by_session": confidence_by_session,
+    }
 
 
 def format_backtest_report(result: UnicornBacktestResult) -> str:
@@ -1388,63 +1475,37 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append("")
 
     # Setup Disposition by Session
-    if result.all_setups:
+    if result.session_diagnostics:
+        diag = result.session_diagnostics
         lines.append("-" * 40)
         lines.append("SETUP DISPOSITION BY SESSION")
         lines.append("-" * 40)
         lines.append(f"{'Session':<12} {'Total':>7} {'Taken':>7} {'Rejected':>9} {'Macro-Rej':>10} {'Take%':>7}")
         lines.append("-" * 56)
 
-        session_disposition: dict[str, dict[str, int]] = {}
-        for s in result.all_setups:
-            key = s.setup_session or "unknown"
-            if key not in session_disposition:
-                session_disposition[key] = {"total": 0, "taken": 0, "rejected": 0, "macro_rejected": 0}
-            session_disposition[key]["total"] += 1
-            if s.taken:
-                session_disposition[key]["taken"] += 1
-            else:
-                session_disposition[key]["rejected"] += 1
-                if not s.setup_in_macro_window:
-                    session_disposition[key]["macro_rejected"] += 1
-
-        for sess_key, counts in sorted(session_disposition.items()):
-            take_pct = counts["taken"] / max(1, counts["total"]) * 100
+        for sess_key in sorted(diag["setup_disposition"].keys()):
+            counts = diag["setup_disposition"][sess_key]
             lines.append(
                 f"{sess_key:<12} {counts['total']:>7} {counts['taken']:>7} "
-                f"{counts['rejected']:>9} {counts['macro_rejected']:>10} {take_pct:>6.1f}%"
+                f"{counts['rejected']:>9} {counts['macro_rejected']:>10} {counts['take_pct']:>6.1f}%"
             )
         lines.append("")
 
     # Confidence by Session
-    if result.all_setups:
+    if result.session_diagnostics:
+        diag = result.session_diagnostics
         lines.append("-" * 40)
         lines.append("CONFIDENCE BY SESSION")
         lines.append("-" * 40)
 
-        # Build lookup: entry_time → setup_session from taken setups
-        taken_setups_by_time: dict[datetime, str] = {}
-        for s in result.all_setups:
-            if s.taken:
-                taken_setups_by_time[s.timestamp] = s.setup_session or "unknown"
-
-        # Group trades by session
-        session_trades: dict[str, list[float]] = {}
-        for trade in result.trades:
-            sess = taken_setups_by_time.get(trade.entry_time, "unknown")
-            session_trades.setdefault(sess, []).append(trade.confidence)
-
         lines.append(f"{'Session':<12} {'Trades':>7} {'AvgConf':>8} {'Low<0.4':>8} {'Mid':>8} {'High>0.7':>9}")
         lines.append("-" * 56)
 
-        for sess_key in sorted(session_trades.keys()):
-            confs = session_trades[sess_key]
-            avg_conf = sum(confs) / len(confs) if confs else 0
-            low = sum(1 for c in confs if c < 0.4)
-            mid = sum(1 for c in confs if 0.4 <= c <= 0.7)
-            high = sum(1 for c in confs if c > 0.7)
+        for sess_key in sorted(diag["confidence_by_session"].keys()):
+            c = diag["confidence_by_session"][sess_key]
             lines.append(
-                f"{sess_key:<12} {len(confs):>7} {avg_conf:>8.3f} {low:>8} {mid:>8} {high:>9}"
+                f"{sess_key:<12} {c['trades']:>7} {c['avg_confidence']:>8.3f} "
+                f"{c['low']:>8} {c['mid']:>8} {c['high']:>9}"
             )
         lines.append("")
 

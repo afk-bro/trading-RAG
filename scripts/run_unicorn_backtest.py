@@ -617,6 +617,7 @@ Examples:
                 }
                 for b in result.confidence_buckets
             ],
+            "session_diagnostics": result.session_diagnostics,
         }
         report = json.dumps(output, indent=2)
     else:

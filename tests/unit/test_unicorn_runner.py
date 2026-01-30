@@ -1073,6 +1073,42 @@ class TestNYOpenProfile:
             assert setup.setup_session != "", f"setup_session empty at {setup.timestamp}"
             assert isinstance(setup.setup_in_macro_window, bool)
 
+    def test_session_diagnostics_structure(self):
+        """session_diagnostics dict has expected keys and types."""
+        start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
+        htf_bars = generate_trending_bars(start, 100, 17500.0, trend=0.3, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start, 300, 17500.0, trend=0.1, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        diag = result.session_diagnostics
+        assert diag is not None
+        assert "setup_disposition" in diag
+        assert "confidence_by_session" in diag
+
+        # Validate setup_disposition entries
+        for sess_key, counts in diag["setup_disposition"].items():
+            assert isinstance(sess_key, str)
+            assert isinstance(counts["total"], int)
+            assert isinstance(counts["taken"], int)
+            assert isinstance(counts["rejected"], int)
+            assert isinstance(counts["macro_rejected"], int)
+            assert isinstance(counts["take_pct"], float)
+
+        # Validate confidence_by_session entries
+        for sess_key, stats in diag["confidence_by_session"].items():
+            assert isinstance(sess_key, str)
+            assert isinstance(stats["trades"], int)
+            assert isinstance(stats["avg_confidence"], float)
+            assert isinstance(stats["low"], int)
+            assert isinstance(stats["mid"], int)
+            assert isinstance(stats["high"], int)
+
     def test_report_contains_diagnostic_sections(self):
         """Report includes CONFIG, SETUP DISPOSITION BY SESSION, and CONFIDENCE BY SESSION."""
         start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
