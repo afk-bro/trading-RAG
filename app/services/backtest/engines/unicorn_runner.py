@@ -53,6 +53,26 @@ from app.services.strategy.strategies.unicorn_model import (
 
 
 @dataclass(frozen=True)
+class BiasSnapshot:
+    """Full bias stack at a point in time (for trace/audit)."""
+    # Per-TF: None = TF not provided/computed. NEUTRAL = computed but neutral.
+    h4_direction: Optional[BiasDirection] = None
+    h4_confidence: float = 0.0
+    h1_direction: Optional[BiasDirection] = None
+    h1_confidence: float = 0.0
+    m15_direction: Optional[BiasDirection] = None
+    m15_confidence: float = 0.0
+    m5_direction: Optional[BiasDirection] = None
+    m5_confidence: float = 0.0
+    # Final weighted result
+    final_direction: BiasDirection = BiasDirection.NEUTRAL
+    final_confidence: float = 0.0
+    alignment_score: float = 0.0
+    # Which TFs contributed (non-None inputs)
+    used_tfs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BarBundle:
     """Multi-timeframe bar data for hybrid execution.
 
@@ -305,6 +325,7 @@ class CriteriaCheck:
     mss_displacement_atr: float = 0.0  # displacement_size of matched MSS (ATR multiples)
     stop_points: float = 0.0
     session: TradingSession = TradingSession.OFF_HOURS
+    bias_snapshot: Optional["BiasSnapshot"] = None
 
     @property
     def criteria_met_count(self) -> int:
@@ -427,6 +448,9 @@ class TradeRecord:
     # Timing
     duration_minutes: int = 0
     bars_held: int = 0
+
+    # Intermarket agreement label (set by _build_session_diagnostics)
+    intermarket_label: Optional[str] = None
 
 
 @dataclass
@@ -688,6 +712,32 @@ def check_criteria(
     check.htf_bias_direction = htf_bias.final_direction
     check.htf_bias_confidence = htf_bias.final_confidence
     check.htf_bias_aligned = htf_bias.is_tradeable
+
+    # Build full bias snapshot for trace/audit
+    used_tfs: list[str] = []
+    if htf_bias.h4_bias is not None:
+        used_tfs.append("h4")
+    if htf_bias.h1_bias is not None:
+        used_tfs.append("h1")
+    if htf_bias.m15_bias is not None:
+        used_tfs.append("m15")
+    if htf_bias.m5_bias is not None:
+        used_tfs.append("m5")
+
+    check.bias_snapshot = BiasSnapshot(
+        h4_direction=htf_bias.h4_bias.direction if htf_bias.h4_bias else None,
+        h4_confidence=htf_bias.h4_bias.confidence if htf_bias.h4_bias else 0.0,
+        h1_direction=htf_bias.h1_bias.direction if htf_bias.h1_bias else None,
+        h1_confidence=htf_bias.h1_bias.confidence if htf_bias.h1_bias else 0.0,
+        m15_direction=htf_bias.m15_bias.direction if htf_bias.m15_bias else None,
+        m15_confidence=htf_bias.m15_bias.confidence if htf_bias.m15_bias else 0.0,
+        m5_direction=htf_bias.m5_bias.direction if htf_bias.m5_bias else None,
+        m5_confidence=htf_bias.m5_bias.confidence if htf_bias.m5_bias else 0.0,
+        final_direction=htf_bias.final_direction,
+        final_confidence=htf_bias.final_confidence,
+        alignment_score=htf_bias.alignment_score,
+        used_tfs=tuple(used_tfs),
+    )
 
     if direction_filter and htf_bias.final_direction != direction_filter:
         check.htf_bias_aligned = False
@@ -1756,6 +1806,9 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
             else:
                 label = "divergent"
 
+            # Store per-trade label for trace mode
+            trade.intermarket_label = label
+
             # Accumulate into by_agreement
             if label not in by_agreement:
                 by_agreement[label] = _agreement_bucket()
@@ -2078,6 +2131,260 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
 
     lines.append("")
     lines.append(f"Confidence-Win Correlation: {result.confidence_win_correlation:+.3f}")
+    lines.append("")
+    lines.append("=" * 70)
+
+    return "\n".join(lines)
+
+
+def format_trade_trace(
+    trade: TradeRecord,
+    trade_index: int,
+    bar_bundle: Optional[BarBundle],
+    result: UnicornBacktestResult,
+    intrabar_policy: IntrabarPolicy,
+    slippage_points: float,
+    verbose: bool = False,
+) -> str:
+    """
+    Post-run trace: replay a single trade's management path to its recorded exit.
+
+    Does NOT re-simulate exits. Uses trade.exit_time, trade.exit_price,
+    trade.exit_reason as ground truth. Walks bars up to recorded exit
+    and shows the path. On the exit bar, verifies the recorded reason
+    matches what resolve_bar_exit() would produce.
+
+    Args:
+        trade: The TradeRecord to trace.
+        trade_index: 0-based index of this trade in result.trades.
+        bar_bundle: BarBundle with m1/m15 data for replay.
+        result: Full backtest result (for context).
+        intrabar_policy: Policy used in the backtest.
+        slippage_points: Slippage in points (per side).
+        verbose: If True, print all bars. If False, first 5 + exit bar.
+
+    Returns:
+        Plain-text trace output.
+
+    Raises:
+        ValueError: If trade_index is out of range.
+    """
+    if trade_index < 0 or trade_index >= len(result.trades):
+        raise ValueError(
+            f"trade_index {trade_index} out of range "
+            f"(0–{len(result.trades) - 1}, {len(result.trades)} trades)"
+        )
+
+    lines: list[str] = []
+    lines.append("=" * 70)
+    lines.append(f"TRADE TRACE — Trade #{trade_index}")
+    lines.append("=" * 70)
+
+    # ------------------------------------------------------------------
+    # Section 1: ENTRY CONTEXT
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("ENTRY CONTEXT")
+    lines.append("-" * 40)
+
+    entry_et = to_eastern_time(trade.entry_time)
+    lines.append(f"Entry time (ET):     {trade.entry_time.isoformat()} ({entry_et.strftime('%H:%M')} ET)")
+    lines.append(f"Entry price:         {trade.entry_price:.2f}")
+    lines.append(f"Direction:           {trade.direction.value}")
+    lines.append(f"Stop:                {trade.stop_price:.2f}")
+    lines.append(f"Target:              {trade.target_price:.2f}")
+    planned_r = abs(trade.target_price - trade.entry_price) / trade.risk_points if trade.risk_points > 0 else 0.0
+    lines.append(f"Planned R:           {planned_r:.2f}R")
+    lines.append(f"Risk points:         {trade.risk_points:.2f}")
+    lines.append(f"Session:             {trade.session.value}")
+
+    criteria = trade.criteria
+    lines.append(f"Macro window:        {'yes' if criteria.in_macro_window else 'no'}")
+
+    # Guard diagnostics (from setup if available)
+    setup_record = None
+    for s in result.all_setups:
+        if s.taken and s.timestamp == trade.entry_time:
+            setup_record = s
+            break
+    if setup_record:
+        lines.append(f"Wick ratio:          {setup_record.signal_wick_ratio:.3f}")
+        lines.append(f"Range ATR mult:      {setup_record.signal_range_atr_mult:.2f}")
+        lines.append(f"Displacement ATR:    {setup_record.signal_displacement_atr:.2f}")
+
+    # ------------------------------------------------------------------
+    # Section 2: BIAS STACK
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("BIAS STACK AT ENTRY")
+    lines.append("-" * 40)
+
+    snap = criteria.bias_snapshot
+    if snap is not None:
+        tf_fields = [
+            ("h4", snap.h4_direction, snap.h4_confidence),
+            ("h1", snap.h1_direction, snap.h1_confidence),
+            ("m15", snap.m15_direction, snap.m15_confidence),
+            ("m5", snap.m5_direction, snap.m5_confidence),
+        ]
+        for tf_name, direction, confidence in tf_fields:
+            if direction is None:
+                lines.append(f"  {tf_name:>4}: not provided")
+            else:
+                lines.append(f"  {tf_name:>4}: {direction.value:<8} conf={confidence:.3f}")
+        lines.append(f"  Final:  {snap.final_direction.value:<8} conf={snap.final_confidence:.3f}  alignment={snap.alignment_score:.3f}")
+        lines.append(f"  Used TFs: {', '.join(snap.used_tfs) if snap.used_tfs else 'none'}")
+
+        # Last completed candle timestamps per TF
+        tf_durations = {"h4": timedelta(hours=4), "h1": timedelta(hours=1), "m15": timedelta(minutes=15), "m5": timedelta(minutes=5)}
+        for tf in snap.used_tfs:
+            dur = tf_durations.get(tf)
+            if dur:
+                # Floor entry_time to the TF boundary
+                total_seconds = int(dur.total_seconds())
+                entry_epoch = int(trade.entry_time.timestamp())
+                last_completed = datetime.fromtimestamp(
+                    (entry_epoch // total_seconds) * total_seconds,
+                    tz=trade.entry_time.tzinfo,
+                )
+                lines.append(f"  Last completed {tf}: {last_completed.isoformat()}")
+    else:
+        lines.append("  (no bias snapshot captured)")
+
+    # Intermarket label
+    if trade.intermarket_label:
+        lines.append(f"  Intermarket:  {trade.intermarket_label}")
+
+    # ------------------------------------------------------------------
+    # Section 3: MANAGEMENT PATH
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("MANAGEMENT PATH")
+    lines.append("-" * 40)
+
+    if trade.exit_time is None:
+        lines.append("  Trade has no exit (still open at backtest end).")
+    else:
+        # Select replay bars: prefer m1, fallback to m15
+        replay_bars: list[OHLCVBar] = []
+        replay_tf = "m1"
+        if bar_bundle and bar_bundle.m1:
+            replay_bars = [
+                b for b in bar_bundle.m1
+                if trade.entry_time <= b.ts <= trade.exit_time
+            ]
+        if not replay_bars and bar_bundle and bar_bundle.m15:
+            replay_tf = "m15"
+            replay_bars = [
+                b for b in bar_bundle.m15
+                if trade.entry_time <= b.ts <= trade.exit_time
+            ]
+        if not replay_bars:
+            replay_tf = "m15"
+            # Fallback: use result htf data if accessible
+            lines.append("  (no bar data available for replay)")
+        else:
+            lines.append(f"  Replay TF: {replay_tf} ({len(replay_bars)} bars)")
+            lines.append(f"  {'Timestamp':<26} {'O':>10} {'H':>10} {'L':>10} {'C':>10} {'MFE':>8} {'MAE':>8} Event")
+            lines.append(f"  {'-'*110}")
+
+            running_mfe = 0.0
+            running_mae = 0.0
+            is_long = trade.direction == BiasDirection.BULLISH
+
+            bars_to_print = replay_bars if verbose else None
+            if not verbose:
+                # First 5 + exit bar
+                first_5 = replay_bars[:5]
+                exit_bar_candidates = [b for b in replay_bars if b.ts == trade.exit_time]
+                exit_bar = exit_bar_candidates[0] if exit_bar_candidates else replay_bars[-1] if replay_bars else None
+                # Deduplicate if exit is in first 5
+                bars_to_print_set = list(first_5)
+                if exit_bar and exit_bar not in bars_to_print_set:
+                    if len(replay_bars) > 5:
+                        bars_to_print_set.append(None)  # Ellipsis marker
+                    bars_to_print_set.append(exit_bar)
+                bars_to_print = bars_to_print_set
+
+            for idx, b in enumerate(replay_bars):
+                # Track running MFE/MAE
+                if is_long:
+                    unrealized_high = b.high - trade.entry_price
+                    unrealized_low = b.low - trade.entry_price
+                else:
+                    unrealized_high = trade.entry_price - b.low
+                    unrealized_low = trade.entry_price - b.high
+                running_mfe = max(running_mfe, unrealized_high)
+                running_mae = max(running_mae, max(0, -unrealized_low))
+
+                event = ""
+                if b.ts == trade.exit_time:
+                    event = f"EXIT: {trade.exit_reason}"
+
+                # Decide whether to print this bar
+                should_print = verbose
+                if not verbose:
+                    if b in (bars_to_print or []):
+                        should_print = True
+                    elif idx < 5:
+                        should_print = True
+                    elif b.ts == trade.exit_time:
+                        should_print = True
+
+                if should_print:
+                    lines.append(
+                        f"  {b.ts.isoformat():<26} {b.open:>10.2f} {b.high:>10.2f} "
+                        f"{b.low:>10.2f} {b.close:>10.2f} {running_mfe:>+8.2f} {running_mae:>8.2f} {event}"
+                    )
+                elif idx == 5 and not verbose:
+                    lines.append(f"  {'...':<26} (use --trace-verbose for all bars)")
+
+        # Verify exit on exit bar
+        if replay_bars and trade.exit_time:
+            exit_bar_candidates = [b for b in replay_bars if b.ts == trade.exit_time]
+            if exit_bar_candidates:
+                exit_bar = exit_bar_candidates[0]
+                verify_result = resolve_bar_exit(
+                    trade, exit_bar, intrabar_policy, slippage_points,
+                )
+                if verify_result and verify_result.exit_reason == trade.exit_reason:
+                    lines.append(f"  Replay verified: yes ({trade.exit_reason})")
+                elif verify_result:
+                    lines.append(
+                        f"  Replay mismatch: recorded={trade.exit_reason}, "
+                        f"replay={verify_result.exit_reason}"
+                    )
+                else:
+                    lines.append(f"  Unable to verify exit bar: resolve_bar_exit returned None")
+            else:
+                lines.append(f"  Unable to verify: exit bar not found in replay data")
+
+    # ------------------------------------------------------------------
+    # Section 4: EXIT SUMMARY
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("EXIT SUMMARY")
+    lines.append("-" * 40)
+
+    if trade.exit_time:
+        exit_et = to_eastern_time(trade.exit_time)
+        lines.append(f"Exit time (ET):      {trade.exit_time.isoformat()} ({exit_et.strftime('%H:%M')} ET)")
+        lines.append(f"Exit price:          {trade.exit_price:.2f}")
+        lines.append(f"Exit reason:         {trade.exit_reason}")
+        lines.append(f"PnL points:          {trade.pnl_points:+.2f}")
+        lines.append(f"R-multiple:          {trade.r_multiple:+.2f}R")
+        lines.append(f"Duration:            {trade.duration_minutes} min")
+        lines.append(f"Outcome:             {trade.outcome.value}")
+        lines.append(f"Policy:              {intrabar_policy.value}")
+        lines.append(f"MFE:                 {trade.mfe:+.2f}")
+        lines.append(f"MAE:                 {trade.mae:.2f}")
+    else:
+        lines.append("  Trade still open at backtest end.")
+
     lines.append("")
     lines.append("=" * 70)
 

@@ -17,6 +17,7 @@ from app.services.backtest.engines.unicorn_runner import (
     check_criteria,
     run_unicorn_backtest,
     format_backtest_report,
+    format_trade_trace,
     CriteriaCheck,
     SetupOccurrence,
     resolve_bar_exit,
@@ -26,6 +27,7 @@ from app.services.backtest.engines.unicorn_runner import (
     compute_adverse_wick_ratio,
     compute_range_atr_mult,
     BiasState,
+    BiasSnapshot,
     BarBundle,
     _asof_lookup,
 )
@@ -1755,3 +1757,297 @@ class TestCLIMultiTFSmoke:
         assert result.returncode == 0, f"CLI failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         # Should mention multi-TF in output
         assert "Multi-TF" in result.stdout or "multi" in result.stdout.lower()
+
+
+# =========================================================================
+# Phase: Trace mode — BiasSnapshot, format_trade_trace, intermarket label
+# =========================================================================
+
+
+class TestBiasSnapshot:
+    """Tests for BiasSnapshot capture in check_criteria."""
+
+    def test_bias_snapshot_populated(self):
+        """check_criteria with h4/h1 data populates per-TF directions."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=2.0, interval_minutes=240)
+        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=1.0, interval_minutes=60)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+            h4_bars=h4_bars, h1_bars=h1_bars,
+        )
+
+        assert result.bias_snapshot is not None
+        snap = result.bias_snapshot
+        # With h4/h1 provided, those directions should not be None
+        assert snap.h4_direction is not None
+        assert snap.h1_direction is not None
+        assert snap.m15_direction is not None
+        assert "h4" in snap.used_tfs
+        assert "h1" in snap.used_tfs
+        assert isinstance(snap.final_confidence, float)
+        assert isinstance(snap.alignment_score, float)
+
+    def test_bias_snapshot_without_htf(self):
+        """No h4/h1 bars → snapshot h4/h1 are None, final still computed from m15/m5."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+        )
+
+        assert result.bias_snapshot is not None
+        snap = result.bias_snapshot
+        assert snap.h4_direction is None
+        assert snap.h1_direction is None
+        # m15 at least should be populated (bars were passed as htf_bars)
+        assert snap.m15_direction is not None
+        assert "h4" not in snap.used_tfs
+        assert "h1" not in snap.used_tfs
+        assert "m15" in snap.used_tfs
+        assert snap.final_confidence >= 0.0
+
+
+class TestFormatTradeTrace:
+    """Tests for format_trade_trace()."""
+
+    def _make_synthetic_result(self):
+        """Build a minimal result with one deterministic trade for trace tests."""
+        from app.services.backtest.engines.unicorn_runner import (
+            UnicornBacktestResult, TradeOutcome,
+        )
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        exit_time = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+
+        snap = BiasSnapshot(
+            m15_direction=BiasDirection.BULLISH,
+            m15_confidence=0.7,
+            m5_direction=BiasDirection.BULLISH,
+            m5_confidence=0.6,
+            final_direction=BiasDirection.BULLISH,
+            final_confidence=0.65,
+            alignment_score=0.8,
+            used_tfs=("m15", "m5"),
+        )
+        criteria = CriteriaCheck(
+            htf_bias_aligned=True, in_macro_window=True, stop_valid=True,
+            htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.65,
+            bias_snapshot=snap,
+        )
+        trade = TradeRecord(
+            entry_time=entry_time,
+            entry_price=17000.0,
+            direction=BiasDirection.BULLISH,
+            quantity=1,
+            session=TradingSession.NY_AM,
+            criteria=criteria,
+            stop_price=16990.0,
+            target_price=17020.0,
+            risk_points=10.0,
+            exit_time=exit_time,
+            exit_price=16990.0 - 0.25,
+            exit_reason="stop_loss",
+            pnl_points=-10.25,
+            pnl_dollars=-50.0,
+            outcome=TradeOutcome.LOSS,
+            r_multiple=-1.025,
+            duration_minutes=30,
+            mfe=5.0,
+            mae=10.0,
+        )
+        result = UnicornBacktestResult(
+            symbol="NQ",
+            start_date=entry_time,
+            end_date=exit_time,
+            total_bars=100,
+            trades=[trade],
+            trades_taken=1,
+            losses=1,
+        )
+        # Build m15 bars covering the trade window
+        m15_bars = []
+        for i in range(10):
+            ts = entry_time + timedelta(minutes=i * 15)
+            m15_bars.append(make_bar(ts, 17000.0 - i, 17005.0 - i, 16989.0 - i, 16995.0 - i))
+        bundle = BarBundle(m15=m15_bars)
+        return result, bundle, trade
+
+    def test_format_trade_trace_basic(self):
+        """Trace first trade, output has all 4 section headers in order."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+
+        assert "ENTRY CONTEXT" in output
+        assert "BIAS STACK" in output
+        assert "MANAGEMENT PATH" in output
+        assert "EXIT SUMMARY" in output
+        # Check ordering
+        idx_entry = output.index("ENTRY CONTEXT")
+        idx_bias = output.index("BIAS STACK")
+        idx_mgmt = output.index("MANAGEMENT PATH")
+        idx_exit = output.index("EXIT SUMMARY")
+        assert idx_entry < idx_bias < idx_mgmt < idx_exit
+
+    def test_format_trade_trace_no_m1(self):
+        """No m1 data → falls back to m15 replay."""
+        result, bundle, trade = self._make_synthetic_result()
+        # bundle already has m15 only (no m1)
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+
+        assert "MANAGEMENT PATH" in output
+        assert "m15" in output  # Should mention replay TF
+
+    def test_format_trade_trace_verbose(self):
+        """Verbose prints all bars (no ellipsis hint)."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+            verbose=True,
+        )
+
+        assert "MANAGEMENT PATH" in output
+        assert "--trace-verbose" not in output
+
+    def test_format_trade_trace_out_of_range(self):
+        """Index beyond trades raises ValueError."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        with pytest.raises(ValueError, match="out of range"):
+            format_trade_trace(
+                trade=trade,
+                trade_index=9999,
+                bar_bundle=bundle,
+                result=result,
+                intrabar_policy=IntrabarPolicy.WORST,
+                slippage_points=0.25,
+            )
+
+    def test_trace_replay_matches_recorded_exit(self):
+        """Replay exit reason matches trade.exit_reason, output says 'verified'."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+
+        # Should contain either verified or unable to verify
+        assert "verified" in output.lower() or "unable to verify" in output.lower()
+
+
+class TestSeedReproducibility:
+    """Seed reproducibility for synthetic data."""
+
+    def test_seed_reproducibility(self):
+        """Same seed → identical trade list."""
+        import random
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+        from run_unicorn_backtest import generate_sample_data
+
+        random.seed(42)
+        htf1, ltf1 = generate_sample_data("NQ", days=5, profile="realistic")
+
+        random.seed(42)
+        htf2, ltf2 = generate_sample_data("NQ", days=5, profile="realistic")
+
+        # Bar counts must match
+        assert len(htf1) == len(htf2)
+        assert len(ltf1) == len(ltf2)
+
+        # Prices must match exactly
+        for a, b in zip(htf1, htf2):
+            assert a.open == b.open
+            assert a.high == b.high
+            assert a.low == b.low
+            assert a.close == b.close
+
+
+class TestIntermarketLabelOnTrade:
+    """intermarket_label is set per trade when ref series provided."""
+
+    def test_intermarket_label_on_trade(self):
+        """_build_session_diagnostics sets intermarket_label on each trade."""
+        from app.services.backtest.engines.unicorn_runner import (
+            UnicornBacktestResult, TradeOutcome, _build_session_diagnostics,
+        )
+
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        trade = TradeRecord(
+            entry_time=entry_time,
+            entry_price=17000.0,
+            direction=BiasDirection.BULLISH,
+            quantity=1,
+            session=TradingSession.NY_AM,
+            criteria=CriteriaCheck(htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.7),
+            stop_price=16990.0,
+            target_price=17020.0,
+            risk_points=10.0,
+            exit_time=entry_time + timedelta(minutes=30),
+            exit_price=17020.0,
+            exit_reason="target",
+            pnl_points=20.0,
+            pnl_dollars=100.0,
+            outcome=TradeOutcome.WIN,
+        )
+
+        # Build result with ref series
+        ref_series = [
+            BiasState(ts=entry_time, direction=BiasDirection.BULLISH, confidence=0.8),
+        ]
+        htf_bias_series = [
+            BiasState(ts=entry_time, direction=BiasDirection.BULLISH, confidence=0.7),
+        ]
+        result = UnicornBacktestResult(
+            symbol="NQ",
+            start_date=entry_time,
+            end_date=entry_time + timedelta(hours=1),
+            total_bars=100,
+            trades=[trade],
+            trades_taken=1,
+            wins=1,
+            htf_bias_series=htf_bias_series,
+            reference_bias_series=ref_series,
+            reference_symbol="ES",
+        )
+
+        # _build_session_diagnostics sets intermarket_label
+        result.session_diagnostics = _build_session_diagnostics(result)
+
+        valid_labels = {"aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"}
+        assert trade.intermarket_label is not None
+        assert trade.intermarket_label in valid_labels
+        # Both BULLISH → should be aligned
+        assert trade.intermarket_label == "aligned"

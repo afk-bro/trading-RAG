@@ -24,6 +24,7 @@ from app.services.strategy.models import OHLCVBar
 from app.services.backtest.engines.unicorn_runner import (
     run_unicorn_backtest,
     format_backtest_report,
+    format_trade_trace,
     IntrabarPolicy,
     BiasState,
     BarBundle,
@@ -689,6 +690,24 @@ Examples:
         help="Enable multi-TF mode: full bias stack (4H/1H/15m/5m) + 1m trade management. "
              "Synthetic: generates 1m base and resamples. Databento: uses fetch_multi_tf()."
     )
+    # Trace mode (post-run trade replay)
+    parser.add_argument(
+        "--trace-trade-index",
+        type=int,
+        metavar="N",
+        help="Trace trade at index N (0-based). Prints full replay after report."
+    )
+    parser.add_argument(
+        "--trace-verbose",
+        action="store_true",
+        help="Print all bars in trace management path (default: first 5 + exit bar)."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        metavar="N",
+        help="Seed for synthetic data generation (for reproducibility)."
+    )
 
     args = parser.parse_args()
 
@@ -697,6 +716,11 @@ Examples:
         parser.error("--ref-htf requires --ref-symbol")
     if args.ref_symbol and args.ref_symbol.upper() == args.symbol.upper():
         parser.error("--ref-symbol must differ from --symbol")
+
+    # Apply seed for reproducibility
+    if args.seed is not None:
+        import random
+        random.seed(args.seed)
 
     # Load or generate data
     bar_bundle = None  # Set when --multi-tf is active
@@ -977,6 +1001,28 @@ Examples:
             total = result.trades_taken or 1
             print(f"\nRef-symbol coverage: {missing_count}/{total} trades "
                   f"({missing_count / total * 100:.1f}%) had missing_ref")
+
+    # Trace mode: replay a single trade
+    if args.trace_trade_index is not None:
+        idx = args.trace_trade_index
+        if idx < 0 or idx >= len(result.trades):
+            print(f"\nError: --trace-trade-index {idx} out of range "
+                  f"(0–{len(result.trades) - 1}, {len(result.trades)} trades)",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        tick_size = 0.25
+        slippage_pts = args.slippage_ticks * tick_size
+        trace_output = format_trade_trace(
+            trade=result.trades[idx],
+            trade_index=idx,
+            bar_bundle=bar_bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy(args.intrabar_policy),
+            slippage_points=slippage_pts,
+            verbose=args.trace_verbose,
+        )
+        print("\n" + trace_output)
 
     # Quick summary to stderr if outputting to file
     if args.output and not args.json:
