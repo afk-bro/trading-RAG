@@ -397,6 +397,34 @@ STRICT fails to beat NORMAL in >=4/5 windows for either instrument. NY_OPEN fail
 
 Sweep script: `scripts/run_session_sweep.py`
 
+### Next: Soft session weighting (not gating)
+
+The sweep disproved hard session filtering but revealed a useful signal: session edge is non-stationary and instrument-specific. The correct next layer is a **soft PD-array modifier** — session acts as a contextual probability tilt on confidence, not a structural gate.
+
+**Proposed config surface** (backward-compatible):
+
+```python
+# UnicornConfig
+session_weight_map: dict[TradingSession, float]  # missing key → 1.0
+```
+
+- Per-symbol config (already true), so NQ vs ES divergence is naturally supported
+- Apply as `confidence *= session_weight` late enough to affect trade selection but not contaminate raw pattern detection metrics
+- Neutral defaults (1.0) produce bit-for-bit identical results vs current baseline
+
+**Foundation already in place:**
+- `setup_session` on every `SetupOccurrence` (taken + rejected) — session×regime table buildable from existing artifacts
+- `signal_strength`/confidence path into intent generation
+- Per-symbol config scoping via `UnicornConfig`
+
+**Guardrails (add at implementation time):**
+- Config validation: reject negative weights, clamp or reject NaN/inf
+- Diagnostics echo: print effective weight used (even when 1.0), so "inert" is always explainable
+
+**Definition of done for that PR:**
+1. With neutral defaults, bit-for-bit identical results vs current baseline
+2. With a non-neutral map, confidence distribution shifts as expected (unit test with fixed seed / canned setups)
+
 ---
 
 *Document created: 2026-01-28*
