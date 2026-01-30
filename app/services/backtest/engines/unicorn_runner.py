@@ -9,6 +9,7 @@ Dedicated backtester for ICT Unicorn Model strategy with detailed analytics:
 - Criteria bottleneck analysis
 """
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from enum import Enum
@@ -49,6 +50,20 @@ from app.services.strategy.strategies.unicorn_model import (
     DEFAULT_CONFIG,
     _calculate_atr,
 )
+
+
+@dataclass(frozen=True)
+class BarBundle:
+    """Multi-timeframe bar data for hybrid execution.
+
+    Contains bars at each timeframe, all resampled from a common 1m source.
+    Fields are Optional so callers can supply only the timeframes they have.
+    """
+    h4: Optional[list[OHLCVBar]] = None
+    h1: Optional[list[OHLCVBar]] = None
+    m15: Optional[list[OHLCVBar]] = None   # Primary scan TF
+    m5: Optional[list[OHLCVBar]] = None    # LTF confirmation
+    m1: Optional[list[OHLCVBar]] = None    # 1m execution
 
 
 class BiasState(NamedTuple):
@@ -631,18 +646,22 @@ def check_criteria(
     ts: datetime,
     direction_filter: Optional[BiasDirection] = None,
     config: Optional[UnicornConfig] = None,
+    h4_bars: Optional[list[OHLCVBar]] = None,
+    h1_bars: Optional[list[OHLCVBar]] = None,
 ) -> CriteriaCheck:
     """
     Check all 8 Unicorn criteria at a specific point in time.
 
     Args:
         bars: Primary timeframe bars
-        htf_bars: Higher timeframe bars for bias
-        ltf_bars: Lower timeframe bars for confirmation
+        htf_bars: Higher timeframe bars for bias (15m)
+        ltf_bars: Lower timeframe bars for confirmation (5m)
         symbol: Trading symbol
         ts: Current timestamp
         direction_filter: Only check for this direction (optional)
         config: Strategy configuration (ATR thresholds, session profile)
+        h4_bars: Optional 4-hour bars for full bias stack (causally aligned)
+        h1_bars: Optional 1-hour bars for full bias stack (causally aligned)
 
     Returns:
         CriteriaCheck with all criteria results
@@ -657,8 +676,10 @@ def check_criteria(
     atr_values = _calculate_atr(htf_bars, config.atr_period)
     current_atr = atr_values[-1] if atr_values else 0.0
 
-    # 1. HTF Bias
+    # 1. HTF Bias (pass all available timeframes for full bias stack)
     htf_bias = compute_tf_bias(
+        h4_bars=h4_bars,
+        h1_bars=h1_bars,
         m15_bars=htf_bars,
         m5_bars=ltf_bars,
         timestamp=ts,
@@ -793,6 +814,8 @@ def run_unicorn_backtest(
     # Intermarket agreement (observability-only)
     reference_bias_series: Optional[list[BiasState]] = None,  # Pre-computed bias from ref symbol
     reference_symbol: Optional[str] = None,  # e.g., "ES"
+    # Multi-timeframe bar bundle (enables full bias stack + 1m execution)
+    bar_bundle: Optional[BarBundle] = None,
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -880,6 +903,23 @@ def run_unicorn_backtest(
     # Build LTF index for quick lookup
     ltf_by_time = {b.ts: b for b in ltf_bars}
 
+    # --- Causal alignment for multi-TF bars ---
+    # Pre-build completion timestamp arrays for O(log n) lookups.
+    # A bar covering [T_bar, T_bar + duration) is "complete" when T >= T_bar + duration.
+    h4_completed_ts: list[datetime] = []
+    h1_completed_ts: list[datetime] = []
+    if bar_bundle is not None:
+        if bar_bundle.h4:
+            h4_completed_ts = [b.ts + timedelta(hours=4) for b in bar_bundle.h4]
+        if bar_bundle.h1:
+            h1_completed_ts = [b.ts + timedelta(hours=1) for b in bar_bundle.h1]
+
+    # Pre-build 1m timestamp index for bisect-based slicing
+    m1_timestamps: list[datetime] = []
+    has_m1 = bar_bundle is not None and bar_bundle.m1 is not None and len(bar_bundle.m1) > 0
+    if has_m1:
+        m1_timestamps = [b.ts for b in bar_bundle.m1]
+
     # Main backtest loop
     # Warmup needs extra bar because we use i-1 for signals
     warmup = 51  # Need history for indicators + 1 for causal signal
@@ -922,34 +962,75 @@ def run_unicorn_backtest(
         # For stop/target checks, we use the CURRENT bar's OHLC (this is correct -
         # we're checking if price hit levels during bar[i], not predicting)
 
-        # Update open trades (MFE/MAE tracking + exit checks)
-        # For exit checking, we use the current bar's OHLC (this is correct -
-        # checking if stop/target were hit during bar execution is not look-ahead)
-        for trade in open_trades:
-            # MFE/MAE tracking (stays inline — not exit logic)
-            if trade.direction == BiasDirection.BULLISH:
-                unrealized = bar.close - trade.entry_price
-            else:
-                unrealized = trade.entry_price - bar.close
-            if unrealized > trade.mfe:
-                trade.mfe = unrealized
-                trade.mfe_time = ts
-            if unrealized < -trade.mae:
-                trade.mae = abs(unrealized)
-                trade.mae_time = ts
+        # Slice 1m bars for this 15m window [ts, ts+15m)
+        m1_window: list[OHLCVBar] = []
+        if has_m1:
+            m1_start_idx = bisect_right(m1_timestamps, ts - timedelta(seconds=1))
+            # Find all m1 bars with ts in [ts, ts + 15m)
+            m1_end_ts = ts + timedelta(minutes=scan_interval * 15)
+            m1_end_idx = bisect_right(m1_timestamps, m1_end_ts - timedelta(seconds=1))
+            m1_window = bar_bundle.m1[m1_start_idx:m1_end_idx]
 
-            # Exit resolution via extracted function
-            exit_result = resolve_bar_exit(
-                trade, bar, intrabar_policy, slippage_points,
-                eod_exit=eod_exit, eod_time=eod_time,
-                time_stop_minutes=time_stop_minutes,
-                time_stop_r_threshold=time_stop_r_threshold,
-            )
-            if exit_result:
-                trade.exit_price = exit_result.exit_price
-                trade.exit_time = ts
-                trade.exit_reason = exit_result.exit_reason
-                trade.pnl_points = exit_result.pnl_points
+        # Update open trades (MFE/MAE tracking + exit checks)
+        if m1_window:
+            # 1m precision management: iterate each 1m bar for exit checks
+            for m1_bar in m1_window:
+                for trade in open_trades:
+                    if trade.exit_time is not None:
+                        continue
+                    # MFE/MAE tracking at 1m precision
+                    if trade.direction == BiasDirection.BULLISH:
+                        unrealized = m1_bar.close - trade.entry_price
+                    else:
+                        unrealized = trade.entry_price - m1_bar.close
+                    if unrealized > trade.mfe:
+                        trade.mfe = unrealized
+                        trade.mfe_time = m1_bar.ts
+                    if unrealized < -trade.mae:
+                        trade.mae = abs(unrealized)
+                        trade.mae_time = m1_bar.ts
+
+                    # Exit resolution at 1m granularity
+                    exit_result = resolve_bar_exit(
+                        trade, m1_bar, intrabar_policy, slippage_points,
+                        eod_exit=eod_exit, eod_time=eod_time,
+                        time_stop_minutes=time_stop_minutes,
+                        time_stop_r_threshold=time_stop_r_threshold,
+                    )
+                    if exit_result:
+                        trade.exit_price = exit_result.exit_price
+                        trade.exit_time = m1_bar.ts
+                        trade.exit_reason = exit_result.exit_reason
+                        trade.pnl_points = exit_result.pnl_points
+                # Remove closed trades between 1m bars to avoid re-checking
+                open_trades = [t for t in open_trades if t.exit_time is None]
+        else:
+            # Fallback: 15m management (existing behavior when no 1m data)
+            for trade in open_trades:
+                # MFE/MAE tracking (stays inline — not exit logic)
+                if trade.direction == BiasDirection.BULLISH:
+                    unrealized = bar.close - trade.entry_price
+                else:
+                    unrealized = trade.entry_price - bar.close
+                if unrealized > trade.mfe:
+                    trade.mfe = unrealized
+                    trade.mfe_time = ts
+                if unrealized < -trade.mae:
+                    trade.mae = abs(unrealized)
+                    trade.mae_time = ts
+
+                # Exit resolution via extracted function
+                exit_result = resolve_bar_exit(
+                    trade, bar, intrabar_policy, slippage_points,
+                    eod_exit=eod_exit, eod_time=eod_time,
+                    time_stop_minutes=time_stop_minutes,
+                    time_stop_r_threshold=time_stop_r_threshold,
+                )
+                if exit_result:
+                    trade.exit_price = exit_result.exit_price
+                    trade.exit_time = ts
+                    trade.exit_reason = exit_result.exit_reason
+                    trade.pnl_points = exit_result.pnl_points
 
         # Finalize closed trades (apply commission)
         closed = [t for t in open_trades if t.exit_time is not None]
@@ -993,6 +1074,19 @@ def run_unicorn_backtest(
 
         result.total_setups_scanned += 1
 
+        # Build causally aligned h4/h1 windows from bar_bundle
+        causal_h4: Optional[list[OHLCVBar]] = None
+        causal_h1: Optional[list[OHLCVBar]] = None
+        if bar_bundle is not None:
+            if bar_bundle.h4 and h4_completed_ts:
+                n_complete = bisect_right(h4_completed_ts, ts)
+                if n_complete > 0:
+                    causal_h4 = bar_bundle.h4[:n_complete][-25:]  # Last ~4 days
+            if bar_bundle.h1 and h1_completed_ts:
+                n_complete = bisect_right(h1_completed_ts, ts)
+                if n_complete > 0:
+                    causal_h1 = bar_bundle.h1[:n_complete][-100:]  # Last ~4 days
+
         # Check all criteria
         criteria = check_criteria(
             bars=htf_window,
@@ -1001,6 +1095,8 @@ def run_unicorn_backtest(
             symbol=symbol,
             ts=ts,
             config=config,
+            h4_bars=causal_h4,
+            h1_bars=causal_h1,
         )
 
         # Capture primary HTF bias at every scanned bar (observability)
@@ -1129,13 +1225,19 @@ def run_unicorn_backtest(
                 max_fvg_fill_pct=config.max_fvg_fill_pct,
             )
 
-            # CRITICAL: Entry is at MARKET (bar.open), not at theoretical FVG level
-            # We can only enter at prices that actually traded
+            # CRITICAL: Entry is at MARKET, not at theoretical FVG level
+            # Use first 1m bar's open within this 15m window when available
+            # for more precise entry pricing; fall back to 15m bar.open
+            if m1_window:
+                raw_entry = m1_window[0].open
+            else:
+                raw_entry = bar.open
+
             # Apply slippage: worse price for our direction
             if direction == BiasDirection.BULLISH:
-                entry_price = bar.open + slippage_points  # Buy at open + slip
+                entry_price = raw_entry + slippage_points  # Buy at open + slip
             else:
-                entry_price = bar.open - slippage_points  # Sell at open - slip
+                entry_price = raw_entry - slippage_points  # Sell at open - slip
 
             # Calculate stop and target (ATR-based validation)
             # Uses signal_atr from previous closed bar
@@ -1180,17 +1282,46 @@ def run_unicorn_backtest(
             # Entry-bar exit check: stop/target may be pierced on the
             # same bar the trade was opened.  The general open-trades loop
             # above ran BEFORE this trade existed, so no double-process risk.
-            entry_bar_exit = resolve_bar_exit(
-                trade, bar, intrabar_policy, slippage_points,
-                eod_exit=eod_exit, eod_time=eod_time,
-                time_stop_minutes=time_stop_minutes,
-                time_stop_r_threshold=time_stop_r_threshold,
-            )
-            if entry_bar_exit:
-                trade.exit_price = entry_bar_exit.exit_price
-                trade.exit_time = ts
-                trade.exit_reason = entry_bar_exit.exit_reason
-                trade.pnl_points = entry_bar_exit.pnl_points
+            if m1_window and len(m1_window) > 1:
+                # Sub-iterate remaining 1m bars after entry for precise exit
+                for m1_bar in m1_window[1:]:
+                    # MFE/MAE at 1m precision
+                    if trade.direction == BiasDirection.BULLISH:
+                        unrealized = m1_bar.close - trade.entry_price
+                    else:
+                        unrealized = trade.entry_price - m1_bar.close
+                    if unrealized > trade.mfe:
+                        trade.mfe = unrealized
+                        trade.mfe_time = m1_bar.ts
+                    if unrealized < -trade.mae:
+                        trade.mae = abs(unrealized)
+                        trade.mae_time = m1_bar.ts
+
+                    entry_bar_exit = resolve_bar_exit(
+                        trade, m1_bar, intrabar_policy, slippage_points,
+                        eod_exit=eod_exit, eod_time=eod_time,
+                        time_stop_minutes=time_stop_minutes,
+                        time_stop_r_threshold=time_stop_r_threshold,
+                    )
+                    if entry_bar_exit:
+                        trade.exit_price = entry_bar_exit.exit_price
+                        trade.exit_time = m1_bar.ts
+                        trade.exit_reason = entry_bar_exit.exit_reason
+                        trade.pnl_points = entry_bar_exit.pnl_points
+                        break
+            else:
+                # Fallback: check on the 15m bar
+                entry_bar_exit = resolve_bar_exit(
+                    trade, bar, intrabar_policy, slippage_points,
+                    eod_exit=eod_exit, eod_time=eod_time,
+                    time_stop_minutes=time_stop_minutes,
+                    time_stop_r_threshold=time_stop_r_threshold,
+                )
+                if entry_bar_exit:
+                    trade.exit_price = entry_bar_exit.exit_price
+                    trade.exit_time = ts
+                    trade.exit_reason = entry_bar_exit.exit_reason
+                    trade.pnl_points = entry_bar_exit.pnl_points
 
             setup_record.taken = True
         else:

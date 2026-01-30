@@ -14,6 +14,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -25,6 +26,7 @@ from app.services.backtest.engines.unicorn_runner import (
     format_backtest_report,
     IntrabarPolicy,
     BiasState,
+    BarBundle,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
@@ -60,9 +62,20 @@ def generate_sample_data(
     symbol: str,
     days: int = 30,
     profile: str = "realistic",
-) -> tuple[list[OHLCVBar], list[OHLCVBar]]:
+    multi_tf: bool = False,
+):
     """
     Generate synthetic data for testing with different realism profiles.
+
+    Args:
+        symbol: Root symbol (NQ, ES)
+        days: Number of trading days
+        profile: "easy", "realistic", or "evil"
+        multi_tf: If True, return BarBundle with all TFs (1m base).
+                  If False, return legacy (htf_bars, ltf_bars) tuple.
+
+    Returns:
+        BarBundle when multi_tf=True, tuple[list[OHLCVBar], list[OHLCVBar]] otherwise.
 
     Profiles:
         easy: Clean Gaussian random walk. Patterns are easy to detect, exits
@@ -239,7 +252,63 @@ def generate_sample_data(
 
                 ltf_price = close
 
-    return htf_bars, ltf_bars
+    if not multi_tf:
+        return htf_bars, ltf_bars
+
+    # Multi-TF mode: generate 1m bars from the same price path, then resample
+    print("  Generating 1m base bars for multi-TF resampling...")
+    m1_bars = []
+    m1_price = htf_bars[0].open if htf_bars else base_price
+
+    for day in range(days):
+        current_date = start_date.replace(day=start_date.day + day)
+        if current_date.weekday() >= 5:
+            continue
+
+        for hour in range(6, 17):
+            for minute in range(0, 60):
+                ts = current_date.replace(hour=hour, minute=minute)
+
+                noise = student_t_sample(fat_tail_df) * current_vol * 0.01
+                move = (trend_bias * 0.067) + noise
+
+                open_ = m1_price
+                close = m1_price + move
+                high = max(open_, close) + random.uniform(0, current_vol * 0.03)
+                low = min(open_, close) - random.uniform(0, current_vol * 0.03)
+
+                if random.random() < wick_prob * 0.3:
+                    if random.random() < 0.5:
+                        low = min(open_, close) - current_vol * wick_mult * 0.2
+                    else:
+                        high = max(open_, close) + current_vol * wick_mult * 0.2
+
+                m1_bars.append(OHLCVBar(
+                    ts=ts,
+                    open=round(open_ / tick_size) * tick_size,
+                    high=round(high / tick_size) * tick_size,
+                    low=round(low / tick_size) * tick_size,
+                    close=round(close / tick_size) * tick_size,
+                    volume=random.randint(50, 500),
+                ))
+
+                m1_price = close
+
+    # Resample from 1m to all TFs
+    from app.services.backtest.data import DatabentoFetcher
+    fetcher = DatabentoFetcher()
+
+    bundle = BarBundle(
+        h4=fetcher._resample_bars(m1_bars, "4h"),
+        h1=fetcher._resample_bars(m1_bars, "1h"),
+        m15=fetcher._resample_bars(m1_bars, "15m"),
+        m5=fetcher._resample_bars(m1_bars, "5m"),
+        m1=m1_bars,
+    )
+    print(f"  Multi-TF: {len(bundle.h4)} 4H, {len(bundle.h1)} 1H, "
+          f"{len(bundle.m15)} 15m, {len(bundle.m5)} 5m, {len(bundle.m1)} 1m bars")
+
+    return bundle
 
 
 # ---------------------------------------------------------------------------
@@ -339,15 +408,28 @@ def load_ref_data(
 def build_reference_bias_series(
     ref_htf_bars: list[OHLCVBar],
     ref_ltf_bars: list[OHLCVBar],
+    ref_h4_bars: Optional[list[OHLCVBar]] = None,
+    ref_h1_bars: Optional[list[OHLCVBar]] = None,
 ) -> list[BiasState]:
     """
     Build a causal BiasState series from reference symbol bars.
 
     For each HTF bar timestamp, compute bias using only data
     available *up to* that point (lookback windows).
-    LTF bars are optional — empty list is tolerated.
+    LTF, h4, h1 bars are optional — None is tolerated.
     """
+    from bisect import bisect_right
+    from datetime import timedelta
+
     series: list[BiasState] = []
+
+    # Pre-build h4/h1 completion timestamps for causal alignment
+    h4_completed_ts: list[datetime] = []
+    h1_completed_ts: list[datetime] = []
+    if ref_h4_bars:
+        h4_completed_ts = [b.ts + timedelta(hours=4) for b in ref_h4_bars]
+    if ref_h1_bars:
+        h1_completed_ts = [b.ts + timedelta(hours=1) for b in ref_h1_bars]
 
     for i, bar in enumerate(ref_htf_bars):
         # Causal window: only bars up to and including current
@@ -363,7 +445,21 @@ def build_reference_bias_series(
         else:
             ltf_window = []
 
+        # Causal h4/h1 windows (only completed bars)
+        causal_h4 = None
+        causal_h1 = None
+        if ref_h4_bars and h4_completed_ts:
+            n = bisect_right(h4_completed_ts, bar.ts)
+            if n > 0:
+                causal_h4 = ref_h4_bars[:n][-25:]
+        if ref_h1_bars and h1_completed_ts:
+            n = bisect_right(h1_completed_ts, bar.ts)
+            if n > 0:
+                causal_h1 = ref_h1_bars[:n][-100:]
+
         bias = compute_tf_bias(
+            h4_bars=causal_h4,
+            h1_bars=causal_h1,
             m15_bars=htf_window,
             m5_bars=ltf_window if ltf_window else None,
             timestamp=bar.ts,
@@ -586,6 +682,13 @@ Examples:
         "--ref-htf",
         help="Explicit CSV path for reference HTF bars (overrides source auto-detect)"
     )
+    # Multi-timeframe execution
+    parser.add_argument(
+        "--multi-tf",
+        action="store_true",
+        help="Enable multi-TF mode: full bias stack (4H/1H/15m/5m) + 1m trade management. "
+             "Synthetic: generates 1m base and resamples. Databento: uses fetch_multi_tf()."
+    )
 
     args = parser.parse_args()
 
@@ -596,6 +699,8 @@ Examples:
         parser.error("--ref-symbol must differ from --symbol")
 
     # Load or generate data
+    bar_bundle = None  # Set when --multi-tf is active
+
     if args.databento_csv:
         # Load from local Databento CSV file
         from app.services.backtest.data import DatabentoFetcher
@@ -607,15 +712,28 @@ Examples:
 
         print(f"Loading {args.symbol} data from {args.databento_csv}...")
         print(f"  Date range: {args.start_date} to {args.end_date}")
-        htf_bars, ltf_bars = fetcher.load_from_csv(
-            csv_path=args.databento_csv,
-            symbol=args.symbol,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            htf_interval="15m",
-            ltf_interval="5m",
-        )
-        print(f"Loaded {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
+
+        if args.multi_tf:
+            bar_bundle = fetcher.load_multi_tf_from_csv(
+                csv_path=args.databento_csv,
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+            )
+            htf_bars = bar_bundle.m15
+            ltf_bars = bar_bundle.m5
+            print(f"Loaded multi-TF: {len(bar_bundle.h4)} 4H, {len(bar_bundle.h1)} 1H, "
+                  f"{len(htf_bars)} 15m, {len(ltf_bars)} 5m, {len(bar_bundle.m1)} 1m bars")
+        else:
+            htf_bars, ltf_bars = fetcher.load_from_csv(
+                csv_path=args.databento_csv,
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                htf_interval="15m",
+                ltf_interval="5m",
+            )
+            print(f"Loaded {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
 
     elif args.databento:
         # Fetch real data from Databento API
@@ -649,21 +767,43 @@ Examples:
             sys.exit(0)
 
         print(f"Fetching {args.symbol} data from Databento ({args.start_date} to {args.end_date})...")
-        htf_bars, ltf_bars = fetcher.fetch_futures_data(
-            symbol=args.symbol,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            htf_interval="15m",
-            ltf_interval="5m",
-            use_cache=not args.no_cache,
-        )
-        print(f"Fetched {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
+
+        if args.multi_tf:
+            bar_bundle = fetcher.fetch_multi_tf(
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                use_cache=not args.no_cache,
+            )
+            htf_bars = bar_bundle.m15
+            ltf_bars = bar_bundle.m5
+            print(f"Fetched multi-TF: {len(bar_bundle.h4)} 4H, {len(bar_bundle.h1)} 1H, "
+                  f"{len(htf_bars)} 15m, {len(ltf_bars)} 5m, {len(bar_bundle.m1)} 1m bars")
+        else:
+            htf_bars, ltf_bars = fetcher.fetch_futures_data(
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                htf_interval="15m",
+                ltf_interval="5m",
+                use_cache=not args.no_cache,
+            )
+            print(f"Fetched {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
 
     elif args.synthetic:
-        htf_bars, ltf_bars = generate_sample_data(
-            args.symbol, args.days, profile=args.synthetic_profile
-        )
-        print(f"Generated {len(htf_bars)} HTF bars and {len(ltf_bars)} LTF bars")
+        if args.multi_tf:
+            bar_bundle = generate_sample_data(
+                args.symbol, args.days, profile=args.synthetic_profile, multi_tf=True
+            )
+            htf_bars = bar_bundle.m15
+            ltf_bars = bar_bundle.m5
+            print(f"Generated multi-TF: {len(bar_bundle.h4)} 4H, {len(bar_bundle.h1)} 1H, "
+                  f"{len(htf_bars)} 15m, {len(ltf_bars)} 5m, {len(bar_bundle.m1)} 1m bars")
+        else:
+            htf_bars, ltf_bars = generate_sample_data(
+                args.symbol, args.days, profile=args.synthetic_profile
+            )
+            print(f"Generated {len(htf_bars)} HTF bars and {len(ltf_bars)} LTF bars")
 
     else:
         # Load from CSV files
@@ -716,7 +856,9 @@ Examples:
         reference_symbol = args.ref_symbol.upper()
         ref_htf_bars, ref_ltf_bars, ref_source = load_ref_data(args, args.ref_htf)
         print(f"Reference symbol: {reference_symbol} (source: {ref_source})")
-        reference_bias_series = build_reference_bias_series(ref_htf_bars, ref_ltf_bars)
+        reference_bias_series = build_reference_bias_series(
+            ref_htf_bars, ref_ltf_bars,
+        )
         # Coverage: what fraction of primary HTF range is covered
         if reference_bias_series:
             ref_start = reference_bias_series[0].ts
@@ -738,6 +880,9 @@ Examples:
 
     print("")
 
+    if args.multi_tf:
+        print(f"Multi-TF mode: full bias stack (4H/1H/15m/5m) + 1m execution")
+
     result = run_unicorn_backtest(
         symbol=args.symbol,
         htf_bars=htf_bars,
@@ -755,6 +900,7 @@ Examples:
         time_stop_r_threshold=args.time_stop_threshold,
         reference_bias_series=reference_bias_series,
         reference_symbol=reference_symbol,
+        bar_bundle=bar_bundle,
     )
 
     # Format output
