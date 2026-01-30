@@ -24,12 +24,14 @@ from app.services.backtest.engines.unicorn_runner import (
     run_unicorn_backtest,
     format_backtest_report,
     IntrabarPolicy,
+    BiasState,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
     SessionProfile,
     BiasDirection,
 )
+from app.services.strategy.indicators.tf_bias import compute_tf_bias
 
 
 def load_bars_from_csv(filepath: str) -> list[OHLCVBar]:
@@ -240,6 +242,142 @@ def generate_sample_data(
     return htf_bars, ltf_bars
 
 
+# ---------------------------------------------------------------------------
+# Reference-symbol bias series builder
+# ---------------------------------------------------------------------------
+
+REF_HTF_LOOKBACK = 100  # HTF bars fed to compute_tf_bias per evaluation point
+REF_LTF_LOOKBACK = 60   # LTF bars (optional) fed per evaluation point
+
+
+def _sort_and_normalize_tz(bars: list[OHLCVBar]) -> list[OHLCVBar]:
+    """Sort bars by timestamp and ensure all are UTC-aware."""
+    sorted_bars = sorted(bars, key=lambda b: b.ts)
+    normalized = []
+    for b in sorted_bars:
+        ts = b.ts
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if ts != b.ts:
+            b = OHLCVBar(ts=ts, open=b.open, high=b.high, low=b.low,
+                         close=b.close, volume=b.volume)
+        normalized.append(b)
+    return normalized
+
+
+def load_ref_data(
+    args: argparse.Namespace,
+    ref_htf_path: str | None,
+) -> tuple[list[OHLCVBar], list[OHLCVBar], str]:
+    """
+    Load reference symbol data using the same source as the primary symbol.
+
+    Returns (ref_htf_bars, ref_ltf_bars, source_label).
+    LTF may be empty — build_reference_bias_series tolerates that.
+    """
+    ref_symbol = args.ref_symbol
+
+    if ref_htf_path:
+        # Explicit CSV path for reference HTF
+        print(f"Loading reference HTF data from {ref_htf_path}...")
+        ref_htf = load_bars_from_csv(ref_htf_path)
+        print(f"  Loaded {len(ref_htf)} reference HTF bars")
+        return _sort_and_normalize_tz(ref_htf), [], "csv"
+
+    if args.databento_csv:
+        from app.services.backtest.data import DatabentoFetcher
+
+        fetcher = DatabentoFetcher()
+        print(f"Loading reference {ref_symbol} from Databento CSV {args.databento_csv}...")
+        ref_htf, ref_ltf = fetcher.load_from_csv(
+            csv_path=args.databento_csv,
+            symbol=ref_symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            htf_interval="15m",
+            ltf_interval="5m",
+        )
+        ref_htf = _sort_and_normalize_tz(ref_htf)
+        ref_ltf = _sort_and_normalize_tz(ref_ltf)
+        print(f"  Loaded {len(ref_htf)} HTF + {len(ref_ltf)} LTF reference bars")
+        return ref_htf, ref_ltf, "databento-csv"
+
+    if args.databento:
+        from app.services.backtest.data import DatabentoFetcher
+
+        fetcher = DatabentoFetcher()
+        print(f"Fetching reference {ref_symbol} from Databento API...")
+        ref_htf, ref_ltf = fetcher.fetch_futures_data(
+            symbol=ref_symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            htf_interval="15m",
+            ltf_interval="5m",
+            use_cache=not args.no_cache,
+        )
+        ref_htf = _sort_and_normalize_tz(ref_htf)
+        ref_ltf = _sort_and_normalize_tz(ref_ltf)
+        print(f"  Fetched {len(ref_htf)} HTF + {len(ref_ltf)} LTF reference bars")
+        return ref_htf, ref_ltf, "databento"
+
+    if args.synthetic:
+        ref_htf, ref_ltf = generate_sample_data(
+            ref_symbol, args.days, profile=args.synthetic_profile
+        )
+        ref_htf = _sort_and_normalize_tz(ref_htf)
+        ref_ltf = _sort_and_normalize_tz(ref_ltf)
+        print(f"  Generated {len(ref_htf)} HTF + {len(ref_ltf)} LTF reference bars (synthetic)")
+        return ref_htf, ref_ltf, "synthetic"
+
+    # Fallback: require explicit --ref-htf
+    raise SystemExit(
+        "error: --ref-symbol requires either --ref-htf <csv>, "
+        "--databento, --databento-csv, or --synthetic to load reference data"
+    )
+
+
+def build_reference_bias_series(
+    ref_htf_bars: list[OHLCVBar],
+    ref_ltf_bars: list[OHLCVBar],
+) -> list[BiasState]:
+    """
+    Build a causal BiasState series from reference symbol bars.
+
+    For each HTF bar timestamp, compute bias using only data
+    available *up to* that point (lookback windows).
+    LTF bars are optional — empty list is tolerated.
+    """
+    series: list[BiasState] = []
+
+    for i, bar in enumerate(ref_htf_bars):
+        # Causal window: only bars up to and including current
+        htf_start = max(0, i + 1 - REF_HTF_LOOKBACK)
+        htf_window = ref_htf_bars[htf_start:i + 1]
+
+        # LTF causal window: bars with ts <= current HTF bar ts
+        if ref_ltf_bars:
+            ltf_window = [
+                b for b in ref_ltf_bars
+                if b.ts <= bar.ts
+            ][-REF_LTF_LOOKBACK:]
+        else:
+            ltf_window = []
+
+        bias = compute_tf_bias(
+            m15_bars=htf_window,
+            m5_bars=ltf_window if ltf_window else None,
+            timestamp=bar.ts,
+        )
+
+        series.append(BiasState(
+            ts=bar.ts,
+            direction=bias.final_direction,
+            confidence=bias.final_confidence,
+        ))
+
+    return series
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run ICT Unicorn Model backtest",
@@ -266,6 +404,12 @@ Examples:
 
     # Realistic friction settings
     python scripts/run_unicorn_backtest.py --symbol NQ --synthetic --slippage-ticks 2 --commission 4.50 --intrabar-policy worst
+
+    # Intermarket reference: tag NQ trades with ES bias (observability only)
+    python scripts/run_unicorn_backtest.py --symbol NQ --synthetic --ref-symbol ES
+
+    # Reference from explicit CSV
+    python scripts/run_unicorn_backtest.py --symbol NQ --htf data/nq_15m.csv --ltf data/nq_5m.csv --ref-symbol ES --ref-htf data/es_15m.csv
         """
     )
 
@@ -432,8 +576,24 @@ Examples:
         "--min-displacement-atr", type=float, default=None,
         help="Skip entry if MSS displacement < this ATR multiple. None=disabled."
     )
+    # Intermarket reference symbol
+    parser.add_argument(
+        "--ref-symbol",
+        help="Reference symbol for intermarket bias (e.g., ES when trading NQ). "
+             "Data loaded from same source as primary unless --ref-htf is given."
+    )
+    parser.add_argument(
+        "--ref-htf",
+        help="Explicit CSV path for reference HTF bars (overrides source auto-detect)"
+    )
 
     args = parser.parse_args()
+
+    # Validate ref args
+    if args.ref_htf and not args.ref_symbol:
+        parser.error("--ref-htf requires --ref-symbol")
+    if args.ref_symbol and args.ref_symbol.upper() == args.symbol.upper():
+        parser.error("--ref-symbol must differ from --symbol")
 
     # Load or generate data
     if args.databento_csv:
@@ -548,6 +708,34 @@ Examples:
         print(f"Range guard: max signal bar range = {args.max_range_atr}x ATR")
     if args.min_displacement_atr is not None:
         print(f"Displacement guard: min MSS displacement = {args.min_displacement_atr:.2f}x ATR")
+
+    # Build reference bias series if requested
+    reference_bias_series = None
+    reference_symbol = None
+    if args.ref_symbol:
+        reference_symbol = args.ref_symbol.upper()
+        ref_htf_bars, ref_ltf_bars, ref_source = load_ref_data(args, args.ref_htf)
+        print(f"Reference symbol: {reference_symbol} (source: {ref_source})")
+        reference_bias_series = build_reference_bias_series(ref_htf_bars, ref_ltf_bars)
+        # Coverage: what fraction of primary HTF range is covered
+        if reference_bias_series:
+            ref_start = reference_bias_series[0].ts
+            ref_end = reference_bias_series[-1].ts
+            print(f"  Bias points: {len(reference_bias_series)} "
+                  f"({ref_start.date()} to {ref_end.date()})")
+            print(f"  LTF bars used: {len(ref_ltf_bars)}")
+            if htf_bars:
+                primary_start = htf_bars[0].ts
+                primary_end = htf_bars[-1].ts
+                covered = sum(
+                    1 for b in reference_bias_series
+                    if primary_start <= b.ts <= primary_end
+                )
+                coverage_pct = covered / len(htf_bars) * 100 if htf_bars else 0.0
+                print(f"  Coverage of primary range: {coverage_pct:.1f}%")
+        else:
+            print("  WARNING: no reference bias points generated")
+
     print("")
 
     result = run_unicorn_backtest(
@@ -565,6 +753,8 @@ Examples:
         direction_filter=BiasDirection.BULLISH if args.long_only else None,
         time_stop_minutes=args.time_stop,
         time_stop_r_threshold=args.time_stop_threshold,
+        reference_bias_series=reference_bias_series,
+        reference_symbol=reference_symbol,
     )
 
     # Format output
@@ -630,6 +820,17 @@ Examples:
         print(f"Report written to {args.output}")
     else:
         print(report)
+
+    # Post-run reference diagnostics
+    if reference_bias_series is not None and hasattr(result, "session_diagnostics"):
+        diag = result.session_diagnostics or {}
+        ia = diag.get("intermarket_agreement")
+        if ia and "by_agreement" in ia:
+            missing = ia["by_agreement"].get("missing_ref", {})
+            missing_count = missing.get("trades", 0)
+            total = result.trades_taken or 1
+            print(f"\nRef-symbol coverage: {missing_count}/{total} trades "
+                  f"({missing_count / total * 100:.1f}%) had missing_ref")
 
     # Quick summary to stderr if outputting to file
     if args.output and not args.json:
