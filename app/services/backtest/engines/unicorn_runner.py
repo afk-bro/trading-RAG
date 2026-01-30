@@ -970,6 +970,7 @@ def run_unicorn_backtest(
             ltf_bars=ltf_window,
             symbol=symbol,
             ts=ts,
+            config=config,
         )
 
         session = criteria.session
