@@ -1132,17 +1132,22 @@ def run_unicorn_backtest(
         result.total_setups_scanned += 1
 
         # Build causally aligned h4/h1 windows from bar_bundle
+        # Lookback must satisfy indicator requirements:
+        #   H4: EMA(200) + 10 = 210 bars minimum → 260 with buffer
+        #   H1: EMA(50)  +  5 =  55 bars minimum → 100 with buffer
+        H4_BIAS_LOOKBACK_BARS = 260
+        H1_BIAS_LOOKBACK_BARS = 100
         causal_h4: Optional[list[OHLCVBar]] = None
         causal_h1: Optional[list[OHLCVBar]] = None
         if bar_bundle is not None:
             if bar_bundle.h4 and h4_completed_ts:
                 n_complete = bisect_right(h4_completed_ts, ts)
                 if n_complete > 0:
-                    causal_h4 = bar_bundle.h4[:n_complete][-25:]  # Last ~4 days
+                    causal_h4 = bar_bundle.h4[:n_complete][-H4_BIAS_LOOKBACK_BARS:]
             if bar_bundle.h1 and h1_completed_ts:
                 n_complete = bisect_right(h1_completed_ts, ts)
                 if n_complete > 0:
-                    causal_h1 = bar_bundle.h1[:n_complete][-100:]  # Last ~4 days
+                    causal_h1 = bar_bundle.h1[:n_complete][-H1_BIAS_LOOKBACK_BARS:]
 
         # Check all criteria
         criteria = check_criteria(
