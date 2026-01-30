@@ -943,6 +943,7 @@ def run_unicorn_backtest(
 
     # Trade tracking
     open_trades: list[TradeRecord] = []
+    closed_in_m1: list[TradeRecord] = []  # Trades closed during 1m management
     point_value = get_point_value(symbol)
 
     # Tick size for slippage calculation (NQ/ES = 0.25)
@@ -1054,8 +1055,10 @@ def run_unicorn_backtest(
                         trade.exit_time = m1_bar.ts
                         trade.exit_reason = exit_result.exit_reason
                         trade.pnl_points = exit_result.pnl_points
-                # Remove closed trades between 1m bars to avoid re-checking
+                # Separate closed from open between 1m bars to avoid re-checking
+                newly_closed = [t for t in open_trades if t.exit_time is not None]
                 open_trades = [t for t in open_trades if t.exit_time is None]
+                closed_in_m1.extend(newly_closed)
         else:
             # Fallback: 15m management (existing behavior when no 1m data)
             for trade in open_trades:
@@ -1085,7 +1088,9 @@ def run_unicorn_backtest(
                     trade.pnl_points = exit_result.pnl_points
 
         # Finalize closed trades (apply commission)
-        closed = [t for t in open_trades if t.exit_time is not None]
+        # Include trades closed during 1m management + any closed in 15m fallback
+        closed = closed_in_m1 + [t for t in open_trades if t.exit_time is not None]
+        closed_in_m1 = []
         open_trades = [t for t in open_trades if t.exit_time is None]
 
         for trade in closed:
