@@ -45,6 +45,7 @@ from app.services.strategy.strategies.unicorn_model import (
     find_entry_zone,
     calculate_stop_and_target,
     MACRO_WINDOWS,
+    SESSION_WINDOWS,
     DEFAULT_CONFIG,
     _calculate_atr,
 )
@@ -545,6 +546,9 @@ class UnicornBacktestResult:
 
     # Setup occurrences (for debugging)
     all_setups: list[SetupOccurrence] = field(default_factory=list)
+
+    # Config snapshot (for diagnostics)
+    config: Optional[UnicornConfig] = None
 
     @property
     def win_rate(self) -> float:
@@ -1290,6 +1294,7 @@ def run_unicorn_backtest(
             if denom_conf > 0 and denom_win > 0:
                 result.confidence_win_correlation = numerator / (denom_conf * denom_win)
 
+    result.config = config
     return result
 
 
@@ -1302,6 +1307,27 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append(f"Period: {result.start_date.date()} to {result.end_date.date()}")
     lines.append(f"Total bars analyzed: {result.total_bars}")
     lines.append("")
+
+    # Config diagnostics
+    if result.config is not None:
+        cfg = result.config
+        lines.append("-" * 40)
+        lines.append("CONFIG")
+        lines.append("-" * 40)
+        lines.append(f"Session profile:       {cfg.session_profile.value}")
+        windows = SESSION_WINDOWS.get(cfg.session_profile, MACRO_WINDOWS)
+        window_strs = [f"{s.strftime('%H:%M')}-{e.strftime('%H:%M')}" for s, e in windows]
+        lines.append(f"Macro windows (ET):    {', '.join(window_strs)}")
+        lines.append(f"Min scored criteria:   {cfg.min_scored_criteria}/5")
+        lines.append(f"FVG ATR mult:          {cfg.fvg_min_atr_mult}")
+        lines.append(f"Stop ATR mult:         {cfg.stop_max_atr_mult}")
+        wick = f"{cfg.max_wick_ratio}" if cfg.max_wick_ratio is not None else "disabled"
+        lines.append(f"Wick guard:            {wick}")
+        rng = f"{cfg.max_range_atr_mult}x ATR" if cfg.max_range_atr_mult is not None else "disabled"
+        lines.append(f"Range guard:           {rng}")
+        disp = f"{cfg.min_displacement_atr}x ATR" if cfg.min_displacement_atr is not None else "disabled"
+        lines.append(f"Displacement guard:    {disp}")
+        lines.append("")
 
     # Setup Analysis
     lines.append("-" * 40)
@@ -1360,6 +1386,67 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
             f"{stats.trades_taken:>8} {stats.win_rate*100:>7.1f}% {stats.total_pnl_points:>+10.2f}"
         )
     lines.append("")
+
+    # Setup Disposition by Session
+    if result.all_setups:
+        lines.append("-" * 40)
+        lines.append("SETUP DISPOSITION BY SESSION")
+        lines.append("-" * 40)
+        lines.append(f"{'Session':<12} {'Total':>7} {'Taken':>7} {'Rejected':>9} {'Macro-Rej':>10} {'Take%':>7}")
+        lines.append("-" * 56)
+
+        session_disposition: dict[str, dict[str, int]] = {}
+        for s in result.all_setups:
+            key = s.setup_session or "unknown"
+            if key not in session_disposition:
+                session_disposition[key] = {"total": 0, "taken": 0, "rejected": 0, "macro_rejected": 0}
+            session_disposition[key]["total"] += 1
+            if s.taken:
+                session_disposition[key]["taken"] += 1
+            else:
+                session_disposition[key]["rejected"] += 1
+                if not s.setup_in_macro_window:
+                    session_disposition[key]["macro_rejected"] += 1
+
+        for sess_key, counts in sorted(session_disposition.items()):
+            take_pct = counts["taken"] / max(1, counts["total"]) * 100
+            lines.append(
+                f"{sess_key:<12} {counts['total']:>7} {counts['taken']:>7} "
+                f"{counts['rejected']:>9} {counts['macro_rejected']:>10} {take_pct:>6.1f}%"
+            )
+        lines.append("")
+
+    # Confidence by Session
+    if result.all_setups:
+        lines.append("-" * 40)
+        lines.append("CONFIDENCE BY SESSION")
+        lines.append("-" * 40)
+
+        # Build lookup: entry_time → setup_session from taken setups
+        taken_setups_by_time: dict[datetime, str] = {}
+        for s in result.all_setups:
+            if s.taken:
+                taken_setups_by_time[s.timestamp] = s.setup_session or "unknown"
+
+        # Group trades by session
+        session_trades: dict[str, list[float]] = {}
+        for trade in result.trades:
+            sess = taken_setups_by_time.get(trade.entry_time, "unknown")
+            session_trades.setdefault(sess, []).append(trade.confidence)
+
+        lines.append(f"{'Session':<12} {'Trades':>7} {'AvgConf':>8} {'Low<0.4':>8} {'Mid':>8} {'High>0.7':>9}")
+        lines.append("-" * 56)
+
+        for sess_key in sorted(session_trades.keys()):
+            confs = session_trades[sess_key]
+            avg_conf = sum(confs) / len(confs) if confs else 0
+            low = sum(1 for c in confs if c < 0.4)
+            mid = sum(1 for c in confs if 0.4 <= c <= 0.7)
+            high = sum(1 for c in confs if c > 0.7)
+            lines.append(
+                f"{sess_key:<12} {len(confs):>7} {avg_conf:>8.3f} {low:>8} {mid:>8} {high:>9}"
+            )
+        lines.append("")
 
     # Criteria Bottleneck
     lines.append("-" * 40)

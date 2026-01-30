@@ -1072,3 +1072,24 @@ class TestNYOpenProfile:
             assert isinstance(setup.setup_session, str)
             assert setup.setup_session != "", f"setup_session empty at {setup.timestamp}"
             assert isinstance(setup.setup_in_macro_window, bool)
+
+    def test_report_contains_diagnostic_sections(self):
+        """Report includes CONFIG, SETUP DISPOSITION BY SESSION, and CONFIDENCE BY SESSION."""
+        start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
+        htf_bars = generate_trending_bars(start, 100, 17500.0, trend=0.3, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start, 300, 17500.0, trend=0.1, interval_minutes=5)
+
+        config = UnicornConfig(session_profile=SessionProfile.NORMAL)
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+        )
+
+        report = format_backtest_report(result)
+
+        assert "CONFIG" in report
+        assert "SETUP DISPOSITION BY SESSION" in report
+        assert "CONFIDENCE BY SESSION" in report

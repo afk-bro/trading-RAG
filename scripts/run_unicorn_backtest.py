@@ -586,9 +586,9 @@ Examples:
             "losses": result.losses,
             "win_rate": result.win_rate,
             "profit_factor": result.profit_factor,
-            "total_pnl_handles": result.total_pnl_handles,
+            "total_pnl_points": result.total_pnl_points,
             "total_pnl_dollars": result.total_pnl_dollars,
-            "expectancy_handles": result.expectancy_handles,
+            "expectancy_points": result.expectancy_points,
             "avg_mfe": result.avg_mfe,
             "avg_mae": result.avg_mae,
             "mfe_capture_rate": result.mfe_capture_rate,
@@ -604,7 +604,7 @@ Examples:
                     "valid_setups": result.session_stats[s].valid_setups,
                     "trades_taken": result.session_stats[s].trades_taken,
                     "win_rate": result.session_stats[s].win_rate,
-                    "total_pnl": result.session_stats[s].total_pnl_handles,
+                    "total_pnl": result.session_stats[s].total_pnl_points,
                 }
                 for s in result.session_stats
             },
@@ -634,8 +634,8 @@ Examples:
     if args.output and not args.json:
         print(f"\nQuick Summary:")
         print(f"  Trades: {result.trades_taken} | Win Rate: {result.win_rate*100:.1f}%")
-        print(f"  PnL: {result.total_pnl_handles:+.2f} handles (${result.total_pnl_dollars:+,.2f})")
-        print(f"  Expectancy: {result.expectancy_handles:+.2f} handles/trade")
+        print(f"  PnL: {result.total_pnl_points:+.2f} points (${result.total_pnl_dollars:+,.2f})")
+        print(f"  Expectancy: {result.expectancy_points:+.2f} points/trade")
         print(f"  Top Bottleneck: {result.criteria_bottlenecks[0].criterion if result.criteria_bottlenecks else 'N/A'}")
 
 
