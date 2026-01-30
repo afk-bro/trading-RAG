@@ -279,6 +279,7 @@ class CriteriaCheck:
     htf_bias_confidence: float = 0.0
     sweep_type: Optional[str] = None
     fvg_size: float = 0.0
+    mss_displacement_atr: float = 0.0  # displacement_size of matched MSS (ATR multiples)
     stop_points: float = 0.0
     session: TradingSession = TradingSession.OFF_HOURS
 
@@ -427,7 +428,11 @@ class SetupOccurrence:
     signal_range_atr_mult: float = 0.0   # signal bar range / ATR
     wick_guard_rejected: bool = False
     range_guard_rejected: bool = False
-    guard_reason_code: Optional[str] = None  # stable key: "wick_guard" | "range_guard"
+    displacement_guard_rejected: bool = False
+    displacement_guard_evaluated: bool = False  # True only when guard is enabled AND check was reached
+    signal_displacement_atr: float = 0.0    # MSS displacement in ATR multiples
+    signal_mss_found: bool = False           # whether MSS was detected
+    guard_reason_code: Optional[str] = None  # stable key: "wick_guard" | "range_guard" | "displacement_guard"
 
 
 @dataclass
@@ -703,14 +708,16 @@ def check_criteria(
                 check.ltf_fvg_found = True
                 break
 
-    # 6. MSS
+    # 6. MSS (prefer newest matching shift — detect_mss returns chronological)
     mss_list = detect_mss(htf_bars, lookback=50)
-    for mss in mss_list:
+    for mss in reversed(mss_list):
         if (direction == BiasDirection.BULLISH and mss.shift_type == "bullish"):
             check.mss_found = True
+            check.mss_displacement_atr = mss.displacement_size
             break
         elif (direction == BiasDirection.BEARISH and mss.shift_type == "bearish"):
             check.mss_found = True
+            check.mss_displacement_atr = mss.displacement_size
             break
 
     # 7. Stop validation (ATR-based max stop)
@@ -1005,6 +1012,10 @@ def run_unicorn_backtest(
                 result.all_setups.append(setup_record)
                 continue
 
+            # Record displacement diagnostics before any guard
+            setup_record.signal_displacement_atr = criteria.mss_displacement_atr
+            setup_record.signal_mss_found = criteria.mss_found
+
             # --- Bar-quality guards ---
             # signal_bar is last closed HTF bar (not current forming bar)
             signal_bar = htf_window[-1]
@@ -1036,6 +1047,24 @@ def run_unicorn_backtest(
                 )
                 result.all_setups.append(setup_record)
                 continue
+
+            # Displacement guard — rejects when value is TOO LOW (insufficient conviction)
+            if config.min_displacement_atr is not None:
+                setup_record.displacement_guard_evaluated = True
+
+                if (
+                    criteria.mss_found
+                    and criteria.mss_displacement_atr < config.min_displacement_atr
+                ):
+                    setup_record.taken = False
+                    setup_record.displacement_guard_rejected = True
+                    setup_record.guard_reason_code = "displacement_guard"
+                    setup_record.reason_not_taken = (
+                        f"displacement_guard: {criteria.mss_displacement_atr:.2f}x ATR "
+                        f"< {config.min_displacement_atr:.2f}x"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
 
             # CRITICAL: Use signal_atr (from previous bar) for sizing, not current bar
             # signal_atr was computed above from htf_atr_values[i-1]

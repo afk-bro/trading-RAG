@@ -163,7 +163,7 @@ See `docs/features/ops.md` for full details.
 
 Detailed documentation for subsystems:
 
-- `docs/features/backtests.md` - Backtest tuning, WFO, test generator
+- `docs/features/backtests.md` - Backtest tuning, WFO, test generator, pre-entry guards (wick/range/displacement)
 - `docs/features/pine-scripts.md` - Pine Script registry, ingest, auto-strategy
 - `docs/features/execution.md` - Paper execution, strategy runner
 - `docs/features/coverage.md` - Coverage triage workflow

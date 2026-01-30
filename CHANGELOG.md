@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Direction filter support (long-only, short-only, both)
   - Time-stop exit for trades not hitting TP/SL within session
   - Look-ahead bias fixes in entry logic
+  - **Wick guard** (`max_wick_ratio`): skip entries where signal bar adverse wick exceeds threshold
+  - **Range guard** (`max_range_atr_mult`): skip entries where signal bar range exceeds ATR multiple
+  - **Displacement guard** (`min_displacement_atr`): skip entries where MSS displacement is below ATR threshold — filters low-conviction structure shifts. Validated across 5 market regimes (2021-2025), sub-window splits, and ATR(10/14/21) normalizations using deterministic worst-case intrabar execution. Recommended production value: 0.5x ATR
+  - MSS match order fix: prefer newest matching shift (reversed iteration) for both `check_criteria()` and `analyze_unicorn_setup()`
 
 - **Strategy Backtest UI** - Interactive backtesting interface at `/admin/backtests/strategy-test`
   - Strategy and symbol selection (ICT Unicorn Model, ES/NQ futures)

@@ -561,3 +561,27 @@ class TestUnicornConfigGuardValidation:
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
         config = UnicornConfig(max_range_atr_mult=3.0)
         assert config.max_range_atr_mult == 3.0
+
+    def test_min_displacement_atr_rejects_zero(self):
+        """min_displacement_atr=0 must raise ValueError."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        with pytest.raises(ValueError, match="min_displacement_atr must be > 0"):
+            UnicornConfig(min_displacement_atr=0)
+
+    def test_min_displacement_atr_rejects_negative(self):
+        """min_displacement_atr=-0.5 must raise ValueError."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        with pytest.raises(ValueError, match="min_displacement_atr must be > 0"):
+            UnicornConfig(min_displacement_atr=-0.5)
+
+    def test_min_displacement_atr_accepts_none(self):
+        """Default None is valid (guard disabled)."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        config = UnicornConfig()
+        assert config.min_displacement_atr is None
+
+    def test_min_displacement_atr_accepts_positive(self):
+        """min_displacement_atr=0.5 should be accepted."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        config = UnicornConfig(min_displacement_atr=0.5)
+        assert config.min_displacement_atr == 0.5

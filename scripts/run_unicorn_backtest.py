@@ -427,6 +427,10 @@ Examples:
         "--max-range-atr", type=float, default=None,
         help="Skip entry if signal bar range exceeds this ATR multiple. None=disabled."
     )
+    parser.add_argument(
+        "--min-displacement-atr", type=float, default=None,
+        help="Skip entry if MSS displacement < this ATR multiple. None=disabled."
+    )
 
     args = parser.parse_args()
 
@@ -521,6 +525,7 @@ Examples:
         stop_max_atr_mult=args.stop_atr_mult,
         max_wick_ratio=args.max_wick_ratio,
         max_range_atr_mult=args.max_range_atr,
+        min_displacement_atr=args.min_displacement_atr,
     )
 
     # Run backtest
@@ -540,6 +545,8 @@ Examples:
         print(f"Wick guard: max adverse wick ratio = {args.max_wick_ratio}")
     if args.max_range_atr is not None:
         print(f"Range guard: max signal bar range = {args.max_range_atr}x ATR")
+    if args.min_displacement_atr is not None:
+        print(f"Displacement guard: min MSS displacement = {args.min_displacement_atr:.2f}x ATR")
     print("")
 
     result = run_unicorn_backtest(

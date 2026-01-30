@@ -172,17 +172,40 @@ Discretionary trading strategy based on ICT methodology.
 - Direction filter support (long-only outperforms on NQ)
 - Time-stop: Exit trades not hitting TP/SL within session
 - Look-ahead bias prevention in entry logic
+- Pre-entry guards (wick, range, displacement) — conviction filters on signal quality
 
-**Configuration** (`UnicornModelConfig`):
-- `htf_bars`, `ltf_bars`: Data window sizes
-- `min_criteria_score`: Minimum scored criteria (default 3)
+**Configuration** (`UnicornConfig`):
+- `min_scored_criteria`: Minimum scored criteria (default 3)
+- `session_profile`: strict / normal / wide
 - `slippage_ticks`: Entry/exit slippage
 - `commission_per_contract`: Round-turn commission
-- `intrabar_policy`: worst (conservative), best (optimistic), random
+- `intrabar_policy`: worst (conservative), best (optimistic), random, ohlc_path
 - `direction_filter`: long_only, short_only, both
+- `max_wick_ratio`: Skip entry if signal bar adverse wick ratio exceeds threshold (None=disabled)
+- `max_range_atr_mult`: Skip entry if signal bar range exceeds ATR multiple (None=disabled)
+- `min_displacement_atr`: Skip entry if MSS displacement < this ATR multiple (None=disabled, recommended: 0.5)
+
+**Pre-Entry Guards** (applied after criteria scoring, before trade creation):
+
+| Guard | Config | Rejects when | Recommended |
+|-------|--------|-------------|-------------|
+| Wick | `max_wick_ratio` | Adverse wick / range > threshold | 0.6 |
+| Range | `max_range_atr_mult` | Bar range / ATR > threshold | None |
+| Displacement | `min_displacement_atr` | MSS displacement < threshold ATR | 0.5 |
+
+Guards are pre-entry filters, not scoring criteria. They gate on signal quality after the 8-criteria checklist passes. Diagnostics (`signal_wick_ratio`, `signal_range_atr_mult`, `signal_displacement_atr`) are recorded on every qualifying setup regardless of which guard rejects, enabling sweep analysis.
+
+The displacement guard was validated across multiple historical regimes, sub-window splits, and ATR normalizations using deterministic worst-case intrabar execution. Performance gains are regime-robust and scale-invariant.
+
+**Recommended production flags**:
+```bash
+--max-wick-ratio 0.6 --min-displacement-atr 0.5 --intrabar-policy worst
+```
 
 **Lessons Learned**:
 - Direction matters: Long-only on NQ improved PF from 0.91 to 1.34
 - Time-stops reduce exposure without hurting edge
+- Wick guard at 0.6 reduced evil-profile bleed from -$957 to -$298
+- Displacement guard at 0.5x ATR improves NQ expectancy +52%, turns ES from breakeven to profitable
 - 40% full-stop rate with 0% +2R+ wins indicates capped exits
 - See `docs/unicorn-model-analysis.md` for forensic analysis

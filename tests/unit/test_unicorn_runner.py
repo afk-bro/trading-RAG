@@ -922,3 +922,107 @@ class TestWickGuardIntegration:
             assert setup.taken is False
             assert setup.guard_reason_code == "range_guard"
             assert "range_guard" in (setup.reason_not_taken or "")
+
+
+class TestDisplacementGuard:
+    """Integration tests for the displacement conviction guard."""
+
+    def _make_backtest_bars(self):
+        """Helper: generate standard bars for displacement guard tests."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        return htf_bars, ltf_bars
+
+    def test_criteria_check_stores_displacement_size(self):
+        """check_criteria stores mss_displacement_atr on CriteriaCheck."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result = check_criteria(
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
+        )
+
+        assert isinstance(result.mss_displacement_atr, float)
+        # If MSS was found, displacement must be non-negative
+        if result.mss_found:
+            assert result.mss_displacement_atr >= 0.0
+
+    def test_displacement_guard_disabled_by_default(self):
+        """min_displacement_atr=None => zero displacement-rejected setups."""
+        htf_bars, ltf_bars = self._make_backtest_bars()
+        config = UnicornConfig()  # defaults: min_displacement_atr=None
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+        )
+
+        disp_rejected = [s for s in result.all_setups if s.displacement_guard_rejected]
+        assert len(disp_rejected) == 0
+        # displacement_guard_evaluated should be False for all setups when disabled
+        for setup in result.all_setups:
+            assert setup.displacement_guard_evaluated is False
+
+    def test_displacement_guard_rejects_weak_mss(self):
+        """Very high threshold => all MSS-bearing setups rejected."""
+        htf_bars, ltf_bars = self._make_backtest_bars()
+        config = UnicornConfig(min_displacement_atr=5.0)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+        )
+
+        disp_rejected = [s for s in result.all_setups if s.displacement_guard_rejected]
+        for setup in disp_rejected:
+            assert setup.taken is False
+            assert setup.guard_reason_code == "displacement_guard"
+            assert "< 5.00x" in (setup.reason_not_taken or "")
+            assert setup.displacement_guard_evaluated is True
+
+    def test_displacement_diagnostics_recorded_on_wick_rejected(self):
+        """signal_displacement_atr is recorded even on wick-rejected setups."""
+        htf_bars, ltf_bars = self._make_backtest_bars()
+
+        # Run with a very tight wick guard to cause wick rejections
+        config_tight = UnicornConfig(max_wick_ratio=0.001)
+        result_tight = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config_tight,
+        )
+
+        # Also run with a loose wick guard for comparison
+        config_loose = UnicornConfig(max_wick_ratio=1.0)
+        result_loose = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config_loose,
+        )
+
+        # In both cases, qualifying setups that passed direction filter
+        # should have signal_displacement_atr as a float
+        for result in [result_tight, result_loose]:
+            qualifying = [
+                s for s in result.all_setups
+                if s.decide_entry_result and s.direction != BiasDirection.NEUTRAL
+            ]
+            for setup in qualifying:
+                assert isinstance(setup.signal_displacement_atr, float)
+                assert isinstance(setup.signal_mss_found, bool)

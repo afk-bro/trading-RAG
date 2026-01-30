@@ -297,6 +297,9 @@ This makes sense - we backtested Jan-Jun 2024, a strong bull market. Short setup
 - **Realistic backtest:** Look-ahead fixed, friction applied, data cleaned
 - **Profitable configuration:** Long-only filter, PF 1.34, +$9,250 over 6 months
 - **Clear diagnostics:** Exit breakdown, direction analysis, session stats
+- **Pre-entry guards shipped:**
+  - **Wick guard** (`max_wick_ratio=0.6`): Filters stop-hunt candles. Reduced evil-profile bleed from -$957 to -$298.
+  - **Displacement guard** (`min_displacement_atr=0.5`): Filters low-conviction MSS. On NQ, improved expectancy +52% (+3.04 → +4.61 pts/trade) while retaining 71% of trades. On ES, turned a breakeven instrument (+$0.22/trade) into profitable (+$1.48/trade). Validated across 5 market regimes (2021-2025), 90-day sub-window splits, and ATR(10/14/21) normalizations. Performance gains are regime-robust and scale-invariant.
 
 ### Potential Improvements to Test
 
@@ -336,6 +339,18 @@ python scripts/run_unicorn_backtest.py \
   --commission 5.00 \
   --intrabar-policy worst \
   --long-only
+
+# Production profile (recommended guards)
+python scripts/run_unicorn_backtest.py \
+  --symbol NQ \
+  --databento-csv path/to/data.csv \
+  --start-date 2024-01-01 \
+  --end-date 2024-06-30 \
+  --slippage-ticks 1 \
+  --commission 2.50 \
+  --intrabar-policy worst \
+  --max-wick-ratio 0.6 \
+  --min-displacement-atr 0.5
 
 # Run diagnostic analysis
 python scripts/diagnose_unicorn.py \

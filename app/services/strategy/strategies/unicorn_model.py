@@ -137,6 +137,9 @@ class UnicornConfig:
     max_wick_ratio: Optional[float] = None      # e.g., 0.6 — skip if signal bar wick > 60%
     max_range_atr_mult: Optional[float] = None  # e.g., 3.0 — skip if signal bar range > 3x ATR
 
+    # Displacement conviction guard (None = disabled)
+    min_displacement_atr: Optional[float] = None  # e.g., 0.5 — skip if MSS displacement < 0.5x ATR
+
     def __post_init__(self):
         if not (0 <= self.min_scored_criteria <= 5):
             raise ValueError(
@@ -151,6 +154,8 @@ class UnicornConfig:
             raise ValueError("max_wick_ratio must be in (0.0, 1.0] when set")
         if self.max_range_atr_mult is not None and self.max_range_atr_mult <= 0:
             raise ValueError("max_range_atr_mult must be > 0 when set")
+        if self.min_displacement_atr is not None and self.min_displacement_atr <= 0:
+            raise ValueError("min_displacement_atr must be > 0 when set")
 
 
 # Default config
@@ -673,9 +678,9 @@ def analyze_unicorn_setup(
     # 4. Breaker/Mitigation block
     score.breaker_block = entry_block is not None
 
-    # 5. Check for MSS confirmation
+    # 5. Check for MSS confirmation (prefer newest matching shift)
     relevant_mss: Optional[MarketStructureShift] = None
-    for mss in htf_mss:
+    for mss in reversed(htf_mss):
         if (
             direction == BiasDirection.BULLISH and mss.shift_type == "bullish"
         ) or (
