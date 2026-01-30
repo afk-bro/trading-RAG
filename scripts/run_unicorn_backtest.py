@@ -673,6 +673,11 @@ Examples:
         "--min-displacement-atr", type=float, default=None,
         help="Skip entry if MSS displacement < this ATR multiple. None=disabled."
     )
+    parser.add_argument(
+        "--breakeven-at-r", type=float, default=None,
+        help="Move stop to breakeven (entry price) when MFE reaches this R-multiple. "
+             "E.g. 1.0 = move stop to entry at +1R. None=disabled."
+    )
     # Intermarket reference symbol
     parser.add_argument(
         "--ref-symbol",
@@ -876,6 +881,8 @@ Examples:
         print(f"Range guard: max signal bar range = {args.max_range_atr}x ATR")
     if args.min_displacement_atr is not None:
         print(f"Displacement guard: min MSS displacement = {args.min_displacement_atr:.2f}x ATR")
+    if args.breakeven_at_r is not None:
+        print(f"Breakeven stop: move to entry at +{args.breakeven_at_r:.1f}R")
 
     # Build reference bias series if requested
     reference_bias_series = None
@@ -928,6 +935,7 @@ Examples:
         time_stop_r_threshold=args.time_stop_threshold,
         reference_bias_series=reference_bias_series,
         reference_symbol=reference_symbol,
+        breakeven_at_r=args.breakeven_at_r,
         bar_bundle=bar_bundle,
     )
 

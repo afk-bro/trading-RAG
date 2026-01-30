@@ -144,6 +144,7 @@ def resolve_bar_exit(
     eod_time: Optional[time] = None,
     time_stop_minutes: Optional[int] = None,
     time_stop_r_threshold: float = 0.25,
+    breakeven_at_r: Optional[float] = None,
 ) -> Optional[ExitResult]:
     """
     Determine if and how a trade exits on a given bar.
@@ -179,6 +180,17 @@ def resolve_bar_exit(
     """
     is_long = trade.direction == BiasDirection.BULLISH
     ts = bar.ts
+
+    # --- 0. Breakeven stop: move stop to entry when MFE reaches threshold ---
+    if breakeven_at_r is not None and trade.risk_points > 0:
+        be_threshold = trade.entry_price + (trade.risk_points * breakeven_at_r) if is_long \
+            else trade.entry_price - (trade.risk_points * breakeven_at_r)
+        # Check if this bar's favorable extreme crosses the threshold
+        favorable_extreme = bar.high if is_long else bar.low
+        if is_long and favorable_extreme >= be_threshold:
+            trade.stop_price = max(trade.stop_price, trade.entry_price)
+        elif not is_long and favorable_extreme <= be_threshold:
+            trade.stop_price = min(trade.stop_price, trade.entry_price)
 
     # --- 1. Detect stop / target hits ---
     if is_long:
@@ -866,6 +878,8 @@ def run_unicorn_backtest(
     # Intermarket agreement (observability-only)
     reference_bias_series: Optional[list[BiasState]] = None,  # Pre-computed bias from ref symbol
     reference_symbol: Optional[str] = None,  # e.g., "ES"
+    # Profit protection: move stop to breakeven at +NR
+    breakeven_at_r: Optional[float] = None,  # e.g. 1.0 = move stop to entry at +1R
     # Multi-timeframe bar bundle (enables full bias stack + 1m execution)
     bar_bundle: Optional[BarBundle] = None,
 ) -> UnicornBacktestResult:
@@ -1049,6 +1063,7 @@ def run_unicorn_backtest(
                         eod_exit=eod_exit, eod_time=eod_time,
                         time_stop_minutes=time_stop_minutes,
                         time_stop_r_threshold=time_stop_r_threshold,
+                        breakeven_at_r=breakeven_at_r,
                     )
                     if exit_result:
                         trade.exit_price = exit_result.exit_price
@@ -1080,6 +1095,7 @@ def run_unicorn_backtest(
                     eod_exit=eod_exit, eod_time=eod_time,
                     time_stop_minutes=time_stop_minutes,
                     time_stop_r_threshold=time_stop_r_threshold,
+                    breakeven_at_r=breakeven_at_r,
                 )
                 if exit_result:
                     trade.exit_price = exit_result.exit_price
@@ -1364,6 +1380,7 @@ def run_unicorn_backtest(
                         eod_exit=eod_exit, eod_time=eod_time,
                         time_stop_minutes=time_stop_minutes,
                         time_stop_r_threshold=time_stop_r_threshold,
+                        breakeven_at_r=breakeven_at_r,
                     )
                     if entry_bar_exit:
                         trade.exit_price = entry_bar_exit.exit_price
@@ -1378,6 +1395,7 @@ def run_unicorn_backtest(
                     eod_exit=eod_exit, eod_time=eod_time,
                     time_stop_minutes=time_stop_minutes,
                     time_stop_r_threshold=time_stop_r_threshold,
+                    breakeven_at_r=breakeven_at_r,
                 )
                 if entry_bar_exit:
                     trade.exit_price = entry_bar_exit.exit_price
