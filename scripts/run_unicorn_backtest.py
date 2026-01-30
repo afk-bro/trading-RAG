@@ -12,7 +12,7 @@ CSV format expected:
 
 import argparse
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add parent to path for imports
@@ -131,7 +131,7 @@ def generate_sample_data(
     ltf_bars = []
 
     # State variables
-    start_date = datetime(2024, 1, 2, 0, 0)
+    start_date = datetime(2024, 1, 2, 0, 0, tzinfo=timezone.utc)
     price = base_price
     current_vol = base_vol
     trend_bias = 0.0  # Positive = bullish, negative = bearish
@@ -386,10 +386,11 @@ Examples:
     )
     parser.add_argument(
         "--intrabar-policy",
-        choices=["worst", "best", "random"],
+        choices=["worst", "best", "random", "ohlc_path"],
         default="worst",
         help="How to resolve stop/target ambiguity when both hit in same bar. "
-             "worst=stop first (conservative), best=target first, random=50/50 (default: worst)"
+             "worst=stop first (conservative), best=target first, random=50/50, "
+             "ohlc_path=deterministic O→H→L→C / O→L→H→C (default: worst)"
     )
     # Synthetic data profiles
     parser.add_argument(
@@ -417,6 +418,14 @@ Examples:
         type=float,
         default=0.25,
         help="R-multiple threshold for time-stop (default: 0.25R)"
+    )
+    parser.add_argument(
+        "--max-wick-ratio", type=float, default=None,
+        help="Skip entry if signal bar adverse wick ratio exceeds this (0-1). None=disabled."
+    )
+    parser.add_argument(
+        "--max-range-atr", type=float, default=None,
+        help="Skip entry if signal bar range exceeds this ATR multiple. None=disabled."
     )
 
     args = parser.parse_args()
@@ -510,6 +519,8 @@ Examples:
         session_profile=SessionProfile(args.session_profile),
         fvg_min_atr_mult=args.fvg_atr_mult,
         stop_max_atr_mult=args.stop_atr_mult,
+        max_wick_ratio=args.max_wick_ratio,
+        max_range_atr_mult=args.max_range_atr,
     )
 
     # Run backtest
@@ -525,6 +536,10 @@ Examples:
         print(f"Direction filter: LONG ONLY")
     if args.time_stop:
         print(f"Time-stop: exit if not at +{args.time_stop_threshold}R within {args.time_stop} minutes")
+    if args.max_wick_ratio is not None:
+        print(f"Wick guard: max adverse wick ratio = {args.max_wick_ratio}")
+    if args.max_range_atr is not None:
+        print(f"Range guard: max signal bar range = {args.max_range_atr}x ATR")
     print("")
 
     result = run_unicorn_backtest(

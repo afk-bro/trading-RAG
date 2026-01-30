@@ -133,6 +133,10 @@ class UnicornConfig:
     point_value_nq: float = 20.0
     point_value_es: float = 50.0
 
+    # Pre-entry bar-quality guards (None = disabled)
+    max_wick_ratio: Optional[float] = None      # e.g., 0.6 — skip if signal bar wick > 60%
+    max_range_atr_mult: Optional[float] = None  # e.g., 3.0 — skip if signal bar range > 3x ATR
+
     def __post_init__(self):
         if not (0 <= self.min_scored_criteria <= 5):
             raise ValueError(
@@ -143,6 +147,10 @@ class UnicornConfig:
             raise ValueError(
                 f"min_confidence must be 0.0-1.0 or None (got {self.min_confidence})"
             )
+        if self.max_wick_ratio is not None and not (0.0 < self.max_wick_ratio <= 1.0):
+            raise ValueError("max_wick_ratio must be in (0.0, 1.0] when set")
+        if self.max_range_atr_mult is not None and self.max_range_atr_mult <= 0:
+            raise ValueError("max_range_atr_mult must be > 0 when set")
 
 
 # Default config

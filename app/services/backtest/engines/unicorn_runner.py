@@ -74,9 +74,182 @@ class IntrabarPolicy(str, Enum):
     This is critical for realistic backtesting - assuming "TP wins" leads to
     artificially inflated win rates. Default to WORST for conservative estimates.
     """
-    WORST = "worst"   # Assume stop hit first (conservative)
-    BEST = "best"     # Assume target hit first (optimistic, unrealistic)
-    RANDOM = "random" # 50/50 coin flip
+    WORST = "worst"       # Assume stop hit first (conservative)
+    BEST = "best"         # Assume target hit first (optimistic, unrealistic)
+    RANDOM = "random"     # 50/50 coin flip
+    OHLC_PATH = "ohlc_path"  # Deterministic: O→H→L→C (bullish) or O→L→H→C (bearish)
+
+
+@dataclass(frozen=True)
+class ExitResult:
+    """Result of intrabar exit resolution.
+
+    Returned by resolve_bar_exit when a trade exits on a given bar.
+    """
+    exit_price: float
+    exit_reason: str   # "stop_loss", "target", "time_stop", "eod"
+    pnl_points: float
+
+
+def resolve_bar_exit(
+    trade: "TradeRecord",
+    bar: OHLCVBar,
+    intrabar_policy: IntrabarPolicy,
+    slippage_points: float,
+    eod_exit: bool = False,
+    eod_time: Optional[time] = None,
+    time_stop_minutes: Optional[int] = None,
+    time_stop_r_threshold: float = 0.25,
+) -> Optional[ExitResult]:
+    """
+    Determine if and how a trade exits on a given bar.
+
+    Evaluation order (explicit priority):
+        1. Stop/target hit detection (touching counts: <= / >=)
+        2. Same-bar ambiguity resolved via IntrabarPolicy
+        3. Gap-through stop pricing: fill at bar.open when open is
+           worse than the stop level
+        4. Time-stop: exit at bar.close if unrealized R below threshold
+        5. EOD: exit at bar.close
+
+    Fill assumptions
+    ----------------
+    * Stops are stop-market orders.  Gap fills at bar.open (worst-case).
+      No worse-than-open scenario is modeled.
+    * Targets are limit orders.  Fill at limit price with adverse
+      slippage applied.  No price improvement is modeled.
+    * ``pnl_points = exit_price - entry_price`` for longs,
+      ``entry_price - exit_price`` for shorts.
+      Slippage is already baked into exit_price.
+
+    OHLC_PATH logic (deterministic, no simulation):
+        * Bullish bar (close >= open): assumed path O -> H -> L -> C
+          - Long:  target first (O->H leg), stop second (H->L leg)
+          - Short: stop first  (O->H leg), target second (H->L leg)
+        * Bearish bar (close < open): assumed path O -> L -> H -> C
+          - Long:  stop first  (O->L leg), target second (L->H leg)
+          - Short: target first (O->L leg), stop second (L->H leg)
+
+    Returns:
+        ExitResult if the trade exits on this bar, None otherwise.
+    """
+    is_long = trade.direction == BiasDirection.BULLISH
+    ts = bar.ts
+
+    # --- 1. Detect stop / target hits ---
+    if is_long:
+        stop_hit = bar.low <= trade.stop_price
+        target_hit = bar.high >= trade.target_price
+    else:
+        stop_hit = bar.high >= trade.stop_price
+        target_hit = bar.low <= trade.target_price
+
+    # --- 2 & 3. Resolve exit when at least one level is hit ---
+    if stop_hit or target_hit:
+        # Decide which fires first when both are hit
+        if stop_hit and target_hit:
+            if intrabar_policy == IntrabarPolicy.WORST:
+                take_stop = True
+            elif intrabar_policy == IntrabarPolicy.BEST:
+                take_stop = False
+            elif intrabar_policy == IntrabarPolicy.OHLC_PATH:
+                bullish_bar = bar.close >= bar.open
+                if is_long:
+                    # Bullish bar O→H→L→C: target on O→H, stop on H→L => target first
+                    # Bearish bar O→L→H→C: stop on O→L, target on L→H => stop first
+                    take_stop = not bullish_bar
+                else:
+                    # Bullish bar O→H→L→C: stop on O→H, target on H→L => stop first
+                    # Bearish bar O→L→H→C: target on O→L, stop on L→H => target first
+                    take_stop = bullish_bar
+            else:  # RANDOM
+                take_stop = random.random() < 0.5
+        else:
+            take_stop = stop_hit  # Only one was hit
+
+        if take_stop:
+            # Gap-through: fill at bar.open when open is already past the stop
+            if is_long:
+                fill_price = min(trade.stop_price, bar.open)
+                exit_price = fill_price - slippage_points
+                pnl = exit_price - trade.entry_price
+            else:
+                fill_price = max(trade.stop_price, bar.open)
+                exit_price = fill_price + slippage_points
+                pnl = trade.entry_price - exit_price
+            return ExitResult(exit_price=exit_price, exit_reason="stop_loss", pnl_points=pnl)
+        else:
+            # Target is a limit order — fills at limit price (no gap improvement)
+            if is_long:
+                exit_price = trade.target_price - slippage_points
+                pnl = exit_price - trade.entry_price
+            else:
+                exit_price = trade.target_price + slippage_points
+                pnl = trade.entry_price - exit_price
+            return ExitResult(exit_price=exit_price, exit_reason="target", pnl_points=pnl)
+
+    # --- 4. Time-stop ---
+    if (
+        time_stop_minutes is not None
+        and (ts - trade.entry_time).total_seconds() / 60 >= time_stop_minutes
+    ):
+        if trade.risk_points > 0:
+            if is_long:
+                unrealized_r = (bar.close - trade.entry_price) / trade.risk_points
+            else:
+                unrealized_r = (trade.entry_price - bar.close) / trade.risk_points
+        else:
+            unrealized_r = 0.0
+
+        if unrealized_r < time_stop_r_threshold:
+            if is_long:
+                exit_price = bar.close - slippage_points
+                pnl = exit_price - trade.entry_price
+            else:
+                exit_price = bar.close + slippage_points
+                pnl = trade.entry_price - exit_price
+            return ExitResult(exit_price=exit_price, exit_reason="time_stop", pnl_points=pnl)
+
+    # --- 5. EOD exit ---
+    if eod_exit and eod_time is not None and to_eastern_time(ts) >= eod_time:
+        if is_long:
+            exit_price = bar.close - slippage_points
+            pnl = exit_price - trade.entry_price
+        else:
+            exit_price = bar.close + slippage_points
+            pnl = trade.entry_price - exit_price
+        return ExitResult(exit_price=exit_price, exit_reason="eod", pnl_points=pnl)
+
+    return None
+
+
+def compute_adverse_wick_ratio(bar: OHLCVBar, direction: BiasDirection) -> float:
+    """
+    Adverse wick ratio: fraction of bar range that is the wick opposing our direction.
+
+    Long entry: upper wick is adverse (rejection after buying).
+        ratio = (high - max(open, close)) / (high - low)
+    Short entry: lower wick is adverse (rejection after selling).
+        ratio = (min(open, close) - low) / (high - low)
+
+    Returns 0.0 if bar range is zero.
+    """
+    bar_range = bar.high - bar.low
+    if bar_range <= 0:
+        return 0.0
+    body_top = max(bar.open, bar.close)
+    body_bot = min(bar.open, bar.close)
+    if direction == BiasDirection.BULLISH:
+        return (bar.high - body_top) / bar_range
+    else:
+        return (body_bot - bar.low) / bar_range
+
+
+def compute_range_atr_mult(bar: OHLCVBar, atr: float) -> float:
+    """Bar range as a multiple of ATR. Returns 0.0 if ATR is zero."""
+    if atr <= 0:
+        return 0.0
+    return (bar.high - bar.low) / atr
 
 
 # Mandatory criteria that MUST pass before soft scoring applies.
@@ -248,6 +421,13 @@ class SetupOccurrence:
     min_scored_required: int = 0
     decide_entry_result: bool = False
     scored_missing: list[str] = field(default_factory=list)
+
+    # Bar-quality guard diagnostics
+    signal_wick_ratio: float = 0.0       # adverse wick / range of signal bar
+    signal_range_atr_mult: float = 0.0   # signal bar range / ATR
+    wick_guard_rejected: bool = False
+    range_guard_rejected: bool = False
+    guard_reason_code: Optional[str] = None  # stable key: "wick_guard" | "range_guard"
 
 
 @dataclass
@@ -705,135 +885,30 @@ def run_unicorn_backtest(
         # For exit checking, we use the current bar's OHLC (this is correct -
         # checking if stop/target were hit during bar execution is not look-ahead)
         for trade in open_trades:
+            # MFE/MAE tracking (stays inline — not exit logic)
             if trade.direction == BiasDirection.BULLISH:
-                # Long trade - MFE/MAE tracking (use close for unrealized, OHLC for exits)
                 unrealized = bar.close - trade.entry_price
-                if unrealized > trade.mfe:
-                    trade.mfe = unrealized
-                    trade.mfe_time = ts
-                if unrealized < -trade.mae:
-                    trade.mae = abs(unrealized)
-                    trade.mae_time = ts
-
-                # Check stop/target hits with intrabar policy
-                stop_hit = bar.low <= trade.stop_price
-                target_hit = bar.high >= trade.target_price
-
-                if stop_hit and target_hit:
-                    # Both hit in same bar - apply intrabar policy
-                    if intrabar_policy == IntrabarPolicy.WORST:
-                        stop_wins = True  # Conservative: stop hit first
-                    elif intrabar_policy == IntrabarPolicy.BEST:
-                        stop_wins = False  # Optimistic: target hit first
-                    else:  # RANDOM
-                        stop_wins = random.random() < 0.5
-
-                    if stop_wins:
-                        # Exit at stop with slippage (worse for long = lower)
-                        trade.exit_price = trade.stop_price - slippage_points
-                        trade.exit_reason = "stop_loss"
-                    else:
-                        # Exit at target with slippage (worse for long = lower)
-                        trade.exit_price = trade.target_price - slippage_points
-                        trade.exit_reason = "target"
-                    trade.exit_time = ts
-                    trade.pnl_points = trade.exit_price - trade.entry_price
-
-                elif stop_hit:
-                    # Exit at stop with slippage
-                    trade.exit_price = trade.stop_price - slippage_points
-                    trade.exit_time = ts
-                    trade.exit_reason = "stop_loss"
-                    trade.pnl_points = trade.exit_price - trade.entry_price
-
-                elif target_hit:
-                    # Exit at target with slippage
-                    trade.exit_price = trade.target_price - slippage_points
-                    trade.exit_time = ts
-                    trade.exit_reason = "target"
-                    trade.pnl_points = trade.exit_price - trade.entry_price
-
-            else:  # Short trade
+            else:
                 unrealized = trade.entry_price - bar.close
-                if unrealized > trade.mfe:
-                    trade.mfe = unrealized
-                    trade.mfe_time = ts
-                if unrealized < -trade.mae:
-                    trade.mae = abs(unrealized)
-                    trade.mae_time = ts
+            if unrealized > trade.mfe:
+                trade.mfe = unrealized
+                trade.mfe_time = ts
+            if unrealized < -trade.mae:
+                trade.mae = abs(unrealized)
+                trade.mae_time = ts
 
-                # Check stop/target hits with intrabar policy
-                stop_hit = bar.high >= trade.stop_price
-                target_hit = bar.low <= trade.target_price
-
-                if stop_hit and target_hit:
-                    # Both hit in same bar - apply intrabar policy
-                    if intrabar_policy == IntrabarPolicy.WORST:
-                        stop_wins = True
-                    elif intrabar_policy == IntrabarPolicy.BEST:
-                        stop_wins = False
-                    else:  # RANDOM
-                        stop_wins = random.random() < 0.5
-
-                    if stop_wins:
-                        # Exit at stop with slippage (worse for short = higher)
-                        trade.exit_price = trade.stop_price + slippage_points
-                        trade.exit_reason = "stop_loss"
-                    else:
-                        # Exit at target with slippage (worse for short = higher)
-                        trade.exit_price = trade.target_price + slippage_points
-                        trade.exit_reason = "target"
-                    trade.exit_time = ts
-                    trade.pnl_points = trade.entry_price - trade.exit_price
-
-                elif stop_hit:
-                    # Exit at stop with slippage
-                    trade.exit_price = trade.stop_price + slippage_points
-                    trade.exit_time = ts
-                    trade.exit_reason = "stop_loss"
-                    trade.pnl_points = trade.entry_price - trade.exit_price
-
-                elif target_hit:
-                    # Exit at target with slippage
-                    trade.exit_price = trade.target_price + slippage_points
-                    trade.exit_time = ts
-                    trade.exit_reason = "target"
-                    trade.pnl_points = trade.entry_price - trade.exit_price
-
-            # Time-stop: exit if not at +threshold R within N minutes
-            # ICT-style entries often work fast; cut grindy losers early
-            if (
-                time_stop_minutes is not None
-                and trade.exit_time is None
-                and (ts - trade.entry_time).total_seconds() / 60 >= time_stop_minutes
-            ):
-                # Calculate unrealized R-multiple
-                if trade.direction == BiasDirection.BULLISH:
-                    unrealized_r = (bar.close - trade.entry_price) / trade.risk_points if trade.risk_points > 0 else 0
-                else:
-                    unrealized_r = (trade.entry_price - bar.close) / trade.risk_points if trade.risk_points > 0 else 0
-
-                # Exit if below threshold
-                if unrealized_r < time_stop_r_threshold:
-                    if trade.direction == BiasDirection.BULLISH:
-                        trade.exit_price = bar.close - slippage_points
-                        trade.pnl_points = trade.exit_price - trade.entry_price
-                    else:
-                        trade.exit_price = bar.close + slippage_points
-                        trade.pnl_points = trade.entry_price - trade.exit_price
-                    trade.exit_time = ts
-                    trade.exit_reason = "time_stop"
-
-            # EOD exit (with slippage) - use bar.close since we're exiting at EOD
-            if eod_exit and to_eastern_time(ts) >= eod_time and trade.exit_time is None:
-                if trade.direction == BiasDirection.BULLISH:
-                    trade.exit_price = bar.close - slippage_points
-                    trade.pnl_points = trade.exit_price - trade.entry_price
-                else:
-                    trade.exit_price = bar.close + slippage_points
-                    trade.pnl_points = trade.entry_price - trade.exit_price
+            # Exit resolution via extracted function
+            exit_result = resolve_bar_exit(
+                trade, bar, intrabar_policy, slippage_points,
+                eod_exit=eod_exit, eod_time=eod_time,
+                time_stop_minutes=time_stop_minutes,
+                time_stop_r_threshold=time_stop_r_threshold,
+            )
+            if exit_result:
+                trade.exit_price = exit_result.exit_price
                 trade.exit_time = ts
-                trade.exit_reason = "eod"
+                trade.exit_reason = exit_result.exit_reason
+                trade.pnl_points = exit_result.pnl_points
 
         # Finalize closed trades (apply commission)
         closed = [t for t in open_trades if t.exit_time is not None]
@@ -930,6 +1005,38 @@ def run_unicorn_backtest(
                 result.all_setups.append(setup_record)
                 continue
 
+            # --- Bar-quality guards ---
+            # signal_bar is last closed HTF bar (not current forming bar)
+            signal_bar = htf_window[-1]
+            wick_ratio = compute_adverse_wick_ratio(signal_bar, direction)
+            range_atr_mult = compute_range_atr_mult(signal_bar, signal_atr)
+
+            # Always record diagnostics (even when guards disabled)
+            setup_record.signal_wick_ratio = wick_ratio
+            setup_record.signal_range_atr_mult = range_atr_mult
+
+            # Wick guard
+            if config.max_wick_ratio is not None and wick_ratio > config.max_wick_ratio:
+                setup_record.taken = False
+                setup_record.wick_guard_rejected = True
+                setup_record.guard_reason_code = "wick_guard"
+                setup_record.reason_not_taken = (
+                    f"wick_guard: {wick_ratio:.2f} > {config.max_wick_ratio}"
+                )
+                result.all_setups.append(setup_record)
+                continue
+
+            # Range guard
+            if config.max_range_atr_mult is not None and range_atr_mult > config.max_range_atr_mult:
+                setup_record.taken = False
+                setup_record.range_guard_rejected = True
+                setup_record.guard_reason_code = "range_guard"
+                setup_record.reason_not_taken = (
+                    f"range_guard: {range_atr_mult:.1f}x ATR > {config.max_range_atr_mult}"
+                )
+                result.all_setups.append(setup_record)
+                continue
+
             # CRITICAL: Use signal_atr (from previous bar) for sizing, not current bar
             # signal_atr was computed above from htf_atr_values[i-1]
 
@@ -996,6 +1103,21 @@ def run_unicorn_backtest(
 
             open_trades.append(trade)
             result.trades_taken += 1
+
+            # Entry-bar exit check: stop/target may be pierced on the
+            # same bar the trade was opened.  The general open-trades loop
+            # above ran BEFORE this trade existed, so no double-process risk.
+            entry_bar_exit = resolve_bar_exit(
+                trade, bar, intrabar_policy, slippage_points,
+                eod_exit=eod_exit, eod_time=eod_time,
+                time_stop_minutes=time_stop_minutes,
+                time_stop_r_threshold=time_stop_r_threshold,
+            )
+            if entry_bar_exit:
+                trade.exit_price = entry_bar_exit.exit_price
+                trade.exit_time = ts
+                trade.exit_reason = entry_bar_exit.exit_reason
+                trade.pnl_points = entry_bar_exit.pnl_points
 
             setup_record.taken = True
         else:

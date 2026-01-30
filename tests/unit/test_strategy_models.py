@@ -1,7 +1,7 @@
 """Unit tests for strategy runner models."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -29,7 +29,7 @@ class TestOHLCVBar:
     def test_valid_bar(self):
         """Create a valid OHLCV bar."""
         bar = OHLCVBar(
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
             open=100.0,
             high=105.0,
             low=99.0,
@@ -42,10 +42,35 @@ class TestOHLCVBar:
         assert bar.close == 103.0
         assert bar.volume == 10000.0
 
+    def test_naive_ts_rejected(self):
+        """Naive datetime is rejected by the tz-aware validator."""
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            OHLCVBar(
+                ts=datetime(2024, 1, 1),  # naive
+                open=100.0,
+                high=105.0,
+                low=99.0,
+                close=103.0,
+                volume=10000.0,
+            )
+
+    def test_non_utc_tz_accepted(self):
+        """Non-UTC tz-aware datetime is accepted (converted at usage site)."""
+        from zoneinfo import ZoneInfo
+        bar = OHLCVBar(
+            ts=datetime(2024, 1, 1, tzinfo=ZoneInfo("America/New_York")),
+            open=100.0,
+            high=105.0,
+            low=99.0,
+            close=103.0,
+            volume=10000.0,
+        )
+        assert bar.ts.tzinfo is not None
+
     def test_missing_required_fields(self):
         """All OHLCV fields are required."""
         with pytest.raises(ValidationError) as exc_info:
-            OHLCVBar(ts=datetime.utcnow(), open=100.0)
+            OHLCVBar(ts=datetime.now(timezone.utc), open=100.0)
 
         errors = exc_info.value.errors()
         missing_fields = {e["loc"][0] for e in errors if e["type"] == "missing"}
@@ -66,7 +91,7 @@ class TestMarketSnapshot:
     @pytest.fixture
     def sample_bars(self) -> list[OHLCVBar]:
         """Create sample bars for testing."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return [
             OHLCVBar(
                 ts=now - timedelta(days=2),
@@ -96,7 +121,7 @@ class TestMarketSnapshot:
 
     def test_valid_snapshot(self, sample_bars):
         """Create a valid market snapshot."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         snapshot = MarketSnapshot(
             symbol="AAPL",
             ts=now,
@@ -113,7 +138,7 @@ class TestMarketSnapshot:
 
     def test_snapshot_with_optional_fields(self, sample_bars):
         """Create snapshot with all optional fields populated."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         snapshot = MarketSnapshot(
             symbol="AAPL",
             ts=now,
@@ -131,7 +156,7 @@ class TestMarketSnapshot:
 
     def test_requires_at_least_two_bars(self):
         """Validation fails with fewer than 2 bars."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         single_bar = [
             OHLCVBar(
                 ts=now,
@@ -153,7 +178,7 @@ class TestMarketSnapshot:
 
     def test_requires_at_least_two_bars_empty(self):
         """Validation fails with empty bars list."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with pytest.raises(ValidationError) as exc_info:
             MarketSnapshot(
                 symbol="AAPL",
@@ -165,7 +190,7 @@ class TestMarketSnapshot:
 
     def test_bar_timestamp_cannot_exceed_snapshot_ts(self):
         """Latest bar timestamp cannot be after snapshot timestamp."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         future_bar = now + timedelta(hours=1)
 
         bars = [
@@ -340,9 +365,9 @@ class TestExecutionSpec:
 
     def test_created_at_defaults_to_now(self, valid_spec_data):
         """created_at defaults to current time."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         spec = ExecutionSpec(**valid_spec_data)
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         assert before <= spec.created_at <= after
 
@@ -387,7 +412,7 @@ class TestStrategyEvaluation:
         eval_result = StrategyEvaluation(
             spec_id=str(uuid.uuid4()),
             symbol="AAPL",
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
         )
 
         assert len(eval_result.intents) == 0
@@ -399,7 +424,7 @@ class TestStrategyEvaluation:
         eval_result = StrategyEvaluation(
             spec_id=str(uuid.uuid4()),
             symbol="AAPL",
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
             intents=[sample_intent],
             signals=["52-week high breakout detected"],
             metadata={"52w_high": 150.0, "current_price": 152.0},
@@ -415,12 +440,12 @@ class TestStrategyEvaluation:
         eval1 = StrategyEvaluation(
             spec_id=str(uuid.uuid4()),
             symbol="AAPL",
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
         )
         eval2 = StrategyEvaluation(
             spec_id=str(uuid.uuid4()),
             symbol="AAPL",
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
         )
 
         assert eval1.evaluation_id is not None
@@ -442,7 +467,7 @@ class TestStrategyEvaluation:
         eval_result = StrategyEvaluation(
             spec_id=str(uuid.uuid4()),
             symbol="AAPL",
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
             intents=[sample_intent, close_intent],
             signals=["Open AAPL", "Close MSFT"],
         )
@@ -479,3 +504,60 @@ class TestPackageImports:
         assert RiskConfig is not None
         assert ExecutionSpec is not None
         assert StrategyEvaluation is not None
+
+
+# =============================================================================
+# UnicornConfig bar-quality guard validation
+# =============================================================================
+
+
+class TestUnicornConfigGuardValidation:
+    """UnicornConfig must validate bar-quality guard parameters."""
+
+    def test_max_wick_ratio_rejects_invalid(self):
+        """max_wick_ratio=1.5 is out of (0.0, 1.0] range."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        with pytest.raises(ValueError, match="max_wick_ratio must be in"):
+            UnicornConfig(max_wick_ratio=1.5)
+
+    def test_max_wick_ratio_rejects_zero(self):
+        """max_wick_ratio=0.0 is out of (0.0, 1.0] range (exclusive lower bound)."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        with pytest.raises(ValueError, match="max_wick_ratio must be in"):
+            UnicornConfig(max_wick_ratio=0.0)
+
+    def test_max_wick_ratio_accepts_none(self):
+        """Default None is valid (guard disabled)."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        config = UnicornConfig()
+        assert config.max_wick_ratio is None
+
+    def test_max_wick_ratio_accepts_one(self):
+        """max_wick_ratio=1.0 is the upper boundary, should be accepted."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        config = UnicornConfig(max_wick_ratio=1.0)
+        assert config.max_wick_ratio == 1.0
+
+    def test_max_range_atr_mult_rejects_zero(self):
+        """max_range_atr_mult=0 must raise ValueError."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        with pytest.raises(ValueError, match="max_range_atr_mult must be > 0"):
+            UnicornConfig(max_range_atr_mult=0)
+
+    def test_max_range_atr_mult_rejects_negative(self):
+        """max_range_atr_mult=-1.0 must raise ValueError."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        with pytest.raises(ValueError, match="max_range_atr_mult must be > 0"):
+            UnicornConfig(max_range_atr_mult=-1.0)
+
+    def test_max_range_atr_mult_accepts_none(self):
+        """Default None is valid (guard disabled)."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        config = UnicornConfig()
+        assert config.max_range_atr_mult is None
+
+    def test_max_range_atr_mult_accepts_positive(self):
+        """max_range_atr_mult=3.0 should be accepted."""
+        from app.services.strategy.strategies.unicorn_model import UnicornConfig
+        config = UnicornConfig(max_range_atr_mult=3.0)
+        assert config.max_range_atr_mult == 3.0

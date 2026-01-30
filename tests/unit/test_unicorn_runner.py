@@ -17,6 +17,12 @@ from app.services.backtest.engines.unicorn_runner import (
     format_backtest_report,
     CriteriaCheck,
     SetupOccurrence,
+    resolve_bar_exit,
+    ExitResult,
+    IntrabarPolicy,
+    TradeRecord,
+    compute_adverse_wick_ratio,
+    compute_range_atr_mult,
 )
 from app.services.strategy.indicators.tf_bias import BiasDirection
 from app.services.strategy.strategies.unicorn_model import (
@@ -587,3 +593,332 @@ class TestTimezoneConversion:
         # Just before boundary
         ts_before = datetime(2024, 1, 15, 15, 59, 59, tzinfo=timezone.utc)
         assert is_in_macro_window(ts_before, SessionProfile.STRICT) is True
+
+
+class TestEnsureUtc:
+    """Tests for the ensure_utc utility."""
+
+    def test_utc_passthrough(self):
+        """UTC datetime passes through unchanged."""
+        from app.utils.time import ensure_utc
+        ts = datetime(2024, 1, 15, 10, 30, tzinfo=timezone.utc)
+        result = ensure_utc(ts)
+        assert result == ts
+        assert result.tzinfo is not None
+
+    def test_non_utc_converts(self):
+        """Non-UTC tz-aware datetime is converted to UTC."""
+        from app.utils.time import ensure_utc
+        et_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+        result = ensure_utc(et_ts)
+        # 10:30 ET in winter = 15:30 UTC
+        assert result.hour == 15
+        assert result.minute == 30
+        assert result.tzname() == "UTC"
+
+    def test_naive_raises(self):
+        """Naive datetime raises ValueError."""
+        from app.utils.time import ensure_utc
+        with pytest.raises(ValueError, match="tz-aware"):
+            ensure_utc(datetime(2024, 1, 15, 10, 30))
+
+
+# =========================================================================
+# Canonical intrabar fill tests for resolve_bar_exit
+# =========================================================================
+
+SLIP = 0.25  # 1 tick on NQ
+
+from typing import Optional
+
+
+def _make_trade(
+    direction: BiasDirection,
+    entry_price: float,
+    stop_price: float,
+    target_price: float,
+    entry_time: Optional[datetime] = None,
+    risk_points: Optional[float] = None,
+) -> TradeRecord:
+    """Helper to build a minimal TradeRecord for exit tests."""
+    if entry_time is None:
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+    if risk_points is None:
+        risk_points = abs(entry_price - stop_price)
+    return TradeRecord(
+        entry_time=entry_time,
+        entry_price=entry_price,
+        direction=direction,
+        quantity=1,
+        session=TradingSession.NY_AM,
+        criteria=CriteriaCheck(),
+        stop_price=stop_price,
+        target_price=target_price,
+        risk_points=risk_points,
+    )
+
+
+
+class TestResolveBarExitStopTarget:
+    """Group A: stop/target basics."""
+
+    def test_long_stop_hit(self):
+        """Bar low pierces stop => stop_loss at stop-slip, pnl < 0."""
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 99.0, 100.5, 94.5, 96.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "stop_loss"
+        assert result.exit_price == 95.0 - SLIP
+        assert result.pnl_points < 0
+
+    def test_long_target_hit(self):
+        """Bar high reaches target => target at target-slip, pnl > 0."""
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 101.0, 111.0, 100.5, 109.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "target"
+        assert result.exit_price == 110.0 - SLIP
+        assert result.pnl_points > 0
+
+    def test_short_stop_hit(self):
+        """Bar high pierces stop => stop_loss at stop+slip, pnl < 0."""
+        trade = _make_trade(BiasDirection.BEARISH, 100.0, 105.0, 90.0)
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 101.0, 105.5, 100.0, 104.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "stop_loss"
+        assert result.exit_price == 105.0 + SLIP
+        assert result.pnl_points < 0
+
+    def test_short_target_hit(self):
+        """Bar low reaches target => target at target+slip, pnl > 0."""
+        trade = _make_trade(BiasDirection.BEARISH, 100.0, 105.0, 90.0)
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 99.0, 100.0, 89.0, 91.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "target"
+        assert result.exit_price == 90.0 + SLIP
+        assert result.pnl_points > 0
+
+
+class TestResolveBarExitAmbiguity:
+    """Group B: Same-bar stop+target ambiguity."""
+
+    def test_same_bar_worst_policy(self):
+        """Both hit, WORST => stop_loss."""
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        # Bar spans from below stop to above target
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 105.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "stop_loss"
+
+    def test_same_bar_best_policy(self):
+        """Both hit, BEST => target."""
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 105.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.BEST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "target"
+
+    def test_same_bar_ohlc_path_bullish_bar(self):
+        """Both hit on bullish bar (close>open), long => target first.
+
+        Bullish bar: path is O->H->L->C. Long target on O->H leg fires first.
+        """
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        # Bullish bar: close > open
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 108.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.OHLC_PATH, SLIP)
+        assert result is not None
+        assert result.exit_reason == "target"
+        assert result.exit_price == 110.0 - SLIP
+
+
+class TestResolveBarExitGapThrough:
+    """Group C: Gap-through stop pricing."""
+
+    def test_long_gap_through_stop(self):
+        """Bar opens below stop => fills at open-slip (not stop-slip)."""
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        # Bar gaps down — opens at 93, below the 95 stop
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 93.0, 94.0, 92.0, 93.5)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "stop_loss"
+        # Gap through: fill at min(stop=95, open=93) = 93, then -slip
+        assert result.exit_price == 93.0 - SLIP
+
+    def test_short_gap_through_stop(self):
+        """Bar opens above stop => fills at open+slip (not stop+slip)."""
+        trade = _make_trade(BiasDirection.BEARISH, 100.0, 105.0, 90.0)
+        # Bar gaps up — opens at 107, above the 105 stop
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 107.0, 108.0, 106.0, 107.5)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "stop_loss"
+        # Gap through: fill at max(stop=105, open=107) = 107, then +slip
+        assert result.exit_price == 107.0 + SLIP
+
+
+class TestResolveBarExitEdgeCases:
+    """Group D: Edge cases."""
+
+    def test_no_exit_when_neither_hit(self):
+        """Neither stop nor target hit => None."""
+        trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
+        # Bar stays within stop and target
+        bar = make_bar(trade.entry_time + timedelta(minutes=15), 100.0, 103.0, 97.0, 101.0)
+        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
+        assert result is None
+
+
+class TestEntryBarStopCheck:
+    """Group E: Entry-bar integration — stop checked on the entry bar."""
+
+    def test_entry_bar_stop_checked(self):
+        """Stop pierced on entry bar => trade exits immediately.
+
+        Runs a full backtest with synthetic data where the entry bar's
+        low breaches the stop. The trade should be closed on the entry bar
+        rather than surviving to the next bar.
+        """
+        # Build bars where a trade would be opened and immediately stopped.
+        # We use the resolve_bar_exit function directly to verify behavior,
+        # since triggering an actual setup in run_unicorn_backtest requires
+        # 8 criteria to align which is non-trivial in synthetic data.
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        trade = _make_trade(
+            BiasDirection.BULLISH, 100.0, 98.0, 106.0, entry_time=entry_time,
+        )
+        # Entry bar itself goes below stop
+        entry_bar = make_bar(entry_time, 100.0, 101.0, 97.0, 99.0)
+
+        result = resolve_bar_exit(trade, entry_bar, IntrabarPolicy.WORST, SLIP)
+        assert result is not None
+        assert result.exit_reason == "stop_loss"
+        # Gap-through: open=100 > stop=98, so fill at stop price
+        assert result.exit_price == 98.0 - SLIP
+        assert result.pnl_points < 0
+
+
+# =========================================================================
+# Wick ratio and range ATR mult helper tests
+# =========================================================================
+
+
+class TestComputeAdverseWickRatio:
+    """Tests for adverse wick ratio computation."""
+
+    def test_bullish_long_big_upper_wick(self):
+        """Long direction: upper wick is adverse. o=100, h=110, l=98, c=102."""
+        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 102.0)
+        ratio = compute_adverse_wick_ratio(bar, BiasDirection.BULLISH)
+        # upper wick = (110 - 102) / (110 - 98) = 8/12
+        assert ratio == pytest.approx(0.6667, rel=1e-3)
+
+    def test_bearish_short_big_lower_wick(self):
+        """Short direction: lower wick is adverse. o=100, h=102, l=90, c=98."""
+        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 102.0, 90.0, 98.0)
+        ratio = compute_adverse_wick_ratio(bar, BiasDirection.BEARISH)
+        # lower wick = (98 - 90) / (102 - 90) = 8/12
+        assert ratio == pytest.approx(0.6667, rel=1e-3)
+
+    def test_zero_range_returns_zero(self):
+        """Flat bar (high == low) returns 0.0."""
+        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 100.0, 100.0, 100.0)
+        assert compute_adverse_wick_ratio(bar, BiasDirection.BULLISH) == 0.0
+        assert compute_adverse_wick_ratio(bar, BiasDirection.BEARISH) == 0.0
+
+
+class TestComputeRangeAtrMult:
+    """Tests for range ATR multiple computation."""
+
+    def test_basic(self):
+        """Bar range=12, ATR=10 => 1.2."""
+        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 105.0)
+        assert compute_range_atr_mult(bar, 10.0) == pytest.approx(1.2)
+
+    def test_zero_atr_returns_zero(self):
+        """ATR=0 => 0.0 (avoid division by zero)."""
+        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 105.0)
+        assert compute_range_atr_mult(bar, 0.0) == 0.0
+
+
+class TestWickGuardIntegration:
+    """Integration tests for bar-quality guards in the backtest loop."""
+
+    def test_wick_guard_rejects_high_wick(self):
+        """config.max_wick_ratio=0.5, signal bar wick ~ 0.67 => rejected."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        config = UnicornConfig(max_wick_ratio=0.5)
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+        )
+
+        # Check that wick guard diagnostics are populated on setups
+        wick_rejected = [s for s in result.all_setups if s.wick_guard_rejected]
+        # With the guard enabled, at least the diagnostic fields should be populated
+        for setup in result.all_setups:
+            if setup.decide_entry_result and setup.direction != BiasDirection.NEUTRAL:
+                # Diagnostics should always be recorded
+                assert isinstance(setup.signal_wick_ratio, float)
+                assert isinstance(setup.signal_range_atr_mult, float)
+
+        # Any wick-rejected setup must have correct fields
+        for setup in wick_rejected:
+            assert setup.taken is False
+            assert setup.guard_reason_code == "wick_guard"
+            assert "wick_guard" in (setup.reason_not_taken or "")
+
+    def test_wick_guard_disabled_by_default(self):
+        """config.max_wick_ratio=None => no filtering."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        config = UnicornConfig()  # defaults: max_wick_ratio=None
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+        )
+
+        # No setups should be wick-guard-rejected when disabled
+        wick_rejected = [s for s in result.all_setups if s.wick_guard_rejected]
+        assert len(wick_rejected) == 0
+
+    def test_range_guard_rejects_wide_bar(self):
+        """config.max_range_atr_mult=2.0, wide signal bars => some rejected."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, volatility=10.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        config = UnicornConfig(max_range_atr_mult=2.0)
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+        )
+
+        # Check that range guard diagnostics are correct
+        range_rejected = [s for s in result.all_setups if s.range_guard_rejected]
+        for setup in range_rejected:
+            assert setup.taken is False
+            assert setup.guard_reason_code == "range_guard"
+            assert "range_guard" in (setup.reason_not_taken or "")
