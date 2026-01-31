@@ -479,6 +479,70 @@ def build_reference_bias_series(
     return series
 
 
+def _build_output_dict(result, config, args) -> dict:
+    """Build a JSON-serializable dict from backtest results.
+
+    Pure function — no printing, no file IO.
+    """
+    return {
+        "run_key": result.run_key,
+        "run_label": result.run_label,
+        "model_version": MODEL_VERSION,
+        "config": {
+            "min_scored_criteria": config.min_scored_criteria,
+            "min_displacement_atr": config.min_displacement_atr,
+            "session_profile": config.session_profile.value,
+            "direction_filter": "long" if args.long_only else "bidir",
+            "time_stop_minutes": args.time_stop,
+        },
+        "symbol": result.symbol,
+        "start_date": result.start_date.isoformat(),
+        "end_date": result.end_date.isoformat(),
+        "total_bars": result.total_bars,
+        "total_setups_scanned": result.total_setups_scanned,
+        "partial_setups": result.partial_setups,
+        "valid_setups": result.valid_setups,
+        "trades_taken": result.trades_taken,
+        "wins": result.wins,
+        "losses": result.losses,
+        "win_rate": result.win_rate,
+        "profit_factor": result.profit_factor,
+        "total_pnl_points": result.total_pnl_points,
+        "total_pnl_dollars": result.total_pnl_dollars,
+        "expectancy_points": result.expectancy_points,
+        "avg_mfe": result.avg_mfe,
+        "avg_mae": result.avg_mae,
+        "mfe_capture_rate": result.mfe_capture_rate,
+        "avg_r_multiple": result.avg_r_multiple,
+        "largest_loss_points": result.largest_loss_points,
+        "confidence_win_correlation": result.confidence_win_correlation,
+        "criteria_bottlenecks": [
+            {"criterion": b.criterion, "fail_rate": b.fail_rate}
+            for b in result.criteria_bottlenecks
+        ],
+        "session_stats": {
+            s.value: {
+                "total_setups": result.session_stats[s].total_setups,
+                "valid_setups": result.session_stats[s].valid_setups,
+                "trades_taken": result.session_stats[s].trades_taken,
+                "win_rate": result.session_stats[s].win_rate,
+                "total_pnl": result.session_stats[s].total_pnl_points,
+            }
+            for s in result.session_stats
+        },
+        "confidence_buckets": [
+            {
+                "range": f"{b.min_confidence:.1f}-{b.max_confidence:.1f}",
+                "trades": b.trade_count,
+                "win_rate": b.win_rate,
+                "avg_r": b.avg_r_multiple,
+            }
+            for b in result.confidence_buckets
+        ],
+        "session_diagnostics": result.session_diagnostics,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run ICT Unicorn Model backtest",
@@ -732,6 +796,16 @@ Examples:
         metavar="N",
         help="Seed for synthetic data generation (for reproducibility)."
     )
+    parser.add_argument(
+        "--baseline-run",
+        metavar="PATH",
+        help="Path to a previous --json output file. Prints compare summary after report."
+    )
+    parser.add_argument(
+        "--write-baseline",
+        metavar="PATH",
+        help="Write current run's JSON output dict to PATH (for future --baseline-run)."
+    )
 
     args = parser.parse_args()
 
@@ -976,65 +1050,8 @@ Examples:
     # Format output
     if args.json:
         import json
-        from dataclasses import asdict
 
-        # Convert to JSON-serializable format
-        output = {
-            "run_key": result.run_key,
-            "run_label": result.run_label,
-            "model_version": MODEL_VERSION,
-            "config": {
-                "min_scored_criteria": config.min_scored_criteria,
-                "min_displacement_atr": config.min_displacement_atr,
-                "session_profile": config.session_profile.value,
-                "direction_filter": "long" if args.long_only else "bidir",
-                "time_stop_minutes": args.time_stop,
-            },
-            "symbol": result.symbol,
-            "start_date": result.start_date.isoformat(),
-            "end_date": result.end_date.isoformat(),
-            "total_bars": result.total_bars,
-            "total_setups_scanned": result.total_setups_scanned,
-            "partial_setups": result.partial_setups,
-            "valid_setups": result.valid_setups,
-            "trades_taken": result.trades_taken,
-            "wins": result.wins,
-            "losses": result.losses,
-            "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor,
-            "total_pnl_points": result.total_pnl_points,
-            "total_pnl_dollars": result.total_pnl_dollars,
-            "expectancy_points": result.expectancy_points,
-            "avg_mfe": result.avg_mfe,
-            "avg_mae": result.avg_mae,
-            "mfe_capture_rate": result.mfe_capture_rate,
-            "avg_r_multiple": result.avg_r_multiple,
-            "confidence_win_correlation": result.confidence_win_correlation,
-            "criteria_bottlenecks": [
-                {"criterion": b.criterion, "fail_rate": b.fail_rate}
-                for b in result.criteria_bottlenecks
-            ],
-            "session_stats": {
-                s.value: {
-                    "total_setups": result.session_stats[s].total_setups,
-                    "valid_setups": result.session_stats[s].valid_setups,
-                    "trades_taken": result.session_stats[s].trades_taken,
-                    "win_rate": result.session_stats[s].win_rate,
-                    "total_pnl": result.session_stats[s].total_pnl_points,
-                }
-                for s in result.session_stats
-            },
-            "confidence_buckets": [
-                {
-                    "range": f"{b.min_confidence:.1f}-{b.max_confidence:.1f}",
-                    "trades": b.trade_count,
-                    "win_rate": b.win_rate,
-                    "avg_r": b.avg_r_multiple,
-                }
-                for b in result.confidence_buckets
-            ],
-            "session_diagnostics": result.session_diagnostics,
-        }
+        output = _build_output_dict(result, config, args)
         report = json.dumps(output, indent=2)
     else:
         report = format_backtest_report(result)
@@ -1046,6 +1063,31 @@ Examples:
         print(f"Report written to {args.output}")
     else:
         print(report)
+
+    # Baseline compare
+    if args.baseline_run:
+        import json as _json
+        from compare_unicorn_runs import compare_runs
+        try:
+            with open(args.baseline_run) as f:
+                baseline = _json.load(f)
+        except FileNotFoundError:
+            print(f"Error: baseline file not found: {args.baseline_run}", file=sys.stderr)
+            sys.exit(1)
+        except _json.JSONDecodeError as e:
+            print(f"Error: invalid JSON in baseline file: {e}", file=sys.stderr)
+            sys.exit(1)
+        output_dict = _build_output_dict(result, config, args)
+        print(f"\nBaseline comparison (vs {args.baseline_run}):")
+        print(compare_runs(baseline, output_dict))
+
+    # Write baseline for future comparisons
+    if args.write_baseline:
+        import json as _json
+        output_dict = _build_output_dict(result, config, args)
+        with open(args.write_baseline, "w") as f:
+            _json.dump(output_dict, f, indent=2)
+        print(f"\nBaseline written to {args.write_baseline}")
 
     # Post-run reference diagnostics
     if reference_bias_series is not None and hasattr(result, "session_diagnostics"):
