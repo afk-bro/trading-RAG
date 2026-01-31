@@ -1,22 +1,30 @@
 """
-ICT Unicorn Model Strategy.
+ICT Unicorn Model Strategy — v2.1 "Intent" (Structure-Gated).
 
 A comprehensive ICT (Inner Circle Trader) strategy implementation
 that combines multiple confluence factors for high-probability entries.
 
-Entry Criteria (scored, configurable threshold):
-1. HTF Bias confirms direction (Daily/4H/1H alignment)
-2. Liquidity sweep has occurred (stop hunt)
-3. FVG (Fair Value Gap) is present
-4. Breaker or Mitigation Block provides entry zone
-5. 5-15M FVG/DOL (Draw on Liquidity) confirms setup
-6. Displacement / MSS (Market Structure Shift) shows intent
-7. Stop placement within ATR-based limit (risk management)
-8. Valid macro time window (session timing)
+Version history:
+  v1.0 "Scan"   — Classic soft-scored with 8 equal-weight criteria
+  v2.0 "Bias"   — MTF bias-gated with mandatory/scored split (3M+5S)
+  v2.1 "Intent" — Structure-gated: MSS + displacement as mandatory (5M+4S)
 
-Key improvements:
+Entry Criteria (9 total = 5 mandatory + 4 scored):
+  Mandatory (all must pass):
+    1. HTF Bias confirms direction (Daily/4H/1H alignment)
+    2. Stop placement within ATR-based limit (risk management)
+    3. Valid macro time window (session timing)
+    4. MSS (Market Structure Shift) shows directional change
+    5. Displacement meets conviction threshold (institutional intent)
+  Scored (min N of 4, default 3):
+    6. Liquidity sweep has occurred (stop hunt)
+    7. FVG (Fair Value Gap) is present on HTF
+    8. Breaker or Mitigation Block provides entry zone
+    9. LTF FVG/DOL (Draw on Liquidity) confirms setup
+
+Key features:
 - Volatility-normalized thresholds (FVG size, stop distance use ATR)
-- Soft scoring: enter at score >= threshold (default 6/8)
+- Guardrailed soft scoring: mandatory gates + scored threshold
 - Configurable session profiles (STRICT, NORMAL, WIDE)
 
 Exit Criteria:
@@ -65,6 +73,139 @@ from app.services.strategy.models import (
 
 
 # =============================================================================
+# Strategy Family Versioning
+# =============================================================================
+
+STRATEGY_FAMILY = "Unicorn"
+
+# Version history — each entry carries the criteria schema so docs can't
+# disagree with code.  Only v2.1 is fully populated today; older versions
+# record the schema they shipped with for archaeological reference.
+MODEL_VERSIONS: dict[str, dict] = {
+    "1.0": {
+        "codename": "Scan",
+        "mandatory": 0,
+        "scored": 8,
+        "desc": "Classic soft-scored with 8 equal-weight criteria",
+    },
+    "2.0": {
+        "codename": "Bias",
+        "mandatory": 3,
+        "scored": 5,
+        "desc": "MTF bias-gated with mandatory/scored split (3M+5S)",
+    },
+    "2.1": {
+        "codename": "Intent",
+        "mandatory": 5,
+        "scored": 4,
+        "desc": "Structure-gated: MSS + displacement as mandatory (5M+4S)",
+    },
+}
+
+MODEL_VERSION = "2.1"
+MODEL_CODENAME = MODEL_VERSIONS[MODEL_VERSION]["codename"]
+
+
+def _label_segments(
+    config: "UnicornConfig",
+    *,
+    direction_filter: object = None,
+    time_stop_minutes: object = None,
+    bar_bundle: object = None,
+) -> list[tuple[str, str]]:
+    """Return (key, value) pairs that define a run's identity.
+
+    Pure config choices only — no market-derived facts (dates, symbols, bar
+    counts).  This keeps labels deterministic across identical configs.
+    """
+    segs: list[tuple[str, str]] = []
+    segs.append(("ver", f"{STRATEGY_FAMILY.lower()}_v{MODEL_VERSION.replace('.', '_')}"))
+
+    bias = "mtf" if bar_bundle is not None else "single"
+    segs.append(("bias", bias))
+
+    if direction_filter is None:
+        side = "bidir"
+    else:
+        side = "long" if str(direction_filter).endswith("BULLISH") else "short"
+    segs.append(("side", side))
+
+    displ = str(config.min_displacement_atr) if config.min_displacement_atr is not None else "off"
+    segs.append(("displ", displ))
+
+    segs.append(("minscore", f"{config.min_scored_criteria}of4"))
+    segs.append(("window", config.session_profile.value))
+
+    ts = f"{time_stop_minutes}m" if time_stop_minutes is not None else "none"
+    segs.append(("ts", ts))
+
+    return segs
+
+
+def build_run_label(
+    config: "UnicornConfig",
+    *,
+    direction_filter: object = None,  # BiasDirection or None
+    time_stop_minutes: object = None,  # int or None
+    bar_bundle: object = None,  # BarBundle or None
+) -> str:
+    """Build a self-describing one-line run label from config + runtime params.
+
+    Format: Unicorn v2.1 | Bias=<profile> | Side=<dir> | Displ=<val> | MinScore=N/4 | Window=<profile> | TS=<val>
+
+    Contains only config choices — no market-derived facts (dates, symbols,
+    bar counts).  Deterministic for identical configs.
+    """
+    segs = _label_segments(
+        config,
+        direction_filter=direction_filter,
+        time_stop_minutes=time_stop_minutes,
+        bar_bundle=bar_bundle,
+    )
+    # Human-friendly display format
+    display_map = {
+        "ver": f"{STRATEGY_FAMILY} v{MODEL_VERSION}",
+        "bias": lambda v: f"Bias={v.upper() if v == 'mtf' else v.capitalize()}",
+        "side": lambda v: f"Side={'BiDir' if v == 'bidir' else v.capitalize()}",
+        "displ": lambda v: f"Displ={v}",
+        "minscore": lambda v: f"MinScore={v.replace('of', '/')}",
+        "window": lambda v: f"Window={v}",
+        "ts": lambda v: f"TS={v}",
+    }
+    parts = []
+    for key, val in segs:
+        fmt = display_map[key]
+        parts.append(fmt if isinstance(fmt, str) else fmt(val))
+    return " | ".join(parts)
+
+
+def build_run_key(
+    config: "UnicornConfig",
+    *,
+    direction_filter: object = None,
+    time_stop_minutes: object = None,
+    bar_bundle: object = None,
+) -> str:
+    """Machine-stable slug for database indexing, caching, and artifact naming.
+
+    Example: unicorn_v2_1_bias_mtf_side_long_displ_0_3_minscore_2of4_window_strict_ts_30m
+
+    Deterministic: same config + runtime params always produce the same key.
+    """
+    import re
+
+    segs = _label_segments(
+        config,
+        direction_filter=direction_filter,
+        time_stop_minutes=time_stop_minutes,
+        bar_bundle=bar_bundle,
+    )
+    raw = "_".join(f"{k}_{v}" for k, v in segs)
+    # Collapse dots and any non-alphanumeric chars to underscores
+    return re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -108,8 +249,8 @@ MACRO_WINDOWS = SESSION_WINDOWS[SessionProfile.WIDE]
 class UnicornConfig:
     """Configuration for Unicorn Model strategy."""
 
-    # Scoring: minimum scored criteria to enter (out of 5 scored items)
-    # Mandatory criteria (htf_bias, stop_valid, macro_window) always required.
+    # Scoring: minimum scored criteria to enter (out of 4 scored items)
+    # Mandatory criteria (htf_bias, stop_valid, macro_window, mss, displacement) always required.
     min_scored_criteria: int = 3
 
     # Confidence gate (None = metric-only, not used for entry filtering)
@@ -149,10 +290,10 @@ class UnicornConfig:
     require_sweep_settlement: bool = False        # next bar must close on correct side of swept level
 
     def __post_init__(self):
-        if not (0 <= self.min_scored_criteria <= 5):
+        if not (0 <= self.min_scored_criteria <= 4):
             raise ValueError(
-                f"min_scored_criteria must be 0-5 (got {self.min_scored_criteria}). "
-                f"There are only 5 scored criteria; mandatory gates are always enforced."
+                f"min_scored_criteria must be 0-4 (got {self.min_scored_criteria}). "
+                f"There are only 4 scored criteria; mandatory gates are always enforced."
             )
         if self.min_confidence is not None and not (0.0 <= self.min_confidence <= 1.0):
             raise ValueError(
@@ -189,10 +330,11 @@ class CriteriaScore:
     mss: bool = False
     stop_valid: bool = False
     macro_window: bool = False
+    displacement_valid: bool = False
 
     @property
     def score(self) -> int:
-        """Total criteria met (0-8)."""
+        """Total criteria met (0-9)."""
         return sum([
             self.htf_bias,
             self.liquidity_sweep,
@@ -202,6 +344,7 @@ class CriteriaScore:
             self.mss,
             self.stop_valid,
             self.macro_window,
+            self.displacement_valid,
         ])
 
     @property
@@ -224,35 +367,42 @@ class CriteriaScore:
             missing.append("stop_valid")
         if not self.macro_window:
             missing.append("macro_window")
+        if not self.displacement_valid:
+            missing.append("displacement")
         return missing
 
     @property
     def mandatory_met(self) -> bool:
-        """All 3 mandatory criteria must pass: htf_bias, stop_valid, macro_window."""
-        return self.htf_bias and self.stop_valid and self.macro_window
+        """All 5 mandatory criteria must pass: htf_bias, stop_valid, macro_window, mss, displacement."""
+        return (
+            self.htf_bias
+            and self.stop_valid
+            and self.macro_window
+            and self.mss
+            and self.displacement_valid
+        )
 
     @property
     def scored_count(self) -> int:
-        """Count of passed scored criteria (out of 5)."""
+        """Count of passed scored criteria (out of 4)."""
         return sum([
             self.liquidity_sweep,
             self.htf_fvg,
             self.breaker_block,
             self.ltf_fvg,
-            self.mss,
         ])
 
     @property
     def scored_missing(self) -> list[str]:
         """Names of scored criteria that failed (subset of missing)."""
-        _scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"}
+        _scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg"}
         return [name for name in self.missing if name in _scored]
 
     def decide_entry(self, min_scored: int = 3) -> bool:
         """
         Canonical entry gate used by both live evaluator and backtest.
 
-        Requires all 3 mandatory criteria AND at least min_scored of 5 scored criteria.
+        Requires all 5 mandatory criteria AND at least min_scored of 4 scored criteria.
         """
         return self.mandatory_met and self.scored_count >= min_scored
 
@@ -291,8 +441,8 @@ class UnicornSetup:
 
     @property
     def all_criteria_met(self) -> bool:
-        """Check if all 8 criteria are satisfied (strict mode)."""
-        return self.criteria_score.score == 8
+        """Check if all 9 criteria are satisfied (strict mode)."""
+        return self.criteria_score.score == 9
 
     def meets_threshold(self, threshold: int = 6) -> bool:
         """Check if setup meets minimum criteria threshold."""
@@ -700,6 +850,12 @@ def analyze_unicorn_setup(
             break
     score.mss = relevant_mss is not None
 
+    # 5b. Displacement validation (mandatory context gate)
+    score.displacement_valid = (
+        config.min_displacement_atr is None
+        or (relevant_mss is not None and relevant_mss.displacement_size >= config.min_displacement_atr)
+    )
+
     # 6. Check for LTF FVG (DOL confirmation)
     relevant_ltf_fvg: Optional[FairValueGap] = None
     for fvg in ltf_fvgs:
@@ -882,10 +1038,10 @@ def evaluate_unicorn_model(
                     signals.append("outside_macro_window")
             else:
                 signals.append(
-                    f"scored_{cs.scored_count}/5_below_{config.min_scored_criteria}"
+                    f"scored_{cs.scored_count}/4_below_{config.min_scored_criteria}"
                 )
             for name in cs.missing:
-                if name not in ("htf_bias", "stop_valid", "macro_window"):
+                if name not in ("htf_bias", "stop_valid", "macro_window", "mss", "displacement"):
                     signals.append(f"no_{name}")
         else:
             # Entry criteria met - generate entry intent

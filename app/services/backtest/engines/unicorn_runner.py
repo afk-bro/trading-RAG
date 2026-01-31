@@ -50,6 +50,12 @@ from app.services.strategy.strategies.unicorn_model import (
     SESSION_WINDOWS,
     DEFAULT_CONFIG,
     _calculate_atr,
+    STRATEGY_FAMILY,
+    MODEL_VERSION,
+    MODEL_CODENAME,
+    MODEL_VERSIONS,
+    build_run_label,
+    build_run_key,
 )
 
 
@@ -310,17 +316,19 @@ def compute_range_atr_mult(bar: OHLCVBar, atr: float) -> float:
 
 # Mandatory criteria that MUST pass before soft scoring applies.
 # These protect core risk logic and cannot be bypassed by scoring.
-MANDATORY_CRITERIA = frozenset({"htf_bias", "stop_valid", "macro_window"})
+MANDATORY_CRITERIA = frozenset({"htf_bias", "stop_valid", "macro_window", "mss", "displacement"})
 
 # Scored criteria - soft scoring threshold applies to these
 SCORED_CRITERIA = frozenset({
-    "liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"
+    "liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg"
 })
+
+assert len(MANDATORY_CRITERIA) + len(SCORED_CRITERIA) == 9, "criteria count drift"
 
 
 @dataclass
 class CriteriaCheck:
-    """Results of checking each of the 8 Unicorn criteria."""
+    """Results of checking each of the 9 Unicorn criteria."""
     htf_bias_aligned: bool = False
     liquidity_sweep_found: bool = False
     htf_fvg_found: bool = False
@@ -329,6 +337,7 @@ class CriteriaCheck:
     mss_found: bool = False
     stop_valid: bool = False
     in_macro_window: bool = False
+    displacement_valid: bool = False
 
     # Details
     htf_bias_direction: Optional[BiasDirection] = None
@@ -355,12 +364,13 @@ class CriteriaCheck:
             self.mss_found,
             self.stop_valid,
             self.in_macro_window,
+            self.displacement_valid,
         ])
 
     @property
     def all_criteria_met(self) -> bool:
-        """Check if all 8 criteria are satisfied."""
-        return self.criteria_met_count == 8
+        """Check if all 9 criteria are satisfied."""
+        return self.criteria_met_count == 9
 
     def missing_criteria(self) -> list[str]:
         """Return list of criteria that failed."""
@@ -381,6 +391,8 @@ class CriteriaCheck:
             missing.append("stop_valid")
         if not self.in_macro_window:
             missing.append("macro_window")
+        if not self.displacement_valid:
+            missing.append("displacement")
         return missing
 
     @property
@@ -388,13 +400,15 @@ class CriteriaCheck:
         """
         Check if all MANDATORY criteria are satisfied.
 
-        Mandatory criteria (htf_bias, stop_valid, macro_window) MUST pass
-        before soft scoring can be applied. These protect core risk logic.
+        Mandatory criteria (htf_bias, stop_valid, macro_window, mss, displacement)
+        MUST pass before soft scoring can be applied. These protect core risk logic.
         """
         return (
-            self.htf_bias_aligned and
-            self.stop_valid and
-            self.in_macro_window
+            self.htf_bias_aligned
+            and self.stop_valid
+            and self.in_macro_window
+            and self.mss_found
+            and self.displacement_valid
         )
 
     @property
@@ -402,7 +416,7 @@ class CriteriaCheck:
         """
         Count how many SCORED criteria are satisfied.
 
-        Scored criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg, mss
+        Scored criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg
         Soft scoring threshold applies only to these.
         """
         return sum([
@@ -410,7 +424,6 @@ class CriteriaCheck:
             self.htf_fvg_found,
             self.breaker_block_found,
             self.ltf_fvg_found,
-            self.mss_found,
         ])
 
     def meets_entry_requirements(self, min_scored: int = 3) -> bool:
@@ -418,7 +431,7 @@ class CriteriaCheck:
         Check if criteria meet entry requirements with guardrails.
 
         Args:
-            min_scored: Minimum scored criteria required (out of 5)
+            min_scored: Minimum scored criteria required (out of 4)
 
         Returns:
             True if all mandatory criteria pass AND scored count >= threshold
@@ -507,7 +520,7 @@ class SessionStats:
     """Statistics for a trading session."""
     session: TradingSession
     total_setups: int = 0
-    valid_setups: int = 0  # All 8 criteria met
+    valid_setups: int = 0  # All 9 criteria met
     trades_taken: int = 0
     wins: int = 0
     losses: int = 0
@@ -571,7 +584,7 @@ class UnicornBacktestResult:
     # Setup analysis
     total_setups_scanned: int = 0
     partial_setups: int = 0  # Some criteria met but not all
-    valid_setups: int = 0    # All 8 criteria met
+    valid_setups: int = 0    # All 9 criteria met
     trades_taken: int = 0
 
     # Trade results
@@ -618,6 +631,11 @@ class UnicornBacktestResult:
 
     # Config snapshot (for diagnostics)
     config: Optional[UnicornConfig] = None
+
+    # Self-describing run label (e.g. "Unicorn v2.1 | Bias=MTF | Side=Long | ...")
+    run_label: Optional[str] = None
+    # Machine-stable slug for indexing/caching/artifact naming
+    run_key: Optional[str] = None
 
     # Machine-readable session diagnostics (populated by _build_session_diagnostics)
     session_diagnostics: Optional[dict] = None
@@ -690,7 +708,7 @@ def check_criteria(
     h1_bars: Optional[list[OHLCVBar]] = None,
 ) -> CriteriaCheck:
     """
-    Check all 8 Unicorn criteria at a specific point in time.
+    Check all 9 Unicorn criteria at a specific point in time.
 
     Args:
         bars: Primary timeframe bars
@@ -871,6 +889,15 @@ def check_criteria(
             check.mss_displacement_atr = mss.displacement_size
             break
 
+    # 6b. Displacement validation (mandatory context gate)
+    # Both sides compare ATR multiples: mss_displacement_atr is displacement_size from detect_mss()
+    if config.min_displacement_atr is None:
+        check.displacement_valid = True  # disabled = auto-pass
+    elif check.mss_found:
+        check.displacement_valid = check.mss_displacement_atr >= config.min_displacement_atr
+    else:
+        check.displacement_valid = False  # no MSS = no displacement to measure
+
     # 7. Stop validation (ATR-based max stop)
     max_points = get_max_stop_points(symbol, atr=current_atr, config=config)
     entry_fvg, entry_block, entry_price = find_entry_zone(
@@ -905,7 +932,7 @@ def run_unicorn_backtest(
     max_concurrent_trades: int = 1,
     eod_exit: bool = True,
     eod_time: time = time(15, 45),
-    min_criteria_score: int = 3,  # Soft scoring: enter at >= N of 5 scored criteria
+    min_criteria_score: int = 3,  # Soft scoring: enter at >= N of 4 scored criteria
     config: Optional[UnicornConfig] = None,
     # Friction parameters (critical for realistic backtesting)
     slippage_ticks: float = 1.0,  # Slippage per side in ticks
@@ -936,7 +963,7 @@ def run_unicorn_backtest(
         max_concurrent_trades: Maximum simultaneous positions
         eod_exit: Exit all positions at EOD
         eod_time: Time for EOD exit
-        min_criteria_score: Minimum SCORED criteria to enter (out of 5, not 8)
+        min_criteria_score: Minimum SCORED criteria to enter (out of 4)
         config: Strategy configuration (ATR thresholds, session profile)
         slippage_ticks: Slippage per side in ticks (default 1 tick each way)
         commission_per_contract: Round-trip commission per contract (default $2.50)
@@ -957,9 +984,9 @@ def run_unicorn_backtest(
         UnicornBacktestResult with complete analytics
 
     Note on soft scoring:
-        - 3 MANDATORY criteria must always pass: htf_bias, stop_valid, macro_window
-        - 5 SCORED criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg, mss
-        - min_criteria_score applies only to the scored set (default 3/5)
+        - 5 MANDATORY criteria must always pass: htf_bias, stop_valid, macro_window, mss, displacement
+        - 4 SCORED criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg
+        - min_criteria_score applies only to the scored set (default 3/4)
         - This prevents bypassing core risk management via scoring
     """
     if config is None:
@@ -977,6 +1004,18 @@ def run_unicorn_backtest(
         total_bars=len(htf_bars),
         reference_bias_series=reference_bias_series,
         reference_symbol=reference_symbol,
+        run_label=build_run_label(
+            config,
+            direction_filter=direction_filter,
+            time_stop_minutes=time_stop_minutes,
+            bar_bundle=bar_bundle,
+        ),
+        run_key=build_run_key(
+            config,
+            direction_filter=direction_filter,
+            time_stop_minutes=time_stop_minutes,
+            bar_bundle=bar_bundle,
+        ),
     )
 
     # Initialize session stats
@@ -993,6 +1032,7 @@ def run_unicorn_backtest(
         "mss": 0,
         "stop_valid": 0,
         "macro_window": 0,
+        "displacement": 0,
     }
     criteria_passes: dict[str, list[TradeRecord]] = {k: [] for k in criteria_fails}
 
@@ -1252,14 +1292,14 @@ def run_unicorn_backtest(
         for criterion in criteria.missing_criteria():
             criteria_fails[criterion] += 1
 
-        # Track valid setups (all 8/8)
+        # Track valid setups (all 9/9)
         if criteria.all_criteria_met:
             result.valid_setups += 1
             result.session_stats[session].valid_setups += 1
 
         # SOFT SCORING with mandatory/scored separation:
-        # - 3 MANDATORY must all pass: htf_bias, stop_valid, macro_window
-        # - 5 SCORED: min_criteria_score of these must pass
+        # - 5 MANDATORY must all pass: htf_bias, stop_valid, macro_window, mss, displacement
+        # - 4 SCORED: min_criteria_score of these must pass
         if entry_decision:
             direction = criteria.htf_bias_direction
 
@@ -1307,7 +1347,8 @@ def run_unicorn_backtest(
                 result.all_setups.append(setup_record)
                 continue
 
-            # Displacement guard — rejects when value is TOO LOW (insufficient conviction)
+            # BACKSTOP: displacement is now a mandatory criterion; this guard is redundant
+            # but kept temporarily for regression safety. Remove after validation.
             if config.min_displacement_atr is not None:
                 setup_record.displacement_guard_evaluated = True
 
@@ -1456,9 +1497,13 @@ def run_unicorn_backtest(
                     missing_mandatory.append("stop_valid")
                 if not criteria.in_macro_window:
                     missing_mandatory.append("macro_window")
+                if not criteria.mss_found:
+                    missing_mandatory.append("mss")
+                if not criteria.displacement_valid:
+                    missing_mandatory.append("displacement")
                 setup_record.reason_not_taken = f"mandatory failed: {', '.join(missing_mandatory)}"
             else:
-                setup_record.reason_not_taken = f"scored {criteria.scored_criteria_count}/5 < {min_criteria_score}"
+                setup_record.reason_not_taken = f"scored {criteria.scored_criteria_count}/4 < {min_criteria_score}"
 
         result.all_setups.append(setup_record)
 
@@ -1956,6 +2001,8 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines = []
     lines.append("=" * 70)
     lines.append(f"UNICORN MODEL BACKTEST REPORT - {result.symbol}")
+    if result.run_label:
+        lines.append(result.run_label)
     lines.append("=" * 70)
     lines.append(f"Period: {result.start_date.date()} to {result.end_date.date()}")
     lines.append(f"Total bars analyzed: {result.total_bars}")
@@ -1964,14 +2011,17 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     # Config diagnostics
     if result.config is not None:
         cfg = result.config
+        ver_info = MODEL_VERSIONS[MODEL_VERSION]
         lines.append("-" * 40)
         lines.append("CONFIG")
         lines.append("-" * 40)
+        lines.append(f"Model:                 {STRATEGY_FAMILY} v{MODEL_VERSION} ({MODEL_CODENAME}) — {ver_info['mandatory']}M+{ver_info['scored']}S")
         lines.append(f"Session profile:       {cfg.session_profile.value}")
         windows = SESSION_WINDOWS.get(cfg.session_profile, MACRO_WINDOWS)
         window_strs = [f"{s.strftime('%H:%M')}-{e.strftime('%H:%M')}" for s, e in windows]
         lines.append(f"Macro windows (ET):    {', '.join(window_strs)}")
-        lines.append(f"Min scored criteria:   {cfg.min_scored_criteria}/5")
+        lines.append(f"Mandatory criteria:    5 (htf_bias, stop_valid, macro_window, mss, displacement)")
+        lines.append(f"Min scored criteria:   {cfg.min_scored_criteria}/4 (liquidity_sweep, htf_fvg, breaker_block, ltf_fvg)")
         lines.append(f"FVG ATR mult:          {cfg.fvg_min_atr_mult}")
         lines.append(f"Stop ATR mult:         {cfg.stop_max_atr_mult}")
         wick = f"{cfg.max_wick_ratio}" if cfg.max_wick_ratio is not None else "disabled"
@@ -1991,7 +2041,7 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append("-" * 40)
     lines.append(f"Total setups scanned:  {result.total_setups_scanned}")
     lines.append(f"Partial setups:        {result.partial_setups} ({result.partial_setups/max(1,result.total_setups_scanned)*100:.1f}%)")
-    lines.append(f"Valid setups (8/8):    {result.valid_setups} ({result.valid_setups/max(1,result.total_setups_scanned)*100:.1f}%)")
+    lines.append(f"Valid setups (9/9):    {result.valid_setups} ({result.valid_setups/max(1,result.total_setups_scanned)*100:.1f}%)")
     lines.append(f"Trades taken:          {result.trades_taken}")
     lines.append(f"Setup→Trade ratio:     {result.setup_to_trade_ratio*100:.1f}%")
     lines.append("")
@@ -2185,8 +2235,9 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append("CRITERIA BOTTLENECK (sorted by fail rate)")
     lines.append("-" * 40)
     for bottleneck in result.criteria_bottlenecks:
+        tag = "[M]" if bottleneck.criterion in MANDATORY_CRITERIA else "[S]"
         bar = "█" * int(bottleneck.fail_rate * 20)
-        lines.append(f"{bottleneck.criterion:<18} {bottleneck.fail_rate*100:>5.1f}% {bar}")
+        lines.append(f"{tag} {bottleneck.criterion:<15} {bottleneck.fail_rate*100:>5.1f}% {bar}")
     lines.append("")
 
     # Confidence Correlation

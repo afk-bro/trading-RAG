@@ -144,9 +144,10 @@ class TestCriteriaCheck:
         check.mss_found = True
         check.stop_valid = True
         check.in_macro_window = True
+        check.displacement_valid = True
 
         assert check.all_criteria_met
-        assert check.criteria_met_count == 8
+        assert check.criteria_met_count == 9
 
     def test_missing_criteria(self):
         """Missing criteria list is correct."""
@@ -259,34 +260,36 @@ class TestMeetsEntryRequirements:
     """Tests for mandatory + scored entry gating."""
 
     def test_mandatory_pass_and_scored_at_threshold_enters(self):
-        """All 3 mandatory + exactly 3/5 scored => entry allowed."""
+        """All 5 mandatory + exactly 3/4 scored => entry allowed."""
         check = CriteriaCheck()
         # Mandatory
         check.htf_bias_aligned = True
         check.stop_valid = True
         check.in_macro_window = True
-        # Scored: exactly 3 of 5
+        check.mss_found = True
+        check.displacement_valid = True
+        # Scored: exactly 3 of 4
         check.liquidity_sweep_found = True
         check.htf_fvg_found = True
-        check.mss_found = True
-        check.breaker_block_found = False
+        check.breaker_block_found = True
         check.ltf_fvg_found = False
 
         assert check.meets_entry_requirements(min_scored=3) is True
 
     def test_mandatory_fail_with_all_scored_rejects(self):
-        """Mandatory fail + 5/5 scored => must reject."""
+        """Mandatory fail + 4/4 scored => must reject."""
         check = CriteriaCheck()
         # Mandatory: stop_valid fails
         check.htf_bias_aligned = True
         check.stop_valid = False
         check.in_macro_window = True
-        # All 5 scored pass
+        check.mss_found = True
+        check.displacement_valid = True
+        # All 4 scored pass
         check.liquidity_sweep_found = True
         check.htf_fvg_found = True
         check.breaker_block_found = True
         check.ltf_fvg_found = True
-        check.mss_found = True
 
         assert check.meets_entry_requirements(min_scored=3) is False
         assert check.mandatory_criteria_met is False
@@ -302,21 +305,25 @@ class TestCriteriaScoreDecideEntry:
         cs.htf_bias = True
         cs.stop_valid = True
         cs.macro_window = True
-        # 3/5 scored
+        cs.mss = True
+        cs.displacement_valid = True
+        # 3/4 scored
         cs.liquidity_sweep = True
         cs.htf_fvg = True
-        cs.mss = True
+        cs.breaker_block = True
 
         assert cs.decide_entry(min_scored=3) is True
-        # Total score is 6, but decide_entry should not care about total
-        assert cs.score == 6
+        # Total score is 8, but decide_entry should not care about total
+        assert cs.score == 8
 
     def test_decide_entry_rejects_below_scored_threshold(self):
-        """Mandatory pass + only 2/5 scored => reject."""
+        """Mandatory pass + only 2/4 scored => reject."""
         cs = CriteriaScore()
         cs.htf_bias = True
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
         # Only 2 scored
@@ -335,11 +342,12 @@ class TestNeutralBiasRejection:
         # Simulate NEUTRAL: htf_bias stays False
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
         cs.breaker_block = True
         cs.ltf_fvg = True
-        cs.mss = True
 
         assert cs.decide_entry(min_scored=3) is False
         assert cs.mandatory_met is False
@@ -422,9 +430,11 @@ class TestConfidenceGate:
         cs.htf_bias = True  # Would be set by analyze_unicorn_setup
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
-        cs.mss = True
+        cs.breaker_block = True
 
         # Even though confidence may be low, htf_bias passed => decide_entry works
         assert cs.decide_entry(min_scored=3) is True
@@ -442,13 +452,14 @@ class TestConfidenceGate:
         cs.htf_bias = False
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
         cs.breaker_block = True
         cs.ltf_fvg = True
-        cs.mss = True
 
-        # Mandatory fails (htf_bias=False), so entry rejected despite 5/5 scored
+        # Mandatory fails (htf_bias=False), so entry rejected despite 4/4 scored
         assert cs.decide_entry(min_scored=3) is False
         assert cs.mandatory_met is False
 
@@ -482,14 +493,14 @@ class TestRangesOverlapBoundary:
 class TestConfigValidation:
     """UnicornConfig must reject invalid parameter ranges."""
 
-    def test_min_scored_criteria_rejects_six(self):
-        """min_scored_criteria=6 is impossible (only 5 scored items)."""
-        with pytest.raises(ValueError, match="min_scored_criteria must be 0-5"):
-            UnicornConfig(min_scored_criteria=6)
+    def test_min_scored_criteria_rejects_five(self):
+        """min_scored_criteria=5 is impossible (only 4 scored items)."""
+        with pytest.raises(ValueError, match="min_scored_criteria must be 0-4"):
+            UnicornConfig(min_scored_criteria=5)
 
     def test_min_scored_criteria_rejects_negative(self):
         """min_scored_criteria=-1 is invalid."""
-        with pytest.raises(ValueError, match="min_scored_criteria must be 0-5"):
+        with pytest.raises(ValueError, match="min_scored_criteria must be 0-4"):
             UnicornConfig(min_scored_criteria=-1)
 
     def test_min_scored_criteria_accepts_zero(self):
@@ -497,10 +508,10 @@ class TestConfigValidation:
         config = UnicornConfig(min_scored_criteria=0)
         assert config.min_scored_criteria == 0
 
-    def test_min_scored_criteria_accepts_five(self):
-        """min_scored_criteria=5 requires all scored criteria."""
-        config = UnicornConfig(min_scored_criteria=5)
-        assert config.min_scored_criteria == 5
+    def test_min_scored_criteria_accepts_four(self):
+        """min_scored_criteria=4 requires all scored criteria."""
+        config = UnicornConfig(min_scored_criteria=4)
+        assert config.min_scored_criteria == 4
 
     def test_min_confidence_rejects_out_of_range(self):
         """min_confidence must be 0.0-1.0 when set."""
@@ -552,12 +563,12 @@ class TestParityDiagnostics:
 
             # scored_missing must be consistent with scored_count
             assert isinstance(setup.scored_missing, list)
-            assert len(setup.scored_missing) == 5 - setup.scored_count, (
+            assert len(setup.scored_missing) == 4 - setup.scored_count, (
                 f"scored_missing length mismatch at {setup.timestamp}: "
                 f"missing={setup.scored_missing}, scored_count={setup.scored_count}"
             )
             # All items must be valid scored criteria names
-            valid_scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"}
+            valid_scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg"}
             for name in setup.scored_missing:
                 assert name in valid_scored, f"Invalid scored criterion: {name}"
 

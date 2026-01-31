@@ -33,6 +33,9 @@ from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
     SessionProfile,
     BiasDirection,
+    MODEL_VERSION,
+    MODEL_CODENAME,
+    build_run_label,
 )
 from app.services.strategy.indicators.tf_bias import compute_tf_bias
 
@@ -592,7 +595,7 @@ Examples:
         "--min-criteria",
         type=int,
         default=3,
-        help="Minimum SCORED criteria (out of 5, not 8). Mandatory criteria always required. (default: 3)"
+        help="Minimum SCORED criteria (out of 4). Mandatory criteria always required. (default: 3)"
     )
     parser.add_argument(
         "--session-profile",
@@ -873,10 +876,18 @@ Examples:
     )
 
     # Run backtest
-    print(f"\nRunning Unicorn Model backtest for {args.symbol}...")
+    direction_filter = BiasDirection.BULLISH if args.long_only else None
+    run_label = build_run_label(
+        config,
+        direction_filter=direction_filter,
+        time_stop_minutes=args.time_stop,
+        bar_bundle=bar_bundle,
+    )
+    print(f"\n{run_label}")
+    print(f"Running Unicorn Model backtest for {args.symbol}...")
     print(f"Risk per trade: ${args.dollars_per_trade:,.2f}")
     print(f"Max concurrent positions: {args.max_concurrent}")
-    print(f"Criteria: 3 mandatory + {args.min_criteria}/5 scored (guardrailed soft scoring)")
+    print(f"Criteria: 5 mandatory + {args.min_criteria}/4 scored (guardrailed soft scoring)")
     print(f"Session profile: {args.session_profile}")
     print(f"FVG ATR mult: {args.fvg_atr_mult}, Stop ATR mult: {args.stop_atr_mult}")
     print(f"Friction: {args.slippage_ticks} ticks slippage, ${args.commission:.2f} commission")
@@ -944,7 +955,7 @@ Examples:
         slippage_ticks=args.slippage_ticks,
         commission_per_contract=args.commission,
         intrabar_policy=IntrabarPolicy(args.intrabar_policy),
-        direction_filter=BiasDirection.BULLISH if args.long_only else None,
+        direction_filter=direction_filter,
         time_stop_minutes=args.time_stop,
         time_stop_r_threshold=args.time_stop_threshold,
         reference_bias_series=reference_bias_series,
