@@ -540,6 +540,7 @@ class TestBuildRunLabel:
         assert "MinScore=3/4" in label
         assert "Window=normal" in label
         assert "TS=none" in label
+        assert "Mode=Research" in label
 
     def test_mtf_long_only_with_displacement(self):
         cfg = UnicornConfig(min_displacement_atr=0.3, min_scored_criteria=2, session_profile=SessionProfile.STRICT)
@@ -566,7 +567,7 @@ class TestBuildRunLabel:
     def test_label_pipe_separated(self):
         label = build_run_label(UnicornConfig())
         parts = label.split(" | ")
-        assert len(parts) == 7, f"Expected 7 pipe-separated segments, got {len(parts)}"
+        assert len(parts) == 8, f"Expected 8 pipe-separated segments, got {len(parts)}"
 
 
 class TestBuildRunKey:
@@ -574,7 +575,7 @@ class TestBuildRunKey:
 
     def test_default_config_key(self):
         key = build_run_key(UnicornConfig())
-        assert key == "ver_unicorn_v2_1_bias_single_side_bidir_displ_off_minscore_3of4_window_normal_ts_none"
+        assert key == "ver_unicorn_v2_1_bias_single_side_bidir_displ_off_minscore_3of4_window_normal_ts_none_mode_research"
 
     def test_key_matches_label_semantics(self):
         """Key and label encode the same config choices."""
@@ -793,3 +794,104 @@ class TestDisplacementBackstopFlag:
             assert not setup.displacement_guard_rejected, (
                 f"Backstop fired at {setup.timestamp} despite enable_displacement_backstop=False"
             )
+
+
+# ===========================================================================
+# Eval-mode segment in run label / key
+# ===========================================================================
+
+
+class TestModeSegment:
+    """mode segment is always present: eval when governor, research otherwise."""
+
+    def test_eval_mode_label(self):
+        label = build_run_label(UnicornConfig(), eval_mode=True)
+        assert "Mode=Eval" in label
+
+    def test_research_mode_label(self):
+        label = build_run_label(UnicornConfig())
+        assert "Mode=Research" in label
+
+    def test_eval_mode_key(self):
+        key = build_run_key(UnicornConfig(), eval_mode=True)
+        assert "mode_eval" in key
+
+    def test_research_mode_key(self):
+        key = build_run_key(UnicornConfig())
+        assert "mode_research" in key
+
+    def test_mode_segment_order_matches_contract(self):
+        segs = _label_segments(UnicornConfig())
+        keys = tuple(k for k, v in segs)
+        assert keys == EXPECTED_SEGMENT_ORDER
+
+    def test_eval_segment_order_matches_contract(self):
+        segs = _label_segments(UnicornConfig(), eval_mode=True)
+        keys = tuple(k for k, v in segs)
+        assert keys == EXPECTED_SEGMENT_ORDER
+
+    def test_eval_key_deterministic(self):
+        k1 = build_run_key(UnicornConfig(), eval_mode=True)
+        k2 = build_run_key(UnicornConfig(), eval_mode=True)
+        assert k1 == k2
+
+    def test_eval_key_differs_from_research(self):
+        k_eval = build_run_key(UnicornConfig(), eval_mode=True)
+        k_research = build_run_key(UnicornConfig())
+        assert k_eval != k_research
+
+
+# ===========================================================================
+# Governor stats in report
+# ===========================================================================
+
+
+class TestGovernorInReport:
+    def test_governor_stats_in_report(self):
+        """When governor_stats is set, report should include governor section."""
+        from app.services.backtest.engines.unicorn_runner import format_backtest_report
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        governor = DailyGovernor(max_daily_loss_dollars=300.0, max_trades_per_day=1)
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=UnicornConfig(),
+            daily_governor=governor,
+        )
+        report = format_backtest_report(result)
+        assert "DAILY GOVERNOR" in report
+        # Policy knobs
+        assert "Max daily loss:" in report
+        assert "Half-loss threshold:" in report
+        assert "Max trades/day:" in report
+        # Outcomes
+        assert "Signals skipped:" in report
+        assert "Days halted early:" in report
+        assert "Loss-limit halts:" in report
+        assert "Trade-limit halts:" in report
+        assert "Half-size trades:" in report
+        assert "Days with trades:" in report
+
+    def test_no_governor_stats_no_section(self):
+        """Without governor, report should not have governor section."""
+        from app.services.backtest.engines.unicorn_runner import format_backtest_report
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            config=UnicornConfig(),
+        )
+        report = format_backtest_report(result)
+        assert "DAILY GOVERNOR" not in report

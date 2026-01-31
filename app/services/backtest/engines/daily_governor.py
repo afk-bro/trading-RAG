@@ -1,0 +1,94 @@
+"""Daily risk governor for eval/prop-firm backtesting."""
+
+from dataclasses import dataclass
+
+
+@dataclass
+class DailyGovernorStats:
+    """Aggregated stats for governor behavior across the backtest."""
+
+    signals_skipped: int = 0  # setups that passed criteria but governor blocked
+    days_halted: int = 0  # calendar days where governor halted early
+    half_size_trades: int = 0  # trades taken at reduced size
+    total_days_traded: int = 0  # days with at least one trade
+
+
+@dataclass
+class DailyGovernor:
+    """Per-day risk state tracker with half-size stepdown.
+
+    Policy:
+        - Full loss (day_loss <= -max_daily_loss) -> halt for day
+        - Half loss (day_loss <= -half_threshold) -> risk_multiplier drops to half_size_multiplier
+        - Trade count cap -> halt for day
+    """
+
+    # --- Config (set once) ---
+    max_daily_loss_dollars: float = 300.0
+    max_trades_per_day: int = 2
+    half_size_multiplier: float = 0.5
+
+    # --- Per-day mutable state ---
+    day_loss_dollars: float = 0.0
+    day_trade_count: int = 0
+    risk_multiplier: float = 1.0
+    halted_for_day: bool = False
+    halt_reason: str = ""  # "loss_limit" or "trade_limit" when halted
+    current_date: object = None  # date object, set on first bar of day
+
+    @property
+    def half_loss_threshold(self) -> float:
+        """Loss level that triggers half-size stepdown."""
+        return self.max_daily_loss_dollars * self.half_size_multiplier
+
+    def allows_entry(self) -> bool:
+        """Check if governor permits a new trade entry."""
+        if self.halted_for_day:
+            return False
+        if self.day_trade_count >= self.max_trades_per_day:
+            self.halted_for_day = True
+            self.halt_reason = "trade_limit"
+            return False
+        if self.day_loss_dollars <= -self.max_daily_loss_dollars:
+            self.halted_for_day = True
+            self.halt_reason = "loss_limit"
+            return False
+        return True
+
+    def record_trade_close(self, pnl_dollars: float) -> None:
+        """Update state after a trade closes."""
+        self.day_trade_count += 1
+        if pnl_dollars < 0:
+            self.day_loss_dollars += pnl_dollars
+
+        # Half-size stepdown: if cumulative loss hits half threshold,
+        # next trade uses reduced size
+        if self.day_loss_dollars <= -self.half_loss_threshold:
+            self.risk_multiplier = self.half_size_multiplier
+
+        # Full halt
+        if self.day_loss_dollars <= -self.max_daily_loss_dollars:
+            self.halted_for_day = True
+            self.halt_reason = "loss_limit"
+
+    def maybe_reset(self, bar_date) -> str:
+        """Reset state if calendar day changed.
+
+        Returns:
+            "" if no reset or day wasn't halted,
+            halt_reason ("loss_limit" or "trade_limit") if day was halted.
+        """
+        if self.current_date != bar_date:
+            prev_halt_reason = self.halt_reason if self.halted_for_day else ""
+            self.reset_day()
+            self.current_date = bar_date
+            return prev_halt_reason
+        return ""
+
+    def reset_day(self) -> None:
+        """Reset all per-day state."""
+        self.day_loss_dollars = 0.0
+        self.day_trade_count = 0
+        self.risk_multiplier = 1.0
+        self.halted_for_day = False
+        self.halt_reason = ""

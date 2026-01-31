@@ -105,7 +105,7 @@ MODEL_VERSIONS: dict[str, dict] = {
 MODEL_VERSION = "2.1"
 MODEL_CODENAME = MODEL_VERSIONS[MODEL_VERSION]["codename"]
 
-EXPECTED_SEGMENT_ORDER = ("ver", "bias", "side", "displ", "minscore", "window", "ts")
+EXPECTED_SEGMENT_ORDER = ("ver", "bias", "side", "displ", "minscore", "window", "ts", "mode")
 
 
 def _label_segments(
@@ -114,6 +114,7 @@ def _label_segments(
     direction_filter: object = None,
     time_stop_minutes: object = None,
     bar_bundle: object = None,
+    eval_mode: object = None,
 ) -> list[tuple[str, str]]:
     """Return (key, value) pairs that define a run's identity.
 
@@ -141,6 +142,8 @@ def _label_segments(
     ts = f"{time_stop_minutes}m" if time_stop_minutes is not None else "none"
     segs.append(("ts", ts))
 
+    segs.append(("mode", "eval" if eval_mode else "research"))
+
     return segs
 
 
@@ -150,6 +153,7 @@ def build_run_label(
     direction_filter: object = None,  # BiasDirection or None
     time_stop_minutes: object = None,  # int or None
     bar_bundle: object = None,  # BarBundle or None
+    eval_mode: object = None,  # bool or None
 ) -> str:
     """Build a self-describing one-line run label from config + runtime params.
 
@@ -163,6 +167,7 @@ def build_run_label(
         direction_filter=direction_filter,
         time_stop_minutes=time_stop_minutes,
         bar_bundle=bar_bundle,
+        eval_mode=eval_mode,
     )
     # Human-friendly display format
     display_map = {
@@ -173,6 +178,7 @@ def build_run_label(
         "minscore": lambda v: f"MinScore={v.replace('of', '/')}",
         "window": lambda v: f"Window={v}",
         "ts": lambda v: f"TS={v}",
+        "mode": lambda v: f"Mode={v.capitalize()}",
     }
     parts = []
     for key, val in segs:
@@ -190,6 +196,7 @@ def build_run_key(
     direction_filter: object = None,
     time_stop_minutes: object = None,
     bar_bundle: object = None,
+    eval_mode: object = None,
 ) -> str:
     """Machine-stable slug for database indexing, caching, and artifact naming.
 
@@ -207,6 +214,7 @@ def build_run_key(
         direction_filter=direction_filter,
         time_stop_minutes=time_stop_minutes,
         bar_bundle=bar_bundle,
+        eval_mode=eval_mode,
     )
     raw = "_".join(f"{k}_{v}" for k, v in segs)
     # Collapse dots and any non-alphanumeric chars to underscores

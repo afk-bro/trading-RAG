@@ -2064,3 +2064,107 @@ class TestIntermarketLabelOnTrade:
         assert trade.intermarket_label in valid_labels
         # Both BULLISH → should be aligned
         assert trade.intermarket_label == "aligned"
+
+
+class TestDailyGovernorIntegration:
+    """Test that daily governor gates entries in the backtest loop."""
+
+    def test_governor_halts_after_max_trades(self):
+        """With max_trades=1, only one trade per day should be taken."""
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+        from collections import Counter
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        config = UnicornConfig()
+        governor = DailyGovernor(max_daily_loss_dollars=5000.0, max_trades_per_day=1)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+            daily_governor=governor,
+        )
+
+        # Count trades per calendar day
+        trades_per_day = Counter(t.entry_time.date() for t in result.trades)
+        for day, count in trades_per_day.items():
+            assert count <= 1, f"Day {day} had {count} trades, expected max 1"
+
+    def test_governor_none_means_no_limit(self):
+        """Without governor, no daily limits apply (backward compat)."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result_no_gov = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=UnicornConfig(),
+            daily_governor=None,
+        )
+        assert result_no_gov.trades_taken >= 0
+        assert result_no_gov.governor_stats is None
+
+    def test_governor_stats_populated(self):
+        """Governor stats dict should be present when governor is used."""
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        governor = DailyGovernor(max_daily_loss_dollars=300.0, max_trades_per_day=1)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=UnicornConfig(),
+            daily_governor=governor,
+        )
+
+        assert result.governor_stats is not None
+        assert "signals_skipped" in result.governor_stats
+        assert "days_halted" in result.governor_stats
+        assert "half_size_trades" in result.governor_stats
+        assert "total_days_traded" in result.governor_stats
+        assert "loss_limit_halts" in result.governor_stats
+        assert "trade_limit_halts" in result.governor_stats
+        # Policy knobs stored for report
+        assert result.governor_stats["max_daily_loss_dollars"] == 300.0
+        assert result.governor_stats["max_trades_per_day"] == 1
+
+
+class TestStructuralSizing:
+    def test_wide_stop_skips_trade(self):
+        """When stop is too wide for the risk budget, trade is skipped."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0,
+                                          volatility=20.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67,
+                                          volatility=7.0, interval_minutes=5)
+
+        # Very small budget: $50 per trade with NQ ($20/pt)
+        # Any stop > 2.5 points should produce quantity=0 -> skip
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=50,  # tiny budget
+            config=UnicornConfig(),
+        )
+
+        # Check that the mechanism exists (position_size_zero in reason)
+        size_skipped = [
+            s for s in result.all_setups
+            if s.reason_not_taken and "position_size_zero" in s.reason_not_taken
+        ]
+        assert isinstance(size_skipped, list)

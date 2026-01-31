@@ -513,6 +513,7 @@ class SetupOccurrence:
     signal_displacement_atr: float = 0.0    # MSS displacement in ATR multiples
     signal_mss_found: bool = False           # whether MSS was detected
     guard_reason_code: Optional[str] = None  # stable key: "wick_guard" | "range_guard" | "displacement_guard"
+    governor_rejected: bool = False  # daily governor blocked this entry
 
 
 @dataclass
@@ -640,6 +641,9 @@ class UnicornBacktestResult:
 
     # Machine-readable session diagnostics (populated by _build_session_diagnostics)
     session_diagnostics: Optional[dict] = None
+
+    # Daily governor stats (None when governor not used)
+    governor_stats: Optional[dict] = None
 
     @property
     def win_rate(self) -> float:
@@ -951,6 +955,8 @@ def run_unicorn_backtest(
     breakeven_at_r: Optional[float] = None,  # e.g. 1.0 = move stop to entry at +1R
     # Multi-timeframe bar bundle (enables full bias stack + 1m execution)
     bar_bundle: Optional[BarBundle] = None,
+    # Daily risk governor (eval mode)
+    daily_governor: Optional["DailyGovernor"] = None,
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -1010,12 +1016,14 @@ def run_unicorn_backtest(
             direction_filter=direction_filter,
             time_stop_minutes=time_stop_minutes,
             bar_bundle=bar_bundle,
+            eval_mode=daily_governor is not None,
         ),
         run_key=build_run_key(
             config,
             direction_filter=direction_filter,
             time_stop_minutes=time_stop_minutes,
             bar_bundle=bar_bundle,
+            eval_mode=daily_governor is not None,
         ),
     )
 
@@ -1069,6 +1077,21 @@ def run_unicorn_backtest(
     if has_m1:
         m1_timestamps = [b.ts for b in bar_bundle.m1]
 
+    # Daily governor tracking
+    _gov_stats = {
+        "signals_skipped": 0,
+        "days_halted": 0,
+        "half_size_trades": 0,
+        "total_days_traded": 0,
+        "loss_limit_halts": 0,
+        "trade_limit_halts": 0,
+    }
+    if daily_governor is not None:
+        _gov_stats["max_daily_loss_dollars"] = daily_governor.max_daily_loss_dollars
+        _gov_stats["half_loss_threshold"] = daily_governor.half_loss_threshold
+        _gov_stats["max_trades_per_day"] = daily_governor.max_trades_per_day
+    _gov_day_has_trade = False  # track first trade per day for total_days_traded
+
     # Main backtest loop
     # Warmup needs extra bar because we use i-1 for signals
     warmup = 51  # Need history for indicators + 1 for causal signal
@@ -1076,6 +1099,18 @@ def run_unicorn_backtest(
     for i in range(warmup, len(htf_bars), scan_interval):
         bar = htf_bars[i]
         ts = bar.ts
+
+        # Daily governor: reset on new calendar day
+        if daily_governor is not None:
+            prev_halt_reason = daily_governor.maybe_reset(ts.date())
+            if prev_halt_reason:
+                _gov_stats["days_halted"] += 1
+                if prev_halt_reason == "loss_limit":
+                    _gov_stats["loss_limit_halts"] += 1
+                elif prev_halt_reason == "trade_limit":
+                    _gov_stats["trade_limit_halts"] += 1
+            if prev_halt_reason or daily_governor.day_trade_count == 0:
+                _gov_day_has_trade = False
 
         # CRITICAL: Use bar OPEN for entry price (we know open at start of bar)
         # We do NOT use bar.close - that's future information
@@ -1214,6 +1249,10 @@ def run_unicorn_backtest(
             result.total_pnl_points += trade.pnl_points
             result.total_pnl_dollars += trade.pnl_dollars
 
+            # Update daily governor
+            if daily_governor is not None:
+                daily_governor.record_trade_close(trade.pnl_dollars)
+
             # Update session stats
             session_stat = result.session_stats[trade.session]
             session_stat.trades_taken += 1
@@ -1222,6 +1261,11 @@ def run_unicorn_backtest(
                 session_stat.wins += 1
             elif trade.outcome == TradeOutcome.LOSS:
                 session_stat.losses += 1
+
+        # Daily governor gate
+        if daily_governor is not None and not daily_governor.allows_entry():
+            _gov_stats["signals_skipped"] += 1
+            continue
 
         # Check for new setups (only if we have capacity)
         if len(open_trades) >= max_concurrent_trades:
@@ -1419,10 +1463,31 @@ def run_unicorn_backtest(
 
             # Position sizing (account for slippage in risk)
             risk_dollars = (risk_points + slippage_points) * point_value
+            effective_risk_budget = dollars_per_trade
+            if daily_governor is not None:
+                effective_risk_budget *= daily_governor.risk_multiplier
             if risk_dollars > 0:
-                quantity = max(1, int(dollars_per_trade / risk_dollars))
+                quantity = int(effective_risk_budget / risk_dollars)
             else:
                 quantity = 1
+
+            # Skip trade if position size is zero (risk too wide for budget)
+            if quantity < 1:
+                setup_record.taken = False
+                setup_record.reason_not_taken = (
+                    f"position_size_zero: risk ${risk_dollars:.0f} > budget ${effective_risk_budget:.0f}"
+                )
+                result.all_setups.append(setup_record)
+                continue
+
+            # Track governor half-size trades
+            if daily_governor is not None and daily_governor.risk_multiplier < 1.0:
+                _gov_stats["half_size_trades"] += 1
+
+            # Track governor days with trades
+            if daily_governor is not None and not _gov_day_has_trade:
+                _gov_day_has_trade = True
+                _gov_stats["total_days_traded"] += 1
 
             # Create trade
             trade = TradeRecord(
@@ -1627,6 +1692,11 @@ def run_unicorn_backtest(
 
     result.config = config
     result.session_diagnostics = _build_session_diagnostics(result)
+
+    # Populate governor stats
+    if daily_governor is not None:
+        result.governor_stats = dict(_gov_stats)
+
     return result
 
 
@@ -2260,6 +2330,27 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append("")
     lines.append(f"Confidence-Win Correlation: {result.confidence_win_correlation:+.3f}")
     lines.append("")
+
+    # Daily Governor
+    if result.governor_stats is not None:
+        gs = result.governor_stats
+        lines.append("-" * 40)
+        lines.append("DAILY GOVERNOR")
+        lines.append("-" * 40)
+        # Policy knobs
+        lines.append(f"Max daily loss:        ${gs['max_daily_loss_dollars']:,.0f}")
+        lines.append(f"Half-loss threshold:   ${gs['half_loss_threshold']:,.0f}")
+        lines.append(f"Max trades/day:        {gs['max_trades_per_day']}")
+        lines.append("")
+        # Outcomes
+        lines.append(f"Signals skipped:       {gs['signals_skipped']}")
+        lines.append(f"Days halted early:     {gs['days_halted']}")
+        lines.append(f"  Loss-limit halts:    {gs['loss_limit_halts']}")
+        lines.append(f"  Trade-limit halts:   {gs['trade_limit_halts']}")
+        lines.append(f"Half-size trades:      {gs['half_size_trades']}")
+        lines.append(f"Days with trades:      {gs['total_days_traded']}")
+        lines.append("")
+
     lines.append("=" * 70)
 
     return "\n".join(lines)

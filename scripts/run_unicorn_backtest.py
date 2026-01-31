@@ -540,6 +540,7 @@ def _build_output_dict(result, config, args) -> dict:
             for b in result.confidence_buckets
         ],
         "session_diagnostics": result.session_diagnostics,
+        "governor_stats": result.governor_stats,
     }
 
 
@@ -806,6 +807,28 @@ Examples:
         metavar="PATH",
         help="Write current run's JSON output dict to PATH (for future --baseline-run)."
     )
+    # Eval mode (prop firm simulation)
+    parser.add_argument(
+        "--eval-mode",
+        action="store_true",
+        help="Enable eval/prop-firm mode: daily governor, structural sizing (skip if contracts < 1), "
+             "fixed 2R target, no breakeven/trailing. Sets sensible defaults for --max-daily-loss "
+             "and --max-trades-per-day if not explicitly provided."
+    )
+    parser.add_argument(
+        "--max-daily-loss",
+        type=float,
+        metavar="DOLLARS",
+        help="Max daily loss in dollars before halting for the day. "
+             "Default: equal to --dollars-per-trade when --eval-mode is set."
+    )
+    parser.add_argument(
+        "--max-trades-per-day",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max trades per calendar day. Default: 2 when --eval-mode is set."
+    )
 
     args = parser.parse_args()
 
@@ -819,6 +842,26 @@ Examples:
     if args.seed is not None:
         import random
         random.seed(args.seed)
+
+    # Eval mode / daily governor
+    daily_governor = None
+    if args.eval_mode or args.max_daily_loss is not None or args.max_trades_per_day is not None:
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+
+        max_loss = args.max_daily_loss if args.max_daily_loss is not None else args.dollars_per_trade
+        max_trades = args.max_trades_per_day if args.max_trades_per_day is not None else 2
+
+        daily_governor = DailyGovernor(
+            max_daily_loss_dollars=max_loss,
+            max_trades_per_day=max_trades,
+        )
+
+        if args.eval_mode:
+            # Lock eval behavior: no breakeven, no trailing
+            args.breakeven_at_r = None
+
+        print(f"Daily governor: max loss ${max_loss:.0f}/day, max {max_trades} trades/day, "
+              f"half-size at ${max_loss * 0.5:.0f} loss")
 
     # Load or generate data
     bar_bundle = None  # Set when --multi-tf is active
@@ -1045,6 +1088,7 @@ Examples:
         reference_symbol=reference_symbol,
         breakeven_at_r=args.breakeven_at_r,
         bar_bundle=bar_bundle,
+        daily_governor=daily_governor,
     )
 
     # Format output
@@ -1063,6 +1107,18 @@ Examples:
         print(f"Report written to {args.output}")
     else:
         print(report)
+
+    # Governor summary
+    if result.governor_stats is not None:
+        gs = result.governor_stats
+        print(f"\nDaily Governor (${gs['max_daily_loss_dollars']:,.0f} max loss, "
+              f"${gs['half_loss_threshold']:,.0f} half-threshold, "
+              f"{gs['max_trades_per_day']} trades/day):")
+        print(f"  Signals skipped:    {gs['signals_skipped']}")
+        print(f"  Days halted early:  {gs['days_halted']} "
+              f"(loss={gs['loss_limit_halts']}, trades={gs['trade_limit_halts']})")
+        print(f"  Half-size trades:   {gs['half_size_trades']}")
+        print(f"  Days with trades:   {gs['total_days_traded']}")
 
     # Baseline compare
     if args.baseline_run:

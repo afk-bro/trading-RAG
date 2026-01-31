@@ -183,6 +183,7 @@ def _fake_result(**overrides):
             ),
         ],
         session_diagnostics={"intermarket_agreement": None},
+        governor_stats=None,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
