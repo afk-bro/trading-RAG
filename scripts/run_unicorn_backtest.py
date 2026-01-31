@@ -36,6 +36,7 @@ from app.services.strategy.strategies.unicorn_model import (
     MODEL_VERSION,
     MODEL_CODENAME,
     build_run_label,
+    build_run_key,
 )
 from app.services.strategy.indicators.tf_bias import compute_tf_bias
 
@@ -677,6 +678,13 @@ Examples:
         help="Skip entry if MSS displacement < this ATR multiple. None=disabled."
     )
     parser.add_argument(
+        "--no-displacement-backstop",
+        action="store_true",
+        default=False,
+        help="Disable the redundant post-scoring displacement guard (backstop). "
+             "Safe when displacement is already a mandatory criterion."
+    )
+    parser.add_argument(
         "--breakeven-at-r", type=float, default=None,
         help="Move stop to breakeven (entry price) when MFE reaches this R-multiple. "
              "E.g. 1.0 = move stop to entry at +1R. None=disabled."
@@ -873,6 +881,7 @@ Examples:
         min_displacement_atr=args.min_displacement_atr,
         max_sweep_age_bars=args.max_sweep_age_bars,
         require_sweep_settlement=args.require_sweep_settlement,
+        enable_displacement_backstop=not args.no_displacement_backstop,
     )
 
     # Run backtest
@@ -971,6 +980,16 @@ Examples:
 
         # Convert to JSON-serializable format
         output = {
+            "run_key": result.run_key,
+            "run_label": result.run_label,
+            "model_version": MODEL_VERSION,
+            "config": {
+                "min_scored_criteria": config.min_scored_criteria,
+                "min_displacement_atr": config.min_displacement_atr,
+                "session_profile": config.session_profile.value,
+                "direction_filter": "long" if args.long_only else "bidir",
+                "time_stop_minutes": args.time_stop,
+            },
             "symbol": result.symbol,
             "start_date": result.start_date.isoformat(),
             "end_date": result.end_date.isoformat(),

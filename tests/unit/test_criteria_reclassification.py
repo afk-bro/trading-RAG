@@ -20,6 +20,9 @@ from app.services.strategy.strategies.unicorn_model import (
     MODEL_VERSION,
     MODEL_CODENAME,
     MODEL_VERSIONS,
+    EXPECTED_SEGMENT_ORDER,
+    MAX_KEY_LEN,
+    _label_segments,
     build_run_label,
     build_run_key,
 )
@@ -601,6 +604,47 @@ class TestBuildRunKey:
         k2 = build_run_key(UnicornConfig(min_displacement_atr=0.3))
         assert k1 != k2
 
+    def test_key_only_lowercase_alnum_underscore(self):
+        """run_key must match [a-z0-9_]+ only."""
+        import re
+        for cfg in [UnicornConfig(), UnicornConfig(min_displacement_atr=0.3, session_profile=SessionProfile.STRICT)]:
+            key = build_run_key(cfg, direction_filter=BiasDirection.BULLISH, time_stop_minutes=30, bar_bundle=object())
+            assert re.fullmatch(r"[a-z0-9_]+", key), f"Key contains invalid chars: {key}"
+
+    def test_key_max_length_160(self):
+        """run_key must be at most MAX_KEY_LEN characters."""
+        key = build_run_key(UnicornConfig())
+        assert len(key) <= MAX_KEY_LEN
+
+    def test_key_deterministic_across_calls(self):
+        """Same config produces same key across multiple calls."""
+        cfg = UnicornConfig(min_displacement_atr=0.5, session_profile=SessionProfile.WIDE)
+        k1 = build_run_key(cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45)
+        k2 = build_run_key(cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45)
+        k3 = build_run_key(cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45)
+        assert k1 == k2 == k3
+
+
+class TestLabelSegmentOrder:
+    """Segment order in _label_segments must match the contract."""
+
+    def test_segment_key_order_matches_contract(self):
+        segs = _label_segments(UnicornConfig())
+        keys = tuple(k for k, v in segs)
+        assert keys == EXPECTED_SEGMENT_ORDER
+
+    def test_order_stable_across_configs(self):
+        """Same key order with MTF + long + displacement + time stop."""
+        cfg = UnicornConfig(min_displacement_atr=0.3, session_profile=SessionProfile.STRICT)
+        segs = _label_segments(
+            cfg,
+            direction_filter=BiasDirection.BULLISH,
+            time_stop_minutes=30,
+            bar_bundle=object(),
+        )
+        keys = tuple(k for k, v in segs)
+        assert keys == EXPECTED_SEGMENT_ORDER
+
 
 class TestRunLabelInReport:
     """Run label and model line appear in backtest report."""
@@ -644,3 +688,108 @@ class TestRunLabelInReport:
         report = format_backtest_report(result)
         assert "Unicorn v2.1 (Intent)" in report
         assert "5M+4S" in report
+
+
+# ===========================================================================
+# Item 1: run_key stamped into export artifacts
+# ===========================================================================
+
+
+class TestRunKeyInExports:
+    """run_key, run_label, and model_version are present in export artifacts."""
+
+    def _make_result(self):
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        return run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            config=UnicornConfig(),
+        )
+
+    def test_json_output_contains_run_identity(self):
+        """Verify run_key/run_label/model_version would be in JSON dict."""
+        result = self._make_result()
+        # Simulate what the CLI --json path builds
+        output = {
+            "run_key": result.run_key,
+            "run_label": result.run_label,
+            "model_version": MODEL_VERSION,
+        }
+        assert output["run_key"] is not None
+        assert "unicorn_v2_1" in output["run_key"]
+        assert output["run_label"] is not None
+        assert "Unicorn v2.1" in output["run_label"]
+        assert output["model_version"] == "2.1"
+
+    def test_report_header_contains_run_key(self):
+        """Assert 'Run key:' line in report text."""
+        from app.services.backtest.engines.unicorn_runner import format_backtest_report
+
+        result = self._make_result()
+        report = format_backtest_report(result)
+        assert "Run key:" in report
+        assert result.run_key in report
+
+    def test_trade_trace_header_contains_run_label(self):
+        """Assert run_label appears in trade trace output."""
+        from app.services.backtest.engines.unicorn_runner import (
+            format_trade_trace,
+            IntrabarPolicy,
+            BarBundle,
+        )
+
+        result = self._make_result()
+        if len(result.trades) == 0:
+            pytest.skip("No trades to trace")
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        bar_bundle = BarBundle(m15=htf_bars, m5=ltf_bars)
+
+        trace = format_trade_trace(
+            trade=result.trades[0],
+            trade_index=0,
+            bar_bundle=bar_bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+        assert result.run_label in trace
+
+
+# ===========================================================================
+# Item 6: Backstop removal cleanup flag
+# ===========================================================================
+
+
+class TestDisplacementBackstopFlag:
+    """enable_displacement_backstop config flag."""
+
+    def test_backstop_enabled_by_default(self):
+        config = UnicornConfig()
+        assert config.enable_displacement_backstop is True
+
+    def test_backstop_disabled_skips_guard(self):
+        """With flag=False and displacement threshold set, no backstop rejections."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            config=UnicornConfig(
+                min_displacement_atr=0.3,
+                enable_displacement_backstop=False,
+            ),
+        )
+
+        for setup in result.all_setups:
+            assert not setup.displacement_guard_rejected, (
+                f"Backstop fired at {setup.timestamp} despite enable_displacement_backstop=False"
+            )

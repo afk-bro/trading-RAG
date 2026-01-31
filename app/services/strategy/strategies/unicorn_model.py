@@ -105,6 +105,8 @@ MODEL_VERSIONS: dict[str, dict] = {
 MODEL_VERSION = "2.1"
 MODEL_CODENAME = MODEL_VERSIONS[MODEL_VERSION]["codename"]
 
+EXPECTED_SEGMENT_ORDER = ("ver", "bias", "side", "displ", "minscore", "window", "ts")
+
 
 def _label_segments(
     config: "UnicornConfig",
@@ -179,6 +181,9 @@ def build_run_label(
     return " | ".join(parts)
 
 
+MAX_KEY_LEN = 160
+
+
 def build_run_key(
     config: "UnicornConfig",
     *,
@@ -191,7 +196,10 @@ def build_run_key(
     Example: unicorn_v2_1_bias_mtf_side_long_displ_0_3_minscore_2of4_window_strict_ts_30m
 
     Deterministic: same config + runtime params always produce the same key.
+    Safe for filenames and DB indexing: lowercase alphanumeric + underscores,
+    capped at MAX_KEY_LEN characters.
     """
+    import hashlib
     import re
 
     segs = _label_segments(
@@ -202,7 +210,16 @@ def build_run_key(
     )
     raw = "_".join(f"{k}_{v}" for k, v in segs)
     # Collapse dots and any non-alphanumeric chars to underscores
-    return re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    sanitized = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+
+    if len(sanitized) > MAX_KEY_LEN:
+        full_hash = hashlib.sha256(sanitized.encode()).hexdigest()[:8]
+        sanitized = f"{sanitized[:MAX_KEY_LEN - 9]}_{full_hash}"
+
+    assert re.fullmatch(r"[a-z0-9_]+", sanitized)
+    assert len(sanitized) <= MAX_KEY_LEN
+
+    return sanitized
 
 
 # =============================================================================
@@ -288,6 +305,9 @@ class UnicornConfig:
     # Sweep closure confirmation gate
     max_sweep_age_bars: Optional[int] = None     # e.g., 10 — only accept sweeps within N HTF bars
     require_sweep_settlement: bool = False        # next bar must close on correct side of swept level
+
+    # Backstop cleanup flag: when False, skip the redundant post-scoring displacement guard
+    enable_displacement_backstop: bool = True
 
     def __post_init__(self):
         if not (0 <= self.min_scored_criteria <= 4):

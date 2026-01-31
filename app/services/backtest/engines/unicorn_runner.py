@@ -634,7 +634,8 @@ class UnicornBacktestResult:
 
     # Self-describing run label (e.g. "Unicorn v2.1 | Bias=MTF | Side=Long | ...")
     run_label: Optional[str] = None
-    # Machine-stable slug for indexing/caching/artifact naming
+    # Machine-stable slug for indexing/caching/artifact naming.
+    # When persisting to backtest_runs DB, include as params["run_key"].
     run_key: Optional[str] = None
 
     # Machine-readable session diagnostics (populated by _build_session_diagnostics)
@@ -1349,7 +1350,7 @@ def run_unicorn_backtest(
 
             # BACKSTOP: displacement is now a mandatory criterion; this guard is redundant
             # but kept temporarily for regression safety. Remove after validation.
-            if config.min_displacement_atr is not None:
+            if config.enable_displacement_backstop and config.min_displacement_atr is not None:
                 setup_record.displacement_guard_evaluated = True
 
                 if (
@@ -2016,6 +2017,8 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
         lines.append("CONFIG")
         lines.append("-" * 40)
         lines.append(f"Model:                 {STRATEGY_FAMILY} v{MODEL_VERSION} ({MODEL_CODENAME}) — {ver_info['mandatory']}M+{ver_info['scored']}S")
+        if result.run_key:
+            lines.append(f"Run key:               {result.run_key}")
         lines.append(f"Session profile:       {cfg.session_profile.value}")
         windows = SESSION_WINDOWS.get(cfg.session_profile, MACRO_WINDOWS)
         window_strs = [f"{s.strftime('%H:%M')}-{e.strftime('%H:%M')}" for s, e in windows]
@@ -2303,6 +2306,8 @@ def format_trade_trace(
     lines: list[str] = []
     lines.append("=" * 70)
     lines.append(f"TRADE TRACE — Trade #{trade_index}")
+    if result.run_label:
+        lines.append(result.run_label)
     lines.append("=" * 70)
 
     # ------------------------------------------------------------------
