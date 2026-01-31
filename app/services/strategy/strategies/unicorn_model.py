@@ -144,6 +144,10 @@ class UnicornConfig:
     # Displacement conviction guard (None = disabled)
     min_displacement_atr: Optional[float] = None  # e.g., 0.5 — skip if MSS displacement < 0.5x ATR
 
+    # Sweep closure confirmation gate
+    max_sweep_age_bars: Optional[int] = None     # e.g., 10 — only accept sweeps within N HTF bars
+    require_sweep_settlement: bool = False        # next bar must close on correct side of swept level
+
     def __post_init__(self):
         if not (0 <= self.min_scored_criteria <= 5):
             raise ValueError(
@@ -160,6 +164,8 @@ class UnicornConfig:
             raise ValueError("max_range_atr_mult must be > 0 when set")
         if self.min_displacement_atr is not None and self.min_displacement_atr <= 0:
             raise ValueError("min_displacement_atr must be > 0 when set")
+        if self.max_sweep_age_bars is not None and self.max_sweep_age_bars < 1:
+            raise ValueError("max_sweep_age_bars must be >= 1 when set")
 
 
 # Default config

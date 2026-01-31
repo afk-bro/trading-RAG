@@ -334,6 +334,9 @@ class CriteriaCheck:
     htf_bias_direction: Optional[BiasDirection] = None
     htf_bias_confidence: float = 0.0
     sweep_type: Optional[str] = None
+    sweep_age_bars: Optional[int] = None            # age of best candidate sweep
+    sweep_settled: Optional[bool] = None             # did settlement pass (None if not evaluated)
+    sweep_reject_reason: Optional[str] = None        # "stale" | "unsettled" | "no_next_bar" | None
     fvg_size: float = 0.0
     mss_displacement_atr: float = 0.0  # displacement_size of matched MSS (ATR multiples)
     stop_points: float = 0.0
@@ -762,17 +765,55 @@ def check_criteria(
 
     current_price = bars[-1].close if bars else 0
 
-    # 2. Liquidity Sweep
+    # 2. Liquidity Sweep (with optional closure confirmation gate)
     sweeps = detect_liquidity_sweeps(htf_bars, lookback=50)
-    for sweep in sweeps:
-        if direction == BiasDirection.BULLISH and sweep.sweep_type == "low":
-            check.liquidity_sweep_found = True
-            check.sweep_type = "low"
-            break
-        elif direction == BiasDirection.BEARISH and sweep.sweep_type == "high":
-            check.liquidity_sweep_found = True
-            check.sweep_type = "high"
-            break
+    n_bars = len(htf_bars)
+
+    # Iterate newest-first so most recent qualifying sweep wins
+    for sweep in sorted(sweeps, key=lambda s: s.bar_index, reverse=True):
+        # Direction filter
+        if direction == BiasDirection.BULLISH and sweep.sweep_type != "low":
+            continue
+        if direction == BiasDirection.BEARISH and sweep.sweep_type != "high":
+            continue
+
+        age = (n_bars - 1) - sweep.bar_index
+
+        # Track best (youngest) candidate for diagnostics
+        if check.sweep_age_bars is None or age < check.sweep_age_bars:
+            check.sweep_age_bars = age
+
+        # Recency gate
+        if config.max_sweep_age_bars is not None and age > config.max_sweep_age_bars:
+            if check.sweep_reject_reason is None:
+                check.sweep_reject_reason = "stale"
+            continue
+
+        # Settlement gate
+        if config.require_sweep_settlement:
+            settle_idx = sweep.bar_index + 1
+            if settle_idx >= n_bars:
+                check.sweep_settled = False
+                check.sweep_reject_reason = "no_next_bar"
+                continue
+
+            settle_bar = htf_bars[settle_idx]
+            if sweep.sweep_type == "low":
+                settled = settle_bar.close >= sweep.swept_level
+            else:
+                settled = settle_bar.close <= sweep.swept_level
+
+            if not settled:
+                check.sweep_settled = False
+                check.sweep_reject_reason = "unsettled"
+                continue
+            check.sweep_settled = True
+
+        # Sweep passes all gates
+        check.liquidity_sweep_found = True
+        check.sweep_type = sweep.sweep_type
+        check.sweep_reject_reason = None  # clear any earlier candidate's reason
+        break
 
     # 3. HTF FVG (ATR-normalized threshold)
     htf_fvgs = detect_fvgs(
@@ -1939,6 +1980,9 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
         lines.append(f"Range guard:           {rng}")
         disp = f"{cfg.min_displacement_atr}x ATR" if cfg.min_displacement_atr is not None else "disabled"
         lines.append(f"Displacement guard:    {disp}")
+        sweep_age = f"{cfg.max_sweep_age_bars} bars" if cfg.max_sweep_age_bars is not None else "disabled"
+        sweep_settle = "enabled" if cfg.require_sweep_settlement else "disabled"
+        lines.append(f"Sweep closure guard:   recency={sweep_age}, settlement={sweep_settle}")
         lines.append("")
 
     # Setup Analysis

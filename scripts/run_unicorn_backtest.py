@@ -678,6 +678,14 @@ Examples:
         help="Move stop to breakeven (entry price) when MFE reaches this R-multiple. "
              "E.g. 1.0 = move stop to entry at +1R. None=disabled."
     )
+    parser.add_argument(
+        "--max-sweep-age-bars", type=int, default=None,
+        help="Max HTF bars since sweep for recency gate. None=disabled."
+    )
+    parser.add_argument(
+        "--require-sweep-settlement", action="store_true", default=False,
+        help="Require bar after sweep to close on correct side of swept level."
+    )
     # Intermarket reference symbol
     parser.add_argument(
         "--ref-symbol",
@@ -860,6 +868,8 @@ Examples:
         max_wick_ratio=args.max_wick_ratio,
         max_range_atr_mult=args.max_range_atr,
         min_displacement_atr=args.min_displacement_atr,
+        max_sweep_age_bars=args.max_sweep_age_bars,
+        require_sweep_settlement=args.require_sweep_settlement,
     )
 
     # Run backtest
@@ -883,6 +893,10 @@ Examples:
         print(f"Displacement guard: min MSS displacement = {args.min_displacement_atr:.2f}x ATR")
     if args.breakeven_at_r is not None:
         print(f"Breakeven stop: move to entry at +{args.breakeven_at_r:.1f}R")
+    sweep_age = f"{args.max_sweep_age_bars} bars" if args.max_sweep_age_bars is not None else "disabled"
+    sweep_settle = "enabled" if args.require_sweep_settlement else "disabled"
+    if args.max_sweep_age_bars is not None or args.require_sweep_settlement:
+        print(f"Sweep closure guard: recency={sweep_age}, settlement={sweep_settle}")
 
     # Build reference bias series if requested
     reference_bias_series = None
