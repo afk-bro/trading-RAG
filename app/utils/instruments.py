@@ -29,3 +29,23 @@ def get_point_value(symbol: str) -> float:
         return POINT_VALUE_ES  # Full ES = $50 per point
     else:
         return POINT_VALUE_NQ  # Default to NQ
+
+
+# Micro → full-size root mapping for data loading.
+# MNQ/MES trade the same underlying at the same prices as NQ/ES;
+# only point_value differs.  Data feeds typically carry full-size only.
+_MICRO_TO_FULL = {"MNQ": "NQ", "MES": "ES"}
+
+
+def data_root(symbol: str) -> str:
+    """Return the data-feed root symbol for *symbol*.
+
+    Maps micro symbols to their full-size equivalents so the CSV loader
+    can find the correct rows.  Full-size symbols pass through unchanged.
+
+    >>> data_root("MNQ")
+    'NQ'
+    >>> data_root("ES")
+    'ES'
+    """
+    return _MICRO_TO_FULL.get(symbol.upper(), symbol.upper())

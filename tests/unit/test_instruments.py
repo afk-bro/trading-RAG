@@ -1,6 +1,6 @@
 """Unit tests for app.utils.instruments."""
 
-from app.utils.instruments import get_point_value, POINT_VALUE_NQ, POINT_VALUE_ES
+from app.utils.instruments import get_point_value, data_root, POINT_VALUE_NQ, POINT_VALUE_ES
 
 
 class TestGetPointValue:
@@ -44,3 +44,26 @@ class TestGetPointValue:
         """MES must match before ES (substring ordering)."""
         assert get_point_value("MES") == 5.0
         assert get_point_value("ES") == 50.0
+
+
+class TestDataRoot:
+    """Tests for data_root() micro→full-size mapping."""
+
+    def test_mnq_maps_to_nq(self):
+        assert data_root("MNQ") == "NQ"
+
+    def test_mes_maps_to_es(self):
+        assert data_root("MES") == "ES"
+
+    def test_nq_passthrough(self):
+        assert data_root("NQ") == "NQ"
+
+    def test_es_passthrough(self):
+        assert data_root("ES") == "ES"
+
+    def test_case_insensitive(self):
+        assert data_root("mnq") == "NQ"
+        assert data_root("mes") == "ES"
+
+    def test_unknown_passthrough(self):
+        assert data_root("YM") == "YM"

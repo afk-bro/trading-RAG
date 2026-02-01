@@ -44,6 +44,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+from app.utils.instruments import data_root
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -614,10 +616,13 @@ class DatabentoFetcher:
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
 
+        # Resolve micro → full-size root for data loading (MNQ→NQ, MES→ES)
+        csv_root = data_root(symbol)
+
         # Build front-month contract mapping if needed
         front_month_contracts: dict[str, str] = {}  # date_str -> contract symbol
         if front_month_only:
-            contracts = get_continuous_symbols(symbol, start_dt, end_dt)
+            contracts = get_continuous_symbols(csv_root, start_dt, end_dt)
             for contract_symbol, period_start, period_end in contracts:
                 # Map each date in the period to this contract
                 current = period_start
@@ -669,7 +674,7 @@ class DatabentoFetcher:
                     continue
 
                 # Check if symbol starts with our root
-                if not sym.startswith(symbol):
+                if not sym.startswith(csv_root):
                     continue
 
                 # Parse timestamp
@@ -826,9 +831,12 @@ class DatabentoFetcher:
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
 
+        # Resolve micro → full-size root for data loading (MNQ→NQ, MES→ES)
+        csv_root = data_root(symbol)
+
         front_month_contracts: dict[str, str] = {}
         if front_month_only:
-            contracts = get_continuous_symbols(symbol, start_dt, end_dt)
+            contracts = get_continuous_symbols(csv_root, start_dt, end_dt)
             for contract_symbol, period_start, period_end in contracts:
                 current = period_start
                 while current <= period_end:
@@ -847,7 +855,7 @@ class DatabentoFetcher:
             for line in f:
                 parts = line.strip().split(",")
                 sym = parts[col_idx["symbol"]]
-                if "-" in sym or not sym.startswith(symbol):
+                if "-" in sym or not sym.startswith(csv_root):
                     continue
                 ts_str = parts[col_idx["ts_event"]]
                 try:
