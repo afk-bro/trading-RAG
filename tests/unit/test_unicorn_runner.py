@@ -2110,7 +2110,9 @@ class TestDailyGovernorIntegration:
             daily_governor=None,
         )
         assert result_no_gov.trades_taken >= 0
-        assert result_no_gov.governor_stats is None
+        # governor_stats always populated (sizing config), but no governor-specific keys
+        assert result_no_gov.governor_stats is not None
+        assert "max_daily_loss_dollars" not in result_no_gov.governor_stats
 
     def test_governor_stats_populated(self):
         """Governor stats dict should be present when governor is used."""

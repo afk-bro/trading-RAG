@@ -894,4 +894,6 @@ class TestGovernorInReport:
             config=UnicornConfig(),
         )
         report = format_backtest_report(result)
-        assert "DAILY GOVERNOR" not in report
+        # Governor section present (sizing config), but no governor policy knobs
+        assert "DAILY GOVERNOR" in report
+        assert "Max daily loss:" not in report

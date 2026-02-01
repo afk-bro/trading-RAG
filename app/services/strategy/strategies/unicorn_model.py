@@ -343,8 +343,13 @@ DEFAULT_CONFIG = UnicornConfig()
 # Risk parameters for NQ/ES (legacy, for backward compatibility)
 MAX_STOP_POINTS_NQ = 30  # 30 points max stop for NQ
 MAX_STOP_POINTS_ES = 10  # 10 points max stop for ES
-POINT_VALUE_NQ = 20.0  # $20 per point for NQ
-POINT_VALUE_ES = 50.0  # $50 per point for ES
+
+# Re-export point values from shared module for backward compatibility
+from app.utils.instruments import (  # noqa: E402
+    POINT_VALUE_NQ,
+    POINT_VALUE_ES,
+    get_point_value,
+)
 
 
 @dataclass
@@ -587,20 +592,7 @@ def get_max_stop_points(
         return config.max_stop_points_nq  # Default to NQ
 
 
-def get_point_value(symbol: str) -> float:
-    """Get point value for the instrument."""
-    symbol_upper = symbol.upper()
-    # Check micro contracts first (MNQ before NQ, MES before ES)
-    if "MNQ" in symbol_upper:
-        return POINT_VALUE_NQ / 10  # Micro NQ = $2 per point
-    elif "NQ" in symbol_upper:
-        return POINT_VALUE_NQ  # Full NQ = $20 per point
-    elif "MES" in symbol_upper:
-        return POINT_VALUE_ES / 10  # Micro ES = $5 per point
-    elif "ES" in symbol_upper:
-        return POINT_VALUE_ES  # Full ES = $50 per point
-    else:
-        return POINT_VALUE_NQ  # Default
+# get_point_value is imported from app.utils.instruments above
 
 
 def find_entry_zone(

@@ -830,6 +830,41 @@ Examples:
         help="Max trades per calendar day. Default: 2 when --eval-mode is set."
     )
 
+    # Eval account profile (R-native sizing from trailing drawdown)
+    parser.add_argument(
+        "--eval-account-size",
+        type=float,
+        metavar="DOLLARS",
+        help="Eval account size in dollars. Enables R-native sizing from trailing drawdown."
+    )
+    parser.add_argument(
+        "--eval-max-drawdown",
+        type=float,
+        metavar="DOLLARS",
+        help="Maximum trailing drawdown in dollars. Default: 4%% of --eval-account-size."
+    )
+    parser.add_argument(
+        "--eval-risk-fraction",
+        type=float,
+        default=0.15,
+        metavar="FLOAT",
+        help="Fraction of remaining drawdown room to risk per trade (default: 0.15)."
+    )
+    parser.add_argument(
+        "--eval-r-min",
+        type=float,
+        default=100.0,
+        metavar="DOLLARS",
+        help="Minimum R_day floor in dollars (default: 100)."
+    )
+    parser.add_argument(
+        "--eval-r-max",
+        type=float,
+        default=300.0,
+        metavar="DOLLARS",
+        help="Maximum R_day cap in dollars (default: 300)."
+    )
+
     args = parser.parse_args()
 
     # Validate ref args
@@ -862,6 +897,46 @@ Examples:
 
         print(f"Daily governor: max loss ${max_loss:.0f}/day, max {max_trades} trades/day, "
               f"half-size at ${max_loss * 0.5:.0f} loss")
+
+    # Eval account profile (R-native sizing)
+    eval_profile = None
+    if args.eval_account_size is not None:
+        from app.services.backtest.engines.eval_profile import EvalAccountProfile
+
+        max_dd = (
+            args.eval_max_drawdown
+            if args.eval_max_drawdown is not None
+            else args.eval_account_size * 0.04
+        )
+
+        eval_profile = EvalAccountProfile(
+            account_size=args.eval_account_size,
+            max_drawdown_dollars=max_dd,
+            max_daily_loss_dollars=(
+                args.max_daily_loss if args.max_daily_loss is not None else max_dd * 0.5
+            ),
+            risk_fraction=args.eval_risk_fraction,
+            r_min_dollars=args.eval_r_min,
+            r_max_dollars=args.eval_r_max,
+        )
+
+        # When profile is active with --eval-mode and no explicit --max-daily-loss,
+        # wire profile.max_daily_loss_dollars into DailyGovernor
+        if args.eval_mode and daily_governor is None:
+            from app.services.backtest.engines.daily_governor import DailyGovernor
+            max_trades = args.max_trades_per_day if args.max_trades_per_day is not None else 2
+            daily_governor = DailyGovernor(
+                max_daily_loss_dollars=eval_profile.max_daily_loss_dollars,
+                max_trades_per_day=max_trades,
+            )
+            print(f"Daily governor (from eval profile): max loss "
+                  f"${eval_profile.max_daily_loss_dollars:.0f}/day, "
+                  f"max {max_trades} trades/day")
+
+        print(f"Eval profile: ${eval_profile.account_size:,.0f} account, "
+              f"${eval_profile.max_drawdown_dollars:,.0f} max DD, "
+              f"fraction={eval_profile.risk_fraction}, "
+              f"R=[${eval_profile.r_min_dollars:.0f}-${eval_profile.r_max_dollars:.0f}]")
 
     # Load or generate data
     bar_bundle = None  # Set when --multi-tf is active
@@ -1089,6 +1164,7 @@ Examples:
         breakeven_at_r=args.breakeven_at_r,
         bar_bundle=bar_bundle,
         daily_governor=daily_governor,
+        eval_profile=eval_profile,
     )
 
     # Format output
@@ -1111,14 +1187,35 @@ Examples:
     # Governor summary
     if result.governor_stats is not None:
         gs = result.governor_stats
-        print(f"\nDaily Governor (${gs['max_daily_loss_dollars']:,.0f} max loss, "
-              f"${gs['half_loss_threshold']:,.0f} half-threshold, "
-              f"{gs['max_trades_per_day']} trades/day):")
+        if "max_daily_loss_dollars" in gs:
+            print(f"\nDaily Governor (${gs['max_daily_loss_dollars']:,.0f} max loss, "
+                  f"${gs['half_loss_threshold']:,.0f} half-threshold, "
+                  f"{gs['max_trades_per_day']} trades/day):")
+        else:
+            print("\nGovernor stats:")
+        print(f"  Risk budget/trade:  ${gs.get('dollars_per_trade', 0):,.0f}")
+        print(f"  Sizing rejects:     {gs.get('sizing_rejects', 0)}")
         print(f"  Signals skipped:    {gs['signals_skipped']}")
         print(f"  Days halted early:  {gs['days_halted']} "
               f"(loss={gs['loss_limit_halts']}, trades={gs['trade_limit_halts']})")
         print(f"  Half-size trades:   {gs['half_size_trades']}")
         print(f"  Days with trades:   {gs['total_days_traded']}")
+
+        # Eval account summary
+        if "eval_account_size" in gs:
+            trailing_dd = gs.get("trailing_drawdown", 0)
+            max_dd = gs["eval_max_drawdown"]
+            dd_pct = (trailing_dd / max_dd * 100) if max_dd > 0 else 0.0
+            print(f"\n  Eval Account:")
+            print(f"    Starting equity:  ${gs['eval_account_size']:,.0f}")
+            print(f"    Final equity:     ${gs.get('final_equity', 0):,.0f}")
+            print(f"    Peak equity:      ${gs.get('peak_equity', 0):,.0f}")
+            print(f"    Trailing DD:      ${trailing_dd:,.0f} / ${max_dd:,.0f} ({dd_pct:.1f}%)")
+            r_min = gs.get("r_day_min", 0)
+            r_max = gs.get("r_day_max", 0)
+            print(f"    R_day range:      ${r_min:,.0f} - ${r_max:,.0f}")
+            if gs.get("drawdown_halt"):
+                print(f"    *** EVAL BLOWN ***")
 
     # Baseline compare
     if args.baseline_run:

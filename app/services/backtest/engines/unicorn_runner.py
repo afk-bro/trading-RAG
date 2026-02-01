@@ -19,6 +19,11 @@ import statistics
 
 from app.utils.time import to_eastern_time
 
+from app.services.backtest.engines.eval_profile import (
+    EvalAccountProfile,
+    compute_r_day,
+)
+
 from app.services.strategy.models import OHLCVBar
 from app.services.strategy.indicators.ict_patterns import (
     detect_fvgs,
@@ -957,6 +962,8 @@ def run_unicorn_backtest(
     bar_bundle: Optional[BarBundle] = None,
     # Daily risk governor (eval mode)
     daily_governor: Optional["DailyGovernor"] = None,
+    # Eval account profile (R-native sizing from trailing drawdown)
+    eval_profile: Optional[EvalAccountProfile] = None,
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -1016,14 +1023,14 @@ def run_unicorn_backtest(
             direction_filter=direction_filter,
             time_stop_minutes=time_stop_minutes,
             bar_bundle=bar_bundle,
-            eval_mode=daily_governor is not None,
+            eval_mode=daily_governor is not None or eval_profile is not None,
         ),
         run_key=build_run_key(
             config,
             direction_filter=direction_filter,
             time_stop_minutes=time_stop_minutes,
             bar_bundle=bar_bundle,
-            eval_mode=daily_governor is not None,
+            eval_mode=daily_governor is not None or eval_profile is not None,
         ),
     )
 
@@ -1085,12 +1092,35 @@ def run_unicorn_backtest(
         "total_days_traded": 0,
         "loss_limit_halts": 0,
         "trade_limit_halts": 0,
+        "sizing_rejects": 0,
+        # Sizing config (always present for artifact interpretability)
+        "dollars_per_trade": dollars_per_trade,
+        "sizing_active": dollars_per_trade > 0,
     }
     if daily_governor is not None:
         _gov_stats["max_daily_loss_dollars"] = daily_governor.max_daily_loss_dollars
         _gov_stats["half_loss_threshold"] = daily_governor.half_loss_threshold
         _gov_stats["max_trades_per_day"] = daily_governor.max_trades_per_day
     _gov_day_has_trade = False  # track first trade per day for total_days_traded
+
+    # Eval profile equity tracking
+    _running_equity = eval_profile.account_size if eval_profile else 0.0
+    _peak_equity = _running_equity
+    _current_r_day = (
+        compute_r_day(eval_profile, _running_equity, _peak_equity)
+        if eval_profile else dollars_per_trade
+    )
+    _r_day_min = _current_r_day
+    _r_day_max = _current_r_day
+    _eval_blown = False
+    _prev_date = None  # day boundary detection (independent of governor)
+
+    if eval_profile is not None:
+        _gov_stats["eval_account_size"] = eval_profile.account_size
+        _gov_stats["eval_max_drawdown"] = eval_profile.max_drawdown_dollars
+        _gov_stats["eval_risk_fraction"] = eval_profile.risk_fraction
+        _gov_stats["eval_r_min"] = eval_profile.r_min_dollars
+        _gov_stats["eval_r_max"] = eval_profile.r_max_dollars
 
     # Main backtest loop
     # Warmup needs extra bar because we use i-1 for signals
@@ -1111,6 +1141,22 @@ def run_unicorn_backtest(
                     _gov_stats["trade_limit_halts"] += 1
             if prev_halt_reason or daily_governor.day_trade_count == 0:
                 _gov_day_has_trade = False
+
+        # Eval profile: recompute R_day at day boundaries
+        if eval_profile is not None:
+            bar_date = ts.date()
+            if _prev_date != bar_date:
+                _current_r_day = compute_r_day(
+                    eval_profile, _running_equity, _peak_equity
+                )
+                if _current_r_day == 0.0:
+                    _eval_blown = True
+                _r_day_min = min(_r_day_min, _current_r_day)
+                _r_day_max = max(_r_day_max, _current_r_day)
+                _prev_date = bar_date
+
+        if _eval_blown:
+            break
 
         # CRITICAL: Use bar OPEN for entry price (we know open at start of bar)
         # We do NOT use bar.close - that's future information
@@ -1248,6 +1294,11 @@ def run_unicorn_backtest(
             result.trades.append(trade)
             result.total_pnl_points += trade.pnl_points
             result.total_pnl_dollars += trade.pnl_dollars
+
+            # Update eval profile equity tracking
+            if eval_profile is not None:
+                _running_equity += trade.pnl_dollars
+                _peak_equity = max(_peak_equity, _running_equity)
 
             # Update daily governor
             if daily_governor is not None:
@@ -1463,7 +1514,7 @@ def run_unicorn_backtest(
 
             # Position sizing (account for slippage in risk)
             risk_dollars = (risk_points + slippage_points) * point_value
-            effective_risk_budget = dollars_per_trade
+            effective_risk_budget = _current_r_day if eval_profile else dollars_per_trade
             if daily_governor is not None:
                 effective_risk_budget *= daily_governor.risk_multiplier
             if risk_dollars > 0:
@@ -1473,6 +1524,7 @@ def run_unicorn_backtest(
 
             # Skip trade if position size is zero (risk too wide for budget)
             if quantity < 1:
+                _gov_stats["sizing_rejects"] += 1
                 setup_record.taken = False
                 setup_record.reason_not_taken = (
                     f"position_size_zero: risk ${risk_dollars:.0f} > budget ${effective_risk_budget:.0f}"
@@ -1693,9 +1745,18 @@ def run_unicorn_backtest(
     result.config = config
     result.session_diagnostics = _build_session_diagnostics(result)
 
-    # Populate governor stats
-    if daily_governor is not None:
-        result.governor_stats = dict(_gov_stats)
+    # Eval profile final stats
+    if eval_profile is not None:
+        _gov_stats["peak_equity"] = _peak_equity
+        _gov_stats["final_equity"] = _running_equity
+        _gov_stats["trailing_drawdown"] = _peak_equity - _running_equity
+        _gov_stats["r_day_min"] = _r_day_min
+        _gov_stats["r_day_max"] = _r_day_max
+        _gov_stats["drawdown_halt"] = _eval_blown
+
+    # Populate governor stats (always — sizing_rejects and config are useful
+    # even without a daily governor for artifact interpretability)
+    result.governor_stats = dict(_gov_stats)
 
     return result
 
@@ -2337,19 +2398,45 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
         lines.append("-" * 40)
         lines.append("DAILY GOVERNOR")
         lines.append("-" * 40)
-        # Policy knobs
-        lines.append(f"Max daily loss:        ${gs['max_daily_loss_dollars']:,.0f}")
-        lines.append(f"Half-loss threshold:   ${gs['half_loss_threshold']:,.0f}")
-        lines.append(f"Max trades/day:        {gs['max_trades_per_day']}")
-        lines.append("")
+        # Policy knobs (only present when daily_governor was used)
+        if "max_daily_loss_dollars" in gs:
+            lines.append(f"Max daily loss:        ${gs['max_daily_loss_dollars']:,.0f}")
+            lines.append(f"Half-loss threshold:   ${gs['half_loss_threshold']:,.0f}")
+            lines.append(f"Max trades/day:        {gs['max_trades_per_day']}")
+            lines.append("")
+        # Sizing config
+        lines.append(f"Risk budget/trade:     ${gs.get('dollars_per_trade', 0):,.0f}")
+        lines.append(f"Sizing active:         {gs.get('sizing_active', False)}")
         # Outcomes
         lines.append(f"Signals skipped:       {gs['signals_skipped']}")
         lines.append(f"Days halted early:     {gs['days_halted']}")
         lines.append(f"  Loss-limit halts:    {gs['loss_limit_halts']}")
         lines.append(f"  Trade-limit halts:   {gs['trade_limit_halts']}")
         lines.append(f"Half-size trades:      {gs['half_size_trades']}")
+        lines.append(f"Sizing rejects:        {gs.get('sizing_rejects', 0)}")
         lines.append(f"Days with trades:      {gs['total_days_traded']}")
         lines.append("")
+
+        # Eval account subsection
+        if "eval_account_size" in gs:
+            lines.append("-" * 40)
+            lines.append("EVAL ACCOUNT")
+            lines.append("-" * 40)
+            lines.append(f"Starting equity:       ${gs['eval_account_size']:,.0f}")
+            lines.append(f"Final equity:          ${gs.get('final_equity', 0):,.0f}")
+            lines.append(f"Peak equity:           ${gs.get('peak_equity', 0):,.0f}")
+            trailing_dd = gs.get("trailing_drawdown", 0)
+            max_dd = gs["eval_max_drawdown"]
+            dd_pct = (trailing_dd / max_dd * 100) if max_dd > 0 else 0.0
+            lines.append(
+                f"Trailing drawdown:     ${trailing_dd:,.0f} / ${max_dd:,.0f}  ({dd_pct:.1f}%)"
+            )
+            r_min = gs.get("r_day_min", 0)
+            r_max = gs.get("r_day_max", 0)
+            lines.append(f"R_day range:           ${r_min:,.0f} - ${r_max:,.0f}")
+            if gs.get("drawdown_halt"):
+                lines.append("*** EVAL BLOWN ***")
+            lines.append("")
 
     lines.append("=" * 70)
 

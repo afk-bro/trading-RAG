@@ -211,3 +211,54 @@ Session profile validated across 5 regime windows (2021-2025). STRICT and NY_OPE
 - Displacement guard at 0.5x ATR improves NQ expectancy +52%, turns ES from breakeven to profitable
 - 40% full-stop rate with 0% +2R+ wins indicates capped exits
 - See `docs/unicorn-model-analysis.md` for forensic analysis
+
+## Eval Mode (Prop-Firm Simulation)
+
+Simulates a prop-firm evaluation with trailing drawdown limits and R-native position sizing.
+
+**Risk Model** (`app/services/backtest/engines/eval_profile.py`):
+
+Per-trade risk is derived from remaining drawdown room rather than a fixed dollar budget:
+
+```
+R_day = clamp(room * risk_fraction, r_min, r_max)
+room  = max_drawdown_dollars - (peak_equity - current_equity)
+```
+
+When `room <= 0`, the eval is blown and the backtest terminates.
+
+**Components**:
+- `EvalAccountProfile` - Frozen dataclass with account parameters (immutable during run)
+- `compute_r_day()` - Pure function: `(profile, equity, peak) -> float`
+- `DailyGovernor` - Intraday stepdown + halt (composes via `effective_R = R_day * risk_multiplier`)
+
+**Composition**: The eval profile sets the base R_day at each day boundary. The DailyGovernor applies its intraday multiplier (1.0 → 0.5 after half-loss). They compose independently.
+
+**CLI Arguments**:
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--eval-account-size DOLLARS` | Enables R-native sizing | (required to activate) |
+| `--eval-max-drawdown DOLLARS` | Trailing DD limit | 4% of account size |
+| `--eval-risk-fraction FLOAT` | Fraction of room per trade | 0.15 |
+| `--eval-r-min DOLLARS` | R_day floor | 100 |
+| `--eval-r-max DOLLARS` | R_day cap | 300 |
+| `--eval-mode` | Also enables DailyGovernor | — |
+| `--max-daily-loss DOLLARS` | DailyGovernor max loss/day | 50% of max drawdown |
+| `--max-trades-per-day N` | DailyGovernor trade cap | 2 |
+
+**Example trajectory** ($50k account, $2k DD, fraction=0.15):
+- Day 1: room=$2000 → R=$300 (cap)
+- After -$500 drawdown: room=$1500 → R=$225
+- After -$1300 drawdown: room=$700 → R=$105
+- After -$1400 drawdown: room=$600 → R=$100 (floor)
+- After -$2000 drawdown: room=$0 → R=0 → **eval blown**, backtest stops
+
+**Backtest report output**: Includes EVAL ACCOUNT section with starting/final/peak equity, trailing drawdown %, R_day range, and EVAL BLOWN indicator.
+
+**CLI example**:
+```bash
+python scripts/run_unicorn_backtest.py --eval-mode --symbol MNQ \
+  --eval-account-size 50000 --eval-max-drawdown 2000 \
+  --eval-r-min 100 --eval-r-max 300 \
+  --databento-csv data/mnq.csv --start-date 2024-01-01 --end-date 2024-06-30 --multi-tf
+```

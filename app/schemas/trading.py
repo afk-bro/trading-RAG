@@ -138,6 +138,7 @@ class PolicyReason(str, Enum):
     INVALID_TIMEFRAME = "invalid_timeframe"
     STRATEGY_DISABLED = "strategy_disabled"
     INSUFFICIENT_CONFIDENCE = "insufficient_confidence"
+    RISK_TOO_HIGH_FOR_ACCOUNT = "risk_too_high_for_account"
 
     # Approvals
     ALL_RULES_PASSED = "all_rules_passed"
@@ -219,6 +220,14 @@ class CurrentState(BaseModel):
     current_regime: Optional[dict] = Field(None, description="Current regime snapshot")
     regime_distance_z: Optional[float] = Field(
         None, description="Z-score from training regime"
+    )
+
+    # Structural sizing
+    risk_budget_dollars: Optional[float] = Field(
+        None, description="Per-trade risk budget in dollars"
+    )
+    risk_multiplier: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Governor risk multiplier"
     )
 
     # Timestamps
@@ -421,6 +430,9 @@ class PaperState(BaseModel):
     starting_equity: float = Field(default=10000.0, description="Starting equity")
     cash: float = Field(default=10000.0, description="Current cash balance")
     realized_pnl: float = Field(default=0.0, description="Total realized P&L")
+    peak_equity: float = Field(
+        default=10000.0, description="High-water mark for trailing drawdown"
+    )
 
     # Positions by symbol
     positions: dict[str, PaperPosition] = Field(
