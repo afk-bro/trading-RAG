@@ -223,6 +223,30 @@ class Settings(BaseSettings):
         le=1.0,
         description="Maximum position size as percentage of equity (0.20 = 20%)",
     )
+    paper_default_risk_budget_dollars: Optional[float] = Field(
+        default=None,
+        description="Fallback per-trade risk budget. Used only if intent doesn't provide one.",
+    )
+    paper_eval_account_size: Optional[float] = Field(
+        default=None,
+        description="Eval account size for R-native sizing. Enables eval profile when set.",
+    )
+    paper_eval_max_drawdown: Optional[float] = Field(
+        default=None,
+        description="Max trailing drawdown in dollars. Default: 4% of account size.",
+    )
+    paper_eval_risk_fraction: float = Field(
+        default=0.15,
+        description="Fraction of remaining drawdown room to risk per trade.",
+    )
+    paper_eval_r_min: float = Field(
+        default=100.0,
+        description="Minimum R_day floor in dollars.",
+    )
+    paper_eval_r_max: float = Field(
+        default=300.0,
+        description="Maximum R_day cap in dollars.",
+    )
 
     # Auto-Pause Guardrail (safety feature)
     auto_pause_enabled: bool = Field(

@@ -76,7 +76,20 @@ INTENT_EMITTED → POLICY_EVALUATED → INTENT_APPROVED → ORDER_FILLED
 - `starting_equity` - Initial capital (default 10000.0)
 - `cash` - Current available cash
 - `realized_pnl` - Cumulative realized P&L
+- `peak_equity` - High-water mark for trailing drawdown tracking
 - `positions` - Dict of symbol → `PaperPosition`
+
+**Eval Account Profile** (R-native risk budgeting):
+
+The paper broker accepts per-workspace `EvalAccountProfile` instances that compute dynamic risk budgets from trailing drawdown. Risk budget resolution precedence:
+1. `intent.metadata["risk_budget_dollars"]` (explicit per-trade override)
+2. `eval_profile` R_day via `compute_r_day(profile, equity, peak_equity)`
+3. `config.paper_default_risk_budget_dollars` (fallback)
+4. `None` (sizing disabled)
+
+After execution, `state.peak_equity` is updated to track the high-water mark. See `docs/features/backtests.md` for eval mode details.
+
+Config settings (`app/config.py`): `paper_eval_account_size`, `paper_eval_max_drawdown`, `paper_eval_risk_fraction`, `paper_eval_r_min`, `paper_eval_r_max`.
 
 **Position Scaling**:
 ```python

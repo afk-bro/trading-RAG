@@ -17,7 +17,7 @@ from app.services.policy_engine import (
     KillSwitchRule,
     DriftGuardRule,
     MaxDrawdownRule,
-)
+)  # StructuralSizingRule tested via test_structural_sizing_rule.py
 
 
 # =============================================================================
@@ -361,3 +361,88 @@ class TestPolicyEngine:
         # Rules should be re-sorted
         assert engine.rules[0].name == "kill_switch"  # priority 0
         assert engine.rules[1].name == "drift_guard"  # priority 10
+
+    def test_structural_sizing_in_default_rules(self):
+        """StructuralSizingRule is in default rules."""
+        engine = PolicyEngine()
+        rule_names = [r.name for r in engine.rules]
+        assert "structural_sizing" in rule_names
+
+    def test_modified_quantity_propagated_on_approval(self):
+        """Last rule's modified_quantity reaches the approval decision."""
+
+        class SizingStub(PolicyRule):
+            @property
+            def name(self):
+                return "sizing_stub"
+
+            @property
+            def priority(self):
+                return 50
+
+            def evaluate(self, intent, state):
+                return RuleResult(passed=True, modified_quantity=5.0)
+
+        engine = PolicyEngine(rules=[KillSwitchRule(), SizingStub()])
+        intent = TradeIntent(
+            correlation_id="test",
+            workspace_id=uuid.uuid4(),
+            action=IntentAction.OPEN_LONG,
+            strategy_entity_id=uuid.uuid4(),
+            symbol="MNQ",
+            timeframe="5m",
+            quantity=1.0,
+        )
+        state = CurrentState()
+        decision = engine.evaluate(intent, state)
+
+        assert decision.approved is True
+        assert decision.modified_quantity == 5.0
+
+    def test_last_modifier_wins(self):
+        """If two rules set modified_quantity, last one wins."""
+
+        class FirstModifier(PolicyRule):
+            @property
+            def name(self):
+                return "first_mod"
+
+            @property
+            def priority(self):
+                return 30
+
+            def evaluate(self, intent, state):
+                return RuleResult(passed=True, modified_quantity=10.0)
+
+        class SecondModifier(PolicyRule):
+            @property
+            def name(self):
+                return "second_mod"
+
+            @property
+            def priority(self):
+                return 50
+
+            def evaluate(self, intent, state):
+                return RuleResult(passed=True, modified_quantity=3.0)
+
+        engine = PolicyEngine(
+            rules=[
+                KillSwitchRule(),
+                FirstModifier(),
+                SecondModifier(),
+            ]
+        )
+        intent = TradeIntent(
+            correlation_id="test",
+            workspace_id=uuid.uuid4(),
+            action=IntentAction.OPEN_LONG,
+            strategy_entity_id=uuid.uuid4(),
+            symbol="MNQ",
+            timeframe="5m",
+            quantity=1.0,
+        )
+        decision = engine.evaluate(intent, CurrentState())
+
+        assert decision.approved is True
+        assert decision.modified_quantity == 3.0  # Last modifier wins

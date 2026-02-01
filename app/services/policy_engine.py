@@ -16,6 +16,8 @@ terminates evaluation (short-circuit).
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
+import json
+import math
 import time
 
 import structlog
@@ -269,6 +271,104 @@ class MaxDrawdownRule(PolicyRule):
         return RuleResult(passed=True)
 
 
+class StructuralSizingRule(PolicyRule):
+    """
+    Computes position size from risk math and rejects trades
+    where the stop is too wide for the account.
+
+    Pass-through when risk_budget_dollars is None (sizing not enabled).
+    When enabled, requires both entry price and stop loss on the intent.
+    """
+
+    @property
+    def name(self) -> str:
+        return "structural_sizing"
+
+    @property
+    def priority(self) -> int:
+        return 50  # After drawdown checks
+
+    def evaluate(
+        self,
+        intent: TradeIntent,
+        state: CurrentState,
+    ) -> RuleResult:
+        from app.schemas import IntentAction
+        from app.utils.instruments import get_point_value
+
+        # Pass-through for close/scale-out/cancel actions
+        passthrough_actions = {
+            IntentAction.CLOSE_LONG,
+            IntentAction.CLOSE_SHORT,
+            IntentAction.SCALE_OUT,
+            IntentAction.CANCEL_ORDER,
+        }
+        if intent.action in passthrough_actions:
+            return RuleResult(passed=True)
+
+        # Pass-through when sizing is not enabled
+        if state.risk_budget_dollars is None:
+            return RuleResult(passed=True)
+
+        # Sizing IS enabled — entry and stop are mandatory
+        if intent.price is None or intent.stop_loss is None:
+            return RuleResult(
+                passed=False,
+                reason=PolicyReason.RISK_TOO_HIGH_FOR_ACCOUNT,
+                reason_details="Cannot size trade without entry price and stop loss",
+            )
+
+        entry = intent.price
+        stop = intent.stop_loss
+        stop_distance = abs(entry - stop)
+
+        # Guard against zero stop distance
+        if stop_distance == 0:
+            return RuleResult(
+                passed=True,
+                warnings=["Entry equals stop loss — zero stop distance"],
+            )
+
+        point_value = get_point_value(intent.symbol)
+        risk_per_contract = stop_distance * point_value
+        effective_budget = state.risk_budget_dollars * state.risk_multiplier
+        contracts = math.floor(effective_budget / risk_per_contract)
+
+        if contracts < 1:
+            debug = {
+                "entry": entry,
+                "stop": stop,
+                "stop_points": stop_distance,
+                "point_value": point_value,
+                "risk_per_contract": risk_per_contract,
+                "risk_budget": state.risk_budget_dollars,
+                "risk_multiplier": state.risk_multiplier,
+                "effective_budget": effective_budget,
+                "computed_contracts": contracts,
+            }
+            return RuleResult(
+                passed=False,
+                reason=PolicyReason.RISK_TOO_HIGH_FOR_ACCOUNT,
+                reason_details=json.dumps(debug),
+            )
+
+        logger.debug(
+            "structural_sizing_approved",
+            symbol=intent.symbol,
+            old_quantity=intent.quantity,
+            new_quantity=contracts,
+            stop_points=stop_distance,
+            point_value=point_value,
+            risk_per_contract=risk_per_contract,
+            effective_budget=effective_budget,
+        )
+
+        return RuleResult(
+            passed=True,
+            modified_quantity=float(contracts),
+        )
+
+
 # =============================================================================
 # Policy Engine
 # =============================================================================
@@ -308,6 +408,7 @@ class PolicyEngine:
             KillSwitchRule(),
             DriftGuardRule(),
             MaxDrawdownRule(),
+            StructuralSizingRule(),
         ]
 
     @property
@@ -346,6 +447,7 @@ class PolicyEngine:
         rules_passed = []
         rules_failed = []
         all_warnings = []
+        final_modified_quantity: Optional[float] = None
 
         log = logger.bind(
             intent_id=str(intent.id),
@@ -383,6 +485,9 @@ class PolicyEngine:
 
             if result.passed:
                 rules_passed.append(rule.name)
+                # Track modified_quantity — last rule that sets it wins
+                if result.modified_quantity is not None:
+                    final_modified_quantity = result.modified_quantity
                 log.debug("Rule passed", rule=rule.name)
             else:
                 rules_failed.append(rule.name)
@@ -423,5 +528,6 @@ class PolicyEngine:
             rules_passed=rules_passed,
             rules_failed=[],
             warnings=all_warnings,
+            modified_quantity=final_modified_quantity,
             evaluation_ms=elapsed_ms,
         )

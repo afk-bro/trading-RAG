@@ -46,6 +46,23 @@ class TimeframeBiasComponent:
     factors: dict = field(default_factory=dict)  # Debug info
 
 
+def _is_component_usable(component: Optional["TimeframeBiasComponent"]) -> bool:
+    """Return True if a bias component should participate in scoring.
+
+    A component is unusable when:
+    - It is None (timeframe not provided)
+    - It carries ``factors["error"] == "insufficient_data"`` (warmup period)
+
+    Unusable components are excluded from the weighted-bias denominator so they
+    don't drag confidence below the ``is_tradeable`` threshold.
+    """
+    if component is None:
+        return False
+    if component.factors.get("error") == "insufficient_data":
+        return False
+    return True
+
+
 @dataclass
 class TimeframeBias:
     """
@@ -743,7 +760,7 @@ def compute_tf_bias(
     conflicting: list[str] = []
 
     for component, weight in components:
-        if component is None:
+        if not _is_component_usable(component):
             continue
 
         total_weight += weight
@@ -774,7 +791,7 @@ def compute_tf_bias(
     # Check for conflicts
     primary_direction = final_direction
     for component, _ in components:
-        if component is None:
+        if not _is_component_usable(component):
             continue
         if (
             component.direction != BiasDirection.NEUTRAL
@@ -787,7 +804,7 @@ def compute_tf_bias(
     agreeing_count = 0
     total_count = 0
     for component, _ in components:
-        if component is None:
+        if not _is_component_usable(component):
             continue
         total_count += 1
         if (

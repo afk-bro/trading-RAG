@@ -14,6 +14,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,13 +24,21 @@ from app.services.strategy.models import OHLCVBar
 from app.services.backtest.engines.unicorn_runner import (
     run_unicorn_backtest,
     format_backtest_report,
+    format_trade_trace,
     IntrabarPolicy,
+    BiasState,
+    BarBundle,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
     SessionProfile,
     BiasDirection,
+    MODEL_VERSION,
+    MODEL_CODENAME,
+    build_run_label,
+    build_run_key,
 )
+from app.services.strategy.indicators.tf_bias import compute_tf_bias
 
 
 def load_bars_from_csv(filepath: str) -> list[OHLCVBar]:
@@ -58,9 +67,20 @@ def generate_sample_data(
     symbol: str,
     days: int = 30,
     profile: str = "realistic",
-) -> tuple[list[OHLCVBar], list[OHLCVBar]]:
+    multi_tf: bool = False,
+):
     """
     Generate synthetic data for testing with different realism profiles.
+
+    Args:
+        symbol: Root symbol (NQ, ES)
+        days: Number of trading days
+        profile: "easy", "realistic", or "evil"
+        multi_tf: If True, return BarBundle with all TFs (1m base).
+                  If False, return legacy (htf_bars, ltf_bars) tuple.
+
+    Returns:
+        BarBundle when multi_tf=True, tuple[list[OHLCVBar], list[OHLCVBar]] otherwise.
 
     Profiles:
         easy: Clean Gaussian random walk. Patterns are easy to detect, exits
@@ -237,7 +257,291 @@ def generate_sample_data(
 
                 ltf_price = close
 
-    return htf_bars, ltf_bars
+    if not multi_tf:
+        return htf_bars, ltf_bars
+
+    # Multi-TF mode: generate 1m bars from the same price path, then resample
+    print("  Generating 1m base bars for multi-TF resampling...")
+    m1_bars = []
+    m1_price = htf_bars[0].open if htf_bars else base_price
+
+    for day in range(days):
+        current_date = start_date.replace(day=start_date.day + day)
+        if current_date.weekday() >= 5:
+            continue
+
+        for hour in range(6, 17):
+            for minute in range(0, 60):
+                ts = current_date.replace(hour=hour, minute=minute)
+
+                noise = student_t_sample(fat_tail_df) * current_vol * 0.01
+                move = (trend_bias * 0.067) + noise
+
+                open_ = m1_price
+                close = m1_price + move
+                high = max(open_, close) + random.uniform(0, current_vol * 0.03)
+                low = min(open_, close) - random.uniform(0, current_vol * 0.03)
+
+                if random.random() < wick_prob * 0.3:
+                    if random.random() < 0.5:
+                        low = min(open_, close) - current_vol * wick_mult * 0.2
+                    else:
+                        high = max(open_, close) + current_vol * wick_mult * 0.2
+
+                m1_bars.append(OHLCVBar(
+                    ts=ts,
+                    open=round(open_ / tick_size) * tick_size,
+                    high=round(high / tick_size) * tick_size,
+                    low=round(low / tick_size) * tick_size,
+                    close=round(close / tick_size) * tick_size,
+                    volume=random.randint(50, 500),
+                ))
+
+                m1_price = close
+
+    # Resample from 1m to all TFs
+    from app.services.backtest.data import DatabentoFetcher
+    fetcher = DatabentoFetcher()
+
+    bundle = BarBundle(
+        h4=fetcher._resample_bars(m1_bars, "4h"),
+        h1=fetcher._resample_bars(m1_bars, "1h"),
+        m15=fetcher._resample_bars(m1_bars, "15m"),
+        m5=fetcher._resample_bars(m1_bars, "5m"),
+        m1=m1_bars,
+    )
+    print(f"  Multi-TF: {len(bundle.h4)} 4H, {len(bundle.h1)} 1H, "
+          f"{len(bundle.m15)} 15m, {len(bundle.m5)} 5m, {len(bundle.m1)} 1m bars")
+
+    return bundle
+
+
+# ---------------------------------------------------------------------------
+# Reference-symbol bias series builder
+# ---------------------------------------------------------------------------
+
+REF_HTF_LOOKBACK = 100  # HTF bars fed to compute_tf_bias per evaluation point
+REF_LTF_LOOKBACK = 60   # LTF bars (optional) fed per evaluation point
+
+
+def _sort_and_normalize_tz(bars: list[OHLCVBar]) -> list[OHLCVBar]:
+    """Sort bars by timestamp and ensure all are UTC-aware."""
+    sorted_bars = sorted(bars, key=lambda b: b.ts)
+    normalized = []
+    for b in sorted_bars:
+        ts = b.ts
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if ts != b.ts:
+            b = OHLCVBar(ts=ts, open=b.open, high=b.high, low=b.low,
+                         close=b.close, volume=b.volume)
+        normalized.append(b)
+    return normalized
+
+
+def load_ref_data(
+    args: argparse.Namespace,
+    ref_htf_path: str | None,
+) -> tuple[list[OHLCVBar], list[OHLCVBar], str]:
+    """
+    Load reference symbol data using the same source as the primary symbol.
+
+    Returns (ref_htf_bars, ref_ltf_bars, source_label).
+    LTF may be empty — build_reference_bias_series tolerates that.
+    """
+    ref_symbol = args.ref_symbol
+
+    if ref_htf_path:
+        # Explicit CSV path for reference HTF
+        print(f"Loading reference HTF data from {ref_htf_path}...")
+        ref_htf = load_bars_from_csv(ref_htf_path)
+        print(f"  Loaded {len(ref_htf)} reference HTF bars")
+        return _sort_and_normalize_tz(ref_htf), [], "csv"
+
+    if args.databento_csv:
+        from app.services.backtest.data import DatabentoFetcher
+
+        fetcher = DatabentoFetcher()
+        print(f"Loading reference {ref_symbol} from Databento CSV {args.databento_csv}...")
+        ref_htf, ref_ltf = fetcher.load_from_csv(
+            csv_path=args.databento_csv,
+            symbol=ref_symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            htf_interval="15m",
+            ltf_interval="5m",
+        )
+        ref_htf = _sort_and_normalize_tz(ref_htf)
+        ref_ltf = _sort_and_normalize_tz(ref_ltf)
+        print(f"  Loaded {len(ref_htf)} HTF + {len(ref_ltf)} LTF reference bars")
+        return ref_htf, ref_ltf, "databento-csv"
+
+    if args.databento:
+        from app.services.backtest.data import DatabentoFetcher
+
+        fetcher = DatabentoFetcher()
+        print(f"Fetching reference {ref_symbol} from Databento API...")
+        ref_htf, ref_ltf = fetcher.fetch_futures_data(
+            symbol=ref_symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            htf_interval="15m",
+            ltf_interval="5m",
+            use_cache=not args.no_cache,
+        )
+        ref_htf = _sort_and_normalize_tz(ref_htf)
+        ref_ltf = _sort_and_normalize_tz(ref_ltf)
+        print(f"  Fetched {len(ref_htf)} HTF + {len(ref_ltf)} LTF reference bars")
+        return ref_htf, ref_ltf, "databento"
+
+    if args.synthetic:
+        ref_htf, ref_ltf = generate_sample_data(
+            ref_symbol, args.days, profile=args.synthetic_profile
+        )
+        ref_htf = _sort_and_normalize_tz(ref_htf)
+        ref_ltf = _sort_and_normalize_tz(ref_ltf)
+        print(f"  Generated {len(ref_htf)} HTF + {len(ref_ltf)} LTF reference bars (synthetic)")
+        return ref_htf, ref_ltf, "synthetic"
+
+    # Fallback: require explicit --ref-htf
+    raise SystemExit(
+        "error: --ref-symbol requires either --ref-htf <csv>, "
+        "--databento, --databento-csv, or --synthetic to load reference data"
+    )
+
+
+def build_reference_bias_series(
+    ref_htf_bars: list[OHLCVBar],
+    ref_ltf_bars: list[OHLCVBar],
+    ref_h4_bars: Optional[list[OHLCVBar]] = None,
+    ref_h1_bars: Optional[list[OHLCVBar]] = None,
+) -> list[BiasState]:
+    """
+    Build a causal BiasState series from reference symbol bars.
+
+    For each HTF bar timestamp, compute bias using only data
+    available *up to* that point (lookback windows).
+    LTF, h4, h1 bars are optional — None is tolerated.
+    """
+    from bisect import bisect_right
+    from datetime import timedelta
+
+    series: list[BiasState] = []
+
+    # Pre-build h4/h1 completion timestamps for causal alignment
+    h4_completed_ts: list[datetime] = []
+    h1_completed_ts: list[datetime] = []
+    if ref_h4_bars:
+        h4_completed_ts = [b.ts + timedelta(hours=4) for b in ref_h4_bars]
+    if ref_h1_bars:
+        h1_completed_ts = [b.ts + timedelta(hours=1) for b in ref_h1_bars]
+
+    for i, bar in enumerate(ref_htf_bars):
+        # Causal window: only bars up to and including current
+        htf_start = max(0, i + 1 - REF_HTF_LOOKBACK)
+        htf_window = ref_htf_bars[htf_start:i + 1]
+
+        # LTF causal window: bars with ts <= current HTF bar ts
+        if ref_ltf_bars:
+            ltf_window = [
+                b for b in ref_ltf_bars
+                if b.ts <= bar.ts
+            ][-REF_LTF_LOOKBACK:]
+        else:
+            ltf_window = []
+
+        # Causal h4/h1 windows (only completed bars)
+        causal_h4 = None
+        causal_h1 = None
+        if ref_h4_bars and h4_completed_ts:
+            n = bisect_right(h4_completed_ts, bar.ts)
+            if n > 0:
+                causal_h4 = ref_h4_bars[:n][-25:]
+        if ref_h1_bars and h1_completed_ts:
+            n = bisect_right(h1_completed_ts, bar.ts)
+            if n > 0:
+                causal_h1 = ref_h1_bars[:n][-100:]
+
+        bias = compute_tf_bias(
+            h4_bars=causal_h4,
+            h1_bars=causal_h1,
+            m15_bars=htf_window,
+            m5_bars=ltf_window if ltf_window else None,
+            timestamp=bar.ts,
+        )
+
+        series.append(BiasState(
+            ts=bar.ts,
+            direction=bias.final_direction,
+            confidence=bias.final_confidence,
+        ))
+
+    return series
+
+
+def _build_output_dict(result, config, args) -> dict:
+    """Build a JSON-serializable dict from backtest results.
+
+    Pure function — no printing, no file IO.
+    """
+    return {
+        "run_key": result.run_key,
+        "run_label": result.run_label,
+        "model_version": MODEL_VERSION,
+        "config": {
+            "min_scored_criteria": config.min_scored_criteria,
+            "min_displacement_atr": config.min_displacement_atr,
+            "session_profile": config.session_profile.value,
+            "direction_filter": "long" if args.long_only else "bidir",
+            "time_stop_minutes": args.time_stop,
+        },
+        "symbol": result.symbol,
+        "start_date": result.start_date.isoformat(),
+        "end_date": result.end_date.isoformat(),
+        "total_bars": result.total_bars,
+        "total_setups_scanned": result.total_setups_scanned,
+        "partial_setups": result.partial_setups,
+        "valid_setups": result.valid_setups,
+        "trades_taken": result.trades_taken,
+        "wins": result.wins,
+        "losses": result.losses,
+        "win_rate": result.win_rate,
+        "profit_factor": result.profit_factor,
+        "total_pnl_points": result.total_pnl_points,
+        "total_pnl_dollars": result.total_pnl_dollars,
+        "expectancy_points": result.expectancy_points,
+        "avg_mfe": result.avg_mfe,
+        "avg_mae": result.avg_mae,
+        "mfe_capture_rate": result.mfe_capture_rate,
+        "avg_r_multiple": result.avg_r_multiple,
+        "largest_loss_points": result.largest_loss_points,
+        "confidence_win_correlation": result.confidence_win_correlation,
+        "criteria_bottlenecks": [
+            {"criterion": b.criterion, "fail_rate": b.fail_rate}
+            for b in result.criteria_bottlenecks
+        ],
+        "session_stats": {
+            s.value: {
+                "total_setups": result.session_stats[s].total_setups,
+                "valid_setups": result.session_stats[s].valid_setups,
+                "trades_taken": result.session_stats[s].trades_taken,
+                "win_rate": result.session_stats[s].win_rate,
+                "total_pnl": result.session_stats[s].total_pnl_points,
+            }
+            for s in result.session_stats
+        },
+        "confidence_buckets": [
+            {
+                "range": f"{b.min_confidence:.1f}-{b.max_confidence:.1f}",
+                "trades": b.trade_count,
+                "win_rate": b.win_rate,
+                "avg_r": b.avg_r_multiple,
+            }
+            for b in result.confidence_buckets
+        ],
+        "session_diagnostics": result.session_diagnostics,
+        "governor_stats": result.governor_stats,
+    }
 
 
 def main():
@@ -266,6 +570,12 @@ Examples:
 
     # Realistic friction settings
     python scripts/run_unicorn_backtest.py --symbol NQ --synthetic --slippage-ticks 2 --commission 4.50 --intrabar-policy worst
+
+    # Intermarket reference: tag NQ trades with ES bias (observability only)
+    python scripts/run_unicorn_backtest.py --symbol NQ --synthetic --ref-symbol ES
+
+    # Reference from explicit CSV
+    python scripts/run_unicorn_backtest.py --symbol NQ --htf data/nq_15m.csv --ltf data/nq_5m.csv --ref-symbol ES --ref-htf data/es_15m.csv
         """
     )
 
@@ -351,7 +661,7 @@ Examples:
         "--min-criteria",
         type=int,
         default=3,
-        help="Minimum SCORED criteria (out of 5, not 8). Mandatory criteria always required. (default: 3)"
+        help="Minimum SCORED criteria (out of 4). Mandatory criteria always required. (default: 3)"
     )
     parser.add_argument(
         "--session-profile",
@@ -432,10 +742,205 @@ Examples:
         "--min-displacement-atr", type=float, default=None,
         help="Skip entry if MSS displacement < this ATR multiple. None=disabled."
     )
+    parser.add_argument(
+        "--no-displacement-backstop",
+        action="store_true",
+        default=False,
+        help="Disable the redundant post-scoring displacement guard (backstop). "
+             "Safe when displacement is already a mandatory criterion."
+    )
+    parser.add_argument(
+        "--breakeven-at-r", type=float, default=None,
+        help="Move stop to breakeven (entry price) when MFE reaches this R-multiple. "
+             "E.g. 1.0 = move stop to entry at +1R. None=disabled."
+    )
+    parser.add_argument(
+        "--max-sweep-age-bars", type=int, default=None,
+        help="Max HTF bars since sweep for recency gate. None=disabled."
+    )
+    parser.add_argument(
+        "--require-sweep-settlement", action="store_true", default=False,
+        help="Require bar after sweep to close on correct side of swept level."
+    )
+    # Intermarket reference symbol
+    parser.add_argument(
+        "--ref-symbol",
+        help="Reference symbol for intermarket bias (e.g., ES when trading NQ). "
+             "Data loaded from same source as primary unless --ref-htf is given."
+    )
+    parser.add_argument(
+        "--ref-htf",
+        help="Explicit CSV path for reference HTF bars (overrides source auto-detect)"
+    )
+    # Multi-timeframe execution
+    parser.add_argument(
+        "--multi-tf",
+        action="store_true",
+        help="Enable multi-TF mode: full bias stack (4H/1H/15m/5m) + 1m trade management. "
+             "Synthetic: generates 1m base and resamples. Databento: uses fetch_multi_tf()."
+    )
+    # Trace mode (post-run trade replay)
+    parser.add_argument(
+        "--trace-trade-index",
+        type=int,
+        metavar="N",
+        help="Trace trade at index N (0-based). Prints full replay after report."
+    )
+    parser.add_argument(
+        "--trace-verbose",
+        action="store_true",
+        help="Print all bars in trace management path (default: first 5 + exit bar)."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        metavar="N",
+        help="Seed for synthetic data generation (for reproducibility)."
+    )
+    parser.add_argument(
+        "--baseline-run",
+        metavar="PATH",
+        help="Path to a previous --json output file. Prints compare summary after report."
+    )
+    parser.add_argument(
+        "--write-baseline",
+        metavar="PATH",
+        help="Write current run's JSON output dict to PATH (for future --baseline-run)."
+    )
+    # Eval mode (prop firm simulation)
+    parser.add_argument(
+        "--eval-mode",
+        action="store_true",
+        help="Enable eval/prop-firm mode: daily governor, structural sizing (skip if contracts < 1), "
+             "fixed 2R target, no breakeven/trailing. Sets sensible defaults for --max-daily-loss "
+             "and --max-trades-per-day if not explicitly provided."
+    )
+    parser.add_argument(
+        "--max-daily-loss",
+        type=float,
+        metavar="DOLLARS",
+        help="Max daily loss in dollars before halting for the day. "
+             "Default: equal to --dollars-per-trade when --eval-mode is set."
+    )
+    parser.add_argument(
+        "--max-trades-per-day",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max trades per calendar day. Default: 2 when --eval-mode is set."
+    )
+
+    # Eval account profile (R-native sizing from trailing drawdown)
+    parser.add_argument(
+        "--eval-account-size",
+        type=float,
+        metavar="DOLLARS",
+        help="Eval account size in dollars. Enables R-native sizing from trailing drawdown."
+    )
+    parser.add_argument(
+        "--eval-max-drawdown",
+        type=float,
+        metavar="DOLLARS",
+        help="Maximum trailing drawdown in dollars. Default: 4%% of --eval-account-size."
+    )
+    parser.add_argument(
+        "--eval-risk-fraction",
+        type=float,
+        default=0.15,
+        metavar="FLOAT",
+        help="Fraction of remaining drawdown room to risk per trade (default: 0.15)."
+    )
+    parser.add_argument(
+        "--eval-r-min",
+        type=float,
+        default=100.0,
+        metavar="DOLLARS",
+        help="Minimum R_day floor in dollars (default: 100)."
+    )
+    parser.add_argument(
+        "--eval-r-max",
+        type=float,
+        default=300.0,
+        metavar="DOLLARS",
+        help="Maximum R_day cap in dollars (default: 300)."
+    )
 
     args = parser.parse_args()
 
+    # Validate ref args
+    if args.ref_htf and not args.ref_symbol:
+        parser.error("--ref-htf requires --ref-symbol")
+    if args.ref_symbol and args.ref_symbol.upper() == args.symbol.upper():
+        parser.error("--ref-symbol must differ from --symbol")
+
+    # Apply seed for reproducibility
+    if args.seed is not None:
+        import random
+        random.seed(args.seed)
+
+    # Eval mode / daily governor
+    daily_governor = None
+    if args.eval_mode or args.max_daily_loss is not None or args.max_trades_per_day is not None:
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+
+        max_loss = args.max_daily_loss if args.max_daily_loss is not None else args.dollars_per_trade
+        max_trades = args.max_trades_per_day if args.max_trades_per_day is not None else 2
+
+        daily_governor = DailyGovernor(
+            max_daily_loss_dollars=max_loss,
+            max_trades_per_day=max_trades,
+        )
+
+        if args.eval_mode:
+            # Lock eval behavior: no breakeven, no trailing
+            args.breakeven_at_r = None
+
+        print(f"Daily governor: max loss ${max_loss:.0f}/day, max {max_trades} trades/day, "
+              f"half-size at ${max_loss * 0.5:.0f} loss")
+
+    # Eval account profile (R-native sizing)
+    eval_profile = None
+    if args.eval_account_size is not None:
+        from app.services.backtest.engines.eval_profile import EvalAccountProfile
+
+        max_dd = (
+            args.eval_max_drawdown
+            if args.eval_max_drawdown is not None
+            else args.eval_account_size * 0.04
+        )
+
+        eval_profile = EvalAccountProfile(
+            account_size=args.eval_account_size,
+            max_drawdown_dollars=max_dd,
+            max_daily_loss_dollars=(
+                args.max_daily_loss if args.max_daily_loss is not None else max_dd * 0.5
+            ),
+            risk_fraction=args.eval_risk_fraction,
+            r_min_dollars=args.eval_r_min,
+            r_max_dollars=args.eval_r_max,
+        )
+
+        # When profile is active with --eval-mode and no explicit --max-daily-loss,
+        # wire profile.max_daily_loss_dollars into DailyGovernor
+        if args.eval_mode and daily_governor is None:
+            from app.services.backtest.engines.daily_governor import DailyGovernor
+            max_trades = args.max_trades_per_day if args.max_trades_per_day is not None else 2
+            daily_governor = DailyGovernor(
+                max_daily_loss_dollars=eval_profile.max_daily_loss_dollars,
+                max_trades_per_day=max_trades,
+            )
+            print(f"Daily governor (from eval profile): max loss "
+                  f"${eval_profile.max_daily_loss_dollars:.0f}/day, "
+                  f"max {max_trades} trades/day")
+
+        print(f"Eval profile: ${eval_profile.account_size:,.0f} account, "
+              f"${eval_profile.max_drawdown_dollars:,.0f} max DD, "
+              f"fraction={eval_profile.risk_fraction}, "
+              f"R=[${eval_profile.r_min_dollars:.0f}-${eval_profile.r_max_dollars:.0f}]")
+
     # Load or generate data
+    bar_bundle = None  # Set when --multi-tf is active
+
     if args.databento_csv:
         # Load from local Databento CSV file
         from app.services.backtest.data import DatabentoFetcher
@@ -447,15 +952,28 @@ Examples:
 
         print(f"Loading {args.symbol} data from {args.databento_csv}...")
         print(f"  Date range: {args.start_date} to {args.end_date}")
-        htf_bars, ltf_bars = fetcher.load_from_csv(
-            csv_path=args.databento_csv,
-            symbol=args.symbol,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            htf_interval="15m",
-            ltf_interval="5m",
-        )
-        print(f"Loaded {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
+
+        if args.multi_tf:
+            bar_bundle = fetcher.load_multi_tf_from_csv(
+                csv_path=args.databento_csv,
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+            )
+            htf_bars = bar_bundle.m15
+            ltf_bars = bar_bundle.m5
+            print(f"Loaded multi-TF: {len(bar_bundle.h4)} 4H, {len(bar_bundle.h1)} 1H, "
+                  f"{len(htf_bars)} 15m, {len(ltf_bars)} 5m, {len(bar_bundle.m1)} 1m bars")
+        else:
+            htf_bars, ltf_bars = fetcher.load_from_csv(
+                csv_path=args.databento_csv,
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                htf_interval="15m",
+                ltf_interval="5m",
+            )
+            print(f"Loaded {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
 
     elif args.databento:
         # Fetch real data from Databento API
@@ -489,21 +1007,43 @@ Examples:
             sys.exit(0)
 
         print(f"Fetching {args.symbol} data from Databento ({args.start_date} to {args.end_date})...")
-        htf_bars, ltf_bars = fetcher.fetch_futures_data(
-            symbol=args.symbol,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            htf_interval="15m",
-            ltf_interval="5m",
-            use_cache=not args.no_cache,
-        )
-        print(f"Fetched {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
+
+        if args.multi_tf:
+            bar_bundle = fetcher.fetch_multi_tf(
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                use_cache=not args.no_cache,
+            )
+            htf_bars = bar_bundle.m15
+            ltf_bars = bar_bundle.m5
+            print(f"Fetched multi-TF: {len(bar_bundle.h4)} 4H, {len(bar_bundle.h1)} 1H, "
+                  f"{len(htf_bars)} 15m, {len(ltf_bars)} 5m, {len(bar_bundle.m1)} 1m bars")
+        else:
+            htf_bars, ltf_bars = fetcher.fetch_futures_data(
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                htf_interval="15m",
+                ltf_interval="5m",
+                use_cache=not args.no_cache,
+            )
+            print(f"Fetched {len(htf_bars)} HTF (15m) bars and {len(ltf_bars)} LTF (5m) bars")
 
     elif args.synthetic:
-        htf_bars, ltf_bars = generate_sample_data(
-            args.symbol, args.days, profile=args.synthetic_profile
-        )
-        print(f"Generated {len(htf_bars)} HTF bars and {len(ltf_bars)} LTF bars")
+        if args.multi_tf:
+            bar_bundle = generate_sample_data(
+                args.symbol, args.days, profile=args.synthetic_profile, multi_tf=True
+            )
+            htf_bars = bar_bundle.m15
+            ltf_bars = bar_bundle.m5
+            print(f"Generated multi-TF: {len(bar_bundle.h4)} 4H, {len(bar_bundle.h1)} 1H, "
+                  f"{len(htf_bars)} 15m, {len(ltf_bars)} 5m, {len(bar_bundle.m1)} 1m bars")
+        else:
+            htf_bars, ltf_bars = generate_sample_data(
+                args.symbol, args.days, profile=args.synthetic_profile
+            )
+            print(f"Generated {len(htf_bars)} HTF bars and {len(ltf_bars)} LTF bars")
 
     else:
         # Load from CSV files
@@ -518,6 +1058,10 @@ Examples:
         ltf_bars = load_bars_from_csv(args.ltf)
         print(f"Loaded {len(ltf_bars)} LTF bars")
 
+    # Ensure bar_bundle exists for trace replay in non-multi-tf mode
+    if bar_bundle is None:
+        bar_bundle = BarBundle(m15=htf_bars, m5=ltf_bars)
+
     # Build config
     config = UnicornConfig(
         min_scored_criteria=args.min_criteria,
@@ -527,13 +1071,24 @@ Examples:
         max_wick_ratio=args.max_wick_ratio,
         max_range_atr_mult=args.max_range_atr,
         min_displacement_atr=args.min_displacement_atr,
+        max_sweep_age_bars=args.max_sweep_age_bars,
+        require_sweep_settlement=args.require_sweep_settlement,
+        enable_displacement_backstop=not args.no_displacement_backstop,
     )
 
     # Run backtest
-    print(f"\nRunning Unicorn Model backtest for {args.symbol}...")
+    direction_filter = BiasDirection.BULLISH if args.long_only else None
+    run_label = build_run_label(
+        config,
+        direction_filter=direction_filter,
+        time_stop_minutes=args.time_stop,
+        bar_bundle=bar_bundle,
+    )
+    print(f"\n{run_label}")
+    print(f"Running Unicorn Model backtest for {args.symbol}...")
     print(f"Risk per trade: ${args.dollars_per_trade:,.2f}")
     print(f"Max concurrent positions: {args.max_concurrent}")
-    print(f"Criteria: 3 mandatory + {args.min_criteria}/5 scored (guardrailed soft scoring)")
+    print(f"Criteria: 5 mandatory + {args.min_criteria}/4 scored (guardrailed soft scoring)")
     print(f"Session profile: {args.session_profile}")
     print(f"FVG ATR mult: {args.fvg_atr_mult}, Stop ATR mult: {args.stop_atr_mult}")
     print(f"Friction: {args.slippage_ticks} ticks slippage, ${args.commission:.2f} commission")
@@ -548,7 +1103,46 @@ Examples:
         print(f"Range guard: max signal bar range = {args.max_range_atr}x ATR")
     if args.min_displacement_atr is not None:
         print(f"Displacement guard: min MSS displacement = {args.min_displacement_atr:.2f}x ATR")
+    if args.breakeven_at_r is not None:
+        print(f"Breakeven stop: move to entry at +{args.breakeven_at_r:.1f}R")
+    sweep_age = f"{args.max_sweep_age_bars} bars" if args.max_sweep_age_bars is not None else "disabled"
+    sweep_settle = "enabled" if args.require_sweep_settlement else "disabled"
+    if args.max_sweep_age_bars is not None or args.require_sweep_settlement:
+        print(f"Sweep closure guard: recency={sweep_age}, settlement={sweep_settle}")
+
+    # Build reference bias series if requested
+    reference_bias_series = None
+    reference_symbol = None
+    if args.ref_symbol:
+        reference_symbol = args.ref_symbol.upper()
+        ref_htf_bars, ref_ltf_bars, ref_source = load_ref_data(args, args.ref_htf)
+        print(f"Reference symbol: {reference_symbol} (source: {ref_source})")
+        reference_bias_series = build_reference_bias_series(
+            ref_htf_bars, ref_ltf_bars,
+        )
+        # Coverage: what fraction of primary HTF range is covered
+        if reference_bias_series:
+            ref_start = reference_bias_series[0].ts
+            ref_end = reference_bias_series[-1].ts
+            print(f"  Bias points: {len(reference_bias_series)} "
+                  f"({ref_start.date()} to {ref_end.date()})")
+            print(f"  LTF bars used: {len(ref_ltf_bars)}")
+            if htf_bars:
+                primary_start = htf_bars[0].ts
+                primary_end = htf_bars[-1].ts
+                covered = sum(
+                    1 for b in reference_bias_series
+                    if primary_start <= b.ts <= primary_end
+                )
+                coverage_pct = covered / len(htf_bars) * 100 if htf_bars else 0.0
+                print(f"  Coverage of primary range: {coverage_pct:.1f}%")
+        else:
+            print("  WARNING: no reference bias points generated")
+
     print("")
+
+    if args.multi_tf:
+        print(f"Multi-TF mode: full bias stack (4H/1H/15m/5m) + 1m execution")
 
     result = run_unicorn_backtest(
         symbol=args.symbol,
@@ -562,63 +1156,22 @@ Examples:
         slippage_ticks=args.slippage_ticks,
         commission_per_contract=args.commission,
         intrabar_policy=IntrabarPolicy(args.intrabar_policy),
-        direction_filter=BiasDirection.BULLISH if args.long_only else None,
+        direction_filter=direction_filter,
         time_stop_minutes=args.time_stop,
         time_stop_r_threshold=args.time_stop_threshold,
+        reference_bias_series=reference_bias_series,
+        reference_symbol=reference_symbol,
+        breakeven_at_r=args.breakeven_at_r,
+        bar_bundle=bar_bundle,
+        daily_governor=daily_governor,
+        eval_profile=eval_profile,
     )
 
     # Format output
     if args.json:
         import json
-        from dataclasses import asdict
 
-        # Convert to JSON-serializable format
-        output = {
-            "symbol": result.symbol,
-            "start_date": result.start_date.isoformat(),
-            "end_date": result.end_date.isoformat(),
-            "total_bars": result.total_bars,
-            "total_setups_scanned": result.total_setups_scanned,
-            "partial_setups": result.partial_setups,
-            "valid_setups": result.valid_setups,
-            "trades_taken": result.trades_taken,
-            "wins": result.wins,
-            "losses": result.losses,
-            "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor,
-            "total_pnl_points": result.total_pnl_points,
-            "total_pnl_dollars": result.total_pnl_dollars,
-            "expectancy_points": result.expectancy_points,
-            "avg_mfe": result.avg_mfe,
-            "avg_mae": result.avg_mae,
-            "mfe_capture_rate": result.mfe_capture_rate,
-            "avg_r_multiple": result.avg_r_multiple,
-            "confidence_win_correlation": result.confidence_win_correlation,
-            "criteria_bottlenecks": [
-                {"criterion": b.criterion, "fail_rate": b.fail_rate}
-                for b in result.criteria_bottlenecks
-            ],
-            "session_stats": {
-                s.value: {
-                    "total_setups": result.session_stats[s].total_setups,
-                    "valid_setups": result.session_stats[s].valid_setups,
-                    "trades_taken": result.session_stats[s].trades_taken,
-                    "win_rate": result.session_stats[s].win_rate,
-                    "total_pnl": result.session_stats[s].total_pnl_points,
-                }
-                for s in result.session_stats
-            },
-            "confidence_buckets": [
-                {
-                    "range": f"{b.min_confidence:.1f}-{b.max_confidence:.1f}",
-                    "trades": b.trade_count,
-                    "win_rate": b.win_rate,
-                    "avg_r": b.avg_r_multiple,
-                }
-                for b in result.confidence_buckets
-            ],
-            "session_diagnostics": result.session_diagnostics,
-        }
+        output = _build_output_dict(result, config, args)
         report = json.dumps(output, indent=2)
     else:
         report = format_backtest_report(result)
@@ -630,6 +1183,97 @@ Examples:
         print(f"Report written to {args.output}")
     else:
         print(report)
+
+    # Governor summary
+    if result.governor_stats is not None:
+        gs = result.governor_stats
+        if "max_daily_loss_dollars" in gs:
+            print(f"\nDaily Governor (${gs['max_daily_loss_dollars']:,.0f} max loss, "
+                  f"${gs['half_loss_threshold']:,.0f} half-threshold, "
+                  f"{gs['max_trades_per_day']} trades/day):")
+        else:
+            print("\nGovernor stats:")
+        print(f"  Risk budget/trade:  ${gs.get('dollars_per_trade', 0):,.0f}")
+        print(f"  Sizing rejects:     {gs.get('sizing_rejects', 0)}")
+        print(f"  Signals skipped:    {gs['signals_skipped']}")
+        print(f"  Days halted early:  {gs['days_halted']} "
+              f"(loss={gs['loss_limit_halts']}, trades={gs['trade_limit_halts']})")
+        print(f"  Half-size trades:   {gs['half_size_trades']}")
+        print(f"  Days with trades:   {gs['total_days_traded']}")
+
+        # Eval account summary
+        if "eval_account_size" in gs:
+            trailing_dd = gs.get("trailing_drawdown", 0)
+            max_dd = gs["eval_max_drawdown"]
+            dd_pct = (trailing_dd / max_dd * 100) if max_dd > 0 else 0.0
+            print(f"\n  Eval Account:")
+            print(f"    Starting equity:  ${gs['eval_account_size']:,.0f}")
+            print(f"    Final equity:     ${gs.get('final_equity', 0):,.0f}")
+            print(f"    Peak equity:      ${gs.get('peak_equity', 0):,.0f}")
+            print(f"    Trailing DD:      ${trailing_dd:,.0f} / ${max_dd:,.0f} ({dd_pct:.1f}%)")
+            r_min = gs.get("r_day_min", 0)
+            r_max = gs.get("r_day_max", 0)
+            print(f"    R_day range:      ${r_min:,.0f} - ${r_max:,.0f}")
+            if gs.get("drawdown_halt"):
+                print(f"    *** EVAL BLOWN ***")
+
+    # Baseline compare
+    if args.baseline_run:
+        import json as _json
+        from compare_unicorn_runs import compare_runs
+        try:
+            with open(args.baseline_run) as f:
+                baseline = _json.load(f)
+        except FileNotFoundError:
+            print(f"Error: baseline file not found: {args.baseline_run}", file=sys.stderr)
+            sys.exit(1)
+        except _json.JSONDecodeError as e:
+            print(f"Error: invalid JSON in baseline file: {e}", file=sys.stderr)
+            sys.exit(1)
+        output_dict = _build_output_dict(result, config, args)
+        print(f"\nBaseline comparison (vs {args.baseline_run}):")
+        print(compare_runs(baseline, output_dict))
+
+    # Write baseline for future comparisons
+    if args.write_baseline:
+        import json as _json
+        output_dict = _build_output_dict(result, config, args)
+        with open(args.write_baseline, "w") as f:
+            _json.dump(output_dict, f, indent=2)
+        print(f"\nBaseline written to {args.write_baseline}")
+
+    # Post-run reference diagnostics
+    if reference_bias_series is not None and hasattr(result, "session_diagnostics"):
+        diag = result.session_diagnostics or {}
+        ia = diag.get("intermarket_agreement")
+        if ia and "by_agreement" in ia:
+            missing = ia["by_agreement"].get("missing_ref", {})
+            missing_count = missing.get("trades", 0)
+            total = result.trades_taken or 1
+            print(f"\nRef-symbol coverage: {missing_count}/{total} trades "
+                  f"({missing_count / total * 100:.1f}%) had missing_ref")
+
+    # Trace mode: replay a single trade
+    if args.trace_trade_index is not None:
+        idx = args.trace_trade_index
+        if idx < 0 or idx >= len(result.trades):
+            print(f"\nError: --trace-trade-index {idx} out of range "
+                  f"(0–{len(result.trades) - 1}, {len(result.trades)} trades)",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        tick_size = 0.25
+        slippage_pts = args.slippage_ticks * tick_size
+        trace_output = format_trade_trace(
+            trade=result.trades[idx],
+            trade_index=idx,
+            bar_bundle=bar_bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy(args.intrabar_policy),
+            slippage_points=slippage_pts,
+            verbose=args.trace_verbose,
+        )
+        print("\n" + trace_output)
 
     # Quick summary to stderr if outputting to file
     if args.output and not args.json:
