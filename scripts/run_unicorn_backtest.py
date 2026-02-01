@@ -479,6 +479,14 @@ def build_reference_bias_series(
     return series
 
 
+def _safe_float(v: float) -> float | None:
+    """Convert inf/nan to None for JSON safety."""
+    import math
+    if math.isinf(v) or math.isnan(v):
+        return None
+    return v
+
+
 def _build_output_dict(result, config, args) -> dict:
     """Build a JSON-serializable dict from backtest results.
 
@@ -506,7 +514,7 @@ def _build_output_dict(result, config, args) -> dict:
         "wins": result.wins,
         "losses": result.losses,
         "win_rate": result.win_rate,
-        "profit_factor": result.profit_factor,
+        "profit_factor": _safe_float(result.profit_factor),
         "total_pnl_points": result.total_pnl_points,
         "total_pnl_dollars": result.total_pnl_dollars,
         "expectancy_points": result.expectancy_points,
@@ -541,6 +549,10 @@ def _build_output_dict(result, config, args) -> dict:
         ],
         "session_diagnostics": result.session_diagnostics,
         "governor_stats": result.governor_stats,
+        "trail_stats": {
+            "trail_activated_count": getattr(result, "trail_activated_count", 0),
+            "trail_stop_exits": getattr(result, "trail_stop_exits", 0),
+        } if getattr(result, "trail_activated_count", 0) > 0 or getattr(result, "trail_stop_exits", 0) > 0 else None,
     }
 
 
@@ -752,7 +764,24 @@ Examples:
     parser.add_argument(
         "--breakeven-at-r", type=float, default=None,
         help="Move stop to breakeven (entry price) when MFE reaches this R-multiple. "
-             "E.g. 1.0 = move stop to entry at +1R. None=disabled."
+             "E.g. 1.0 = move stop to entry at +1R. None=disabled. "
+             "Mutually exclusive with --trail-atr-mult."
+    )
+    parser.add_argument(
+        "--trail-atr-mult", type=float, default=None,
+        help="ATR-based trailing stop distance as ATR multiple. "
+             "Activates at +1R MFE with BE floor. Trail distance = entry_atr * mult. "
+             "Mutually exclusive with --breakeven-at-r. None=disabled."
+    )
+    parser.add_argument(
+        "--trail-cap-mult", type=float, default=None,
+        help="Cap trail distance at this R-multiple of risk_points. "
+             "E.g. 1.0 = trail distance <= 1R. Default: 1.0 in eval mode, uncapped otherwise."
+    )
+    parser.add_argument(
+        "--trail-activate-r", type=float, default=1.0,
+        help="R-multiple MFE threshold to activate trailing stop. "
+             "E.g. 0.5 = activate at +0.5R. Default: 1.0."
     )
     parser.add_argument(
         "--max-sweep-age-bars", type=int, default=None,
@@ -867,6 +896,10 @@ Examples:
 
     args = parser.parse_args()
 
+    # Validate mutual exclusion
+    if args.trail_atr_mult is not None and args.breakeven_at_r is not None:
+        parser.error("--trail-atr-mult and --breakeven-at-r are mutually exclusive")
+
     # Validate ref args
     if args.ref_htf and not args.ref_symbol:
         parser.error("--ref-htf requires --ref-symbol")
@@ -892,8 +925,11 @@ Examples:
         )
 
         if args.eval_mode:
-            # Lock eval behavior: no breakeven, no trailing
+            # Lock eval behavior: no breakeven (trail is allowed)
             args.breakeven_at_r = None
+            # Default trail cap in eval mode: 1.0R (unless explicitly set)
+            if args.trail_atr_mult is not None and args.trail_cap_mult is None:
+                args.trail_cap_mult = 1.0
 
         print(f"Daily governor: max loss ${max_loss:.0f}/day, max {max_trades} trades/day, "
               f"half-size at ${max_loss * 0.5:.0f} loss")
@@ -1162,6 +1198,9 @@ Examples:
         reference_bias_series=reference_bias_series,
         reference_symbol=reference_symbol,
         breakeven_at_r=args.breakeven_at_r,
+        trail_atr_mult=args.trail_atr_mult,
+        trail_cap_mult=args.trail_cap_mult,
+        trail_activate_r=args.trail_activate_r,
         bar_bundle=bar_bundle,
         daily_governor=daily_governor,
         eval_profile=eval_profile,

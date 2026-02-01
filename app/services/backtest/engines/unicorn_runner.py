@@ -142,8 +142,28 @@ class ExitResult:
     Returned by resolve_bar_exit when a trade exits on a given bar.
     """
     exit_price: float
-    exit_reason: str   # "stop_loss", "target", "time_stop", "eod"
+    exit_reason: str   # "stop_loss", "trail_stop", "target", "time_stop", "eod"
     pnl_points: float
+
+
+def _compute_trail_distance(
+    entry_atr: float,
+    trail_atr_mult: Optional[float],
+    trail_cap_mult: Optional[float],
+    risk_points: float,
+) -> float:
+    """Compute frozen trail distance with optional R-based cap.
+
+    trail_distance = entry_atr * trail_atr_mult
+    If trail_cap_mult is set: trail_distance = min(raw, cap_mult * risk_points)
+    """
+    if trail_atr_mult is None or trail_atr_mult <= 0:
+        return 0.0
+    raw = entry_atr * trail_atr_mult
+    if trail_cap_mult is not None and risk_points > 0:
+        cap = trail_cap_mult * risk_points
+        return min(raw, cap)
+    return raw
 
 
 def resolve_bar_exit(
@@ -156,6 +176,8 @@ def resolve_bar_exit(
     time_stop_minutes: Optional[int] = None,
     time_stop_r_threshold: float = 0.25,
     breakeven_at_r: Optional[float] = None,
+    trail_atr_mult: Optional[float] = None,
+    trail_activate_r: float = 1.0,
 ) -> Optional[ExitResult]:
     """
     Determine if and how a trade exits on a given bar.
@@ -192,12 +214,45 @@ def resolve_bar_exit(
     is_long = trade.direction == BiasDirection.BULLISH
     ts = bar.ts
 
-    # --- 0. Breakeven stop: move stop to entry when MFE reaches threshold ---
-    if breakeven_at_r is not None and trade.risk_points > 0:
+    # --- 0. Trail / breakeven stop management ---
+    favorable_extreme = bar.high if is_long else bar.low
+
+    # Update trail tracking (always, even before activation)
+    if is_long:
+        trade.trail_high = max(trade.trail_high, favorable_extreme)
+    else:
+        trade.trail_low = min(trade.trail_low, favorable_extreme)
+
+    if trail_atr_mult is not None and trade.trail_distance > 0 and trade.risk_points > 0:
+        # Compute MFE from intrabar extremes
+        if is_long:
+            mfe_points = trade.trail_high - trade.entry_price
+        else:
+            mfe_points = trade.entry_price - trade.trail_low
+
+        # Activate at configured R threshold
+        activation_threshold = trade.risk_points * trail_activate_r
+        if not trade.trail_active and mfe_points >= activation_threshold:
+            trade.trail_active = True
+            # BE floor: guarantee no loss after activation
+            if is_long:
+                trade.stop_price = max(trade.stop_price, trade.entry_price)
+            else:
+                trade.stop_price = min(trade.stop_price, trade.entry_price)
+
+        # Ratchet trail (same bar as activation — no delay)
+        if trade.trail_active:
+            if is_long:
+                new_stop = trade.trail_high - trade.trail_distance
+                trade.stop_price = max(trade.stop_price, new_stop)
+            else:
+                new_stop = trade.trail_low + trade.trail_distance
+                trade.stop_price = min(trade.stop_price, new_stop)
+
+    elif breakeven_at_r is not None and trade.risk_points > 0:
+        # Legacy breakeven logic (mutually exclusive with trail)
         be_threshold = trade.entry_price + (trade.risk_points * breakeven_at_r) if is_long \
             else trade.entry_price - (trade.risk_points * breakeven_at_r)
-        # Check if this bar's favorable extreme crosses the threshold
-        favorable_extreme = bar.high if is_long else bar.low
         if is_long and favorable_extreme >= be_threshold:
             trade.stop_price = max(trade.stop_price, trade.entry_price)
         elif not is_long and favorable_extreme <= be_threshold:
@@ -244,7 +299,8 @@ def resolve_bar_exit(
                 fill_price = max(trade.stop_price, bar.open)
                 exit_price = fill_price + slippage_points
                 pnl = trade.entry_price - exit_price
-            return ExitResult(exit_price=exit_price, exit_reason="stop_loss", pnl_points=pnl)
+            reason = "trail_stop" if trade.trail_active else "stop_loss"
+            return ExitResult(exit_price=exit_price, exit_reason=reason, pnl_points=pnl)
         else:
             # Target is a limit order — fills at limit price (no gap improvement)
             if is_long:
@@ -462,6 +518,14 @@ class TradeRecord:
     target_price: float
     risk_points: float
 
+    # Trailing stop fields
+    initial_stop: float = 0.0       # Original stop before any mutation
+    trail_distance: float = 0.0     # Frozen entry_atr * trail_mult
+    trail_active: bool = False       # Flipped once at +1R
+    trail_high: float = 0.0         # Best favorable extreme (longs)
+    trail_low: float = float("inf") # Best favorable extreme (shorts)
+    entry_atr: float = 0.0          # ATR at entry time
+
     # MFE/MAE tracking
     mfe: float = 0.0  # Maximum Favorable Excursion (best unrealized profit)
     mae: float = 0.0  # Maximum Adverse Excursion (worst unrealized loss)
@@ -614,6 +678,11 @@ class UnicornBacktestResult:
     avg_r_multiple: float = 0.0
     best_r_multiple: float = 0.0
     worst_r_multiple: float = 0.0
+
+    # Trailing stop analysis
+    trail_activated_count: int = 0
+    trail_stop_exits: int = 0
+    trail_activate_r: float = 1.0
 
     # Session breakdown
     session_stats: dict[TradingSession, SessionStats] = field(default_factory=dict)
@@ -958,6 +1027,10 @@ def run_unicorn_backtest(
     reference_symbol: Optional[str] = None,  # e.g., "ES"
     # Profit protection: move stop to breakeven at +NR
     breakeven_at_r: Optional[float] = None,  # e.g. 1.0 = move stop to entry at +1R
+    # ATR trailing stop (mutually exclusive with breakeven_at_r)
+    trail_atr_mult: Optional[float] = None,  # e.g. 1.5 = trail at 1.5x ATR behind MFE
+    trail_cap_mult: Optional[float] = None,  # cap trail_distance at cap_mult * risk_points
+    trail_activate_r: float = 1.0,  # activate trail at this R-multiple MFE (default +1R)
     # Multi-timeframe bar bundle (enables full bias stack + 1m execution)
     bar_bundle: Optional[BarBundle] = None,
     # Daily risk governor (eval mode)
@@ -1227,6 +1300,8 @@ def run_unicorn_backtest(
                         time_stop_minutes=time_stop_minutes,
                         time_stop_r_threshold=time_stop_r_threshold,
                         breakeven_at_r=breakeven_at_r,
+                        trail_atr_mult=trail_atr_mult,
+                        trail_activate_r=trail_activate_r,
                     )
                     if exit_result:
                         trade.exit_price = exit_result.exit_price
@@ -1259,6 +1334,8 @@ def run_unicorn_backtest(
                     time_stop_minutes=time_stop_minutes,
                     time_stop_r_threshold=time_stop_r_threshold,
                     breakeven_at_r=breakeven_at_r,
+                    trail_atr_mult=trail_atr_mult,
+                    trail_activate_r=trail_activate_r,
                 )
                 if exit_result:
                     trade.exit_price = exit_result.exit_price
@@ -1541,6 +1618,10 @@ def run_unicorn_backtest(
                 _gov_day_has_trade = True
                 _gov_stats["total_days_traded"] += 1
 
+            # Trailing stop: disable fixed target, freeze trail distance
+            if trail_atr_mult is not None:
+                target_price = float("inf") if direction == BiasDirection.BULLISH else float("-inf")
+
             # Create trade
             trade = TradeRecord(
                 entry_time=ts,
@@ -1552,6 +1633,11 @@ def run_unicorn_backtest(
                 stop_price=stop_price,
                 target_price=target_price,
                 risk_points=risk_points,
+                initial_stop=stop_price,
+                entry_atr=signal_atr,
+                trail_distance=_compute_trail_distance(
+                    signal_atr, trail_atr_mult, trail_cap_mult, risk_points,
+                ) if trail_atr_mult else 0.0,
             )
 
             open_trades.append(trade)
@@ -1581,6 +1667,8 @@ def run_unicorn_backtest(
                         time_stop_minutes=time_stop_minutes,
                         time_stop_r_threshold=time_stop_r_threshold,
                         breakeven_at_r=breakeven_at_r,
+                        trail_atr_mult=trail_atr_mult,
+                        trail_activate_r=trail_activate_r,
                     )
                     if entry_bar_exit:
                         trade.exit_price = entry_bar_exit.exit_price
@@ -1596,6 +1684,8 @@ def run_unicorn_backtest(
                     time_stop_minutes=time_stop_minutes,
                     time_stop_r_threshold=time_stop_r_threshold,
                     breakeven_at_r=breakeven_at_r,
+                    trail_atr_mult=trail_atr_mult,
+                    trail_activate_r=trail_activate_r,
                 )
                 if entry_bar_exit:
                     trade.exit_price = entry_bar_exit.exit_price
@@ -1677,6 +1767,12 @@ def run_unicorn_backtest(
             if t.mfe > 0:
                 mfe_captures.append(t.pnl_points / t.mfe if t.pnl_points > 0 else 0)
         result.mfe_capture_rate = statistics.mean(mfe_captures) if mfe_captures else 0
+
+        # Trailing stop aggregation
+        if trail_atr_mult is not None:
+            result.trail_activated_count = sum(1 for t in result.trades if t.trail_active)
+            result.trail_stop_exits = sum(1 for t in result.trades if t.exit_reason == "trail_stop")
+            result.trail_activate_r = trail_activate_r
 
         # Session averages
         for session, stats in result.session_stats.items():
@@ -2210,7 +2306,88 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append(f"Avg MFE:               {result.avg_mfe:.2f} points")
     lines.append(f"Avg MAE:               {result.avg_mae:.2f} points")
     lines.append(f"MFE capture rate:      {result.mfe_capture_rate*100:.1f}%")
+    # MFE R-distribution (always shown)
+    all_with_risk = [t for t in result.trades if t.risk_points > 0]
+    if all_with_risk:
+        n = len(all_with_risk)
+        thresholds = [0.5, 1.0, 1.5, 2.0]
+        parts = []
+        for thr in thresholds:
+            count = sum(1 for t in all_with_risk if t.mfe >= t.risk_points * thr)
+            pct = count / n * 100
+            parts.append(f"+{thr:g}R:{pct:.0f}%")
+        lines.append(f"MFE reach:             {' | '.join(parts)}")
     lines.append("")
+
+    # Trailing Stop Analysis
+    if result.trail_activated_count > 0 or result.trail_stop_exits > 0:
+        lines.append("-" * 40)
+        lines.append("TRAILING STOP")
+        lines.append("-" * 40)
+
+        # Trail config (infer from first trade with trail_distance)
+        trail_trades = [t for t in result.trades if t.trail_distance > 0]
+        if trail_trades:
+            t0 = trail_trades[0]
+            if t0.entry_atr > 0:
+                eff_mult = t0.trail_distance / t0.entry_atr
+                lines.append(f"Trail ATR mult (eff):  {eff_mult:.2f}")
+            if t0.risk_points > 0:
+                cap_r = t0.trail_distance / t0.risk_points
+                lines.append(f"Trail distance (R):    {cap_r:.2f}R")
+
+        if result.trail_activate_r != 1.0:
+            lines.append(f"Activation threshold:  {result.trail_activate_r:.2f}R")
+
+        total = result.trades_taken
+        act_pct = (result.trail_activated_count / total * 100) if total > 0 else 0.0
+        lines.append(
+            f"Trades activated:      {result.trail_activated_count} / {total}  ({act_pct:.1f}%)"
+        )
+        lines.append(f"Trail stop exits:      {result.trail_stop_exits}")
+
+        # Avg R by exit type (all types present)
+        exit_groups = {}
+        for t in result.trades:
+            reason = t.exit_reason or "unknown"
+            exit_groups.setdefault(reason, []).append(t)
+
+        # Show trail_stop and stop_loss first, then others
+        priority_order = ["trail_stop", "stop_loss", "time_stop", "eod"]
+        shown = set()
+        for reason in priority_order:
+            if reason in exit_groups:
+                trades = exit_groups[reason]
+                avg_r = statistics.mean(t.r_multiple for t in trades)
+                lines.append(f"Avg R ({reason:>10}):  {avg_r:+.2f}R  ({len(trades)} trades)")
+                shown.add(reason)
+        for reason, trades in exit_groups.items():
+            if reason not in shown:
+                avg_r = statistics.mean(t.r_multiple for t in trades)
+                lines.append(f"Avg R ({reason:>10}):  {avg_r:+.2f}R  ({len(trades)} trades)")
+
+        # MFE capture: pnl/mfe for trades with positive MFE (includes losers)
+        trail_exits = exit_groups.get("trail_stop", [])
+        if trail_exits:
+            trail_captures = [
+                t.pnl_points / t.mfe for t in trail_exits if t.mfe > 0
+            ]
+            if trail_captures:
+                lines.append(f"MFE capture (trail):   {statistics.mean(trail_captures)*100:.1f}%")
+        lines.append(f"MFE capture (all):     {result.mfe_capture_rate*100:.1f}%")
+        lines.append("")
+
+        # MFE R-distribution: what % of trades reached each MFE milestone
+        trades_with_risk = [t for t in result.trades if t.risk_points > 0]
+        if trades_with_risk:
+            n = len(trades_with_risk)
+            thresholds = [0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
+            parts = []
+            for thr in thresholds:
+                count = sum(1 for t in trades_with_risk if t.mfe >= t.risk_points * thr)
+                parts.append(f"+{thr:.1f}R:{count}/{n}")
+            lines.append(f"MFE reach:  {' | '.join(parts)}")
+            lines.append("")
 
     # Session Breakdown
     lines.append("-" * 40)
@@ -2501,10 +2678,17 @@ def format_trade_trace(
     lines.append(f"Entry price:         {trade.entry_price:.2f}")
     lines.append(f"Direction:           {trade.direction.value}")
     lines.append(f"Stop:                {trade.stop_price:.2f}")
-    lines.append(f"Target:              {trade.target_price:.2f}")
-    planned_r = abs(trade.target_price - trade.entry_price) / trade.risk_points if trade.risk_points > 0 else 0.0
+    if trade.target_price in (float("inf"), float("-inf")):
+        lines.append(f"Target:              none (trailing)")
+    else:
+        lines.append(f"Target:              {trade.target_price:.2f}")
+    planned_r = abs(trade.target_price - trade.entry_price) / trade.risk_points if trade.risk_points > 0 and trade.target_price not in (float("inf"), float("-inf")) else 0.0
     lines.append(f"Planned R:           {planned_r:.2f}R")
     lines.append(f"Risk points:         {trade.risk_points:.2f}")
+    if trade.trail_distance > 0:
+        lines.append(f"Trail distance:      {trade.trail_distance:.2f} pts (ATR={trade.entry_atr:.2f})")
+        lines.append(f"Trail activated:     {'yes' if trade.trail_active else 'no'}")
+        lines.append(f"Initial stop:        {trade.initial_stop:.2f}")
     lines.append(f"Session:             {trade.session.value}")
 
     criteria = trade.criteria

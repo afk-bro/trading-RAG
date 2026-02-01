@@ -199,17 +199,35 @@ The displacement guard was validated across multiple historical regimes, sub-win
 
 **Recommended production flags**:
 ```bash
---session-profile normal --max-wick-ratio 0.6 --min-displacement-atr 0.5 --intrabar-policy worst
+--session-profile normal --max-wick-ratio 0.6 --min-displacement-atr 0.5 --intrabar-policy worst --trail-atr-mult 1.5
 ```
 
 Session profile validated across 5 regime windows (2021-2025). STRICT and NY_OPEN failed decision criteria (expectancy >= baseline in >=4/5 windows). NORMAL remains default. See `docs/unicorn-model-analysis.md` for full tables.
+
+**Trailing Stop** (exit management):
+- `--trail-atr-mult FLOAT`: ATR-based trailing stop distance (e.g. 1.5 = 1.5x ATR)
+- `--trail-cap-mult FLOAT`: Cap trail distance at N × risk_points (default: 1.0 in eval mode, uncapped otherwise)
+- `--trail-activate-r FLOAT`: MFE threshold to activate trail (default: 1.0 = +1R)
+- Trail distance = min(entry_atr × mult, cap_mult × risk_points) — frozen at entry
+- Activates at configured R-multiple MFE with breakeven floor
+- Ratchets only forward behind favorable extreme (trail_high for longs, trail_low for shorts)
+- Activation and ratchet happen on the same bar (no delay)
+- Exit reason: `trail_stop` (vs `stop_loss` for original stop hits)
+- Mutually exclusive with `--breakeven-at-r`
+- Works with `--eval-mode` for prop-firm simulation (auto-caps at 1.0R)
+
+Validated defaults (MNQ 18-month backtest, eval mode, 2024-01 to 2025-07):
+- `--trail-activate-r 1.0` — lowering to 0.5R increases activation (38%→55%) but harvests structurally inferior trades (avg R drops +0.85R→+0.42R, PF drops 0.65→0.59). MFE distribution shows only 32% of trades reach +1R; the 21% gap between +0.5R and +1R doesn't carry enough excursion.
+- `--trail-cap-mult 1.0` (eval auto-default) — tighter caps (0.75) trade smoothness for clipping; wider (1.25+) donate profit back. 1.0R balances eval safety with trend capture.
+- Trail vs fixed 2R target: win rate +14.6%, expectancy +2.78 pts/trade, MFE capture 26%→50% for trail exits, best R uncapped to +3.41R.
 
 **Lessons Learned**:
 - Direction matters: Long-only on NQ improved PF from 0.91 to 1.34
 - Time-stops reduce exposure without hurting edge
 - Wick guard at 0.6 reduced evil-profile bleed from -$957 to -$298
 - Displacement guard at 0.5x ATR improves NQ expectancy +52%, turns ES from breakeven to profitable
-- 40% full-stop rate with 0% +2R+ wins indicates capped exits
+- Trailing stop resolved capped exits: 40% full-stop rate with 0% +2R+ wins → 38% activation with +0.85R avg trail exits
+- Exit engineering is now data-validated; entry selectivity is the bottleneck (32% of trades reach +1R MFE)
 - See `docs/unicorn-model-analysis.md` for forensic analysis
 
 ## Eval Mode (Prop-Firm Simulation)
