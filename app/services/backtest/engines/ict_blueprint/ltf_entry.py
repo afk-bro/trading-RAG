@@ -251,12 +251,12 @@ def check_entry_trigger(
                 setup.fvg = fvg
             else:
                 return None
-        # Check if bar fills into FVG
+        # Check if bar fills into FVG (must overlap the zone)
         if setup.side == Side.LONG and setup.fvg.bullish:
-            if h1_low <= setup.fvg.top:
+            if h1_low <= setup.fvg.top and h1_high >= setup.fvg.bottom:
                 return setup.fvg.top
         elif setup.side == Side.SHORT and not setup.fvg.bullish:
-            if h1_high >= setup.fvg.bottom:
+            if h1_high >= setup.fvg.bottom and h1_low <= setup.fvg.top:
                 return setup.fvg.bottom
         return None
 
@@ -377,9 +377,16 @@ def advance_setup(
 
 
 def create_setup_for_ob(ob: OrderBlock, htf_bias: Bias) -> LTFSetup:
-    """Create a new LTF setup for an active order block."""
+    """Create a new LTF setup for an active order block.
+
+    Carries forward ob.last_setup_bar_index so the setup won't reuse
+    stale L0 swings from a prior timed-out or exited attempt.
+    """
     side = Side.LONG if htf_bias == Bias.BULLISH else Side.SHORT
-    return LTFSetup(ob=ob, side=side, phase=SetupPhase.SCANNING)
+    return LTFSetup(
+        ob=ob, side=side, phase=SetupPhase.SCANNING,
+        last_exit_bar_index=ob.last_setup_bar_index,
+    )
 
 
 def get_active_setup_keys(setups: list[LTFSetup]) -> set[OBId]:

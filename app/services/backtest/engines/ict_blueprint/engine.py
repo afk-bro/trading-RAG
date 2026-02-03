@@ -145,6 +145,7 @@ class ICTBlueprintEngine:
                         for s in active_setups:
                             if s.ob.ob_id == position.ob_id:
                                 s.ob.attempts_used += 1
+                                s.ob.last_setup_bar_index = max(s.ob.last_setup_bar_index, bar_idx)
                                 s.last_exit_bar_index = bar_idx
                                 # Reset to scanning for re-entry
                                 if s.ob.attempts_used < bp.max_attempts_per_ob:
@@ -281,12 +282,17 @@ class ICTBlueprintEngine:
                     partial_pnl_dollars = 0.0
                     break  # One entry per bar
 
-            # 9. Garbage-collect
-            active_setups = [
-                s for s in active_setups
-                if s.phase not in (SetupPhase.TIMED_OUT,)
-                and not s.ob.invalidated
-            ]
+            # 9. Garbage-collect — propagate timeout bar index to OB for fresh-L0 constraint
+            surviving = []
+            for s in active_setups:
+                if s.phase == SetupPhase.TIMED_OUT:
+                    # Save the bar index so future setups for this OB require a fresh L0
+                    s.ob.last_setup_bar_index = max(s.ob.last_setup_bar_index, bar_idx)
+                    continue
+                if s.ob.invalidated:
+                    continue
+                surviving.append(s)
+            active_setups = surviving
 
         # End of data: force close
         if position is not None and h1_bars:

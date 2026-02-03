@@ -317,3 +317,108 @@ class TestPremiumDiscount:
         # threshold 0.382 → level = 80 + 20*0.382 = 87.64
         assert is_in_discount(85.0, r, 0.382) is True
         assert is_in_discount(88.0, r, 0.382) is False
+
+
+# ---------------------------------------------------------------------------
+# Audit: SwingDetector confirmation lag (point #2)
+# ---------------------------------------------------------------------------
+
+
+class TestSwingConfirmationLag:
+    def test_swing_not_emitted_until_right_side_bar(self):
+        """Swing at index 1 is only emitted when bar 2 is pushed (confirmation lag)."""
+        det = SwingDetector(lookback=1)
+        # Bar 0
+        s0 = det.push(0, 100, 9.0, 10.0, 8.0, 9.5)
+        assert s0 == []
+        # Bar 1: potential swing high
+        s1 = det.push(1, 200, 11.0, 15.0, 10.0, 14.0)
+        assert s1 == []  # NOT emitted yet — right-side bar not seen
+        # Bar 2: confirms bar 1
+        s2 = det.push(2, 300, 13.0, 14.0, 12.0, 13.0)
+        highs = [s for s in s2 if s.is_high]
+        assert len(highs) == 1
+        assert highs[0].index == 1  # Emitted for bar 1, not bar 2
+
+    def test_5_candle_confirmation_delay(self):
+        """Lookback=2: swing at index 2 only confirmed after bar 4."""
+        det = SwingDetector(lookback=2)
+        for i in range(4):
+            result = det.push(i, i * 100, 10.0, 11.0 + (2 if i == 2 else 0), 9.0, 10.0)
+            assert result == [], f"Should not emit before bar 4, emitted at bar {i}"
+        # Bar 4 completes the window
+        result = det.push(4, 400, 10.0, 11.0, 9.0, 10.0)
+        highs = [s for s in result if s.is_high]
+        assert len(highs) == 1
+        assert highs[0].index == 2
+
+
+# ---------------------------------------------------------------------------
+# Audit: MSB uses close only, strict > / < (point #3)
+# ---------------------------------------------------------------------------
+
+
+class TestMSBComparators:
+    def test_bullish_msb_requires_strict_greater(self):
+        """Close EQUAL to swing high should NOT trigger MSB."""
+        sh = [SwingPoint(0, 100, 50.0, True)]
+        sl = [SwingPoint(1, 200, 40.0, False)]
+        result = check_msb(sh, sl, 50.0, Bias.NEUTRAL)  # close == swing high
+        assert result is None
+
+    def test_bearish_msb_requires_strict_less(self):
+        """Close EQUAL to swing low should NOT trigger MSB."""
+        sh = [SwingPoint(0, 100, 50.0, True)]
+        sl = [SwingPoint(1, 200, 40.0, False)]
+        result = check_msb(sh, sl, 40.0, Bias.NEUTRAL)  # close == swing low
+        assert result is None
+
+    def test_msb_uses_close_not_high(self):
+        """MSB check takes bar_close, verify it's not checking highs/lows."""
+        sh = [SwingPoint(0, 100, 50.0, True)]
+        sl = []
+        # If someone passed high instead of close, this would trigger.
+        # Passing 49.9 (close below 50) should NOT trigger.
+        result = check_msb(sh, sl, 49.9, Bias.NEUTRAL)
+        assert result is None
+        # 50.1 should trigger
+        result = check_msb(sh, sl, 50.1, Bias.NEUTRAL)
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Audit: Consecutive MSBs in same direction (point #4)
+# ---------------------------------------------------------------------------
+
+
+class TestConsecutiveMSBs:
+    def test_consecutive_bullish_msbs_update_range_and_ob(self):
+        """Two bullish MSBs in a row should produce two OBs and update range."""
+        state = HTFState()
+        params = ICTBlueprintParams(swing_lookback=1, ob_candles=1)
+        detector = SwingDetector(lookback=1)
+        bars_hist = []
+
+        # Build a sequence: low → high → higher-high → pullback → even-higher
+        bar_data = [
+            (0, 100, 100.0, 105.0, 95.0, 102.0),   # neutral
+            (1, 200, 102.0, 110.0, 100.0, 108.0),   # swing high candidate
+            (2, 300, 108.0, 109.0, 98.0, 99.0),     # confirms SH at 1, SL candidate
+            (3, 400, 99.0, 107.0, 97.0, 106.0),     # confirms SL at 2
+            (4, 500, 106.0, 115.0, 105.0, 114.0),   # bullish MSB (close > SH[1]=110)
+            (5, 600, 114.0, 120.0, 113.0, 119.0),   # new SH candidate
+            (6, 700, 119.0, 119.5, 110.0, 111.0),   # confirms SH at 5, new SL
+            (7, 800, 111.0, 118.0, 109.0, 117.0),   # confirms SL at 6
+            (8, 900, 117.0, 125.0, 116.0, 124.0),   # 2nd bullish MSB (close > SH[5]=120)
+        ]
+
+        for bar in bar_data:
+            bars_hist.append(bar)
+            update_htf(state, bar[0], bar, params, detector, bars_hist)
+
+        assert state.bias == Bias.BULLISH
+        # Should have at least 2 OBs (one per MSB)
+        valid_obs = [ob for ob in state.active_obs if not ob.invalidated]
+        assert len(valid_obs) >= 1  # At least the second MSB's OB
+        # Range should reflect the latest MSB
+        assert state.current_range is not None

@@ -21,18 +21,34 @@ class HTFProvider(Protocol):
 class DefaultHTFProvider:
     """Builds HTF state lazily as H1 bars advance chronologically.
 
-    daily_df must have a DatetimeIndex and OHLCV columns (Open, High, Low, Close).
+    daily_df must have a DatetimeIndex (or date index) and OHLCV columns.
     Timestamps are stored as int64 nanoseconds for fast bisecting.
+
+    If the daily index is date-only (midnight timestamps), a session close
+    offset is added so that an H1 bar at e.g. 10:00 on day D does NOT see
+    day D's daily close.  The default offset of 16 hours corresponds to
+    ES/NQ RTH close (16:00 ET).
     """
 
-    def __init__(self, daily_df: pd.DataFrame, params: ICTBlueprintParams) -> None:
+    def __init__(
+        self,
+        daily_df: pd.DataFrame,
+        params: ICTBlueprintParams,
+        session_close_hour: int = 16,
+    ) -> None:
         self._params = params
 
-        # Build int64 ns array of daily close timestamps
-        self._daily_close_ts: np.ndarray = daily_df.index.astype(np.int64).values
+        # Detect if index is date-only (no meaningful time component).
+        # If so, shift each daily timestamp to session close time so that
+        # intraday H1 bars don't peek into the still-forming daily bar.
+        close_offset_ns = self._compute_close_offset(daily_df.index, session_close_hour)
+
+        self._daily_close_ts: np.ndarray = (
+            daily_df.index.astype("datetime64[ns]").astype(np.int64) + close_offset_ns
+        )
         self._daily_bars: list[tuple[int, int, float, float, float, float]] = []
         for i, (ts_val, row) in enumerate(daily_df.iterrows()):
-            ts_ns = int(pd.Timestamp(ts_val).value)
+            ts_ns = int(pd.Timestamp(ts_val).value) + close_offset_ns
             self._daily_bars.append(
                 (i, ts_ns, float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"]))
             )
@@ -44,6 +60,22 @@ class DefaultHTFProvider:
 
         # Cache snapshots at each daily index
         self._snapshots: dict[int, HTFStateSnapshot] = {}
+
+    @staticmethod
+    def _compute_close_offset(index: pd.Index, session_close_hour: int) -> int:
+        """Return ns offset to add to daily timestamps.
+
+        If the index already carries intraday times (e.g. 16:00), returns 0.
+        If dates-only (midnight), returns session_close_hour in nanoseconds.
+        """
+        if len(index) == 0:
+            return 0
+
+        sample_ts = pd.Timestamp(index[0])
+        # Date-only indices convert to midnight; check if time is 00:00
+        if sample_ts.hour == 0 and sample_ts.minute == 0 and sample_ts.second == 0:
+            return int(session_close_hour * 3_600 * 1_000_000_000)
+        return 0
 
     def get_state_at(self, h1_ts: int) -> HTFStateSnapshot:
         """Return HTF state valid for an H1 bar with timestamp *h1_ts* (ns).

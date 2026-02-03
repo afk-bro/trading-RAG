@@ -85,6 +85,7 @@ class OrderBlock:
     attempts_used: int = 0
     invalidated: bool = False
     created_at_daily_index: int = 0
+    last_setup_bar_index: int = -1  # tracks last timeout/exit bar for fresh L0 constraint
 
 
 @dataclass
