@@ -28,6 +28,7 @@ from app.services.backtest.engines.unicorn_runner import (
     IntrabarPolicy,
     BiasState,
     BarBundle,
+    TradeOutcome,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornConfig,
@@ -487,6 +488,72 @@ def _safe_float(v: float) -> float | None:
     return v
 
 
+def _compute_prop_survival(result) -> dict:
+    """Compute prop-firm survival metrics from the trade list.
+
+    Counts setups (not legs) for streak analysis.  Dollar-based for DD.
+    """
+    trades = result.trades
+    if not trades:
+        return {
+            "max_trailing_dd_dollars": 0.0,
+            "max_trailing_dd_pct": 0.0,
+            "worst_losing_streak_setups": 0,
+            "worst_intraday_loss_dollars": 0.0,
+            "avg_win_r": 0.0,
+            "avg_loss_r": 0.0,
+        }
+
+    # --- Max trailing drawdown (dollar equity curve) ---
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for t in trades:
+        equity += t.pnl_dollars
+        peak = max(peak, equity)
+        dd = peak - equity
+        max_dd = max(max_dd, dd)
+
+    gov = result.governor_stats or {}
+    acct = gov.get("eval_account_size", 0)
+    dd_pct = (max_dd / acct * 100) if acct > 0 else 0.0
+
+    # --- Worst losing streak (setup-level: skip partial legs with leg_index==1) ---
+    streak = 0
+    worst_streak = 0
+    for t in trades:
+        if t.is_partial_leg and t.leg_index == 1:
+            continue  # don't count partial-target legs as setups
+        if t.outcome == TradeOutcome.LOSS:
+            streak += 1
+            worst_streak = max(worst_streak, streak)
+        else:
+            streak = 0
+
+    # --- Worst intraday loss (sum of dollar losses per calendar day) ---
+    from collections import defaultdict
+    day_pnl: dict[object, float] = defaultdict(float)
+    for t in trades:
+        if t.exit_time is not None:
+            day_pnl[t.exit_time.date()] += t.pnl_dollars
+    worst_day = min(day_pnl.values()) if day_pnl else 0.0
+
+    # --- Avg win/loss R ---
+    win_rs = [t.r_multiple for t in trades if t.outcome == TradeOutcome.WIN and t.r_multiple != 0]
+    loss_rs = [t.r_multiple for t in trades if t.outcome == TradeOutcome.LOSS and t.r_multiple != 0]
+    avg_win_r = sum(win_rs) / len(win_rs) if win_rs else 0.0
+    avg_loss_r = sum(loss_rs) / len(loss_rs) if loss_rs else 0.0
+
+    return {
+        "max_trailing_dd_dollars": round(max_dd, 2),
+        "max_trailing_dd_pct": round(dd_pct, 2),
+        "worst_losing_streak_setups": worst_streak,
+        "worst_intraday_loss_dollars": round(worst_day, 2),
+        "avg_win_r": round(avg_win_r, 4),
+        "avg_loss_r": round(avg_loss_r, 4),
+    }
+
+
 def _build_output_dict(result, config, args) -> dict:
     """Build a JSON-serializable dict from backtest results.
 
@@ -558,6 +625,7 @@ def _build_output_dict(result, config, args) -> dict:
             "setups_entered": result.trades_taken,
             "total_closed_trades": result.wins + result.losses + result.breakevens,
         } if result.partial_legs > 0 else None,
+        "prop_survival": _compute_prop_survival(result),
     }
 
 
@@ -921,15 +989,23 @@ Examples:
              "Overrides --max-daily-loss with R-based value each day."
     )
 
-    # Partial exit (scale-out)
+    # Scale-out preset (locked configurations)
+    parser.add_argument(
+        "--scale-out",
+        choices=["none", "prop_safe"],
+        default=None,
+        help="Scale-out preset: none (full position rides), "
+             "prop_safe (33%% off at +1R, 67%% trails). "
+             "Overrides --partial-exit-r/--partial-exit-pct."
+    )
+    # Raw partial exit args (hidden overrides for experimentation)
     parser.add_argument(
         "--partial-exit-r", type=float, default=None,
-        help="Exit fraction of position at +NR (e.g. 1.0 = take profit on 50%% at +1R). "
-             "Remainder trails as normal."
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--partial-exit-pct", type=float, default=0.5,
-        help="Fraction of position to exit at partial target (default: 0.5)."
+        "--partial-exit-pct", type=float, default=None,
+        help=argparse.SUPPRESS,
     )
 
     args = parser.parse_args()
@@ -947,6 +1023,19 @@ Examples:
         parser.error("--require-alignment requires --ref-symbol")
     if args.max_daily_loss_r is not None and args.eval_account_size is None:
         parser.error("--max-daily-loss-r requires --eval-account-size")
+
+    # Resolve scale-out preset → raw partial_exit args
+    if args.scale_out is not None:
+        from app.services.strategy.strategies.unicorn_model import (
+            ScaleOutPreset,
+            SCALE_OUT_PARAMS,
+        )
+        preset = ScaleOutPreset(args.scale_out)
+        params = SCALE_OUT_PARAMS[preset]
+        args.partial_exit_r = params["partial_exit_r"]
+        args.partial_exit_pct = params["partial_exit_pct"]
+    elif args.partial_exit_pct is None:
+        args.partial_exit_pct = 0.5  # legacy default when using raw args
 
     # Apply seed for reproducibility
     if args.seed is not None:

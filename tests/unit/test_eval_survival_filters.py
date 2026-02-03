@@ -12,6 +12,8 @@ from app.services.strategy.strategies.unicorn_model import (
     SessionProfile,
     SESSION_WINDOWS,
     is_in_macro_window,
+    ScaleOutPreset,
+    SCALE_OUT_PARAMS,
 )
 from app.services.backtest.engines.unicorn_runner import (
     BiasState,
@@ -393,3 +395,27 @@ class TestGovernorPartialLegCounting:
         assert gov.halted_for_day is True
         assert gov.halt_reason == "loss_limit"
         assert gov.day_trade_count == 0  # no setups counted
+
+
+# ---------------------------------------------------------------------------
+# 7. ScaleOutPreset enum
+# ---------------------------------------------------------------------------
+
+class TestScaleOutPreset:
+    def test_none_disables_partial_exit(self):
+        params = SCALE_OUT_PARAMS[ScaleOutPreset.NONE]
+        assert params["partial_exit_r"] is None
+        assert params["partial_exit_pct"] == 0.0
+
+    def test_prop_safe_is_33_at_1r(self):
+        params = SCALE_OUT_PARAMS[ScaleOutPreset.PROP_SAFE]
+        assert params["partial_exit_r"] == 1.0
+        assert params["partial_exit_pct"] == 0.33
+
+    def test_only_two_presets_exist(self):
+        """No other presets should exist — B and D are rejected."""
+        assert set(ScaleOutPreset) == {ScaleOutPreset.NONE, ScaleOutPreset.PROP_SAFE}
+
+    def test_enum_from_string(self):
+        assert ScaleOutPreset("none") == ScaleOutPreset.NONE
+        assert ScaleOutPreset("prop_safe") == ScaleOutPreset.PROP_SAFE

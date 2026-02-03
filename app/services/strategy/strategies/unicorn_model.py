@@ -238,6 +238,31 @@ def build_run_key(
 QUANTITY_DECIMALS = 2  # NQ/ES use 2 decimal places
 
 
+class ScaleOutPreset(str, Enum):
+    """Locked scale-out configurations.
+
+    NONE:      Full position rides to target/stop. No partial exits.
+    PROP_SAFE: 33% off at +1R, 67% trails. Only approved partial config.
+
+    B (50%@1R) and D (50%@0.75R) are rejected — B halves the runner too
+    aggressively, D locks in too little and chokes MFE capture.
+    """
+    NONE = "none"
+    PROP_SAFE = "prop_safe"  # 33% at +1R
+
+
+SCALE_OUT_PARAMS: dict[ScaleOutPreset, dict] = {
+    ScaleOutPreset.NONE: {
+        "partial_exit_r": None,
+        "partial_exit_pct": 0.0,
+    },
+    ScaleOutPreset.PROP_SAFE: {
+        "partial_exit_r": 1.0,
+        "partial_exit_pct": 0.33,
+    },
+}
+
+
 class SessionProfile(str, Enum):
     """Trading session window profiles."""
     NY_OPEN = "ny_open"  # First 60 min of NY session

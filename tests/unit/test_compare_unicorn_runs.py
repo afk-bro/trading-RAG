@@ -184,6 +184,9 @@ def _fake_result(**overrides):
         ],
         session_diagnostics={"intermarket_agreement": None},
         governor_stats=None,
+        partial_legs=0,
+        breakevens=0,
+        trades=[],
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
