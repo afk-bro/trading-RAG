@@ -12,7 +12,7 @@ CSV format expected:
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -158,7 +158,7 @@ def generate_sample_data(
     in_trend = random.random() < 0.5  # Start in trend or range
 
     for day in range(days):
-        current_date = start_date.replace(day=start_date.day + day)
+        current_date = start_date + timedelta(days=day)
 
         # Skip weekends
         if current_date.weekday() >= 5:
@@ -266,7 +266,7 @@ def generate_sample_data(
     m1_price = htf_bars[0].open if htf_bars else base_price
 
     for day in range(days):
-        current_date = start_date.replace(day=start_date.day + day)
+        current_date = start_date + timedelta(days=day)
         if current_date.weekday() >= 5:
             continue
 
@@ -553,6 +553,11 @@ def _build_output_dict(result, config, args) -> dict:
             "trail_activated_count": getattr(result, "trail_activated_count", 0),
             "trail_stop_exits": getattr(result, "trail_stop_exits", 0),
         } if getattr(result, "trail_activated_count", 0) > 0 or getattr(result, "trail_stop_exits", 0) > 0 else None,
+        "scale_out_stats": {
+            "partial_legs": result.partial_legs,
+            "setups_entered": result.trades_taken,
+            "total_closed_trades": result.wins + result.losses + result.breakevens,
+        } if result.partial_legs > 0 else None,
     }
 
 
@@ -677,10 +682,10 @@ Examples:
     )
     parser.add_argument(
         "--session-profile",
-        choices=["ny_open", "strict", "normal", "wide"],
+        choices=["ny_open", "strict", "normal", "wide", "london"],
         default="normal",
         help="Session profile: ny_open (9:30-10:30), strict (NY AM 9:30-11:00), "
-             "normal (London+NY AM), wide (all sessions)"
+             "normal (London+NY AM), wide (all sessions), london (London 3:00-4:00 only)"
     )
     parser.add_argument(
         "--fvg-atr-mult",
@@ -801,6 +806,20 @@ Examples:
         "--ref-htf",
         help="Explicit CSV path for reference HTF bars (overrides source auto-detect)"
     )
+    parser.add_argument(
+        "--require-alignment",
+        action="store_true",
+        default=False,
+        help="Hard gate: reject setups where reference symbol disagrees with primary direction. "
+             "Requires --ref-symbol."
+    )
+    parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=None,
+        metavar="FLOAT",
+        help="Minimum HTF bias confidence for entry (0.0-1.0). None = disabled."
+    )
     # Multi-timeframe execution
     parser.add_argument(
         "--multi-tf",
@@ -893,6 +912,25 @@ Examples:
         metavar="DOLLARS",
         help="Maximum R_day cap in dollars (default: 300)."
     )
+    parser.add_argument(
+        "--max-daily-loss-r",
+        type=float,
+        default=None,
+        metavar="FLOAT",
+        help="Max daily loss as R-multiple (e.g. 1.0 = 1R). Requires --eval-account-size. "
+             "Overrides --max-daily-loss with R-based value each day."
+    )
+
+    # Partial exit (scale-out)
+    parser.add_argument(
+        "--partial-exit-r", type=float, default=None,
+        help="Exit fraction of position at +NR (e.g. 1.0 = take profit on 50%% at +1R). "
+             "Remainder trails as normal."
+    )
+    parser.add_argument(
+        "--partial-exit-pct", type=float, default=0.5,
+        help="Fraction of position to exit at partial target (default: 0.5)."
+    )
 
     args = parser.parse_args()
 
@@ -905,6 +943,10 @@ Examples:
         parser.error("--ref-htf requires --ref-symbol")
     if args.ref_symbol and args.ref_symbol.upper() == args.symbol.upper():
         parser.error("--ref-symbol must differ from --symbol")
+    if args.require_alignment and not args.ref_symbol:
+        parser.error("--require-alignment requires --ref-symbol")
+    if args.max_daily_loss_r is not None and args.eval_account_size is None:
+        parser.error("--max-daily-loss-r requires --eval-account-size")
 
     # Apply seed for reproducibility
     if args.seed is not None:
@@ -922,6 +964,7 @@ Examples:
         daily_governor = DailyGovernor(
             max_daily_loss_dollars=max_loss,
             max_trades_per_day=max_trades,
+            max_daily_loss_r=args.max_daily_loss_r,
         )
 
         if args.eval_mode:
@@ -964,6 +1007,7 @@ Examples:
             daily_governor = DailyGovernor(
                 max_daily_loss_dollars=eval_profile.max_daily_loss_dollars,
                 max_trades_per_day=max_trades,
+                max_daily_loss_r=args.max_daily_loss_r,
             )
             print(f"Daily governor (from eval profile): max loss "
                   f"${eval_profile.max_daily_loss_dollars:.0f}/day, "
@@ -1110,6 +1154,7 @@ Examples:
         max_sweep_age_bars=args.max_sweep_age_bars,
         require_sweep_settlement=args.require_sweep_settlement,
         enable_displacement_backstop=not args.no_displacement_backstop,
+        min_confidence=args.min_confidence,
     )
 
     # Run backtest
@@ -1145,6 +1190,8 @@ Examples:
     sweep_settle = "enabled" if args.require_sweep_settlement else "disabled"
     if args.max_sweep_age_bars is not None or args.require_sweep_settlement:
         print(f"Sweep closure guard: recency={sweep_age}, settlement={sweep_settle}")
+    if args.partial_exit_r is not None:
+        print(f"Partial exit: {args.partial_exit_pct*100:.0f}% at +{args.partial_exit_r:.1f}R, remainder trails")
 
     # Build reference bias series if requested
     reference_bias_series = None
@@ -1197,6 +1244,7 @@ Examples:
         time_stop_r_threshold=args.time_stop_threshold,
         reference_bias_series=reference_bias_series,
         reference_symbol=reference_symbol,
+        require_intermarket_alignment=args.require_alignment,
         breakeven_at_r=args.breakeven_at_r,
         trail_atr_mult=args.trail_atr_mult,
         trail_cap_mult=args.trail_cap_mult,
@@ -1204,6 +1252,8 @@ Examples:
         bar_bundle=bar_bundle,
         daily_governor=daily_governor,
         eval_profile=eval_profile,
+        partial_exit_r=args.partial_exit_r,
+        partial_exit_pct=args.partial_exit_pct,
     )
 
     # Format output

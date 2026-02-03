@@ -1,6 +1,7 @@
 """Daily risk governor for eval/prop-firm backtesting."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -27,6 +28,7 @@ class DailyGovernor:
     max_daily_loss_dollars: float = 300.0
     max_trades_per_day: int = 2
     half_size_multiplier: float = 0.5
+    max_daily_loss_r: Optional[float] = None  # R-based daily loss cap (e.g. 1.0 = 1R)
 
     # --- Per-day mutable state ---
     day_loss_dollars: float = 0.0
@@ -40,6 +42,15 @@ class DailyGovernor:
     def half_loss_threshold(self) -> float:
         """Loss level that triggers half-size stepdown."""
         return self.max_daily_loss_dollars * self.half_size_multiplier
+
+    def update_r_day(self, r_day: float) -> None:
+        """Recalculate max_daily_loss_dollars from R-based cap when configured.
+
+        Called at day boundary after R_day is recomputed from eval profile.
+        If max_daily_loss_r is None, this is a no-op.
+        """
+        if self.max_daily_loss_r is not None and r_day > 0:
+            self.max_daily_loss_dollars = self.max_daily_loss_r * r_day
 
     def allows_entry(self) -> bool:
         """Check if governor permits a new trade entry."""
@@ -55,9 +66,16 @@ class DailyGovernor:
             return False
         return True
 
-    def record_trade_close(self, pnl_dollars: float) -> None:
-        """Update state after a trade closes."""
-        self.day_trade_count += 1
+    def record_trade_close(self, pnl_dollars: float, is_partial_leg: bool = False) -> None:
+        """Update state after a trade closes.
+
+        Args:
+            pnl_dollars: Realized P&L for this close.
+            is_partial_leg: When True (scale-out leg), P&L accumulates
+                but the close does not count toward the daily trade cap.
+        """
+        if not is_partial_leg:
+            self.day_trade_count += 1
         if pnl_dollars < 0:
             self.day_loss_dollars += pnl_dollars
 

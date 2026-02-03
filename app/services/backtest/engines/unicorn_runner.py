@@ -550,6 +550,13 @@ class TradeRecord:
     # Intermarket agreement label (set by _build_session_diagnostics)
     intermarket_label: Optional[str] = None
 
+    # Partial exit (scale-out)
+    partial_exit_r: Optional[float] = None          # R-multiple to take first exit (e.g. 1.0)
+    partial_exit_pct: float = 0.0                   # Fraction to exit (e.g. 0.5)
+    partial_exit_price: Optional[float] = None      # Computed price level for +NR
+    is_partial_leg: bool = False                    # True for split legs
+    leg_index: int = 0                              # 0=full, 1=runner, 2=trailer
+
 
 @dataclass
 class SetupOccurrence:
@@ -719,11 +726,15 @@ class UnicornBacktestResult:
     # Daily governor stats (None when governor not used)
     governor_stats: Optional[dict] = None
 
+    # Partial exit leg accounting
+    partial_legs: int = 0  # count of partial_target legs created
+
     @property
     def win_rate(self) -> float:
-        if self.trades_taken == 0:
+        total_closed = self.wins + self.losses + self.breakevens
+        if total_closed == 0:
             return 0.0
-        return self.wins / self.trades_taken
+        return self.wins / total_closed
 
     @property
     def profit_factor(self) -> float:
@@ -1022,9 +1033,10 @@ def run_unicorn_backtest(
     # Time-stop: exit if not profitable within N minutes
     time_stop_minutes: Optional[int] = None,  # None=disabled, e.g., 30=exit if not +0.25R in 30 min
     time_stop_r_threshold: float = 0.25,  # R-multiple to reach within time_stop_minutes
-    # Intermarket agreement (observability-only)
+    # Intermarket agreement
     reference_bias_series: Optional[list[BiasState]] = None,  # Pre-computed bias from ref symbol
     reference_symbol: Optional[str] = None,  # e.g., "ES"
+    require_intermarket_alignment: bool = False,  # Hard gate: reject if ref disagrees
     # Profit protection: move stop to breakeven at +NR
     breakeven_at_r: Optional[float] = None,  # e.g. 1.0 = move stop to entry at +1R
     # ATR trailing stop (mutually exclusive with breakeven_at_r)
@@ -1037,6 +1049,9 @@ def run_unicorn_backtest(
     daily_governor: Optional["DailyGovernor"] = None,
     # Eval account profile (R-native sizing from trailing drawdown)
     eval_profile: Optional[EvalAccountProfile] = None,
+    # Partial exit (scale-out)
+    partial_exit_r: Optional[float] = None,   # e.g. 1.0 = exit 50% at +1R
+    partial_exit_pct: float = 0.5,            # fraction to exit at partial target
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -1226,6 +1241,8 @@ def run_unicorn_backtest(
                     _eval_blown = True
                 _r_day_min = min(_r_day_min, _current_r_day)
                 _r_day_max = max(_r_day_max, _current_r_day)
+                if daily_governor is not None:
+                    daily_governor.update_r_day(_current_r_day)
                 _prev_date = bar_date
 
         if _eval_blown:
@@ -1275,14 +1292,17 @@ def run_unicorn_backtest(
             m1_window = bar_bundle.m1[m1_start_idx:m1_end_idx]
 
         # Update open trades (MFE/MAE tracking + exit checks)
+        pending_partial_closes: list[TradeRecord] = []
+        pending_partial_closes_15m: list[TradeRecord] = []
         if m1_window:
             # 1m precision management: iterate each 1m bar for exit checks
             for m1_bar in m1_window:
                 for trade in open_trades:
                     if trade.exit_time is not None:
                         continue
+                    is_long = trade.direction == BiasDirection.BULLISH
                     # MFE/MAE tracking at 1m precision
-                    if trade.direction == BiasDirection.BULLISH:
+                    if is_long:
                         unrealized = m1_bar.close - trade.entry_price
                     else:
                         unrealized = trade.entry_price - m1_bar.close
@@ -1292,6 +1312,61 @@ def run_unicorn_backtest(
                     if unrealized < -trade.mae:
                         trade.mae = abs(unrealized)
                         trade.mae_time = m1_bar.ts
+
+                    # Check partial exit trigger (before resolve_bar_exit)
+                    if (
+                        trade.partial_exit_price is not None
+                        and not trade.is_partial_leg
+                        and trade.quantity >= 2
+                    ):
+                        hit = False
+                        if is_long and m1_bar.high >= trade.partial_exit_price:
+                            hit = True
+                        elif not is_long and m1_bar.low <= trade.partial_exit_price:
+                            hit = True
+
+                        if hit:
+                            leg1_qty = int(trade.quantity * trade.partial_exit_pct)
+                            if leg1_qty < 1:
+                                leg1_qty = 1
+                            leg2_qty = trade.quantity - leg1_qty
+
+                            # Leg 1: immediate exit at partial target
+                            leg1 = TradeRecord(
+                                entry_time=trade.entry_time,
+                                entry_price=trade.entry_price,
+                                direction=trade.direction,
+                                quantity=leg1_qty,
+                                session=trade.session,
+                                criteria=trade.criteria,
+                                stop_price=trade.stop_price,
+                                target_price=trade.partial_exit_price,
+                                risk_points=trade.risk_points,
+                                initial_stop=trade.initial_stop,
+                                entry_atr=trade.entry_atr,
+                                mfe=trade.mfe,
+                                mae=trade.mae,
+                                mfe_time=trade.mfe_time,
+                                mae_time=trade.mae_time,
+                                exit_time=m1_bar.ts,
+                                exit_price=trade.partial_exit_price,
+                                exit_reason="partial_target",
+                                is_partial_leg=True,
+                                leg_index=1,
+                            )
+                            if is_long:
+                                leg1.pnl_points = trade.partial_exit_price - trade.entry_price
+                            else:
+                                leg1.pnl_points = trade.entry_price - trade.partial_exit_price
+
+                            pending_partial_closes.append(leg1)
+
+                            # Mutate original trade into leg 2 (trailer)
+                            trade.quantity = leg2_qty
+                            trade.is_partial_leg = True
+                            trade.leg_index = 2
+                            trade.partial_exit_price = None  # prevent re-trigger
+                            continue  # skip resolve_bar_exit this bar for the newly split trade
 
                     # Exit resolution at 1m granularity
                     exit_result = resolve_bar_exit(
@@ -1312,11 +1387,13 @@ def run_unicorn_backtest(
                 newly_closed = [t for t in open_trades if t.exit_time is not None]
                 open_trades = [t for t in open_trades if t.exit_time is None]
                 closed_in_m1.extend(newly_closed)
+            closed_in_m1.extend(pending_partial_closes)
         else:
             # Fallback: 15m management (existing behavior when no 1m data)
             for trade in open_trades:
+                is_long = trade.direction == BiasDirection.BULLISH
                 # MFE/MAE tracking (stays inline — not exit logic)
-                if trade.direction == BiasDirection.BULLISH:
+                if is_long:
                     unrealized = bar.close - trade.entry_price
                 else:
                     unrealized = trade.entry_price - bar.close
@@ -1326,6 +1403,58 @@ def run_unicorn_backtest(
                 if unrealized < -trade.mae:
                     trade.mae = abs(unrealized)
                     trade.mae_time = ts
+
+                # Check partial exit trigger (before resolve_bar_exit)
+                if (
+                    trade.partial_exit_price is not None
+                    and not trade.is_partial_leg
+                    and trade.quantity >= 2
+                ):
+                    hit = False
+                    if is_long and bar.high >= trade.partial_exit_price:
+                        hit = True
+                    elif not is_long and bar.low <= trade.partial_exit_price:
+                        hit = True
+
+                    if hit:
+                        leg1_qty = int(trade.quantity * trade.partial_exit_pct)
+                        if leg1_qty < 1:
+                            leg1_qty = 1
+
+                        leg1 = TradeRecord(
+                            entry_time=trade.entry_time,
+                            entry_price=trade.entry_price,
+                            direction=trade.direction,
+                            quantity=leg1_qty,
+                            session=trade.session,
+                            criteria=trade.criteria,
+                            stop_price=trade.stop_price,
+                            target_price=trade.partial_exit_price,
+                            risk_points=trade.risk_points,
+                            initial_stop=trade.initial_stop,
+                            entry_atr=trade.entry_atr,
+                            mfe=trade.mfe,
+                            mae=trade.mae,
+                            mfe_time=trade.mfe_time,
+                            mae_time=trade.mae_time,
+                            exit_time=ts,
+                            exit_price=trade.partial_exit_price,
+                            exit_reason="partial_target",
+                            is_partial_leg=True,
+                            leg_index=1,
+                        )
+                        if is_long:
+                            leg1.pnl_points = trade.partial_exit_price - trade.entry_price
+                        else:
+                            leg1.pnl_points = trade.entry_price - trade.partial_exit_price
+
+                        pending_partial_closes_15m.append(leg1)
+
+                        trade.quantity = trade.quantity - leg1_qty
+                        trade.is_partial_leg = True
+                        trade.leg_index = 2
+                        trade.partial_exit_price = None
+                        continue  # skip resolve_bar_exit this bar for the newly split trade
 
                 # Exit resolution via extracted function
                 exit_result = resolve_bar_exit(
@@ -1344,8 +1473,13 @@ def run_unicorn_backtest(
                     trade.pnl_points = exit_result.pnl_points
 
         # Finalize closed trades (apply commission)
-        # Include trades closed during 1m management + any closed in 15m fallback
-        closed = closed_in_m1 + [t for t in open_trades if t.exit_time is not None]
+        # Include trades closed during 1m management + 15m fallback + partial exits
+        closed = (
+            closed_in_m1
+            + pending_partial_closes_15m
+            + [t for t in open_trades if t.exit_time is not None]
+        )
+        pending_partial_closes_15m = []
         closed_in_m1 = []
         open_trades = [t for t in open_trades if t.exit_time is None]
 
@@ -1368,6 +1502,9 @@ def run_unicorn_backtest(
                 trade.outcome = TradeOutcome.BREAKEVEN
                 result.breakevens += 1
 
+            if trade.is_partial_leg and trade.leg_index == 1:
+                result.partial_legs += 1
+
             result.trades.append(trade)
             result.total_pnl_points += trade.pnl_points
             result.total_pnl_dollars += trade.pnl_dollars
@@ -1379,7 +1516,7 @@ def run_unicorn_backtest(
 
             # Update daily governor
             if daily_governor is not None:
-                daily_governor.record_trade_close(trade.pnl_dollars)
+                daily_governor.record_trade_close(trade.pnl_dollars, is_partial_leg=trade.is_partial_leg)
 
             # Update session stats
             session_stat = result.session_stats[trade.session]
@@ -1483,6 +1620,42 @@ def run_unicorn_backtest(
                 setup_record.reason_not_taken = f"direction_filter: {direction.value} != {direction_filter.value}"
                 result.all_setups.append(setup_record)
                 continue
+
+            # Confidence gate: hard entry filter on HTF bias confidence
+            if (
+                config.min_confidence is not None
+                and criteria.htf_bias_confidence < config.min_confidence
+            ):
+                setup_record.taken = False
+                setup_record.reason_not_taken = (
+                    f"confidence_gate: {criteria.htf_bias_confidence:.2f} < {config.min_confidence}"
+                )
+                result.all_setups.append(setup_record)
+                continue
+
+            # Intermarket alignment gate: require ref symbol agrees with primary direction
+            if (
+                require_intermarket_alignment
+                and reference_bias_series is not None
+            ):
+                ref_state = _asof_lookup(reference_bias_series, ts)
+                if ref_state is None:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = "alignment_gate: no reference bias available"
+                    result.all_setups.append(setup_record)
+                    continue
+                if ref_state.direction == BiasDirection.NEUTRAL:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = "alignment_gate: reference bias is NEUTRAL"
+                    result.all_setups.append(setup_record)
+                    continue
+                if ref_state.direction != direction:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = (
+                        f"alignment_gate: primary={direction.value} != ref={ref_state.direction.value}"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
 
             # Record displacement diagnostics before any guard
             setup_record.signal_displacement_atr = criteria.mss_displacement_atr
@@ -1640,6 +1813,15 @@ def run_unicorn_backtest(
                 ) if trail_atr_mult else 0.0,
             )
 
+            # Compute partial exit price for scale-out
+            if partial_exit_r is not None:
+                if direction == BiasDirection.BULLISH:
+                    trade.partial_exit_price = entry_price + (risk_points * partial_exit_r)
+                else:
+                    trade.partial_exit_price = entry_price - (risk_points * partial_exit_r)
+                trade.partial_exit_r = partial_exit_r
+                trade.partial_exit_pct = partial_exit_pct
+
             open_trades.append(trade)
             result.trades_taken += 1
 
@@ -1648,9 +1830,10 @@ def run_unicorn_backtest(
             # above ran BEFORE this trade existed, so no double-process risk.
             if m1_window and len(m1_window) > 1:
                 # Sub-iterate remaining 1m bars after entry for precise exit
+                is_long_entry = trade.direction == BiasDirection.BULLISH
                 for m1_bar in m1_window[1:]:
                     # MFE/MAE at 1m precision
-                    if trade.direction == BiasDirection.BULLISH:
+                    if is_long_entry:
                         unrealized = m1_bar.close - trade.entry_price
                     else:
                         unrealized = trade.entry_price - m1_bar.close
@@ -1660,6 +1843,58 @@ def run_unicorn_backtest(
                     if unrealized < -trade.mae:
                         trade.mae = abs(unrealized)
                         trade.mae_time = m1_bar.ts
+
+                    # Check partial exit trigger on entry bar
+                    if (
+                        trade.partial_exit_price is not None
+                        and not trade.is_partial_leg
+                        and trade.quantity >= 2
+                    ):
+                        hit_entry = False
+                        if is_long_entry and m1_bar.high >= trade.partial_exit_price:
+                            hit_entry = True
+                        elif not is_long_entry and m1_bar.low <= trade.partial_exit_price:
+                            hit_entry = True
+
+                        if hit_entry:
+                            leg1_qty = int(trade.quantity * trade.partial_exit_pct)
+                            if leg1_qty < 1:
+                                leg1_qty = 1
+
+                            leg1 = TradeRecord(
+                                entry_time=trade.entry_time,
+                                entry_price=trade.entry_price,
+                                direction=trade.direction,
+                                quantity=leg1_qty,
+                                session=trade.session,
+                                criteria=trade.criteria,
+                                stop_price=trade.stop_price,
+                                target_price=trade.partial_exit_price,
+                                risk_points=trade.risk_points,
+                                initial_stop=trade.initial_stop,
+                                entry_atr=trade.entry_atr,
+                                mfe=trade.mfe,
+                                mae=trade.mae,
+                                mfe_time=trade.mfe_time,
+                                mae_time=trade.mae_time,
+                                exit_time=m1_bar.ts,
+                                exit_price=trade.partial_exit_price,
+                                exit_reason="partial_target",
+                                is_partial_leg=True,
+                                leg_index=1,
+                            )
+                            if is_long_entry:
+                                leg1.pnl_points = trade.partial_exit_price - trade.entry_price
+                            else:
+                                leg1.pnl_points = trade.entry_price - trade.partial_exit_price
+
+                            closed_in_m1.append(leg1)
+
+                            trade.quantity = trade.quantity - leg1_qty
+                            trade.is_partial_leg = True
+                            trade.leg_index = 2
+                            trade.partial_exit_price = None
+                            continue
 
                     entry_bar_exit = resolve_bar_exit(
                         trade, m1_bar, intrabar_policy, slippage_points,
@@ -1746,6 +1981,9 @@ def run_unicorn_backtest(
         else:
             trade.outcome = TradeOutcome.BREAKEVEN
             result.breakevens += 1
+
+        if trade.is_partial_leg and trade.leg_index == 1:
+            result.partial_legs += 1
 
         result.trades.append(trade)
         result.total_pnl_points += trade.pnl_points

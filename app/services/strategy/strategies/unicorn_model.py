@@ -244,6 +244,7 @@ class SessionProfile(str, Enum):
     STRICT = "strict"    # NY AM only
     NORMAL = "normal"    # London + NY AM
     WIDE = "wide"        # London + NY AM + NY PM
+    LONDON = "london"    # London session only
 
 
 # Session windows by profile
@@ -263,6 +264,9 @@ SESSION_WINDOWS = {
         (time(9, 30), time(11, 0)),   # NY AM
         (time(13, 30), time(15, 0)),  # NY PM
         (time(19, 0), time(20, 0)),   # Asia
+    ],
+    SessionProfile.LONDON: [
+        (time(3, 0), time(4, 0)),     # London only
     ],
 }
 
