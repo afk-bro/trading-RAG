@@ -51,7 +51,7 @@ class BacktestRunner:
         """
         self.kb_repo = kb_repo
         self.backtest_repo = backtest_repo
-        self.engine = BacktestingPyEngine()
+        self._default_engine = BacktestingPyEngine()
 
     async def run(
         self,
@@ -158,6 +158,9 @@ class BacktestRunner:
                     details=e.details,
                 )
 
+            # Resolve engine
+            engine = self._resolve_engine(backtest_config)
+
             # Create run record (status=running)
             dataset_meta = {
                 "filename": filename,
@@ -172,7 +175,7 @@ class BacktestRunner:
                 strategy_spec_id=spec_id,
                 spec_version=spec_version,
                 params=validated_params,
-                engine=self.engine.name,
+                engine=engine.name,
                 dataset_meta=dataset_meta,
             )
 
@@ -186,7 +189,7 @@ class BacktestRunner:
             )
 
             try:
-                result = self.engine.run(
+                result = engine.run(
                     ohlcv_df=parse_result.df,
                     config=backtest_config,
                     params=validated_params,
@@ -258,3 +261,12 @@ class BacktestRunner:
                 f"Unexpected error: {e}",
                 code="INTERNAL_ERROR",
             )
+
+    def _resolve_engine(self, backtest_config: dict[str, Any]):
+        """Select engine based on backtest_config['engine'] key."""
+        engine_name = backtest_config.get("engine", "backtestingpy")
+        if engine_name == "ict_blueprint":
+            from app.services.backtest.engines.ict_blueprint import ICTBlueprintEngine
+
+            return ICTBlueprintEngine()
+        return self._default_engine
