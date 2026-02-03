@@ -75,7 +75,10 @@ class ICTBlueprintEngine:
         htf_df = self._load_htf_data(config, warnings)
 
         # Build provider
-        provider = DefaultHTFProvider(htf_df, bp)
+        provider = DefaultHTFProvider(
+            htf_df, bp,
+            session_close_hour=config.get("session_close_hour", bp.session_close_hour),
+        )
 
         # Build H1 bar tuples
         h1_bars = self._build_bar_tuples(ohlcv_df)

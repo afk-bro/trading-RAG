@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from bisect import bisect_right
 from typing import Protocol
 
@@ -10,6 +11,8 @@ import pandas as pd
 
 from .htf_bias import SwingDetector, update_htf
 from .types import HTFState, HTFStateSnapshot, ICTBlueprintParams
+
+logger = logging.getLogger(__name__)
 
 
 class HTFProvider(Protocol):
@@ -61,6 +64,8 @@ class DefaultHTFProvider:
         # Cache snapshots at each daily index
         self._snapshots: dict[int, HTFStateSnapshot] = {}
 
+        self._validate_daily_timestamps(daily_df.index, session_close_hour)
+
     @staticmethod
     def _compute_close_offset(index: pd.Index, session_close_hour: int) -> int:
         """Return ns offset to add to daily timestamps.
@@ -76,6 +81,40 @@ class DefaultHTFProvider:
         if sample_ts.hour == 0 and sample_ts.minute == 0 and sample_ts.second == 0:
             return int(session_close_hour * 3_600 * 1_000_000_000)
         return 0
+
+    @staticmethod
+    def _validate_daily_timestamps(index: pd.Index, session_close_hour: int) -> None:
+        """Warn if daily bar timestamps look inconsistent with session_close_hour.
+
+        Checks:
+        - If index has intraday times, the hour should match session_close_hour.
+        - Duplicate dates suggest non-daily granularity was passed in.
+        """
+        if len(index) < 2:
+            return
+
+        sample_ts = pd.Timestamp(index[0])
+
+        # Check 1: if timestamps carry time, it should be close to session_close_hour
+        if not (sample_ts.hour == 0 and sample_ts.minute == 0 and sample_ts.second == 0):
+            if sample_ts.hour != session_close_hour:
+                logger.warning(
+                    "Daily bar timestamp hour (%d) != session_close_hour (%d). "
+                    "Verify session_type matches data (RTH vs Globex).",
+                    sample_ts.hour,
+                    session_close_hour,
+                )
+
+        # Check 2: duplicate calendar dates suggest sub-daily data was passed
+        dates = pd.DatetimeIndex(index).normalize()
+        n_unique = dates.nunique()
+        if n_unique < len(index):
+            logger.warning(
+                "Daily DataFrame has %d rows but only %d unique dates. "
+                "This likely means sub-daily data was passed as daily.",
+                len(index),
+                n_unique,
+            )
 
     def get_state_at(self, h1_ts: int) -> HTFStateSnapshot:
         """Return HTF state valid for an H1 bar with timestamp *h1_ts* (ns).

@@ -220,6 +220,9 @@ class ICTBlueprintParams:
     max_wait_bars_after_msb: int = 12
     breaker_candles: int = 1
 
+    # Session
+    session_close_hour: int = 16  # RTH close hour (ET) for daily bar alignment
+
     # Risk
     stop_mode: str = "below_sweep"
     tp_mode: str = "external_range"

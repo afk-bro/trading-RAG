@@ -163,3 +163,39 @@ class TestNoLookahead:
 
         expected = int(pd.Timestamp("2024-01-02 16:00:00").value)
         assert provider._daily_close_ts[0] == expected  # No offset
+
+    def test_warns_on_hour_mismatch(self, caplog):
+        """Warn if daily timestamps carry a time that doesn't match session_close_hour."""
+        daily_df = pd.DataFrame(
+            {
+                "Open": [100.0, 110.0],
+                "High": [105.0, 115.0],
+                "Low": [95.0, 105.0],
+                "Close": [102.0, 112.0],
+            },
+            index=pd.to_datetime(["2024-01-02 17:00:00", "2024-01-03 17:00:00"]),
+        )
+        params = ICTBlueprintParams()
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            DefaultHTFProvider(daily_df, params, session_close_hour=16)
+        assert "session_close_hour" in caplog.text
+
+    def test_warns_on_duplicate_dates(self, caplog):
+        """Warn if daily DataFrame has duplicate calendar dates (sub-daily data)."""
+        daily_df = pd.DataFrame(
+            {
+                "Open": [100.0, 110.0],
+                "High": [105.0, 115.0],
+                "Low": [95.0, 105.0],
+                "Close": [102.0, 112.0],
+            },
+            index=pd.to_datetime(["2024-01-02 10:00:00", "2024-01-02 11:00:00"]),
+        )
+        params = ICTBlueprintParams()
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            DefaultHTFProvider(daily_df, params, session_close_hour=16)
+        assert "unique dates" in caplog.text
