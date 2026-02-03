@@ -168,3 +168,98 @@ class TestDailyGovernorStats:
         assert stats.days_halted == 0
         assert stats.half_size_trades == 0
         assert stats.total_days_traded == 0
+
+
+class TestConsecutiveLossTracking:
+    def test_increments_on_loss(self):
+        gov = DailyGovernor(max_daily_loss_dollars=1000.0, max_trades_per_day=5)
+        gov.record_trade_close(-50.0)
+        assert gov.consecutive_losses == 1
+        gov.record_trade_close(-50.0)
+        assert gov.consecutive_losses == 2
+
+    def test_resets_on_win(self):
+        gov = DailyGovernor(max_daily_loss_dollars=1000.0, max_trades_per_day=5)
+        gov.record_trade_close(-50.0)
+        gov.record_trade_close(-50.0)
+        assert gov.consecutive_losses == 2
+        gov.record_trade_close(100.0)
+        assert gov.consecutive_losses == 0
+
+    def test_partial_legs_dont_affect_streak(self):
+        gov = DailyGovernor(max_daily_loss_dollars=1000.0, max_trades_per_day=5)
+        gov.record_trade_close(-50.0)  # setup close -> streak=1
+        gov.record_trade_close(-30.0, is_partial_leg=True)  # partial leg ignored
+        assert gov.consecutive_losses == 1
+
+    def test_resets_on_day_boundary(self):
+        gov = DailyGovernor(max_daily_loss_dollars=1000.0, max_trades_per_day=5)
+        gov.record_trade_close(-50.0)
+        gov.record_trade_close(-50.0)
+        assert gov.consecutive_losses == 2
+        gov.reset_day()
+        assert gov.consecutive_losses == 0
+
+
+class TestAdaptiveConfidenceTieringGovernor:
+    def test_streak_trigger(self):
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=2,
+        )
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is False
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is True
+
+    def test_streak_not_triggered_below_threshold(self):
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=3,
+        )
+        gov.record_trade_close(-50.0)
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is False
+
+    def test_dd_trigger(self):
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_dd_pct=50.0,
+        )
+        gov.check_adaptive_dd(49.0)
+        assert gov.confidence_tier_active is False
+        gov.check_adaptive_dd(50.0)
+        assert gov.confidence_tier_active is True
+
+    def test_dd_disabled_when_none(self):
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_dd_pct=None,
+        )
+        gov.check_adaptive_dd(100.0)
+        assert gov.confidence_tier_active is False
+
+    def test_reset_clears_adaptive_state(self):
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=1,
+        )
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is True
+        gov.reset_day()
+        assert gov.confidence_tier_active is False
+        assert gov.consecutive_losses == 0
+
+    def test_adaptive_tier_defaults(self):
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=2,
+        )
+        assert gov.adaptive_tier_a == 0.80
+        assert gov.adaptive_tier_b == 0.70

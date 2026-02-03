@@ -39,6 +39,7 @@ from app.services.strategy.indicators.tf_bias import (
     TimeframeBias,
     _is_component_usable,
     compute_tf_bias,
+    compute_weekly_bias,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornSetup,
@@ -68,6 +69,8 @@ from app.services.strategy.strategies.unicorn_model import (
 class BiasSnapshot:
     """Full bias stack at a point in time (for trace/audit)."""
     # Per-TF: None = TF not provided/computed. NEUTRAL = computed but neutral.
+    daily_direction: Optional[BiasDirection] = None
+    daily_confidence: float = 0.0
     h4_direction: Optional[BiasDirection] = None
     h4_confidence: float = 0.0
     h1_direction: Optional[BiasDirection] = None
@@ -96,6 +99,8 @@ class BarBundle:
     m15: Optional[list[OHLCVBar]] = None   # Primary scan TF
     m5: Optional[list[OHLCVBar]] = None    # LTF confirmation
     m1: Optional[list[OHLCVBar]] = None    # 1m execution
+    daily: Optional[list[OHLCVBar]] = None   # Daily bars for bias stack
+    weekly: Optional[list[OHLCVBar]] = None  # Weekly bars for bias gate
 
 
 class BiasState(NamedTuple):
@@ -557,6 +562,9 @@ class TradeRecord:
     is_partial_leg: bool = False                    # True for split legs
     leg_index: int = 0                              # 0=full, 1=runner, 2=trailer
 
+    # Confidence tiering
+    confidence_tier: Optional[str] = None           # "A", "B", or None (disabled)
+
 
 @dataclass
 class SetupOccurrence:
@@ -729,6 +737,9 @@ class UnicornBacktestResult:
     # Partial exit leg accounting
     partial_legs: int = 0  # count of partial_target legs created
 
+    # Confidence tier stats (None when tiering not used)
+    confidence_tier_stats: Optional[dict] = None
+
     @property
     def win_rate(self) -> float:
         total_closed = self.wins + self.losses + self.breakevens
@@ -796,6 +807,7 @@ def check_criteria(
     config: Optional[UnicornConfig] = None,
     h4_bars: Optional[list[OHLCVBar]] = None,
     h1_bars: Optional[list[OHLCVBar]] = None,
+    daily_bars: Optional[list[OHLCVBar]] = None,
 ) -> CriteriaCheck:
     """
     Check all 9 Unicorn criteria at a specific point in time.
@@ -826,6 +838,7 @@ def check_criteria(
 
     # 1. HTF Bias (pass all available timeframes for full bias stack)
     htf_bias = compute_tf_bias(
+        daily_bars=daily_bars,
         h4_bars=h4_bars,
         h1_bars=h1_bars,
         m15_bars=htf_bars,
@@ -840,6 +853,8 @@ def check_criteria(
     # Build full bias snapshot for trace/audit
     # used_tfs only lists TFs that actually contributed to scoring
     used_tfs: list[str] = []
+    if _is_component_usable(htf_bias.daily_bias):
+        used_tfs.append("daily")
     if _is_component_usable(htf_bias.h4_bias):
         used_tfs.append("h4")
     if _is_component_usable(htf_bias.h1_bias):
@@ -850,6 +865,8 @@ def check_criteria(
         used_tfs.append("m5")
 
     check.bias_snapshot = BiasSnapshot(
+        daily_direction=htf_bias.daily_bias.direction if htf_bias.daily_bias else None,
+        daily_confidence=htf_bias.daily_bias.confidence if htf_bias.daily_bias else 0.0,
         h4_direction=htf_bias.h4_bias.direction if htf_bias.h4_bias else None,
         h4_confidence=htf_bias.h4_bias.confidence if htf_bias.h4_bias else 0.0,
         h1_direction=htf_bias.h1_bias.direction if htf_bias.h1_bias else None,
@@ -1008,7 +1025,11 @@ def check_criteria(
         check.stop_valid = False
 
     # 8. Macro window
-    check.in_macro_window = is_in_macro_window(ts, profile=config.session_profile)
+    check.in_macro_window = is_in_macro_window(
+        ts,
+        profile=config.session_profile,
+        ny_am_cutoff_minutes=config.ny_am_cutoff_minutes,
+    )
 
     return check
 
@@ -1052,6 +1073,8 @@ def run_unicorn_backtest(
     # Partial exit (scale-out)
     partial_exit_r: Optional[float] = None,   # e.g. 1.0 = exit 50% at +1R
     partial_exit_pct: float = 0.5,            # fraction to exit at partial target
+    # Weekly bias gate (reject if weekly bias opposes trade direction)
+    weekly_bias_gate: bool = False,
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -1160,11 +1183,17 @@ def run_unicorn_backtest(
     # A bar covering [T_bar, T_bar + duration) is "complete" when T >= T_bar + duration.
     h4_completed_ts: list[datetime] = []
     h1_completed_ts: list[datetime] = []
+    daily_completed_ts: list[datetime] = []
+    weekly_completed_ts: list[datetime] = []
     if bar_bundle is not None:
         if bar_bundle.h4:
             h4_completed_ts = [b.ts + timedelta(hours=4) for b in bar_bundle.h4]
         if bar_bundle.h1:
             h1_completed_ts = [b.ts + timedelta(hours=1) for b in bar_bundle.h1]
+        if bar_bundle.daily:
+            daily_completed_ts = [b.ts + timedelta(days=1) for b in bar_bundle.daily]
+        if bar_bundle.weekly:
+            weekly_completed_ts = [b.ts + timedelta(weeks=1) for b in bar_bundle.weekly]
 
     # Pre-build 1m timestamp index for bisect-based slicing
     m1_timestamps: list[datetime] = []
@@ -1181,6 +1210,7 @@ def run_unicorn_backtest(
         "loss_limit_halts": 0,
         "trade_limit_halts": 0,
         "sizing_rejects": 0,
+        "adaptive_tier_activations": 0,
         # Sizing config (always present for artifact interpretability)
         "dollars_per_trade": dollars_per_trade,
         "sizing_active": dollars_per_trade > 0,
@@ -1220,6 +1250,13 @@ def run_unicorn_backtest(
 
         # Daily governor: reset on new calendar day
         if daily_governor is not None:
+            # Track adaptive tier activations before reset clears the flag
+            if (
+                daily_governor.confidence_tier_active
+                and daily_governor.current_date is not None
+                and daily_governor.current_date != ts.date()
+            ):
+                _gov_stats["adaptive_tier_activations"] += 1
             prev_halt_reason = daily_governor.maybe_reset(ts.date())
             if prev_halt_reason:
                 _gov_stats["days_halted"] += 1
@@ -1243,6 +1280,15 @@ def run_unicorn_backtest(
                 _r_day_max = max(_r_day_max, _current_r_day)
                 if daily_governor is not None:
                     daily_governor.update_r_day(_current_r_day)
+                # Adaptive confidence tiering: check trailing DD
+                if daily_governor is not None and eval_profile is not None:
+                    trailing_dd = _peak_equity - _running_equity
+                    dd_pct = (
+                        (trailing_dd / eval_profile.max_drawdown_dollars * 100)
+                        if eval_profile.max_drawdown_dollars > 0
+                        else 0.0
+                    )
+                    daily_governor.check_adaptive_dd(dd_pct)
                 _prev_date = bar_date
 
         if _eval_blown:
@@ -1544,8 +1590,12 @@ def run_unicorn_backtest(
         #   H1: EMA(50)  +  5 =  55 bars minimum → 100 with buffer
         H4_BIAS_LOOKBACK_BARS = 260
         H1_BIAS_LOOKBACK_BARS = 100
+        DAILY_BIAS_LOOKBACK_BARS = 260
+        WEEKLY_BIAS_LOOKBACK_BARS = 260
         causal_h4: Optional[list[OHLCVBar]] = None
         causal_h1: Optional[list[OHLCVBar]] = None
+        causal_daily: Optional[list[OHLCVBar]] = None
+        causal_weekly: Optional[list[OHLCVBar]] = None
         if bar_bundle is not None:
             if bar_bundle.h4 and h4_completed_ts:
                 n_complete = bisect_right(h4_completed_ts, ts)
@@ -1555,6 +1605,14 @@ def run_unicorn_backtest(
                 n_complete = bisect_right(h1_completed_ts, ts)
                 if n_complete > 0:
                     causal_h1 = bar_bundle.h1[:n_complete][-H1_BIAS_LOOKBACK_BARS:]
+            if bar_bundle.daily and daily_completed_ts:
+                n_complete = bisect_right(daily_completed_ts, ts)
+                if n_complete > 0:
+                    causal_daily = bar_bundle.daily[:n_complete][-DAILY_BIAS_LOOKBACK_BARS:]
+            if bar_bundle.weekly and weekly_completed_ts:
+                n_complete = bisect_right(weekly_completed_ts, ts)
+                if n_complete > 0:
+                    causal_weekly = bar_bundle.weekly[:n_complete][-WEEKLY_BIAS_LOOKBACK_BARS:]
 
         # Check all criteria
         criteria = check_criteria(
@@ -1566,6 +1624,7 @@ def run_unicorn_backtest(
             config=config,
             h4_bars=causal_h4,
             h1_bars=causal_h1,
+            daily_bars=causal_daily,
         )
 
         # Capture primary HTF bias at every scanned bar (observability)
@@ -1621,8 +1680,34 @@ def run_unicorn_backtest(
                 result.all_setups.append(setup_record)
                 continue
 
-            # Confidence gate: hard entry filter on HTF bias confidence
+            # Adaptive confidence tiering: governor may activate mid-session
+            effective_tier_a = config.confidence_tier_a
+            effective_tier_b = config.confidence_tier_b
             if (
+                daily_governor is not None
+                and daily_governor.confidence_tier_active
+                and effective_tier_a is None
+            ):
+                effective_tier_a = daily_governor.adaptive_tier_a
+                effective_tier_b = daily_governor.adaptive_tier_b
+
+            # Confidence gate: tiered or hard binary
+            confidence_tier: Optional[str] = None
+            if effective_tier_a is not None:
+                # Tiered mode: A (full) / B (half) / C (blocked)
+                conf = criteria.htf_bias_confidence
+                if conf >= effective_tier_a:
+                    confidence_tier = "A"
+                elif effective_tier_b is not None and conf >= effective_tier_b:
+                    confidence_tier = "B"
+                else:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = (
+                        f"confidence_tier_C: {conf:.2f} < {effective_tier_b}"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
+            elif (
                 config.min_confidence is not None
                 and criteria.htf_bias_confidence < config.min_confidence
             ):
@@ -1653,6 +1738,20 @@ def run_unicorn_backtest(
                     setup_record.taken = False
                     setup_record.reason_not_taken = (
                         f"alignment_gate: primary={direction.value} != ref={ref_state.direction.value}"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
+
+            # Weekly bias gate: reject if weekly bias opposes trade direction
+            if weekly_bias_gate and causal_weekly:
+                wb = compute_weekly_bias(causal_weekly)
+                if (
+                    wb.direction != BiasDirection.NEUTRAL
+                    and wb.direction != direction
+                ):
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = (
+                        f"weekly_bias_gate: weekly={wb.direction.value} != {direction.value}"
                     )
                     result.all_setups.append(setup_record)
                     continue
@@ -1767,6 +1866,8 @@ def run_unicorn_backtest(
             effective_risk_budget = _current_r_day if eval_profile else dollars_per_trade
             if daily_governor is not None:
                 effective_risk_budget *= daily_governor.risk_multiplier
+            if confidence_tier == "B":
+                effective_risk_budget *= 0.5
             if risk_dollars > 0:
                 quantity = int(effective_risk_budget / risk_dollars)
             else:
@@ -1811,6 +1912,7 @@ def run_unicorn_backtest(
                 trail_distance=_compute_trail_distance(
                     signal_atr, trail_atr_mult, trail_cap_mult, risk_points,
                 ) if trail_atr_mult else 0.0,
+                confidence_tier=confidence_tier,
             )
 
             # Compute partial exit price for scale-out
@@ -2088,9 +2190,28 @@ def run_unicorn_backtest(
         _gov_stats["r_day_max"] = _r_day_max
         _gov_stats["drawdown_halt"] = _eval_blown
 
+    # Capture last day's adaptive tier activation (not caught by day-boundary check)
+    if daily_governor is not None and daily_governor.confidence_tier_active:
+        _gov_stats["adaptive_tier_activations"] += 1
+
     # Populate governor stats (always — sizing_rejects and config are useful
     # even without a daily governor for artifact interpretability)
     result.governor_stats = dict(_gov_stats)
+
+    # Populate confidence tier stats
+    if config.confidence_tier_a is not None:
+        tier_counts = {"A": 0, "B": 0}
+        tier_pnl = {"A": 0.0, "B": 0.0}
+        for t in result.trades:
+            tier = t.confidence_tier or "A"
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+            tier_pnl[tier] = tier_pnl.get(tier, 0.0) + t.pnl_dollars
+        result.confidence_tier_stats = {
+            "tier_a_count": tier_counts["A"],
+            "tier_a_pnl": round(tier_pnl["A"], 2),
+            "tier_b_count": tier_counts["B"],
+            "tier_b_pnl": round(tier_pnl["B"], 2),
+        }
 
     return result
 

@@ -310,6 +310,8 @@ def generate_sample_data(
         m15=fetcher._resample_bars(m1_bars, "15m"),
         m5=fetcher._resample_bars(m1_bars, "5m"),
         m1=m1_bars,
+        daily=fetcher._resample_bars(m1_bars, "1d"),
+        weekly=fetcher._resample_bars(m1_bars, "1w"),
     )
     print(f"  Multi-TF: {len(bundle.h4)} 4H, {len(bundle.h1)} 1H, "
           f"{len(bundle.m15)} 15m, {len(bundle.m5)} 5m, {len(bundle.m1)} 1m bars")
@@ -1008,6 +1010,44 @@ Examples:
         help=argparse.SUPPRESS,
     )
 
+    # --- NY AM losing-streak reduction features ---
+    parser.add_argument(
+        "--weekly-bias-gate", action="store_true", default=False,
+        help="Reject trades where weekly EMA(200) bias opposes direction",
+    )
+    parser.add_argument(
+        "--confidence-tier-a", type=float, default=None,
+        help="Confidence tier A threshold (full size). e.g. 0.80",
+    )
+    parser.add_argument(
+        "--confidence-tier-b", type=float, default=None,
+        help="Confidence tier B threshold (half size). e.g. 0.70. "
+             "Below this → blocked (tier C). Requires --confidence-tier-a.",
+    )
+    parser.add_argument(
+        "--ny-am-cutoff", type=int, default=None,
+        help="NY AM window length in minutes from 9:30 ET. "
+             "e.g. 60 → 9:30-10:30 instead of default 9:30-11:00",
+    )
+
+    # --- Adaptive confidence tiering ---
+    parser.add_argument(
+        "--adaptive-tier-streak", type=int, default=None, metavar="N",
+        help="Activate confidence tiering after N consecutive losses (default: None = disabled).",
+    )
+    parser.add_argument(
+        "--adaptive-tier-dd-pct", type=float, default=None, metavar="X",
+        help="Activate confidence tiering when trailing DD > X%% of max DD (default: None = disabled).",
+    )
+    parser.add_argument(
+        "--adaptive-tier-a", type=float, default=0.80, metavar="FLOAT",
+        help="Tier A confidence threshold when adaptive fires (default: 0.80).",
+    )
+    parser.add_argument(
+        "--adaptive-tier-b", type=float, default=0.70, metavar="FLOAT",
+        help="Tier B confidence threshold when adaptive fires (default: 0.70).",
+    )
+
     args = parser.parse_args()
 
     # Validate mutual exclusion
@@ -1023,6 +1063,13 @@ Examples:
         parser.error("--require-alignment requires --ref-symbol")
     if args.max_daily_loss_r is not None and args.eval_account_size is None:
         parser.error("--max-daily-loss-r requires --eval-account-size")
+
+    # Validate confidence tier args
+    if (args.confidence_tier_a is None) != (args.confidence_tier_b is None):
+        parser.error("--confidence-tier-a and --confidence-tier-b must both be set or both omitted")
+    if args.confidence_tier_a is not None and args.confidence_tier_b is not None:
+        if args.confidence_tier_b >= args.confidence_tier_a:
+            parser.error("--confidence-tier-b must be less than --confidence-tier-a")
 
     # Resolve scale-out preset → raw partial_exit args
     if args.scale_out is not None:
@@ -1054,6 +1101,10 @@ Examples:
             max_daily_loss_dollars=max_loss,
             max_trades_per_day=max_trades,
             max_daily_loss_r=args.max_daily_loss_r,
+            adaptive_tier_streak=args.adaptive_tier_streak,
+            adaptive_tier_dd_pct=args.adaptive_tier_dd_pct,
+            adaptive_tier_a=args.adaptive_tier_a,
+            adaptive_tier_b=args.adaptive_tier_b,
         )
 
         if args.eval_mode:
@@ -1063,8 +1114,17 @@ Examples:
             if args.trail_atr_mult is not None and args.trail_cap_mult is None:
                 args.trail_cap_mult = 1.0
 
+            # Lock NY AM survival defaults for strict profile
+            if args.session_profile == "strict":
+                if not args.weekly_bias_gate:
+                    args.weekly_bias_gate = True
+                if args.ny_am_cutoff is None:
+                    args.ny_am_cutoff = 60
+
         print(f"Daily governor: max loss ${max_loss:.0f}/day, max {max_trades} trades/day, "
               f"half-size at ${max_loss * 0.5:.0f} loss")
+        if args.eval_mode and args.session_profile == "strict":
+            print(f"Eval NY AM locks: weekly_bias_gate=ON, ny_am_cutoff={args.ny_am_cutoff}min")
 
     # Eval account profile (R-native sizing)
     eval_profile = None
@@ -1097,6 +1157,10 @@ Examples:
                 max_daily_loss_dollars=eval_profile.max_daily_loss_dollars,
                 max_trades_per_day=max_trades,
                 max_daily_loss_r=args.max_daily_loss_r,
+                adaptive_tier_streak=args.adaptive_tier_streak,
+                adaptive_tier_dd_pct=args.adaptive_tier_dd_pct,
+                adaptive_tier_a=args.adaptive_tier_a,
+                adaptive_tier_b=args.adaptive_tier_b,
             )
             print(f"Daily governor (from eval profile): max loss "
                   f"${eval_profile.max_daily_loss_dollars:.0f}/day, "
@@ -1244,6 +1308,9 @@ Examples:
         require_sweep_settlement=args.require_sweep_settlement,
         enable_displacement_backstop=not args.no_displacement_backstop,
         min_confidence=args.min_confidence,
+        confidence_tier_a=args.confidence_tier_a,
+        confidence_tier_b=args.confidence_tier_b,
+        ny_am_cutoff_minutes=args.ny_am_cutoff,
     )
 
     # Run backtest
@@ -1281,6 +1348,15 @@ Examples:
         print(f"Sweep closure guard: recency={sweep_age}, settlement={sweep_settle}")
     if args.partial_exit_r is not None:
         print(f"Partial exit: {args.partial_exit_pct*100:.0f}% at +{args.partial_exit_r:.1f}R, remainder trails")
+    if args.weekly_bias_gate:
+        print("Weekly bias gate: ENABLED (reject if weekly EMA200 opposes direction)")
+    if args.confidence_tier_a is not None:
+        print(f"Confidence tiering: A >= {args.confidence_tier_a:.2f} (full), "
+              f"B >= {args.confidence_tier_b:.2f} (half), C < {args.confidence_tier_b:.2f} (blocked)")
+    if args.ny_am_cutoff is not None:
+        cutoff_end_h = (9 * 60 + 30 + args.ny_am_cutoff) // 60
+        cutoff_end_m = (9 * 60 + 30 + args.ny_am_cutoff) % 60
+        print(f"NY AM cutoff: {args.ny_am_cutoff} min → 9:30-{cutoff_end_h}:{cutoff_end_m:02d} ET")
 
     # Build reference bias series if requested
     reference_bias_series = None
@@ -1343,6 +1419,7 @@ Examples:
         eval_profile=eval_profile,
         partial_exit_r=args.partial_exit_r,
         partial_exit_pct=args.partial_exit_pct,
+        weekly_bias_gate=args.weekly_bias_gate,
     )
 
     # Format output

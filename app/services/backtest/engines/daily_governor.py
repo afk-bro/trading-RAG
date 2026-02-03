@@ -30,6 +30,12 @@ class DailyGovernor:
     half_size_multiplier: float = 0.5
     max_daily_loss_r: Optional[float] = None  # R-based daily loss cap (e.g. 1.0 = 1R)
 
+    # Adaptive confidence tiering config (None = disabled)
+    adaptive_tier_streak: Optional[int] = None     # activate after N consecutive losses
+    adaptive_tier_dd_pct: Optional[float] = None   # activate when trailing DD > X% of max DD
+    adaptive_tier_a: float = 0.80                  # tier A threshold when adaptive is active
+    adaptive_tier_b: float = 0.70                  # tier B threshold when adaptive is active
+
     # --- Per-day mutable state ---
     day_loss_dollars: float = 0.0
     day_trade_count: int = 0
@@ -37,6 +43,10 @@ class DailyGovernor:
     halted_for_day: bool = False
     halt_reason: str = ""  # "loss_limit" or "trade_limit" when halted
     current_date: object = None  # date object, set on first bar of day
+
+    # Adaptive state (reset daily)
+    consecutive_losses: int = 0
+    confidence_tier_active: bool = False
 
     @property
     def half_loss_threshold(self) -> float:
@@ -78,6 +88,17 @@ class DailyGovernor:
             self.day_trade_count += 1
         if pnl_dollars < 0:
             self.day_loss_dollars += pnl_dollars
+            if not is_partial_leg:
+                self.consecutive_losses += 1
+        elif not is_partial_leg:
+            self.consecutive_losses = 0
+
+        # Adaptive confidence tiering: streak trigger
+        if (
+            self.adaptive_tier_streak is not None
+            and self.consecutive_losses >= self.adaptive_tier_streak
+        ):
+            self.confidence_tier_active = True
 
         # Half-size stepdown: if cumulative loss hits half threshold,
         # next trade uses reduced size
@@ -110,3 +131,10 @@ class DailyGovernor:
         self.risk_multiplier = 1.0
         self.halted_for_day = False
         self.halt_reason = ""
+        self.consecutive_losses = 0
+        self.confidence_tier_active = False
+
+    def check_adaptive_dd(self, trailing_dd_pct: float) -> None:
+        """Activate confidence tiering if trailing DD exceeds threshold."""
+        if self.adaptive_tier_dd_pct is not None and trailing_dd_pct >= self.adaptive_tier_dd_pct:
+            self.confidence_tier_active = True

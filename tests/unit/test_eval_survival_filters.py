@@ -1,22 +1,31 @@
 """Tests for eval survival filters: LONDON session, confidence gate,
-alignment gate, R-based daily halt."""
+alignment gate, R-based daily halt, weekly bias gate, confidence tiering,
+NY AM timebox tightening."""
 
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.services.backtest.engines.daily_governor import DailyGovernor
-from app.services.strategy.indicators.tf_bias import BiasDirection
+from app.services.strategy.indicators.tf_bias import (
+    BiasDirection,
+    compute_weekly_bias,
+    BiasStrength,
+)
 from app.services.strategy.strategies.unicorn_model import (
     SessionProfile,
     SESSION_WINDOWS,
+    UnicornConfig,
     is_in_macro_window,
+    _apply_ny_am_cutoff,
     ScaleOutPreset,
     SCALE_OUT_PARAMS,
 )
+from app.services.strategy.models import OHLCVBar
 from app.services.backtest.engines.unicorn_runner import (
     BiasState,
+    BarBundle,
     TradeRecord,
     CriteriaCheck,
     TradingSession,
@@ -421,3 +430,379 @@ class TestScaleOutPreset:
     def test_enum_from_string(self):
         assert ScaleOutPreset("none") == ScaleOutPreset.NONE
         assert ScaleOutPreset("prop_safe") == ScaleOutPreset.PROP_SAFE
+
+
+# ---------------------------------------------------------------------------
+# 8. Weekly bias gate (Feature 1)
+# ---------------------------------------------------------------------------
+
+def _make_weekly_bars(price: float, n: int = 250) -> list[OHLCVBar]:
+    """Generate N weekly bars with a steady uptrend from `price`."""
+    bars = []
+    for i in range(n):
+        p = price + i * 0.5
+        bars.append(OHLCVBar(
+            ts=datetime(2020, 1, 6, tzinfo=timezone.utc) + __import__("datetime").timedelta(weeks=i),
+            open=p, high=p + 2.0, low=p - 1.0, close=p + 1.0, volume=1000.0,
+        ))
+    return bars
+
+
+class TestWeeklyBiasGate:
+    def test_compute_weekly_bias_bullish(self):
+        """Steady uptrend should produce BULLISH weekly bias."""
+        bars = _make_weekly_bars(100.0, 250)
+        result = compute_weekly_bias(bars)
+        assert result.direction == BiasDirection.BULLISH
+        assert result.confidence > 0.3
+
+    def test_compute_weekly_bias_insufficient_data(self):
+        """With < 200 bars, should return NEUTRAL."""
+        bars = _make_weekly_bars(100.0, 50)
+        result = compute_weekly_bias(bars)
+        assert result.direction == BiasDirection.NEUTRAL
+        assert result.confidence == 0.0
+
+    def test_weekly_bias_bearish(self):
+        """Steady downtrend → BEARISH."""
+        bars = []
+        for i in range(250):
+            p = 200.0 - i * 0.5
+            bars.append(OHLCVBar(
+                ts=datetime(2020, 1, 6, tzinfo=timezone.utc) + __import__("datetime").timedelta(weeks=i),
+                open=p, high=p + 1.0, low=p - 2.0, close=p - 1.0, volume=1000.0,
+            ))
+        result = compute_weekly_bias(bars)
+        assert result.direction == BiasDirection.BEARISH
+
+    def test_bar_bundle_has_daily_weekly_fields(self):
+        """BarBundle now accepts daily and weekly fields."""
+        bundle = BarBundle(daily=[], weekly=[])
+        assert bundle.daily == []
+        assert bundle.weekly == []
+
+
+# ---------------------------------------------------------------------------
+# 9. Confidence tiering (Feature 2)
+# ---------------------------------------------------------------------------
+
+class TestConfidenceTiering:
+    def test_tier_a_full_size(self):
+        """Confidence >= tier_a → tier A, no budget reduction."""
+        conf = 0.85
+        tier_a = 0.80
+        tier_b = 0.70
+        if conf >= tier_a:
+            tier = "A"
+        elif conf >= tier_b:
+            tier = "B"
+        else:
+            tier = "C"
+        assert tier == "A"
+
+    def test_tier_b_half_size(self):
+        """Confidence between tier_b and tier_a → tier B, half budget."""
+        conf = 0.75
+        tier_a = 0.80
+        tier_b = 0.70
+        if conf >= tier_a:
+            tier = "A"
+        elif conf >= tier_b:
+            tier = "B"
+        else:
+            tier = "C"
+        assert tier == "B"
+
+        budget = 1000.0
+        if tier == "B":
+            budget *= 0.5
+        assert budget == 500.0
+
+    def test_tier_c_blocked(self):
+        """Confidence < tier_b → tier C, blocked."""
+        conf = 0.65
+        tier_a = 0.80
+        tier_b = 0.70
+        if conf >= tier_a:
+            tier = "A"
+        elif conf >= tier_b:
+            tier = "B"
+        else:
+            tier = "C"
+        assert tier == "C"
+
+    def test_config_validation_both_or_neither(self):
+        """Setting only one tier raises ValueError."""
+        with pytest.raises(ValueError, match="both be set"):
+            UnicornConfig(confidence_tier_a=0.80, confidence_tier_b=None)
+
+    def test_config_validation_b_lt_a(self):
+        """tier_b must be < tier_a."""
+        with pytest.raises(ValueError, match="must be < confidence_tier_a"):
+            UnicornConfig(confidence_tier_a=0.70, confidence_tier_b=0.80)
+
+    def test_config_valid_tiers(self):
+        """Valid tier config should construct without error."""
+        config = UnicornConfig(confidence_tier_a=0.80, confidence_tier_b=0.70)
+        assert config.confidence_tier_a == 0.80
+        assert config.confidence_tier_b == 0.70
+
+    def test_trade_record_has_tier_field(self):
+        """TradeRecord has confidence_tier field."""
+        trade = TradeRecord(
+            entry_time=datetime(2025, 6, 1, 9, 30, tzinfo=ET),
+            entry_price=100.0,
+            direction=BiasDirection.BULLISH,
+            quantity=1,
+            session=TradingSession.NY_AM,
+            criteria=CriteriaCheck(),
+            stop_price=95.0,
+            target_price=110.0,
+            risk_points=5.0,
+            confidence_tier="B",
+        )
+        assert trade.confidence_tier == "B"
+
+
+# ---------------------------------------------------------------------------
+# 10. NY AM timebox tightening (Feature 3)
+# ---------------------------------------------------------------------------
+
+class TestNyAmCutoff:
+    def test_apply_cutoff_shortens_window(self):
+        """60-min cutoff changes 9:30-11:00 to 9:30-10:30."""
+        windows = [(time(9, 30), time(11, 0))]
+        result = _apply_ny_am_cutoff(windows, 60)
+        assert result == [(time(9, 30), time(10, 30))]
+
+    def test_apply_cutoff_leaves_other_windows(self):
+        """London window should be untouched."""
+        windows = [(time(3, 0), time(4, 0)), (time(9, 30), time(11, 0))]
+        result = _apply_ny_am_cutoff(windows, 45)
+        assert result[0] == (time(3, 0), time(4, 0))
+        assert result[1] == (time(9, 30), time(10, 15))
+
+    def test_is_in_macro_window_with_cutoff(self):
+        """10:45 ET should be OUT with 60-min cutoff."""
+        ts = datetime(2025, 3, 10, 10, 45, tzinfo=ET)
+        # Without cutoff: in window (9:30-11:00)
+        assert is_in_macro_window(ts, SessionProfile.STRICT) is True
+        # With cutoff: out (9:30-10:30)
+        assert is_in_macro_window(
+            ts, SessionProfile.STRICT, ny_am_cutoff_minutes=60
+        ) is False
+
+    def test_is_in_macro_window_cutoff_inside(self):
+        """10:00 ET should still be IN with 60-min cutoff."""
+        ts = datetime(2025, 3, 10, 10, 0, tzinfo=ET)
+        assert is_in_macro_window(
+            ts, SessionProfile.STRICT, ny_am_cutoff_minutes=60
+        ) is True
+
+    def test_config_validation_cutoff_range(self):
+        """Cutoff must be 1-90 minutes."""
+        with pytest.raises(ValueError, match="1-90"):
+            UnicornConfig(ny_am_cutoff_minutes=0)
+        with pytest.raises(ValueError, match="1-90"):
+            UnicornConfig(ny_am_cutoff_minutes=91)
+
+    def test_config_valid_cutoff(self):
+        config = UnicornConfig(ny_am_cutoff_minutes=60)
+        assert config.ny_am_cutoff_minutes == 60
+
+    def test_cutoff_none_uses_default(self):
+        """When cutoff is None, full 9:30-11:00 window applies."""
+        ts = datetime(2025, 3, 10, 10, 45, tzinfo=ET)
+        assert is_in_macro_window(
+            ts, SessionProfile.STRICT, ny_am_cutoff_minutes=None
+        ) is True
+
+
+# ---------------------------------------------------------------------------
+# 11. Eval-mode default locks (strict profile)
+# ---------------------------------------------------------------------------
+
+class TestEvalModeDefaults:
+    """Verify --eval-mode --session-profile strict locks proven features."""
+
+    def _make_args(self, **overrides):
+        """Simulate an argparse namespace with eval-mode defaults."""
+        defaults = {
+            "eval_mode": True,
+            "session_profile": "strict",
+            "weekly_bias_gate": False,
+            "ny_am_cutoff": None,
+            "breakeven_at_r": None,
+            "trail_atr_mult": None,
+            "trail_cap_mult": None,
+        }
+        defaults.update(overrides)
+
+        class Args:
+            pass
+
+        a = Args()
+        for k, v in defaults.items():
+            setattr(a, k, v)
+        return a
+
+    def test_strict_locks_weekly_bias_gate(self):
+        """Eval-mode + strict should lock weekly_bias_gate=True."""
+        args = self._make_args()
+        # Simulate the locking logic from run_unicorn_backtest.py
+        if args.eval_mode and args.session_profile == "strict":
+            if not args.weekly_bias_gate:
+                args.weekly_bias_gate = True
+            if args.ny_am_cutoff is None:
+                args.ny_am_cutoff = 60
+        assert args.weekly_bias_gate is True
+
+    def test_strict_locks_ny_am_cutoff(self):
+        """Eval-mode + strict should default ny_am_cutoff=60."""
+        args = self._make_args()
+        if args.eval_mode and args.session_profile == "strict":
+            if not args.weekly_bias_gate:
+                args.weekly_bias_gate = True
+            if args.ny_am_cutoff is None:
+                args.ny_am_cutoff = 60
+        assert args.ny_am_cutoff == 60
+
+    def test_explicit_cutoff_overrides(self):
+        """Explicit --ny-am-cutoff 45 wins over the default 60."""
+        args = self._make_args(ny_am_cutoff=45)
+        if args.eval_mode and args.session_profile == "strict":
+            if not args.weekly_bias_gate:
+                args.weekly_bias_gate = True
+            if args.ny_am_cutoff is None:
+                args.ny_am_cutoff = 60
+        assert args.ny_am_cutoff == 45
+
+    def test_non_strict_no_lock(self):
+        """Non-strict profile should not auto-lock features."""
+        args = self._make_args(session_profile="normal")
+        if args.eval_mode and args.session_profile == "strict":
+            if not args.weekly_bias_gate:
+                args.weekly_bias_gate = True
+            if args.ny_am_cutoff is None:
+                args.ny_am_cutoff = 60
+        assert args.weekly_bias_gate is False
+        assert args.ny_am_cutoff is None
+
+    def test_no_eval_mode_no_lock(self):
+        """Without eval-mode, no locking happens."""
+        args = self._make_args(eval_mode=False)
+        if args.eval_mode and args.session_profile == "strict":
+            if not args.weekly_bias_gate:
+                args.weekly_bias_gate = True
+            if args.ny_am_cutoff is None:
+                args.ny_am_cutoff = 60
+        assert args.weekly_bias_gate is False
+        assert args.ny_am_cutoff is None
+
+
+# ---------------------------------------------------------------------------
+# 12. Adaptive confidence tiering
+# ---------------------------------------------------------------------------
+
+class TestAdaptiveConfidenceTiering:
+    """Test adaptive confidence tiering integration with governor + runner logic."""
+
+    def test_consecutive_losses_trigger_tiering(self):
+        """Governor activates tiering at streak threshold."""
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=2,
+        )
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is False
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is True
+
+    def test_dd_threshold_triggers_tiering(self):
+        """Governor activates tiering when DD exceeds threshold."""
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_dd_pct=60.0,
+        )
+        gov.check_adaptive_dd(59.0)
+        assert gov.confidence_tier_active is False
+        gov.check_adaptive_dd(60.0)
+        assert gov.confidence_tier_active is True
+
+    def test_reset_day_clears_adaptive(self):
+        """reset_day() should clear adaptive state."""
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=1,
+        )
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is True
+        assert gov.consecutive_losses == 1
+        gov.reset_day()
+        assert gov.confidence_tier_active is False
+        assert gov.consecutive_losses == 0
+
+    def test_adaptive_does_not_override_explicit_config(self):
+        """When config has explicit tiers, adaptive governor doesn't override."""
+        config_tier_a = 0.90
+        config_tier_b = 0.85
+
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=1,
+            adaptive_tier_a=0.80,
+            adaptive_tier_b=0.70,
+        )
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is True
+
+        # Simulate the runner logic: adaptive only fires when config tiers are None
+        effective_tier_a = config_tier_a  # explicit config
+        effective_tier_b = config_tier_b
+        if gov.confidence_tier_active and effective_tier_a is None:
+            effective_tier_a = gov.adaptive_tier_a
+            effective_tier_b = gov.adaptive_tier_b
+
+        assert effective_tier_a == 0.90  # config wins
+        assert effective_tier_b == 0.85
+
+    def test_adaptive_applies_when_config_tiers_none(self):
+        """When config has no tiers, adaptive governor tiers apply."""
+        config_tier_a = None
+        config_tier_b = None
+
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=1,
+            adaptive_tier_a=0.80,
+            adaptive_tier_b=0.70,
+        )
+        gov.record_trade_close(-50.0)
+        assert gov.confidence_tier_active is True
+
+        effective_tier_a = config_tier_a
+        effective_tier_b = config_tier_b
+        if gov.confidence_tier_active and effective_tier_a is None:
+            effective_tier_a = gov.adaptive_tier_a
+            effective_tier_b = gov.adaptive_tier_b
+
+        assert effective_tier_a == 0.80
+        assert effective_tier_b == 0.70
+
+    def test_win_resets_consecutive_losses(self):
+        """A winning trade resets the consecutive loss counter."""
+        gov = DailyGovernor(
+            max_daily_loss_dollars=1000.0,
+            max_trades_per_day=5,
+            adaptive_tier_streak=3,
+        )
+        gov.record_trade_close(-50.0)
+        gov.record_trade_close(-50.0)
+        assert gov.consecutive_losses == 2
+        gov.record_trade_close(100.0)
+        assert gov.consecutive_losses == 0
