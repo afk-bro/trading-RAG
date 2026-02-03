@@ -38,11 +38,24 @@ COMMON=(
     --json
 )
 
+extract_json() {
+    # Extract the JSON object from mixed stdout (header lines + JSON + footer)
+    python3 -c "
+import sys, json
+text = open(sys.argv[1]).read()
+start = text.index('{')
+# Find matching closing brace by parsing
+obj = json.loads(text[start:text.rindex('}')+1])
+json.dump(obj, open(sys.argv[2], 'w'), indent=2)
+" "$1" "$2"
+}
+
 echo "=== Run A: Baseline (no scale-out) ==="
 python "$SCRIPT_DIR/run_unicorn_backtest.py" \
     "${COMMON[@]}" \
     "${DATA_ARGS[@]}" \
-    > "$OUT_DIR/run_a_baseline.json" 2>"$OUT_DIR/run_a.log"
+    > "$OUT_DIR/run_a_raw.txt" 2>"$OUT_DIR/run_a.log"
+extract_json "$OUT_DIR/run_a_raw.txt" "$OUT_DIR/run_a_baseline.json"
 echo "  -> $OUT_DIR/run_a_baseline.json"
 
 echo "=== Run C: prop_safe (33% @ +1R) ==="
@@ -50,7 +63,8 @@ python "$SCRIPT_DIR/run_unicorn_backtest.py" \
     "${COMMON[@]}" \
     --scale-out prop_safe \
     "${DATA_ARGS[@]}" \
-    > "$OUT_DIR/run_c_prop_safe.json" 2>"$OUT_DIR/run_c.log"
+    > "$OUT_DIR/run_c_raw.txt" 2>"$OUT_DIR/run_c.log"
+extract_json "$OUT_DIR/run_c_raw.txt" "$OUT_DIR/run_c_prop_safe.json"
 echo "  -> $OUT_DIR/run_c_prop_safe.json"
 
 echo ""

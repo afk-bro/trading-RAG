@@ -413,8 +413,10 @@ class TestScaleOutPreset:
         assert params["partial_exit_pct"] == 0.33
 
     def test_only_two_presets_exist(self):
-        """No other presets should exist — B and D are rejected."""
-        assert set(ScaleOutPreset) == {ScaleOutPreset.NONE, ScaleOutPreset.PROP_SAFE}
+        """Tuning phase closed — exactly NONE and PROP_SAFE, nothing else."""
+        assert set(ScaleOutPreset) == {ScaleOutPreset.NONE, ScaleOutPreset.PROP_SAFE}, (
+            "Scale-out tuning phase is closed. Do not add presets."
+        )
 
     def test_enum_from_string(self):
         assert ScaleOutPreset("none") == ScaleOutPreset.NONE

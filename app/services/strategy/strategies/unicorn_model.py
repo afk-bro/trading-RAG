@@ -239,18 +239,29 @@ QUANTITY_DECIMALS = 2  # NQ/ES use 2 decimal places
 
 
 class ScaleOutPreset(str, Enum):
-    """Locked scale-out configurations.
+    """Locked scale-out configurations.  TUNING PHASE CLOSED.
 
-    NONE:      Full position rides to target/stop. No partial exits.
-    PROP_SAFE: 33% off at +1R, 67% trails. Only approved partial config.
+    Only two presets exist.  Do not add more.
 
-    B (50%@1R) and D (50%@0.75R) are rejected — B halves the runner too
-    aggressively, D locks in too little and chokes MFE capture.
+    NONE:      Full position rides to target/stop.  No partial exits.
+    PROP_SAFE: 33% off at +1R, 67% trails.
+
+    Decision record (real Databento NQ, Q3 2024, NY AM strict, eval-mode):
+      - PROP_SAFE reduces max trailing DD by ~$1,500 vs baseline.
+      - One fewer halted day, 24 fewer skipped signals.
+      - Profit factor 0.99 → 1.13, expectancy -0.65 → +6.31 pts/setup.
+      - Avg win R drops 1.88 → 1.51 (capped upside on the 33% leg).
+      - Dollar PnL is worse due to per-leg commission at low contract counts.
+
+    Rejected alternatives:
+      B (50% @ +1R)   — halves the runner, too aggressive.
+      D (50% @ +0.75R) — locks in too little, chokes MFE capture.
     """
     NONE = "none"
     PROP_SAFE = "prop_safe"  # 33% at +1R
 
 
+# Immutable.  Do not add entries — scale-out tuning phase is closed.
 SCALE_OUT_PARAMS: dict[ScaleOutPreset, dict] = {
     ScaleOutPreset.NONE: {
         "partial_exit_r": None,
