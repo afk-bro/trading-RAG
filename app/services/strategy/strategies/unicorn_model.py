@@ -357,6 +357,17 @@ class UnicornConfig:
     # Backstop cleanup flag: when False, skip the redundant post-scoring displacement guard
     enable_displacement_backstop: bool = True
 
+    # Confidence tiering (None = disabled, all confidence levels pass)
+    # Tier A: >= confidence_tier_a → full size
+    # Tier B: >= confidence_tier_b → half size (50% risk budget)
+    # Tier C: < confidence_tier_b → blocked (rejected)
+    confidence_tier_a: Optional[float] = None
+    confidence_tier_b: Optional[float] = None
+
+    # NY AM timebox tightening (None = use default session window)
+    # Minutes from 9:30 ET — e.g. 60 → window becomes 9:30-10:30 instead of 9:30-11:00
+    ny_am_cutoff_minutes: Optional[int] = None
+
     def __post_init__(self):
         if not (0 <= self.min_scored_criteria <= 4):
             raise ValueError(
@@ -375,6 +386,20 @@ class UnicornConfig:
             raise ValueError("min_displacement_atr must be > 0 when set")
         if self.max_sweep_age_bars is not None and self.max_sweep_age_bars < 1:
             raise ValueError("max_sweep_age_bars must be >= 1 when set")
+        if self.confidence_tier_a is not None and not (0.0 < self.confidence_tier_a <= 1.0):
+            raise ValueError("confidence_tier_a must be in (0.0, 1.0] when set")
+        if self.confidence_tier_b is not None and not (0.0 < self.confidence_tier_b <= 1.0):
+            raise ValueError("confidence_tier_b must be in (0.0, 1.0] when set")
+        if (self.confidence_tier_a is None) != (self.confidence_tier_b is None):
+            raise ValueError("confidence_tier_a and confidence_tier_b must both be set or both be None")
+        if (
+            self.confidence_tier_a is not None
+            and self.confidence_tier_b is not None
+            and self.confidence_tier_b >= self.confidence_tier_a
+        ):
+            raise ValueError("confidence_tier_b must be < confidence_tier_a")
+        if self.ny_am_cutoff_minutes is not None and not (1 <= self.ny_am_cutoff_minutes <= 90):
+            raise ValueError("ny_am_cutoff_minutes must be 1-90 when set")
 
 
 # Default config
@@ -528,9 +553,28 @@ def round_quantity(qty: float, decimals: int = QUANTITY_DECIMALS) -> float:
     return floor(qty * multiplier) / multiplier
 
 
+def _apply_ny_am_cutoff(
+    windows: list[tuple[time, time]],
+    cutoff_minutes: int,
+) -> list[tuple[time, time]]:
+    """Replace the NY AM window end with 9:30 + cutoff_minutes."""
+    ny_am_start = time(9, 30)
+    new_end_total = 9 * 60 + 30 + cutoff_minutes
+    new_end = time(new_end_total // 60, new_end_total % 60)
+    result = []
+    for start, end in windows:
+        if start == ny_am_start:
+            result.append((start, new_end))
+        else:
+            result.append((start, end))
+    return result
+
+
 def is_in_macro_window(
     ts: datetime,
     profile: SessionProfile = SessionProfile.WIDE,
+    *,
+    ny_am_cutoff_minutes: Optional[int] = None,
 ) -> bool:
     """
     Check if timestamp is within a valid macro trading window.
@@ -538,12 +582,17 @@ def is_in_macro_window(
     Args:
         ts: Timezone-aware datetime to check (any timezone).
         profile: Session profile (STRICT, NORMAL, WIDE)
+        ny_am_cutoff_minutes: Override NY AM window length (minutes from 9:30 ET).
+                             e.g. 60 → 9:30-10:30 instead of 9:30-11:00.
 
     Raises:
         ValueError: If ts is a naive datetime.
     """
     current_time = to_eastern_time(ts)
     windows = SESSION_WINDOWS.get(profile, MACRO_WINDOWS)
+
+    if ny_am_cutoff_minutes is not None:
+        windows = _apply_ny_am_cutoff(windows, ny_am_cutoff_minutes)
 
     for start, end in windows:
         if start <= current_time < end:

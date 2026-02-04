@@ -405,6 +405,71 @@ def compute_daily_bias(
     )
 
 
+def compute_weekly_bias(
+    bars: list[OHLCVBar],
+    ema_period: int = 200,
+) -> TimeframeBiasComponent:
+    """
+    Compute Weekly timeframe bias (Macro Gate — weekly).
+
+    Same EMA(200)-distance-confidence logic as daily bias, applied to weekly bars.
+    Used as a standalone gate (not part of the weighted bias stack).
+
+    Args:
+        bars: Weekly OHLCV bars
+        ema_period: EMA period (default 200)
+
+    Returns:
+        TimeframeBiasComponent for weekly
+    """
+    if len(bars) < ema_period:
+        return TimeframeBiasComponent(
+            timeframe="weekly",
+            direction=BiasDirection.NEUTRAL,
+            strength=BiasStrength.WEAK,
+            confidence=0.0,
+            factors={"error": "insufficient_data"},
+        )
+
+    closes = [b.close for b in bars]
+    ema200 = compute_ema(closes, ema_period)
+
+    current_close = closes[-1]
+    current_ema = ema200[-1]
+
+    distance_pct = (current_close - current_ema) / current_ema * 100
+
+    if distance_pct > 0.5:
+        direction = BiasDirection.BULLISH
+    elif distance_pct < -0.5:
+        direction = BiasDirection.BEARISH
+    else:
+        direction = BiasDirection.NEUTRAL
+
+    abs_distance = abs(distance_pct)
+    if abs_distance > 3.0:
+        strength = BiasStrength.STRONG
+        confidence = min(1.0, 0.7 + abs_distance / 30)
+    elif abs_distance > 1.0:
+        strength = BiasStrength.MODERATE
+        confidence = 0.5 + abs_distance / 10
+    else:
+        strength = BiasStrength.WEAK
+        confidence = 0.3 + abs_distance / 5
+
+    return TimeframeBiasComponent(
+        timeframe="weekly",
+        direction=direction,
+        strength=strength,
+        confidence=min(1.0, confidence),
+        factors={
+            "close": current_close,
+            "ema200": current_ema,
+            "distance_pct": distance_pct,
+        },
+    )
+
+
 def compute_h4_bias(
     bars: list[OHLCVBar],
     ema_fast: int = 50,
