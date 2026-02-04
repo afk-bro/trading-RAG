@@ -524,6 +524,8 @@ class DatabentoFetcher:
             minutes = 60
         elif interval == "4h":
             minutes = 240
+        elif interval in ("1d", "1w"):
+            return self._resample_bars_calendar(bars, interval)
         else:
             raise ValueError(f"Unsupported interval: {interval}")
 
@@ -556,6 +558,25 @@ class DatabentoFetcher:
             resampled.append(self._aggregate_bars(current_group))
 
         return resampled
+
+    def _resample_bars_calendar(self, bars: list, interval: str) -> list:
+        """Resample 1m bars to daily or weekly using calendar boundaries.
+
+        Daily: group by date.
+        Weekly: group by ISO week (Mon–Sun).
+        """
+        from collections import OrderedDict
+
+        groups: OrderedDict = OrderedDict()
+        for bar in bars:
+            if interval == "1d":
+                key = bar.ts.date()
+            else:  # 1w
+                iso = bar.ts.isocalendar()
+                key = (iso[0], iso[1])  # (year, week)
+            groups.setdefault(key, []).append(bar)
+
+        return [self._aggregate_bars(g) for g in groups.values()]
 
     def _aggregate_bars(self, bars: list):
         """Aggregate multiple bars into one OHLCV bar."""
@@ -899,6 +920,8 @@ class DatabentoFetcher:
             m15=self._resample_bars(m1_bars, "15m"),
             m5=self._resample_bars(m1_bars, "5m"),
             m1=m1_bars,
+            daily=self._resample_bars(m1_bars, "1d"),
+            weekly=self._resample_bars(m1_bars, "1w"),
         )
 
     def _decompress_zst(self, zst_path: Path) -> Path:
