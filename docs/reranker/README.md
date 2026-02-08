@@ -188,7 +188,6 @@ app/
 | File | Purpose |
 |------|---------|
 | [runbook.md](./runbook.md) | Operational guide, troubleshooting |
-| [../plans/2026-01-08-cross-encoder-rerank-design.md](../plans/2026-01-08-cross-encoder-rerank-design.md) | Technical design document |
 
 ## Testing
 

@@ -71,13 +71,3 @@ discord.py>=2.3.0
 # Redis (for multi-worker SSE event bus)
 redis>=5.0.0
 
-# Testing (dev dependencies)
-# pytest==8.0.0
-# pytest-asyncio==0.23.4
-# pytest-cov==4.1.0
-# httpx[http2]==0.26.0
-
-# E2E Testing (dev dependencies)
-# playwright==1.57.0
-# pytest-playwright==0.7.2
-# pytest-base-url==2.1.0

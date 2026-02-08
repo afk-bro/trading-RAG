@@ -202,7 +202,7 @@ The displacement guard was validated across multiple historical regimes, sub-win
 --session-profile normal --max-wick-ratio 0.6 --min-displacement-atr 0.5 --intrabar-policy worst --trail-atr-mult 1.5
 ```
 
-Session profile validated across 5 regime windows (2021-2025). STRICT and NY_OPEN failed decision criteria (expectancy >= baseline in >=4/5 windows). NORMAL remains default. See `docs/unicorn-model-analysis.md` for full tables.
+Session profile validated across 5 regime windows (2021-2025). STRICT and NY_OPEN failed decision criteria (expectancy >= baseline in >=4/5 windows). NORMAL remains default.
 
 **Trailing Stop** (exit management):
 - `--trail-atr-mult FLOAT`: ATR-based trailing stop distance (e.g. 1.5 = 1.5x ATR)
@@ -228,7 +228,7 @@ Validated defaults (MNQ 18-month backtest, eval mode, 2024-01 to 2025-07):
 - Displacement guard at 0.5x ATR improves NQ expectancy +52%, turns ES from breakeven to profitable
 - Trailing stop resolved capped exits: 40% full-stop rate with 0% +2R+ wins → 38% activation with +0.85R avg trail exits
 - Exit engineering is now data-validated; entry selectivity is the bottleneck (32% of trades reach +1R MFE)
-- See `docs/unicorn-model-analysis.md` for forensic analysis
+- See `docs-archive` branch for forensic analysis details
 
 ## Eval Mode (Prop-Firm Simulation)
 

@@ -1,468 +1,162 @@
-# Trading RAG Pipeline - Finance Knowledge Base
+# Trading RAG
 
-A local RAG (Retrieval-Augmented Generation) pipeline for finance and trading knowledge. The system ingests YouTube transcripts and other documents via n8n orchestration, processes them through a FastAPI service with chunking, embedding, and storage capabilities.
+Multi-tenant RAG platform for trading research, backtesting, and strategy evaluation.
 
-## Architecture Overview
+[![CI](https://github.com/afk-bro/trading-RAG/actions/workflows/ci.yml/badge.svg)](https://github.com/afk-bro/trading-RAG/actions/workflows/ci.yml)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
+
+## Highlights
+
+- **Async-first FastAPI service** with 221 test files, CI pipeline (lint + unit + integration), and Prometheus alerting (28 rules across 10 subsystems)
+- **Multi-source ingestion** — YouTube transcripts, PDFs, Pine Script, articles, and raw text with token-aware chunking (tiktoken, 512-token windows)
+- **Two-stage retrieval** — Qdrant vector search with optional cross-encoder reranking (BGE-reranker-v2-m3), neighbor expansion, and LLM answer synthesis
+- **Backtest engine** — Grid/random parameter tuning, walk-forward optimization, IS/OOS splits with overfit detection, and a leaderboard
+- **Production-grade ops** — Sentry, structured logging, rate limiting, admin auth, workspace isolation, Telegram alerting with escalation, auto-pause guardrails
+
+## Architecture
 
 ```
-┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Google    │────▶│      n8n        │────▶│   FastAPI       │
-│   Sheets    │     │   Orchestrator  │     │   Service       │
-└─────────────┘     └─────────────────┘     └────────┬────────┘
-                                                     │
-                    ┌────────────────────────────────┼───────────────────────────────┐
-                    │                                │                               │
-                    ▼                                ▼                               ▼
-            ┌─────────────┐                 ┌─────────────┐                 ┌─────────────┐
-            │   Ollama    │                 │   Qdrant    │                 │  Supabase   │
-            │ (Embeddings)│                 │  (Vectors)  │                 │  (Postgres) │
-            └─────────────┘                 └─────────────┘                 └─────────────┘
+Sources (YouTube, PDF, Pine, Articles, Text)
+                │
+                ▼
+      ┌───────────────────┐
+      │   FastAPI Service  │
+      │     (rag-core)     │
+      └────────┬──────────┘
+               │
+    ┌──────────┼──────────┬──────────────┐
+    ▼          ▼          ▼              ▼
+ Ollama     Qdrant    Supabase     Workspaces
+(Embed)    (Vector)  (Postgres)    (Control)
 ```
 
-## Technology Stack
+**Data flow:** Content → Extract → Chunk (512 tokens) → Embed (768-dim) → Store in Vector DB + Postgres
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Orchestration | n8n (Docker) | Watch queue, call service, manage state |
-| Backend | Python FastAPI | API endpoints, business logic |
-| Primary DB | Supabase Postgres | Documents, chunks, metadata (source of truth) |
-| Vector DB | Qdrant (Docker) | Embedding vectors, similarity search |
-| Embeddings | Ollama (local) | nomic-embed-text (768 dimensions) |
-| LLM | OpenRouter API | Answer generation (optional) |
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| API | FastAPI, async (asyncpg, httpx) |
+| Embeddings | Ollama (nomic-embed-text, 768-dim) |
+| Vector DB | Qdrant |
+| Primary DB | Supabase PostgreSQL (76 migrations) |
+| Reranking | sentence-transformers (BGE-reranker-v2-m3) |
+| LLM | OpenRouter API (optional) |
+| Backtesting | Backtesting.py, pandas, numpy |
+| Market Data | CCXT (exchanges), Databento (CME futures) |
+| Monitoring | Prometheus, Sentry, structlog |
+| Admin | Jinja2 templates, Telegram notifications |
 
 ## Features
 
-- **YouTube Ingestion**: Parse URLs, fetch transcripts, extract metadata
-- **Document Ingestion**: Support for PDF, article, note, transcript sources
-- **Smart Chunking**: Token-aware (~512 tokens), timestamp preservation
-- **Metadata Extraction**: Symbols, entities, topics, speakers
-- **Semantic Search**: Qdrant vector search with payload filtering
-- **Answer Generation**: Optional LLM synthesis with citations (graceful degradation)
-- **Model Migration**: Re-embed support for model upgrades
-- **Backtest Parameter Tuning**: Grid/random search, IS/OOS splits, overfit detection
-- **Strategy Backtest UI**: Interactive backtesting with R-metrics, expectancy analysis, session breakdown
-- **ICT Unicorn Model**: Discretionary strategy with 8-criteria checklist, direction filter, time-stops
-- **Trading KB Recommend**: Strategy parameter recommendations with confidence scoring
-- **Regime Fingerprints**: Materialized regime vectors for instant similarity queries
-- **Pine Script Registry**: Parse, lint, and catalog Pine Script files with CLI tooling
-- **Auto-Strategy Discovery**: Generate parameter specs from Pine Script inputs for backtesting
-- **Coverage Triage Cockpit**: Manage weak coverage gaps with priority scoring and status workflow
-- **LLM Strategy Explanation**: Generate explanations for strategy-intent matches
-- **Admin UI**: Leaderboards, N-way tune comparison, ops snapshot, system health dashboard, ops alerts management, document detail with key concepts
-- **Document QA**: Key concept extraction (40+ trading terms), ticker detection, chunk validation workflow
-- **Ops Alerts**: Automated evaluation via pg_cron, Telegram delivery with activation/recovery/escalation notifications
-- **Paper Equity Snapshots**: Append-only equity time series with drawdown computation
-- **Workspace Drawdown Alerts**: WARN at 12%, CRITICAL at 20% with hysteresis (clear at 10%/16%)
-- **Auto-Pause Guardrail**: Config-gated safety feature that pauses active strategies on CRITICAL alerts
-- **Read-Only Dashboards**: Equity curve, intel timeline, alerts summary endpoints for trust-building UIs
-- **Idempotent Notifications**: Race-safe delivery with conditional mark pattern, delivery tracking columns
-- **Idempotency Hygiene**: Auto-prune via pg_cron, health page monitoring, Prometheus metrics
-- **Security Hardening**: Admin auth, rate limiting, CORS allowlist, workspace isolation
-- **Production Monitoring**: Sentry integration, structured logging, Prometheus alerting rules (28 alerts across 10 subsystems)
+### RAG Core
+- Unified ingest endpoint with auto-detection (YouTube, PDF, Pine Script, article, text)
+- Token-aware chunking with overlap and page/timestamp tracking
+- Semantic search with payload filtering (source type, symbols, topics)
+- Optional LLM answer generation with citations (graceful degradation when disabled)
+- Cross-encoder reranking with timeout fallback and neighbor expansion
+- Model migration support (re-embed endpoint for model upgrades)
 
-### Query Modes
+### Backtesting & Strategy
+- Parameter tuning with grid/random search and configurable objectives
+- Walk-forward optimization with IS/OOS splits and overfit detection
+- Pine Script registry with linting, auto-strategy discovery, and CLI tooling
+- KB-driven parameter recommendations with regime fingerprints
+- Paper execution with equity tracking and drawdown alerts
 
-| Mode | LLM Required | Description |
-|------|--------------|-------------|
-| `retrieve` | No | Semantic search only - returns ranked chunks |
-| `answer` | Optional | LLM synthesis - returns chunks + generated answer |
-
-When `mode=answer` is used without an LLM provider configured, the system returns retrieved chunks with a helpful message indicating that generation is disabled.
+### Operations & Admin
+- Admin dashboard with leaderboard, coverage triage, ops snapshot, document QA
+- Ops alerting with Telegram delivery (activation, recovery, escalation)
+- Auto-pause guardrail for CRITICAL drawdown alerts
+- Rate limiting, CORS allowlist, workspace isolation
+- Prometheus alerting rules (28 alerts across 10 subsystems)
 
 ## Quick Start
 
 ### Prerequisites
 
 - Docker and Docker Compose
-- Supabase project with Postgres database
-- OpenRouter API key (optional - only needed for `mode=answer` queries)
-- n8n instance (optional, for automated ingestion)
+- Supabase project (Postgres + auth)
+- OpenRouter API key (optional — only for LLM answer generation)
 
 ### Setup
 
-1. Clone and navigate to the project:
-   ```bash
-   cd trading-RAG
-   ```
+```bash
+# Clone and setup
+git clone https://github.com/afk-bro/trading-RAG.git
+cd trading-RAG
+make setup
 
-2. Run the setup script:
-   ```bash
-   ./init.sh
-   ```
+# Configure .env (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)
+vim .env
 
-3. Configure environment variables in `.env`:
-   ```bash
-   # Required
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-
-   # Optional - enables LLM answer generation
-   # OPENROUTER_API_KEY=your-openrouter-api-key
-   ```
-
-4. Access the services:
-   - API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
-   - Qdrant Dashboard: http://localhost:6333/dashboard
-
-## API Endpoints
-
-### Health Check
-```http
-GET /health
-```
-Returns service status and dependency health.
-
-### Ingest Document
-```http
-POST /ingest
-Content-Type: application/json
-
-{
-  "workspace_id": "uuid",
-  "source": {
-    "url": "https://example.com/article",
-    "type": "article"
-  },
-  "content": "Document content...",
-  "metadata": {
-    "title": "Article Title",
-    "author": "Author Name"
-  }
-}
+# Start services
+make docker-up
 ```
 
-### Ingest YouTube
-```http
-POST /sources/youtube/ingest
-Content-Type: application/json
+API available at http://localhost:8000 — interactive docs at http://localhost:8000/docs
 
-{
-  "workspace_id": "uuid",
-  "url": "https://www.youtube.com/watch?v=VIDEO_ID"
-}
-```
-
-### Query
-```http
-POST /query
-Content-Type: application/json
-
-{
-  "workspace_id": "uuid",
-  "question": "What is the Fed's current stance on interest rates?",
-  "mode": "answer",
-  "filters": {
-    "source_types": ["youtube"],
-    "symbols": ["SPY"],
-    "topics": ["macro"]
-  },
-  "top_k": 5
-}
-```
-
-### Re-embed
-```http
-POST /reembed
-Content-Type: application/json
-
-{
-  "workspace_id": "uuid",
-  "target_collection": "kb_new_model_v1",
-  "embed_provider": "ollama",
-  "embed_model": "new-model-name"
-}
-```
-
-### Job Status
-```http
-GET /jobs/{job_id}
-```
-
-### Backtest Tuning
-
-```http
-POST /backtests/tune
-Content-Type: application/json
-
-{
-  "workspace_id": "uuid",
-  "strategy_entity_id": "uuid",
-  "param_space": {"fast_period": [5, 10, 20], "slow_period": [20, 50, 100]},
-  "objective_type": "sharpe_dd_penalty",
-  "oos_ratio": 0.3
-}
-```
-
-```http
-GET /backtests/leaderboard?workspace_id=uuid&valid_only=true&objective_type=sharpe
-```
-
-### Trading KB Recommend
-```http
-POST /trading-kb/recommend
-Content-Type: application/json
-
-{
-  "workspace_id": "uuid",
-  "strategy_entity_id": "uuid",
-  "market_regime": "trending",
-  "risk_tolerance": "moderate"
-}
-```
-Returns parameter recommendations with confidence scores based on knowledge base analysis.
-
-### Readiness Check
-```http
-GET /ready
-```
-Deep dependency health check for Kubernetes readiness probes. Returns 200 when all dependencies (DB, Qdrant, embedder) are healthy, 503 otherwise.
-
-### Admin UI Routes
-
-| Route | Purpose |
-|-------|---------|
-| `/` | Landing page (public) |
-| `/admin/login` | Login page |
-| `/admin/auth/login` | Authenticate (POST) |
-| `/admin/auth/logout` | Logout and clear session |
-| `/admin/auth/check` | Check auth status (JSON) |
-| `/admin/backtests/tunes` | Filterable tune list |
-| `/admin/backtests/leaderboard` | Global ranking (CSV export) |
-| `/admin/backtests/compare?tune_id=A&tune_id=B` | N-way diff table (JSON export) |
-| `/admin/backtests/strategy-test` | Interactive strategy backtest UI |
-| `/admin/ops/snapshot` | Go-live verification (release, config, health) |
-| `/admin/system/health` | System health dashboard (status cards) |
-| `/admin/system/health.json` | System health (machine-readable) |
-| `/admin/coverage/cockpit` | Coverage triage cockpit UI |
-| `/admin/coverage/cockpit/{run_id}` | Deep link to specific run |
-| `/admin/ops-alerts` | Ops alerts management |
-| `/admin/ops-alerts/{id}/acknowledge` | Acknowledge alert |
-| `/admin/ops-alerts/{id}/resolve` | Resolve alert |
-| `/admin/ops-alerts/{id}/reopen` | Reopen resolved alert |
-| `/admin/ingest` | Unified ingest UI (YouTube, PDF, Pine, Article, Text) |
-| `/admin/documents/{doc_id}` | Document detail page with key concepts |
-| `/dashboards/{ws}/equity` | Equity curve with drawdown overlay |
-| `/dashboards/{ws}/intel-timeline` | Confidence & regime history |
-| `/dashboards/{ws}/alerts` | Active alerts by severity |
-| `/dashboards/{ws}/summary` | Combined overview for dashboard cards |
-
-### Unified Ingest Endpoint
-
-```http
-POST /ingest/unified
-Content-Type: multipart/form-data
-
-workspace_id=<uuid>
-url=<optional: YouTube/PDF/article URL>
-file=<optional: PDF/text/Pine file>
-content=<optional: raw text/markdown>
-title=<optional: override auto-detected title>
-source_type=<optional: override auto-detection>
-```
-
-Auto-detects content type from URL patterns or file extensions. Exactly one of `url`, `file`, or `content` is required.
-
-### Pine Script Registry CLI
-
-Build a registry of Pine Script files with metadata and lint findings:
+### Usage
 
 ```bash
-# Build registry from directory
-python -m app.services.pine --build ./scripts
+# Ingest a YouTube transcript
+curl -X POST http://localhost:8000/sources/youtube/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "YOUR_WS_ID", "url": "https://youtube.com/watch?v=VIDEO_ID"}'
 
-# Custom output directory
-python -m app.services.pine --build ./scripts -o ./data
+# Semantic search
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "YOUR_WS_ID", "question": "What is the current macro outlook?", "mode": "retrieve", "top_k": 5}'
 
-# Include additional extensions
-python -m app.services.pine --build ./scripts --extensions .pine .txt
-
-# Quiet mode (suppress info logging)
-python -m app.services.pine --build ./scripts -q
+# Run a backtest parameter sweep
+curl -X POST http://localhost:8000/backtests/tune \
+  -H "Content-Type: application/json" \
+  -d '{"workspace_id": "YOUR_WS_ID", "strategy_entity_id": "STRATEGY_ID", "param_space": {"fast_period": [5, 10, 20], "slow_period": [20, 50, 100]}, "objective_type": "sharpe_dd_penalty", "oos_ratio": 0.3}'
 ```
-
-**Output files:**
-- `pine_registry.json` - Script metadata (version, type, inputs, features) with lint summaries
-- `pine_lint_report.json` - Full lint findings per script
-
-**Lint Rules:**
-| Code | Severity | Description |
-|------|----------|-------------|
-| E001 | Error | Missing `//@version` directive |
-| E002 | Error | Invalid version number |
-| E003 | Error | Missing `indicator()`/`strategy()`/`library()` declaration |
-| W002 | Warning | `lookahead=barmerge.lookahead_on` usage (future data leakage risk) |
-| W003 | Warning | Deprecated `security()` instead of `request.security()` |
-| I001 | Info | Script has exports but is not a library |
-| I002 | Info | Script exceeds recommended line count |
 
 ## Project Structure
 
 ```
 trading-RAG/
 ├── app/
-│   ├── main.py               # FastAPI application
-│   ├── config.py             # Configuration management
-│   ├── schemas.py            # Pydantic models
-│   ├── deps/
-│   │   └── security.py       # Auth, rate limiting, concurrency
-│   ├── routers/              # API endpoints
-│   │   ├── health.py         # /health and /ready endpoints
-│   │   ├── ingest.py
-│   │   ├── youtube.py
-│   │   ├── query.py
-│   │   ├── backtests.py
-│   │   └── trading_kb.py
-│   ├── admin/
-│   │   ├── router.py         # Admin UI and ops snapshot
-│   │   └── templates/        # HTML templates
-│   ├── services/
-│   │   ├── chunker.py
-│   │   ├── embedder.py
-│   │   ├── llm.py
-│   │   ├── pine/             # Pine Script registry module
-│   │   └── ops_alerts/       # Telegram notifications
-│   │       ├── evaluator.py  # Alert evaluation rules
-│   │       └── telegram.py   # Telegram delivery
-│   ├── repositories/
-│   │   ├── documents.py
-│   │   ├── chunks.py
-│   │   └── ops_alerts.py     # Delivery tracking
-│   └── jobs/
-│       └── handlers/         # Job handlers
-├── tests/
-│   ├── unit/                 # Unit tests
-│   ├── integration/          # Integration tests
-│   └── fixtures/             # Test data
-├── scripts/                  # Utility scripts
-├── migrations/               # SQL migrations
+│   ├── main.py                 # FastAPI application entry point
+│   ├── routers/                # API endpoints (thin controllers)
+│   ├── services/               # Business logic (chunker, embedder, llm, pine)
+│   ├── repositories/           # Data access (documents, chunks, vectors)
+│   ├── admin/                  # Admin UI (router + Jinja2 templates)
+│   ├── deps/                   # Auth, rate limiting, concurrency
+│   └── jobs/                   # Async job handlers
+├── tests/                      # 221 test files (unit, integration, e2e)
+├── migrations/                 # 76 SQL migrations
+├── ops/                        # Prometheus alerting rules
+├── dashboards/                 # Grafana dashboards
 ├── docs/
-│   ├── ops/                  # Operations docs
-│   │   ├── alerting-rules.md
-│   │   ├── runbooks.md
-│   │   └── hardening.md
-│   ├── plans/                # Design documents
-│   └── archive/              # Archived specs
-├── dashboards/               # Grafana dashboards
-├── ops/                      # Prometheus configs
+│   ├── features/               # Feature documentation
+│   ├── ops/                    # Runbooks, alerting, hardening
+│   └── reranker/               # Reranker component docs
 ├── docker-compose.rag.yml
 ├── Dockerfile
-├── requirements.txt
-├── app_spec.txt              # Application specification
-├── feature_list.json         # Test feature list
-└── README.md
+├── Makefile
+└── requirements.txt
 ```
-
-## Database Schema
-
-### documents
-- Core document metadata
-- Unique constraint on (workspace_id, source_type, canonical_url)
-- Status: active, superseded, deleted
-
-### chunks
-- Content segments with token counts
-- Timestamp tracking for YouTube
-- Page tracking for PDFs
-- Metadata arrays: symbols, entities, topics
-
-### chunk_vectors
-- Tracks embeddings per model/collection
-- Supports model migration workflows
-
-### backtest_tunes
-- Parameter sweep sessions with objective config
-- Gates policy snapshots for audit trail
-- Status: pending, running, completed, canceled
-
-### backtest_tune_runs
-- Individual trials within a tune
-- IS/OOS metrics and scores
-- Composite objective scoring
-
-### ops_alerts
-- Operational alerts with severity levels (critical, high, medium, low)
-- Status lifecycle: active, acknowledged, resolved
-- Delivery tracking: `notified_at`, `recovery_notified_at`, `escalation_notified_at`
-- Deduplication via `dedupe_key`
-- Telegram message ID for audit trail
-
-### paper_equity_snapshots
-- Append-only equity time series for drawdown computation
-- Workspace-level tracking with optional strategy_version_id
-- Dual time axes: `snapshot_ts` (market time), `computed_at` (wall clock)
-- Components: equity, cash, positions_value, realized_pnl
-- Deduplication via `inputs_hash` (SHA256)
-
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `SUPABASE_URL` | Supabase project URL | Yes |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes |
-| `OPENROUTER_API_KEY` | OpenRouter API key (enables `mode=answer`) | No |
-| `QDRANT_HOST` | Qdrant host (default: qdrant) | No |
-| `QDRANT_PORT` | Qdrant port (default: 6333) | No |
-| `OLLAMA_HOST` | Ollama host (default: ollama) | No |
-| `OLLAMA_PORT` | Ollama port (default: 11434) | No |
-| `EMBED_MODEL` | Embedding model (default: nomic-embed-text) | No |
-| `SERVICE_PORT` | Service port (default: 8000) | No |
-| `AUTO_PAUSE_ENABLED` | Auto-pause strategies on CRITICAL alerts (default: false) | No |
-
-**Note:** Without `OPENROUTER_API_KEY`, semantic search (`mode=retrieve`) works fully. LLM answer generation (`mode=answer`) will return retrieved chunks with a message indicating generation is disabled.
-
-## Production Deployment
-
-### Security Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ADMIN_TOKEN` | Required for `/admin/*` endpoints | None (endpoints disabled) |
-| `DOCS_ENABLED` | Enable `/docs`, `/redoc`, `/openapi.json` | `true` |
-| `CORS_ORIGINS` | Comma-separated allowed origins | `*` |
-| `RATE_LIMIT_ENABLED` | Enable request rate limiting | `true` |
-| `CONFIG_PROFILE` | Environment profile (`development`/`production`) | `development` |
-
-### Build Metadata (set by CI/CD)
-
-| Variable | Description |
-|----------|-------------|
-| `GIT_SHA` | Git commit SHA for release tracking |
-| `BUILD_TIME` | ISO8601 build timestamp |
-
-### Monitoring
-
-| Variable | Description |
-|----------|-------------|
-| `SENTRY_DSN` | Sentry error tracking DSN |
-| `SENTRY_ENVIRONMENT` | Environment tag for Sentry |
-| `SENTRY_TRACES_SAMPLE_RATE` | Performance tracing sample rate (0.0-1.0) |
-
-### Health Probes
-
-- **Liveness**: `GET /health` - Basic service status
-- **Readiness**: `GET /ready` - Deep dependency checks (DB, Qdrant, embedder)
-
-Use `/ready` for Kubernetes readiness probes to prevent traffic during dependency outages.
 
 ## Development
 
-### Run locally
 ```bash
-source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
+make setup       # Create venv, install deps, copy .env.example
+make dev         # Start uvicorn with hot reload
+make test        # Run unit tests
+make test-all    # Run full test suite
+make lint        # black --check + flake8 + mypy
+make format      # Auto-format with black
+make clean       # Remove caches and build artifacts
 ```
 
-### Run tests
-```bash
-pytest tests/
-```
+### CI Pipeline
 
-### Run with Docker
-```bash
-docker compose -f docker-compose.rag.yml up --build
-```
+Runs on every push: lint (black, flake8, mypy) → unit tests → integration tests. Nightly: full integration suite + smoke tests.
 
 ## License
 
-MIT License - See LICENSE for details.
+MIT
