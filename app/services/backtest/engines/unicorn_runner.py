@@ -9,14 +9,20 @@ Dedicated backtester for ICT Unicorn Model strategy with detailed analytics:
 - Criteria bottleneck analysis
 """
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from enum import Enum
-from typing import Optional
+from typing import NamedTuple, Optional
 import random
 import statistics
 
 from app.utils.time import to_eastern_time
+
+from app.services.backtest.engines.eval_profile import (
+    EvalAccountProfile,
+    compute_r_day,
+)
 
 from app.services.strategy.models import OHLCVBar
 from app.services.strategy.indicators.ict_patterns import (
@@ -31,7 +37,9 @@ from app.services.strategy.indicators.ict_patterns import (
 from app.services.strategy.indicators.tf_bias import (
     BiasDirection,
     TimeframeBias,
+    _is_component_usable,
     compute_tf_bias,
+    compute_weekly_bias,
 )
 from app.services.strategy.strategies.unicorn_model import (
     UnicornSetup,
@@ -48,7 +56,58 @@ from app.services.strategy.strategies.unicorn_model import (
     SESSION_WINDOWS,
     DEFAULT_CONFIG,
     _calculate_atr,
+    STRATEGY_FAMILY,
+    MODEL_VERSION,
+    MODEL_CODENAME,
+    MODEL_VERSIONS,
+    build_run_label,
+    build_run_key,
 )
+
+
+@dataclass(frozen=True)
+class BiasSnapshot:
+    """Full bias stack at a point in time (for trace/audit)."""
+    # Per-TF: None = TF not provided/computed. NEUTRAL = computed but neutral.
+    daily_direction: Optional[BiasDirection] = None
+    daily_confidence: float = 0.0
+    h4_direction: Optional[BiasDirection] = None
+    h4_confidence: float = 0.0
+    h1_direction: Optional[BiasDirection] = None
+    h1_confidence: float = 0.0
+    m15_direction: Optional[BiasDirection] = None
+    m15_confidence: float = 0.0
+    m5_direction: Optional[BiasDirection] = None
+    m5_confidence: float = 0.0
+    # Final weighted result
+    final_direction: BiasDirection = BiasDirection.NEUTRAL
+    final_confidence: float = 0.0
+    alignment_score: float = 0.0
+    # Which TFs contributed (non-None inputs)
+    used_tfs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BarBundle:
+    """Multi-timeframe bar data for hybrid execution.
+
+    Contains bars at each timeframe, all resampled from a common 1m source.
+    Fields are Optional so callers can supply only the timeframes they have.
+    """
+    h4: Optional[list[OHLCVBar]] = None
+    h1: Optional[list[OHLCVBar]] = None
+    m15: Optional[list[OHLCVBar]] = None   # Primary scan TF
+    m5: Optional[list[OHLCVBar]] = None    # LTF confirmation
+    m1: Optional[list[OHLCVBar]] = None    # 1m execution
+    daily: Optional[list[OHLCVBar]] = None   # Daily bars for bias stack
+    weekly: Optional[list[OHLCVBar]] = None  # Weekly bars for bias gate
+
+
+class BiasState(NamedTuple):
+    """Lightweight bias snapshot at a point in time."""
+    ts: datetime
+    direction: BiasDirection  # BULLISH / BEARISH / NEUTRAL
+    confidence: float         # 0.0–1.0
 
 
 class TradingSession(str, Enum):
@@ -88,8 +147,28 @@ class ExitResult:
     Returned by resolve_bar_exit when a trade exits on a given bar.
     """
     exit_price: float
-    exit_reason: str   # "stop_loss", "target", "time_stop", "eod"
+    exit_reason: str   # "stop_loss", "trail_stop", "target", "time_stop", "eod"
     pnl_points: float
+
+
+def _compute_trail_distance(
+    entry_atr: float,
+    trail_atr_mult: Optional[float],
+    trail_cap_mult: Optional[float],
+    risk_points: float,
+) -> float:
+    """Compute frozen trail distance with optional R-based cap.
+
+    trail_distance = entry_atr * trail_atr_mult
+    If trail_cap_mult is set: trail_distance = min(raw, cap_mult * risk_points)
+    """
+    if trail_atr_mult is None or trail_atr_mult <= 0:
+        return 0.0
+    raw = entry_atr * trail_atr_mult
+    if trail_cap_mult is not None and risk_points > 0:
+        cap = trail_cap_mult * risk_points
+        return min(raw, cap)
+    return raw
 
 
 def resolve_bar_exit(
@@ -101,6 +180,9 @@ def resolve_bar_exit(
     eod_time: Optional[time] = None,
     time_stop_minutes: Optional[int] = None,
     time_stop_r_threshold: float = 0.25,
+    breakeven_at_r: Optional[float] = None,
+    trail_atr_mult: Optional[float] = None,
+    trail_activate_r: float = 1.0,
 ) -> Optional[ExitResult]:
     """
     Determine if and how a trade exits on a given bar.
@@ -136,6 +218,50 @@ def resolve_bar_exit(
     """
     is_long = trade.direction == BiasDirection.BULLISH
     ts = bar.ts
+
+    # --- 0. Trail / breakeven stop management ---
+    favorable_extreme = bar.high if is_long else bar.low
+
+    # Update trail tracking (always, even before activation)
+    if is_long:
+        trade.trail_high = max(trade.trail_high, favorable_extreme)
+    else:
+        trade.trail_low = min(trade.trail_low, favorable_extreme)
+
+    if trail_atr_mult is not None and trade.trail_distance > 0 and trade.risk_points > 0:
+        # Compute MFE from intrabar extremes
+        if is_long:
+            mfe_points = trade.trail_high - trade.entry_price
+        else:
+            mfe_points = trade.entry_price - trade.trail_low
+
+        # Activate at configured R threshold
+        activation_threshold = trade.risk_points * trail_activate_r
+        if not trade.trail_active and mfe_points >= activation_threshold:
+            trade.trail_active = True
+            # BE floor: guarantee no loss after activation
+            if is_long:
+                trade.stop_price = max(trade.stop_price, trade.entry_price)
+            else:
+                trade.stop_price = min(trade.stop_price, trade.entry_price)
+
+        # Ratchet trail (same bar as activation — no delay)
+        if trade.trail_active:
+            if is_long:
+                new_stop = trade.trail_high - trade.trail_distance
+                trade.stop_price = max(trade.stop_price, new_stop)
+            else:
+                new_stop = trade.trail_low + trade.trail_distance
+                trade.stop_price = min(trade.stop_price, new_stop)
+
+    elif breakeven_at_r is not None and trade.risk_points > 0:
+        # Legacy breakeven logic (mutually exclusive with trail)
+        be_threshold = trade.entry_price + (trade.risk_points * breakeven_at_r) if is_long \
+            else trade.entry_price - (trade.risk_points * breakeven_at_r)
+        if is_long and favorable_extreme >= be_threshold:
+            trade.stop_price = max(trade.stop_price, trade.entry_price)
+        elif not is_long and favorable_extreme <= be_threshold:
+            trade.stop_price = min(trade.stop_price, trade.entry_price)
 
     # --- 1. Detect stop / target hits ---
     if is_long:
@@ -178,7 +304,8 @@ def resolve_bar_exit(
                 fill_price = max(trade.stop_price, bar.open)
                 exit_price = fill_price + slippage_points
                 pnl = trade.entry_price - exit_price
-            return ExitResult(exit_price=exit_price, exit_reason="stop_loss", pnl_points=pnl)
+            reason = "trail_stop" if trade.trail_active else "stop_loss"
+            return ExitResult(exit_price=exit_price, exit_reason=reason, pnl_points=pnl)
         else:
             # Target is a limit order — fills at limit price (no gap improvement)
             if is_long:
@@ -255,17 +382,19 @@ def compute_range_atr_mult(bar: OHLCVBar, atr: float) -> float:
 
 # Mandatory criteria that MUST pass before soft scoring applies.
 # These protect core risk logic and cannot be bypassed by scoring.
-MANDATORY_CRITERIA = frozenset({"htf_bias", "stop_valid", "macro_window"})
+MANDATORY_CRITERIA = frozenset({"htf_bias", "stop_valid", "macro_window", "mss", "displacement"})
 
 # Scored criteria - soft scoring threshold applies to these
 SCORED_CRITERIA = frozenset({
-    "liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"
+    "liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg"
 })
+
+assert len(MANDATORY_CRITERIA) + len(SCORED_CRITERIA) == 9, "criteria count drift"
 
 
 @dataclass
 class CriteriaCheck:
-    """Results of checking each of the 8 Unicorn criteria."""
+    """Results of checking each of the 9 Unicorn criteria."""
     htf_bias_aligned: bool = False
     liquidity_sweep_found: bool = False
     htf_fvg_found: bool = False
@@ -274,15 +403,20 @@ class CriteriaCheck:
     mss_found: bool = False
     stop_valid: bool = False
     in_macro_window: bool = False
+    displacement_valid: bool = False
 
     # Details
     htf_bias_direction: Optional[BiasDirection] = None
     htf_bias_confidence: float = 0.0
     sweep_type: Optional[str] = None
+    sweep_age_bars: Optional[int] = None            # age of best candidate sweep
+    sweep_settled: Optional[bool] = None             # did settlement pass (None if not evaluated)
+    sweep_reject_reason: Optional[str] = None        # "stale" | "unsettled" | "no_next_bar" | None
     fvg_size: float = 0.0
     mss_displacement_atr: float = 0.0  # displacement_size of matched MSS (ATR multiples)
     stop_points: float = 0.0
     session: TradingSession = TradingSession.OFF_HOURS
+    bias_snapshot: Optional["BiasSnapshot"] = None
 
     @property
     def criteria_met_count(self) -> int:
@@ -296,12 +430,13 @@ class CriteriaCheck:
             self.mss_found,
             self.stop_valid,
             self.in_macro_window,
+            self.displacement_valid,
         ])
 
     @property
     def all_criteria_met(self) -> bool:
-        """Check if all 8 criteria are satisfied."""
-        return self.criteria_met_count == 8
+        """Check if all 9 criteria are satisfied."""
+        return self.criteria_met_count == 9
 
     def missing_criteria(self) -> list[str]:
         """Return list of criteria that failed."""
@@ -322,6 +457,8 @@ class CriteriaCheck:
             missing.append("stop_valid")
         if not self.in_macro_window:
             missing.append("macro_window")
+        if not self.displacement_valid:
+            missing.append("displacement")
         return missing
 
     @property
@@ -329,13 +466,15 @@ class CriteriaCheck:
         """
         Check if all MANDATORY criteria are satisfied.
 
-        Mandatory criteria (htf_bias, stop_valid, macro_window) MUST pass
-        before soft scoring can be applied. These protect core risk logic.
+        Mandatory criteria (htf_bias, stop_valid, macro_window, mss, displacement)
+        MUST pass before soft scoring can be applied. These protect core risk logic.
         """
         return (
-            self.htf_bias_aligned and
-            self.stop_valid and
-            self.in_macro_window
+            self.htf_bias_aligned
+            and self.stop_valid
+            and self.in_macro_window
+            and self.mss_found
+            and self.displacement_valid
         )
 
     @property
@@ -343,7 +482,7 @@ class CriteriaCheck:
         """
         Count how many SCORED criteria are satisfied.
 
-        Scored criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg, mss
+        Scored criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg
         Soft scoring threshold applies only to these.
         """
         return sum([
@@ -351,7 +490,6 @@ class CriteriaCheck:
             self.htf_fvg_found,
             self.breaker_block_found,
             self.ltf_fvg_found,
-            self.mss_found,
         ])
 
     def meets_entry_requirements(self, min_scored: int = 3) -> bool:
@@ -359,7 +497,7 @@ class CriteriaCheck:
         Check if criteria meet entry requirements with guardrails.
 
         Args:
-            min_scored: Minimum scored criteria required (out of 5)
+            min_scored: Minimum scored criteria required (out of 4)
 
         Returns:
             True if all mandatory criteria pass AND scored count >= threshold
@@ -385,6 +523,14 @@ class TradeRecord:
     target_price: float
     risk_points: float
 
+    # Trailing stop fields
+    initial_stop: float = 0.0       # Original stop before any mutation
+    trail_distance: float = 0.0     # Frozen entry_atr * trail_mult
+    trail_active: bool = False       # Flipped once at +1R
+    trail_high: float = 0.0         # Best favorable extreme (longs)
+    trail_low: float = float("inf") # Best favorable extreme (shorts)
+    entry_atr: float = 0.0          # ATR at entry time
+
     # MFE/MAE tracking
     mfe: float = 0.0  # Maximum Favorable Excursion (best unrealized profit)
     mae: float = 0.0  # Maximum Adverse Excursion (worst unrealized loss)
@@ -405,6 +551,19 @@ class TradeRecord:
     # Timing
     duration_minutes: int = 0
     bars_held: int = 0
+
+    # Intermarket agreement label (set by _build_session_diagnostics)
+    intermarket_label: Optional[str] = None
+
+    # Partial exit (scale-out)
+    partial_exit_r: Optional[float] = None          # R-multiple to take first exit (e.g. 1.0)
+    partial_exit_pct: float = 0.0                   # Fraction to exit (e.g. 0.5)
+    partial_exit_price: Optional[float] = None      # Computed price level for +NR
+    is_partial_leg: bool = False                    # True for split legs
+    leg_index: int = 0                              # 0=full, 1=runner, 2=trailer
+
+    # Confidence tiering
+    confidence_tier: Optional[str] = None           # "A", "B", or None (disabled)
 
 
 @dataclass
@@ -438,6 +597,7 @@ class SetupOccurrence:
     signal_displacement_atr: float = 0.0    # MSS displacement in ATR multiples
     signal_mss_found: bool = False           # whether MSS was detected
     guard_reason_code: Optional[str] = None  # stable key: "wick_guard" | "range_guard" | "displacement_guard"
+    governor_rejected: bool = False  # daily governor blocked this entry
 
 
 @dataclass
@@ -445,7 +605,7 @@ class SessionStats:
     """Statistics for a trading session."""
     session: TradingSession
     total_setups: int = 0
-    valid_setups: int = 0  # All 8 criteria met
+    valid_setups: int = 0  # All 9 criteria met
     trades_taken: int = 0
     wins: int = 0
     losses: int = 0
@@ -509,7 +669,7 @@ class UnicornBacktestResult:
     # Setup analysis
     total_setups_scanned: int = 0
     partial_setups: int = 0  # Some criteria met but not all
-    valid_setups: int = 0    # All 8 criteria met
+    valid_setups: int = 0    # All 9 criteria met
     trades_taken: int = 0
 
     # Trade results
@@ -534,6 +694,11 @@ class UnicornBacktestResult:
     best_r_multiple: float = 0.0
     worst_r_multiple: float = 0.0
 
+    # Trailing stop analysis
+    trail_activated_count: int = 0
+    trail_stop_exits: int = 0
+    trail_activate_r: float = 1.0
+
     # Session breakdown
     session_stats: dict[TradingSession, SessionStats] = field(default_factory=dict)
 
@@ -547,17 +712,40 @@ class UnicornBacktestResult:
     # Setup occurrences (for debugging)
     all_setups: list[SetupOccurrence] = field(default_factory=list)
 
+    # HTF bias series: one BiasState per scanned bar (observability)
+    htf_bias_series: list[BiasState] = field(default_factory=list)
+
+    # Optional reference bias series for intermarket agreement tagging
+    reference_bias_series: Optional[list[BiasState]] = None
+    reference_symbol: Optional[str] = None
+
     # Config snapshot (for diagnostics)
     config: Optional[UnicornConfig] = None
+
+    # Self-describing run label (e.g. "Unicorn v2.1 | Bias=MTF | Side=Long | ...")
+    run_label: Optional[str] = None
+    # Machine-stable slug for indexing/caching/artifact naming.
+    # When persisting to backtest_runs DB, include as params["run_key"].
+    run_key: Optional[str] = None
 
     # Machine-readable session diagnostics (populated by _build_session_diagnostics)
     session_diagnostics: Optional[dict] = None
 
+    # Daily governor stats (None when governor not used)
+    governor_stats: Optional[dict] = None
+
+    # Partial exit leg accounting
+    partial_legs: int = 0  # count of partial_target legs created
+
+    # Confidence tier stats (None when tiering not used)
+    confidence_tier_stats: Optional[dict] = None
+
     @property
     def win_rate(self) -> float:
-        if self.trades_taken == 0:
+        total_closed = self.wins + self.losses + self.breakevens
+        if total_closed == 0:
             return 0.0
-        return self.wins / self.trades_taken
+        return self.wins / total_closed
 
     @property
     def profit_factor(self) -> float:
@@ -617,18 +805,23 @@ def check_criteria(
     ts: datetime,
     direction_filter: Optional[BiasDirection] = None,
     config: Optional[UnicornConfig] = None,
+    h4_bars: Optional[list[OHLCVBar]] = None,
+    h1_bars: Optional[list[OHLCVBar]] = None,
+    daily_bars: Optional[list[OHLCVBar]] = None,
 ) -> CriteriaCheck:
     """
-    Check all 8 Unicorn criteria at a specific point in time.
+    Check all 9 Unicorn criteria at a specific point in time.
 
     Args:
         bars: Primary timeframe bars
-        htf_bars: Higher timeframe bars for bias
-        ltf_bars: Lower timeframe bars for confirmation
+        htf_bars: Higher timeframe bars for bias (15m)
+        ltf_bars: Lower timeframe bars for confirmation (5m)
         symbol: Trading symbol
         ts: Current timestamp
         direction_filter: Only check for this direction (optional)
         config: Strategy configuration (ATR thresholds, session profile)
+        h4_bars: Optional 4-hour bars for full bias stack (causally aligned)
+        h1_bars: Optional 1-hour bars for full bias stack (causally aligned)
 
     Returns:
         CriteriaCheck with all criteria results
@@ -643,8 +836,11 @@ def check_criteria(
     atr_values = _calculate_atr(htf_bars, config.atr_period)
     current_atr = atr_values[-1] if atr_values else 0.0
 
-    # 1. HTF Bias
+    # 1. HTF Bias (pass all available timeframes for full bias stack)
     htf_bias = compute_tf_bias(
+        daily_bars=daily_bars,
+        h4_bars=h4_bars,
+        h1_bars=h1_bars,
         m15_bars=htf_bars,
         m5_bars=ltf_bars,
         timestamp=ts,
@@ -653,6 +849,37 @@ def check_criteria(
     check.htf_bias_direction = htf_bias.final_direction
     check.htf_bias_confidence = htf_bias.final_confidence
     check.htf_bias_aligned = htf_bias.is_tradeable
+
+    # Build full bias snapshot for trace/audit
+    # used_tfs only lists TFs that actually contributed to scoring
+    used_tfs: list[str] = []
+    if _is_component_usable(htf_bias.daily_bias):
+        used_tfs.append("daily")
+    if _is_component_usable(htf_bias.h4_bias):
+        used_tfs.append("h4")
+    if _is_component_usable(htf_bias.h1_bias):
+        used_tfs.append("h1")
+    if _is_component_usable(htf_bias.m15_bias):
+        used_tfs.append("m15")
+    if _is_component_usable(htf_bias.m5_bias):
+        used_tfs.append("m5")
+
+    check.bias_snapshot = BiasSnapshot(
+        daily_direction=htf_bias.daily_bias.direction if htf_bias.daily_bias else None,
+        daily_confidence=htf_bias.daily_bias.confidence if htf_bias.daily_bias else 0.0,
+        h4_direction=htf_bias.h4_bias.direction if htf_bias.h4_bias else None,
+        h4_confidence=htf_bias.h4_bias.confidence if htf_bias.h4_bias else 0.0,
+        h1_direction=htf_bias.h1_bias.direction if htf_bias.h1_bias else None,
+        h1_confidence=htf_bias.h1_bias.confidence if htf_bias.h1_bias else 0.0,
+        m15_direction=htf_bias.m15_bias.direction if htf_bias.m15_bias else None,
+        m15_confidence=htf_bias.m15_bias.confidence if htf_bias.m15_bias else 0.0,
+        m5_direction=htf_bias.m5_bias.direction if htf_bias.m5_bias else None,
+        m5_confidence=htf_bias.m5_bias.confidence if htf_bias.m5_bias else 0.0,
+        final_direction=htf_bias.final_direction,
+        final_confidence=htf_bias.final_confidence,
+        alignment_score=htf_bias.alignment_score,
+        used_tfs=tuple(used_tfs),
+    )
 
     if direction_filter and htf_bias.final_direction != direction_filter:
         check.htf_bias_aligned = False
@@ -663,17 +890,55 @@ def check_criteria(
 
     current_price = bars[-1].close if bars else 0
 
-    # 2. Liquidity Sweep
+    # 2. Liquidity Sweep (with optional closure confirmation gate)
     sweeps = detect_liquidity_sweeps(htf_bars, lookback=50)
-    for sweep in sweeps:
-        if direction == BiasDirection.BULLISH and sweep.sweep_type == "low":
-            check.liquidity_sweep_found = True
-            check.sweep_type = "low"
-            break
-        elif direction == BiasDirection.BEARISH and sweep.sweep_type == "high":
-            check.liquidity_sweep_found = True
-            check.sweep_type = "high"
-            break
+    n_bars = len(htf_bars)
+
+    # Iterate newest-first so most recent qualifying sweep wins
+    for sweep in sorted(sweeps, key=lambda s: s.bar_index, reverse=True):
+        # Direction filter
+        if direction == BiasDirection.BULLISH and sweep.sweep_type != "low":
+            continue
+        if direction == BiasDirection.BEARISH and sweep.sweep_type != "high":
+            continue
+
+        age = (n_bars - 1) - sweep.bar_index
+
+        # Track best (youngest) candidate for diagnostics
+        if check.sweep_age_bars is None or age < check.sweep_age_bars:
+            check.sweep_age_bars = age
+
+        # Recency gate
+        if config.max_sweep_age_bars is not None and age > config.max_sweep_age_bars:
+            if check.sweep_reject_reason is None:
+                check.sweep_reject_reason = "stale"
+            continue
+
+        # Settlement gate
+        if config.require_sweep_settlement:
+            settle_idx = sweep.bar_index + 1
+            if settle_idx >= n_bars:
+                check.sweep_settled = False
+                check.sweep_reject_reason = "no_next_bar"
+                continue
+
+            settle_bar = htf_bars[settle_idx]
+            if sweep.sweep_type == "low":
+                settled = settle_bar.close >= sweep.swept_level
+            else:
+                settled = settle_bar.close <= sweep.swept_level
+
+            if not settled:
+                check.sweep_settled = False
+                check.sweep_reject_reason = "unsettled"
+                continue
+            check.sweep_settled = True
+
+        # Sweep passes all gates
+        check.liquidity_sweep_found = True
+        check.sweep_type = sweep.sweep_type
+        check.sweep_reject_reason = None  # clear any earlier candidate's reason
+        break
 
     # 3. HTF FVG (ATR-normalized threshold)
     htf_fvgs = detect_fvgs(
@@ -731,6 +996,15 @@ def check_criteria(
             check.mss_displacement_atr = mss.displacement_size
             break
 
+    # 6b. Displacement validation (mandatory context gate)
+    # Both sides compare ATR multiples: mss_displacement_atr is displacement_size from detect_mss()
+    if config.min_displacement_atr is None:
+        check.displacement_valid = True  # disabled = auto-pass
+    elif check.mss_found:
+        check.displacement_valid = check.mss_displacement_atr >= config.min_displacement_atr
+    else:
+        check.displacement_valid = False  # no MSS = no displacement to measure
+
     # 7. Stop validation (ATR-based max stop)
     max_points = get_max_stop_points(symbol, atr=current_atr, config=config)
     entry_fvg, entry_block, entry_price = find_entry_zone(
@@ -751,7 +1025,11 @@ def check_criteria(
         check.stop_valid = False
 
     # 8. Macro window
-    check.in_macro_window = is_in_macro_window(ts, profile=config.session_profile)
+    check.in_macro_window = is_in_macro_window(
+        ts,
+        profile=config.session_profile,
+        ny_am_cutoff_minutes=config.ny_am_cutoff_minutes,
+    )
 
     return check
 
@@ -765,7 +1043,7 @@ def run_unicorn_backtest(
     max_concurrent_trades: int = 1,
     eod_exit: bool = True,
     eod_time: time = time(15, 45),
-    min_criteria_score: int = 3,  # Soft scoring: enter at >= N of 5 scored criteria
+    min_criteria_score: int = 3,  # Soft scoring: enter at >= N of 4 scored criteria
     config: Optional[UnicornConfig] = None,
     # Friction parameters (critical for realistic backtesting)
     slippage_ticks: float = 1.0,  # Slippage per side in ticks
@@ -776,6 +1054,27 @@ def run_unicorn_backtest(
     # Time-stop: exit if not profitable within N minutes
     time_stop_minutes: Optional[int] = None,  # None=disabled, e.g., 30=exit if not +0.25R in 30 min
     time_stop_r_threshold: float = 0.25,  # R-multiple to reach within time_stop_minutes
+    # Intermarket agreement
+    reference_bias_series: Optional[list[BiasState]] = None,  # Pre-computed bias from ref symbol
+    reference_symbol: Optional[str] = None,  # e.g., "ES"
+    require_intermarket_alignment: bool = False,  # Hard gate: reject if ref disagrees
+    # Profit protection: move stop to breakeven at +NR
+    breakeven_at_r: Optional[float] = None,  # e.g. 1.0 = move stop to entry at +1R
+    # ATR trailing stop (mutually exclusive with breakeven_at_r)
+    trail_atr_mult: Optional[float] = None,  # e.g. 1.5 = trail at 1.5x ATR behind MFE
+    trail_cap_mult: Optional[float] = None,  # cap trail_distance at cap_mult * risk_points
+    trail_activate_r: float = 1.0,  # activate trail at this R-multiple MFE (default +1R)
+    # Multi-timeframe bar bundle (enables full bias stack + 1m execution)
+    bar_bundle: Optional[BarBundle] = None,
+    # Daily risk governor (eval mode)
+    daily_governor: Optional["DailyGovernor"] = None,
+    # Eval account profile (R-native sizing from trailing drawdown)
+    eval_profile: Optional[EvalAccountProfile] = None,
+    # Partial exit (scale-out)
+    partial_exit_r: Optional[float] = None,   # e.g. 1.0 = exit 50% at +1R
+    partial_exit_pct: float = 0.5,            # fraction to exit at partial target
+    # Weekly bias gate (reject if weekly bias opposes trade direction)
+    weekly_bias_gate: bool = False,
 ) -> UnicornBacktestResult:
     """
     Run Unicorn Model backtest with detailed analytics.
@@ -789,7 +1088,7 @@ def run_unicorn_backtest(
         max_concurrent_trades: Maximum simultaneous positions
         eod_exit: Exit all positions at EOD
         eod_time: Time for EOD exit
-        min_criteria_score: Minimum SCORED criteria to enter (out of 5, not 8)
+        min_criteria_score: Minimum SCORED criteria to enter (out of 4)
         config: Strategy configuration (ATR thresholds, session profile)
         slippage_ticks: Slippage per side in ticks (default 1 tick each way)
         commission_per_contract: Round-trip commission per contract (default $2.50)
@@ -801,14 +1100,18 @@ def run_unicorn_backtest(
         time_stop_minutes: Exit if not at +time_stop_r_threshold R within N minutes.
                           None=disabled. Helps cut grindy losers early.
         time_stop_r_threshold: R-multiple to reach within time_stop_minutes (default 0.25R).
+        reference_bias_series: Pre-computed BiasState series from a reference symbol
+                              (e.g., ES). Used for intermarket agreement tagging in
+                              diagnostics only — does not affect trade decisions.
+        reference_symbol: Label for the reference instrument (e.g., "ES").
 
     Returns:
         UnicornBacktestResult with complete analytics
 
     Note on soft scoring:
-        - 3 MANDATORY criteria must always pass: htf_bias, stop_valid, macro_window
-        - 5 SCORED criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg, mss
-        - min_criteria_score applies only to the scored set (default 3/5)
+        - 5 MANDATORY criteria must always pass: htf_bias, stop_valid, macro_window, mss, displacement
+        - 4 SCORED criteria: liquidity_sweep, htf_fvg, breaker_block, ltf_fvg
+        - min_criteria_score applies only to the scored set (default 3/4)
         - This prevents bypassing core risk management via scoring
     """
     if config is None:
@@ -824,6 +1127,22 @@ def run_unicorn_backtest(
         start_date=htf_bars[0].ts,
         end_date=htf_bars[-1].ts,
         total_bars=len(htf_bars),
+        reference_bias_series=reference_bias_series,
+        reference_symbol=reference_symbol,
+        run_label=build_run_label(
+            config,
+            direction_filter=direction_filter,
+            time_stop_minutes=time_stop_minutes,
+            bar_bundle=bar_bundle,
+            eval_mode=daily_governor is not None or eval_profile is not None,
+        ),
+        run_key=build_run_key(
+            config,
+            direction_filter=direction_filter,
+            time_stop_minutes=time_stop_minutes,
+            bar_bundle=bar_bundle,
+            eval_mode=daily_governor is not None or eval_profile is not None,
+        ),
     )
 
     # Initialize session stats
@@ -840,11 +1159,13 @@ def run_unicorn_backtest(
         "mss": 0,
         "stop_valid": 0,
         "macro_window": 0,
+        "displacement": 0,
     }
     criteria_passes: dict[str, list[TradeRecord]] = {k: [] for k in criteria_fails}
 
     # Trade tracking
     open_trades: list[TradeRecord] = []
+    closed_in_m1: list[TradeRecord] = []  # Trades closed during 1m management
     point_value = get_point_value(symbol)
 
     # Tick size for slippage calculation (NQ/ES = 0.25)
@@ -857,6 +1178,68 @@ def run_unicorn_backtest(
     # Build LTF index for quick lookup
     ltf_by_time = {b.ts: b for b in ltf_bars}
 
+    # --- Causal alignment for multi-TF bars ---
+    # Pre-build completion timestamp arrays for O(log n) lookups.
+    # A bar covering [T_bar, T_bar + duration) is "complete" when T >= T_bar + duration.
+    h4_completed_ts: list[datetime] = []
+    h1_completed_ts: list[datetime] = []
+    daily_completed_ts: list[datetime] = []
+    weekly_completed_ts: list[datetime] = []
+    if bar_bundle is not None:
+        if bar_bundle.h4:
+            h4_completed_ts = [b.ts + timedelta(hours=4) for b in bar_bundle.h4]
+        if bar_bundle.h1:
+            h1_completed_ts = [b.ts + timedelta(hours=1) for b in bar_bundle.h1]
+        if bar_bundle.daily:
+            daily_completed_ts = [b.ts + timedelta(days=1) for b in bar_bundle.daily]
+        if bar_bundle.weekly:
+            weekly_completed_ts = [b.ts + timedelta(weeks=1) for b in bar_bundle.weekly]
+
+    # Pre-build 1m timestamp index for bisect-based slicing
+    m1_timestamps: list[datetime] = []
+    has_m1 = bar_bundle is not None and bar_bundle.m1 is not None and len(bar_bundle.m1) > 0
+    if has_m1:
+        m1_timestamps = [b.ts for b in bar_bundle.m1]
+
+    # Daily governor tracking
+    _gov_stats = {
+        "signals_skipped": 0,
+        "days_halted": 0,
+        "half_size_trades": 0,
+        "total_days_traded": 0,
+        "loss_limit_halts": 0,
+        "trade_limit_halts": 0,
+        "sizing_rejects": 0,
+        "adaptive_tier_activations": 0,
+        # Sizing config (always present for artifact interpretability)
+        "dollars_per_trade": dollars_per_trade,
+        "sizing_active": dollars_per_trade > 0,
+    }
+    if daily_governor is not None:
+        _gov_stats["max_daily_loss_dollars"] = daily_governor.max_daily_loss_dollars
+        _gov_stats["half_loss_threshold"] = daily_governor.half_loss_threshold
+        _gov_stats["max_trades_per_day"] = daily_governor.max_trades_per_day
+    _gov_day_has_trade = False  # track first trade per day for total_days_traded
+
+    # Eval profile equity tracking
+    _running_equity = eval_profile.account_size if eval_profile else 0.0
+    _peak_equity = _running_equity
+    _current_r_day = (
+        compute_r_day(eval_profile, _running_equity, _peak_equity)
+        if eval_profile else dollars_per_trade
+    )
+    _r_day_min = _current_r_day
+    _r_day_max = _current_r_day
+    _eval_blown = False
+    _prev_date = None  # day boundary detection (independent of governor)
+
+    if eval_profile is not None:
+        _gov_stats["eval_account_size"] = eval_profile.account_size
+        _gov_stats["eval_max_drawdown"] = eval_profile.max_drawdown_dollars
+        _gov_stats["eval_risk_fraction"] = eval_profile.risk_fraction
+        _gov_stats["eval_r_min"] = eval_profile.r_min_dollars
+        _gov_stats["eval_r_max"] = eval_profile.r_max_dollars
+
     # Main backtest loop
     # Warmup needs extra bar because we use i-1 for signals
     warmup = 51  # Need history for indicators + 1 for causal signal
@@ -864,6 +1247,52 @@ def run_unicorn_backtest(
     for i in range(warmup, len(htf_bars), scan_interval):
         bar = htf_bars[i]
         ts = bar.ts
+
+        # Daily governor: reset on new calendar day
+        if daily_governor is not None:
+            # Track adaptive tier activations before reset clears the flag
+            if (
+                daily_governor.confidence_tier_active
+                and daily_governor.current_date is not None
+                and daily_governor.current_date != ts.date()
+            ):
+                _gov_stats["adaptive_tier_activations"] += 1
+            prev_halt_reason = daily_governor.maybe_reset(ts.date())
+            if prev_halt_reason:
+                _gov_stats["days_halted"] += 1
+                if prev_halt_reason == "loss_limit":
+                    _gov_stats["loss_limit_halts"] += 1
+                elif prev_halt_reason == "trade_limit":
+                    _gov_stats["trade_limit_halts"] += 1
+            if prev_halt_reason or daily_governor.day_trade_count == 0:
+                _gov_day_has_trade = False
+
+        # Eval profile: recompute R_day at day boundaries
+        if eval_profile is not None:
+            bar_date = ts.date()
+            if _prev_date != bar_date:
+                _current_r_day = compute_r_day(
+                    eval_profile, _running_equity, _peak_equity
+                )
+                if _current_r_day == 0.0:
+                    _eval_blown = True
+                _r_day_min = min(_r_day_min, _current_r_day)
+                _r_day_max = max(_r_day_max, _current_r_day)
+                if daily_governor is not None:
+                    daily_governor.update_r_day(_current_r_day)
+                # Adaptive confidence tiering: check trailing DD
+                if daily_governor is not None and eval_profile is not None:
+                    trailing_dd = _peak_equity - _running_equity
+                    dd_pct = (
+                        (trailing_dd / eval_profile.max_drawdown_dollars * 100)
+                        if eval_profile.max_drawdown_dollars > 0
+                        else 0.0
+                    )
+                    daily_governor.check_adaptive_dd(dd_pct)
+                _prev_date = bar_date
+
+        if _eval_blown:
+            break
 
         # CRITICAL: Use bar OPEN for entry price (we know open at start of bar)
         # We do NOT use bar.close - that's future information
@@ -899,37 +1328,205 @@ def run_unicorn_backtest(
         # For stop/target checks, we use the CURRENT bar's OHLC (this is correct -
         # we're checking if price hit levels during bar[i], not predicting)
 
-        # Update open trades (MFE/MAE tracking + exit checks)
-        # For exit checking, we use the current bar's OHLC (this is correct -
-        # checking if stop/target were hit during bar execution is not look-ahead)
-        for trade in open_trades:
-            # MFE/MAE tracking (stays inline — not exit logic)
-            if trade.direction == BiasDirection.BULLISH:
-                unrealized = bar.close - trade.entry_price
-            else:
-                unrealized = trade.entry_price - bar.close
-            if unrealized > trade.mfe:
-                trade.mfe = unrealized
-                trade.mfe_time = ts
-            if unrealized < -trade.mae:
-                trade.mae = abs(unrealized)
-                trade.mae_time = ts
+        # Slice 1m bars for this 15m window [ts, ts+15m)
+        m1_window: list[OHLCVBar] = []
+        if has_m1:
+            m1_start_idx = bisect_right(m1_timestamps, ts - timedelta(seconds=1))
+            # Find all m1 bars with ts in [ts, ts + 15m)
+            m1_end_ts = ts + timedelta(minutes=scan_interval * 15)
+            m1_end_idx = bisect_right(m1_timestamps, m1_end_ts - timedelta(seconds=1))
+            m1_window = bar_bundle.m1[m1_start_idx:m1_end_idx]
 
-            # Exit resolution via extracted function
-            exit_result = resolve_bar_exit(
-                trade, bar, intrabar_policy, slippage_points,
-                eod_exit=eod_exit, eod_time=eod_time,
-                time_stop_minutes=time_stop_minutes,
-                time_stop_r_threshold=time_stop_r_threshold,
-            )
-            if exit_result:
-                trade.exit_price = exit_result.exit_price
-                trade.exit_time = ts
-                trade.exit_reason = exit_result.exit_reason
-                trade.pnl_points = exit_result.pnl_points
+        # Update open trades (MFE/MAE tracking + exit checks)
+        pending_partial_closes: list[TradeRecord] = []
+        pending_partial_closes_15m: list[TradeRecord] = []
+        if m1_window:
+            # 1m precision management: iterate each 1m bar for exit checks
+            for m1_bar in m1_window:
+                for trade in open_trades:
+                    if trade.exit_time is not None:
+                        continue
+                    is_long = trade.direction == BiasDirection.BULLISH
+                    # MFE/MAE tracking at 1m precision
+                    if is_long:
+                        unrealized = m1_bar.close - trade.entry_price
+                    else:
+                        unrealized = trade.entry_price - m1_bar.close
+                    if unrealized > trade.mfe:
+                        trade.mfe = unrealized
+                        trade.mfe_time = m1_bar.ts
+                    if unrealized < -trade.mae:
+                        trade.mae = abs(unrealized)
+                        trade.mae_time = m1_bar.ts
+
+                    # Check partial exit trigger (before resolve_bar_exit)
+                    if (
+                        trade.partial_exit_price is not None
+                        and not trade.is_partial_leg
+                        and trade.quantity >= 2
+                    ):
+                        hit = False
+                        if is_long and m1_bar.high >= trade.partial_exit_price:
+                            hit = True
+                        elif not is_long and m1_bar.low <= trade.partial_exit_price:
+                            hit = True
+
+                        if hit:
+                            leg1_qty = int(trade.quantity * trade.partial_exit_pct)
+                            if leg1_qty < 1:
+                                leg1_qty = 1
+                            leg2_qty = trade.quantity - leg1_qty
+
+                            # Leg 1: immediate exit at partial target
+                            leg1 = TradeRecord(
+                                entry_time=trade.entry_time,
+                                entry_price=trade.entry_price,
+                                direction=trade.direction,
+                                quantity=leg1_qty,
+                                session=trade.session,
+                                criteria=trade.criteria,
+                                stop_price=trade.stop_price,
+                                target_price=trade.partial_exit_price,
+                                risk_points=trade.risk_points,
+                                initial_stop=trade.initial_stop,
+                                entry_atr=trade.entry_atr,
+                                mfe=trade.mfe,
+                                mae=trade.mae,
+                                mfe_time=trade.mfe_time,
+                                mae_time=trade.mae_time,
+                                exit_time=m1_bar.ts,
+                                exit_price=trade.partial_exit_price,
+                                exit_reason="partial_target",
+                                is_partial_leg=True,
+                                leg_index=1,
+                            )
+                            if is_long:
+                                leg1.pnl_points = trade.partial_exit_price - trade.entry_price
+                            else:
+                                leg1.pnl_points = trade.entry_price - trade.partial_exit_price
+
+                            pending_partial_closes.append(leg1)
+
+                            # Mutate original trade into leg 2 (trailer)
+                            trade.quantity = leg2_qty
+                            trade.is_partial_leg = True
+                            trade.leg_index = 2
+                            trade.partial_exit_price = None  # prevent re-trigger
+                            continue  # skip resolve_bar_exit this bar for the newly split trade
+
+                    # Exit resolution at 1m granularity
+                    exit_result = resolve_bar_exit(
+                        trade, m1_bar, intrabar_policy, slippage_points,
+                        eod_exit=eod_exit, eod_time=eod_time,
+                        time_stop_minutes=time_stop_minutes,
+                        time_stop_r_threshold=time_stop_r_threshold,
+                        breakeven_at_r=breakeven_at_r,
+                        trail_atr_mult=trail_atr_mult,
+                        trail_activate_r=trail_activate_r,
+                    )
+                    if exit_result:
+                        trade.exit_price = exit_result.exit_price
+                        trade.exit_time = m1_bar.ts
+                        trade.exit_reason = exit_result.exit_reason
+                        trade.pnl_points = exit_result.pnl_points
+                # Separate closed from open between 1m bars to avoid re-checking
+                newly_closed = [t for t in open_trades if t.exit_time is not None]
+                open_trades = [t for t in open_trades if t.exit_time is None]
+                closed_in_m1.extend(newly_closed)
+            closed_in_m1.extend(pending_partial_closes)
+        else:
+            # Fallback: 15m management (existing behavior when no 1m data)
+            for trade in open_trades:
+                is_long = trade.direction == BiasDirection.BULLISH
+                # MFE/MAE tracking (stays inline — not exit logic)
+                if is_long:
+                    unrealized = bar.close - trade.entry_price
+                else:
+                    unrealized = trade.entry_price - bar.close
+                if unrealized > trade.mfe:
+                    trade.mfe = unrealized
+                    trade.mfe_time = ts
+                if unrealized < -trade.mae:
+                    trade.mae = abs(unrealized)
+                    trade.mae_time = ts
+
+                # Check partial exit trigger (before resolve_bar_exit)
+                if (
+                    trade.partial_exit_price is not None
+                    and not trade.is_partial_leg
+                    and trade.quantity >= 2
+                ):
+                    hit = False
+                    if is_long and bar.high >= trade.partial_exit_price:
+                        hit = True
+                    elif not is_long and bar.low <= trade.partial_exit_price:
+                        hit = True
+
+                    if hit:
+                        leg1_qty = int(trade.quantity * trade.partial_exit_pct)
+                        if leg1_qty < 1:
+                            leg1_qty = 1
+
+                        leg1 = TradeRecord(
+                            entry_time=trade.entry_time,
+                            entry_price=trade.entry_price,
+                            direction=trade.direction,
+                            quantity=leg1_qty,
+                            session=trade.session,
+                            criteria=trade.criteria,
+                            stop_price=trade.stop_price,
+                            target_price=trade.partial_exit_price,
+                            risk_points=trade.risk_points,
+                            initial_stop=trade.initial_stop,
+                            entry_atr=trade.entry_atr,
+                            mfe=trade.mfe,
+                            mae=trade.mae,
+                            mfe_time=trade.mfe_time,
+                            mae_time=trade.mae_time,
+                            exit_time=ts,
+                            exit_price=trade.partial_exit_price,
+                            exit_reason="partial_target",
+                            is_partial_leg=True,
+                            leg_index=1,
+                        )
+                        if is_long:
+                            leg1.pnl_points = trade.partial_exit_price - trade.entry_price
+                        else:
+                            leg1.pnl_points = trade.entry_price - trade.partial_exit_price
+
+                        pending_partial_closes_15m.append(leg1)
+
+                        trade.quantity = trade.quantity - leg1_qty
+                        trade.is_partial_leg = True
+                        trade.leg_index = 2
+                        trade.partial_exit_price = None
+                        continue  # skip resolve_bar_exit this bar for the newly split trade
+
+                # Exit resolution via extracted function
+                exit_result = resolve_bar_exit(
+                    trade, bar, intrabar_policy, slippage_points,
+                    eod_exit=eod_exit, eod_time=eod_time,
+                    time_stop_minutes=time_stop_minutes,
+                    time_stop_r_threshold=time_stop_r_threshold,
+                    breakeven_at_r=breakeven_at_r,
+                    trail_atr_mult=trail_atr_mult,
+                    trail_activate_r=trail_activate_r,
+                )
+                if exit_result:
+                    trade.exit_price = exit_result.exit_price
+                    trade.exit_time = ts
+                    trade.exit_reason = exit_result.exit_reason
+                    trade.pnl_points = exit_result.pnl_points
 
         # Finalize closed trades (apply commission)
-        closed = [t for t in open_trades if t.exit_time is not None]
+        # Include trades closed during 1m management + 15m fallback + partial exits
+        closed = (
+            closed_in_m1
+            + pending_partial_closes_15m
+            + [t for t in open_trades if t.exit_time is not None]
+        )
+        pending_partial_closes_15m = []
+        closed_in_m1 = []
         open_trades = [t for t in open_trades if t.exit_time is None]
 
         for trade in closed:
@@ -951,9 +1548,21 @@ def run_unicorn_backtest(
                 trade.outcome = TradeOutcome.BREAKEVEN
                 result.breakevens += 1
 
+            if trade.is_partial_leg and trade.leg_index == 1:
+                result.partial_legs += 1
+
             result.trades.append(trade)
             result.total_pnl_points += trade.pnl_points
             result.total_pnl_dollars += trade.pnl_dollars
+
+            # Update eval profile equity tracking
+            if eval_profile is not None:
+                _running_equity += trade.pnl_dollars
+                _peak_equity = max(_peak_equity, _running_equity)
+
+            # Update daily governor
+            if daily_governor is not None:
+                daily_governor.record_trade_close(trade.pnl_dollars, is_partial_leg=trade.is_partial_leg)
 
             # Update session stats
             session_stat = result.session_stats[trade.session]
@@ -964,11 +1573,46 @@ def run_unicorn_backtest(
             elif trade.outcome == TradeOutcome.LOSS:
                 session_stat.losses += 1
 
+        # Daily governor gate
+        if daily_governor is not None and not daily_governor.allows_entry():
+            _gov_stats["signals_skipped"] += 1
+            continue
+
         # Check for new setups (only if we have capacity)
         if len(open_trades) >= max_concurrent_trades:
             continue
 
         result.total_setups_scanned += 1
+
+        # Build causally aligned h4/h1 windows from bar_bundle
+        # Lookback must satisfy indicator requirements:
+        #   H4: EMA(200) + 10 = 210 bars minimum → 260 with buffer
+        #   H1: EMA(50)  +  5 =  55 bars minimum → 100 with buffer
+        H4_BIAS_LOOKBACK_BARS = 260
+        H1_BIAS_LOOKBACK_BARS = 100
+        DAILY_BIAS_LOOKBACK_BARS = 260
+        WEEKLY_BIAS_LOOKBACK_BARS = 260
+        causal_h4: Optional[list[OHLCVBar]] = None
+        causal_h1: Optional[list[OHLCVBar]] = None
+        causal_daily: Optional[list[OHLCVBar]] = None
+        causal_weekly: Optional[list[OHLCVBar]] = None
+        if bar_bundle is not None:
+            if bar_bundle.h4 and h4_completed_ts:
+                n_complete = bisect_right(h4_completed_ts, ts)
+                if n_complete > 0:
+                    causal_h4 = bar_bundle.h4[:n_complete][-H4_BIAS_LOOKBACK_BARS:]
+            if bar_bundle.h1 and h1_completed_ts:
+                n_complete = bisect_right(h1_completed_ts, ts)
+                if n_complete > 0:
+                    causal_h1 = bar_bundle.h1[:n_complete][-H1_BIAS_LOOKBACK_BARS:]
+            if bar_bundle.daily and daily_completed_ts:
+                n_complete = bisect_right(daily_completed_ts, ts)
+                if n_complete > 0:
+                    causal_daily = bar_bundle.daily[:n_complete][-DAILY_BIAS_LOOKBACK_BARS:]
+            if bar_bundle.weekly and weekly_completed_ts:
+                n_complete = bisect_right(weekly_completed_ts, ts)
+                if n_complete > 0:
+                    causal_weekly = bar_bundle.weekly[:n_complete][-WEEKLY_BIAS_LOOKBACK_BARS:]
 
         # Check all criteria
         criteria = check_criteria(
@@ -978,7 +1622,17 @@ def run_unicorn_backtest(
             symbol=symbol,
             ts=ts,
             config=config,
+            h4_bars=causal_h4,
+            h1_bars=causal_h1,
+            daily_bars=causal_daily,
         )
+
+        # Capture primary HTF bias at every scanned bar (observability)
+        result.htf_bias_series.append(BiasState(
+            ts=ts,
+            direction=criteria.htf_bias_direction or BiasDirection.NEUTRAL,
+            confidence=criteria.htf_bias_confidence,
+        ))
 
         session = criteria.session
         result.session_stats[session].total_setups += 1
@@ -1007,14 +1661,14 @@ def run_unicorn_backtest(
         for criterion in criteria.missing_criteria():
             criteria_fails[criterion] += 1
 
-        # Track valid setups (all 8/8)
+        # Track valid setups (all 9/9)
         if criteria.all_criteria_met:
             result.valid_setups += 1
             result.session_stats[session].valid_setups += 1
 
         # SOFT SCORING with mandatory/scored separation:
-        # - 3 MANDATORY must all pass: htf_bias, stop_valid, macro_window
-        # - 5 SCORED: min_criteria_score of these must pass
+        # - 5 MANDATORY must all pass: htf_bias, stop_valid, macro_window, mss, displacement
+        # - 4 SCORED: min_criteria_score of these must pass
         if entry_decision:
             direction = criteria.htf_bias_direction
 
@@ -1025,6 +1679,82 @@ def run_unicorn_backtest(
                 setup_record.reason_not_taken = f"direction_filter: {direction.value} != {direction_filter.value}"
                 result.all_setups.append(setup_record)
                 continue
+
+            # Adaptive confidence tiering: governor may activate mid-session
+            effective_tier_a = config.confidence_tier_a
+            effective_tier_b = config.confidence_tier_b
+            if (
+                daily_governor is not None
+                and daily_governor.confidence_tier_active
+                and effective_tier_a is None
+            ):
+                effective_tier_a = daily_governor.adaptive_tier_a
+                effective_tier_b = daily_governor.adaptive_tier_b
+
+            # Confidence gate: tiered or hard binary
+            confidence_tier: Optional[str] = None
+            if effective_tier_a is not None:
+                # Tiered mode: A (full) / B (half) / C (blocked)
+                conf = criteria.htf_bias_confidence
+                if conf >= effective_tier_a:
+                    confidence_tier = "A"
+                elif effective_tier_b is not None and conf >= effective_tier_b:
+                    confidence_tier = "B"
+                else:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = (
+                        f"confidence_tier_C: {conf:.2f} < {effective_tier_b}"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
+            elif (
+                config.min_confidence is not None
+                and criteria.htf_bias_confidence < config.min_confidence
+            ):
+                setup_record.taken = False
+                setup_record.reason_not_taken = (
+                    f"confidence_gate: {criteria.htf_bias_confidence:.2f} < {config.min_confidence}"
+                )
+                result.all_setups.append(setup_record)
+                continue
+
+            # Intermarket alignment gate: require ref symbol agrees with primary direction
+            if (
+                require_intermarket_alignment
+                and reference_bias_series is not None
+            ):
+                ref_state = _asof_lookup(reference_bias_series, ts)
+                if ref_state is None:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = "alignment_gate: no reference bias available"
+                    result.all_setups.append(setup_record)
+                    continue
+                if ref_state.direction == BiasDirection.NEUTRAL:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = "alignment_gate: reference bias is NEUTRAL"
+                    result.all_setups.append(setup_record)
+                    continue
+                if ref_state.direction != direction:
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = (
+                        f"alignment_gate: primary={direction.value} != ref={ref_state.direction.value}"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
+
+            # Weekly bias gate: reject if weekly bias opposes trade direction
+            if weekly_bias_gate and causal_weekly:
+                wb = compute_weekly_bias(causal_weekly)
+                if (
+                    wb.direction != BiasDirection.NEUTRAL
+                    and wb.direction != direction
+                ):
+                    setup_record.taken = False
+                    setup_record.reason_not_taken = (
+                        f"weekly_bias_gate: weekly={wb.direction.value} != {direction.value}"
+                    )
+                    result.all_setups.append(setup_record)
+                    continue
 
             # Record displacement diagnostics before any guard
             setup_record.signal_displacement_atr = criteria.mss_displacement_atr
@@ -1062,8 +1792,9 @@ def run_unicorn_backtest(
                 result.all_setups.append(setup_record)
                 continue
 
-            # Displacement guard — rejects when value is TOO LOW (insufficient conviction)
-            if config.min_displacement_atr is not None:
+            # BACKSTOP: displacement is now a mandatory criterion; this guard is redundant
+            # but kept temporarily for regression safety. Remove after validation.
+            if config.enable_displacement_backstop and config.min_displacement_atr is not None:
                 setup_record.displacement_guard_evaluated = True
 
                 if (
@@ -1099,13 +1830,19 @@ def run_unicorn_backtest(
                 max_fvg_fill_pct=config.max_fvg_fill_pct,
             )
 
-            # CRITICAL: Entry is at MARKET (bar.open), not at theoretical FVG level
-            # We can only enter at prices that actually traded
+            # CRITICAL: Entry is at MARKET, not at theoretical FVG level
+            # Use first 1m bar's open within this 15m window when available
+            # for more precise entry pricing; fall back to 15m bar.open
+            if m1_window:
+                raw_entry = m1_window[0].open
+            else:
+                raw_entry = bar.open
+
             # Apply slippage: worse price for our direction
             if direction == BiasDirection.BULLISH:
-                entry_price = bar.open + slippage_points  # Buy at open + slip
+                entry_price = raw_entry + slippage_points  # Buy at open + slip
             else:
-                entry_price = bar.open - slippage_points  # Sell at open - slip
+                entry_price = raw_entry - slippage_points  # Sell at open - slip
 
             # Calculate stop and target (ATR-based validation)
             # Uses signal_atr from previous closed bar
@@ -1126,10 +1863,38 @@ def run_unicorn_backtest(
 
             # Position sizing (account for slippage in risk)
             risk_dollars = (risk_points + slippage_points) * point_value
+            effective_risk_budget = _current_r_day if eval_profile else dollars_per_trade
+            if daily_governor is not None:
+                effective_risk_budget *= daily_governor.risk_multiplier
+            if confidence_tier == "B":
+                effective_risk_budget *= 0.5
             if risk_dollars > 0:
-                quantity = max(1, int(dollars_per_trade / risk_dollars))
+                quantity = int(effective_risk_budget / risk_dollars)
             else:
                 quantity = 1
+
+            # Skip trade if position size is zero (risk too wide for budget)
+            if quantity < 1:
+                _gov_stats["sizing_rejects"] += 1
+                setup_record.taken = False
+                setup_record.reason_not_taken = (
+                    f"position_size_zero: risk ${risk_dollars:.0f} > budget ${effective_risk_budget:.0f}"
+                )
+                result.all_setups.append(setup_record)
+                continue
+
+            # Track governor half-size trades
+            if daily_governor is not None and daily_governor.risk_multiplier < 1.0:
+                _gov_stats["half_size_trades"] += 1
+
+            # Track governor days with trades
+            if daily_governor is not None and not _gov_day_has_trade:
+                _gov_day_has_trade = True
+                _gov_stats["total_days_traded"] += 1
+
+            # Trailing stop: disable fixed target, freeze trail distance
+            if trail_atr_mult is not None:
+                target_price = float("inf") if direction == BiasDirection.BULLISH else float("-inf")
 
             # Create trade
             trade = TradeRecord(
@@ -1142,7 +1907,22 @@ def run_unicorn_backtest(
                 stop_price=stop_price,
                 target_price=target_price,
                 risk_points=risk_points,
+                initial_stop=stop_price,
+                entry_atr=signal_atr,
+                trail_distance=_compute_trail_distance(
+                    signal_atr, trail_atr_mult, trail_cap_mult, risk_points,
+                ) if trail_atr_mult else 0.0,
+                confidence_tier=confidence_tier,
             )
+
+            # Compute partial exit price for scale-out
+            if partial_exit_r is not None:
+                if direction == BiasDirection.BULLISH:
+                    trade.partial_exit_price = entry_price + (risk_points * partial_exit_r)
+                else:
+                    trade.partial_exit_price = entry_price - (risk_points * partial_exit_r)
+                trade.partial_exit_r = partial_exit_r
+                trade.partial_exit_pct = partial_exit_pct
 
             open_trades.append(trade)
             result.trades_taken += 1
@@ -1150,17 +1930,105 @@ def run_unicorn_backtest(
             # Entry-bar exit check: stop/target may be pierced on the
             # same bar the trade was opened.  The general open-trades loop
             # above ran BEFORE this trade existed, so no double-process risk.
-            entry_bar_exit = resolve_bar_exit(
-                trade, bar, intrabar_policy, slippage_points,
-                eod_exit=eod_exit, eod_time=eod_time,
-                time_stop_minutes=time_stop_minutes,
-                time_stop_r_threshold=time_stop_r_threshold,
-            )
-            if entry_bar_exit:
-                trade.exit_price = entry_bar_exit.exit_price
-                trade.exit_time = ts
-                trade.exit_reason = entry_bar_exit.exit_reason
-                trade.pnl_points = entry_bar_exit.pnl_points
+            if m1_window and len(m1_window) > 1:
+                # Sub-iterate remaining 1m bars after entry for precise exit
+                is_long_entry = trade.direction == BiasDirection.BULLISH
+                for m1_bar in m1_window[1:]:
+                    # MFE/MAE at 1m precision
+                    if is_long_entry:
+                        unrealized = m1_bar.close - trade.entry_price
+                    else:
+                        unrealized = trade.entry_price - m1_bar.close
+                    if unrealized > trade.mfe:
+                        trade.mfe = unrealized
+                        trade.mfe_time = m1_bar.ts
+                    if unrealized < -trade.mae:
+                        trade.mae = abs(unrealized)
+                        trade.mae_time = m1_bar.ts
+
+                    # Check partial exit trigger on entry bar
+                    if (
+                        trade.partial_exit_price is not None
+                        and not trade.is_partial_leg
+                        and trade.quantity >= 2
+                    ):
+                        hit_entry = False
+                        if is_long_entry and m1_bar.high >= trade.partial_exit_price:
+                            hit_entry = True
+                        elif not is_long_entry and m1_bar.low <= trade.partial_exit_price:
+                            hit_entry = True
+
+                        if hit_entry:
+                            leg1_qty = int(trade.quantity * trade.partial_exit_pct)
+                            if leg1_qty < 1:
+                                leg1_qty = 1
+
+                            leg1 = TradeRecord(
+                                entry_time=trade.entry_time,
+                                entry_price=trade.entry_price,
+                                direction=trade.direction,
+                                quantity=leg1_qty,
+                                session=trade.session,
+                                criteria=trade.criteria,
+                                stop_price=trade.stop_price,
+                                target_price=trade.partial_exit_price,
+                                risk_points=trade.risk_points,
+                                initial_stop=trade.initial_stop,
+                                entry_atr=trade.entry_atr,
+                                mfe=trade.mfe,
+                                mae=trade.mae,
+                                mfe_time=trade.mfe_time,
+                                mae_time=trade.mae_time,
+                                exit_time=m1_bar.ts,
+                                exit_price=trade.partial_exit_price,
+                                exit_reason="partial_target",
+                                is_partial_leg=True,
+                                leg_index=1,
+                            )
+                            if is_long_entry:
+                                leg1.pnl_points = trade.partial_exit_price - trade.entry_price
+                            else:
+                                leg1.pnl_points = trade.entry_price - trade.partial_exit_price
+
+                            closed_in_m1.append(leg1)
+
+                            trade.quantity = trade.quantity - leg1_qty
+                            trade.is_partial_leg = True
+                            trade.leg_index = 2
+                            trade.partial_exit_price = None
+                            continue
+
+                    entry_bar_exit = resolve_bar_exit(
+                        trade, m1_bar, intrabar_policy, slippage_points,
+                        eod_exit=eod_exit, eod_time=eod_time,
+                        time_stop_minutes=time_stop_minutes,
+                        time_stop_r_threshold=time_stop_r_threshold,
+                        breakeven_at_r=breakeven_at_r,
+                        trail_atr_mult=trail_atr_mult,
+                        trail_activate_r=trail_activate_r,
+                    )
+                    if entry_bar_exit:
+                        trade.exit_price = entry_bar_exit.exit_price
+                        trade.exit_time = m1_bar.ts
+                        trade.exit_reason = entry_bar_exit.exit_reason
+                        trade.pnl_points = entry_bar_exit.pnl_points
+                        break
+            else:
+                # Fallback: check on the 15m bar
+                entry_bar_exit = resolve_bar_exit(
+                    trade, bar, intrabar_policy, slippage_points,
+                    eod_exit=eod_exit, eod_time=eod_time,
+                    time_stop_minutes=time_stop_minutes,
+                    time_stop_r_threshold=time_stop_r_threshold,
+                    breakeven_at_r=breakeven_at_r,
+                    trail_atr_mult=trail_atr_mult,
+                    trail_activate_r=trail_activate_r,
+                )
+                if entry_bar_exit:
+                    trade.exit_price = entry_bar_exit.exit_price
+                    trade.exit_time = ts
+                    trade.exit_reason = entry_bar_exit.exit_reason
+                    trade.pnl_points = entry_bar_exit.pnl_points
 
             setup_record.taken = True
         else:
@@ -1174,9 +2042,13 @@ def run_unicorn_backtest(
                     missing_mandatory.append("stop_valid")
                 if not criteria.in_macro_window:
                     missing_mandatory.append("macro_window")
+                if not criteria.mss_found:
+                    missing_mandatory.append("mss")
+                if not criteria.displacement_valid:
+                    missing_mandatory.append("displacement")
                 setup_record.reason_not_taken = f"mandatory failed: {', '.join(missing_mandatory)}"
             else:
-                setup_record.reason_not_taken = f"scored {criteria.scored_criteria_count}/5 < {min_criteria_score}"
+                setup_record.reason_not_taken = f"scored {criteria.scored_criteria_count}/4 < {min_criteria_score}"
 
         result.all_setups.append(setup_record)
 
@@ -1212,6 +2084,9 @@ def run_unicorn_backtest(
             trade.outcome = TradeOutcome.BREAKEVEN
             result.breakevens += 1
 
+        if trade.is_partial_leg and trade.leg_index == 1:
+            result.partial_legs += 1
+
         result.trades.append(trade)
         result.total_pnl_points += trade.pnl_points
         result.total_pnl_dollars += trade.pnl_dollars
@@ -1232,6 +2107,12 @@ def run_unicorn_backtest(
             if t.mfe > 0:
                 mfe_captures.append(t.pnl_points / t.mfe if t.pnl_points > 0 else 0)
         result.mfe_capture_rate = statistics.mean(mfe_captures) if mfe_captures else 0
+
+        # Trailing stop aggregation
+        if trail_atr_mult is not None:
+            result.trail_activated_count = sum(1 for t in result.trades if t.trail_active)
+            result.trail_stop_exits = sum(1 for t in result.trades if t.exit_reason == "trail_stop")
+            result.trail_activate_r = trail_activate_r
 
         # Session averages
         for session, stats in result.session_stats.items():
@@ -1299,7 +2180,64 @@ def run_unicorn_backtest(
 
     result.config = config
     result.session_diagnostics = _build_session_diagnostics(result)
+
+    # Eval profile final stats
+    if eval_profile is not None:
+        _gov_stats["peak_equity"] = _peak_equity
+        _gov_stats["final_equity"] = _running_equity
+        _gov_stats["trailing_drawdown"] = _peak_equity - _running_equity
+        _gov_stats["r_day_min"] = _r_day_min
+        _gov_stats["r_day_max"] = _r_day_max
+        _gov_stats["drawdown_halt"] = _eval_blown
+
+    # Capture last day's adaptive tier activation (not caught by day-boundary check)
+    if daily_governor is not None and daily_governor.confidence_tier_active:
+        _gov_stats["adaptive_tier_activations"] += 1
+
+    # Populate governor stats (always — sizing_rejects and config are useful
+    # even without a daily governor for artifact interpretability)
+    result.governor_stats = dict(_gov_stats)
+
+    # Populate confidence tier stats
+    if config.confidence_tier_a is not None:
+        tier_counts = {"A": 0, "B": 0}
+        tier_pnl = {"A": 0.0, "B": 0.0}
+        for t in result.trades:
+            tier = t.confidence_tier or "A"
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+            tier_pnl[tier] = tier_pnl.get(tier, 0.0) + t.pnl_dollars
+        result.confidence_tier_stats = {
+            "tier_a_count": tier_counts["A"],
+            "tier_a_pnl": round(tier_pnl["A"], 2),
+            "tier_b_count": tier_counts["B"],
+            "tier_b_pnl": round(tier_pnl["B"], 2),
+        }
+
     return result
+
+
+def _asof_lookup(series: list[BiasState], ts: datetime) -> Optional[BiasState]:
+    """Return the most recent BiasState at or before *ts*.
+
+    Returns None if no state is available (empty series or ts before first entry).
+    Assumes *series* is sorted chronologically.
+    """
+    best: Optional[BiasState] = None
+    for state in series:
+        if state.ts <= ts:
+            best = state
+        else:
+            break  # series is chronological, can stop early
+    return best
+
+
+def _conf_bucket(confidence: float) -> str:
+    """Map confidence to low/mid/high bucket."""
+    if confidence < 0.4:
+        return "low"
+    elif confidence <= 0.7:
+        return "mid"
+    return "high"
 
 
 def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
@@ -1361,6 +2299,23 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
                     "high": {"trades": int, "wins": int, "win_rate": float, "avg_pnl_pts": float, "total_pnl_pts": float, "avg_r": float, "total_r": float},
                 },
                 ...
+            },
+            "intermarket_agreement": {          # Only present when reference_bias_series provided
+                "reference_symbol": str,
+                "by_agreement": {
+                    "<label>": {                # aligned, divergent, neutral_involved, missing_ref, missing_primary
+                        "trades": int, "wins": int, "win_rate": float,
+                        "avg_pnl_pts": float, "total_pnl_pts": float,
+                        "avg_r": float, "total_r": float,
+                    }, ...
+                },
+                "by_session_agreement": {
+                    "<session>": { "<label>": { ... same fields ... }, ... }, ...
+                },
+                "both_high_conf": {
+                    "trades": int, "wins": int, "win_rate": float,
+                    "avg_r": float, "total_r": float,
+                },
             },
         }
 
@@ -1522,12 +2477,110 @@ def _build_session_diagnostics(result: UnicornBacktestResult) -> dict:
             }
         confidence_outcome_by_session[sess_key] = entry
 
-    return {
+    diagnostics: dict = {
         "setup_disposition": setup_disposition,
         "confidence_by_session": confidence_by_session,
         "expectancy_by_session": expectancy_by_session,
         "confidence_outcome_by_session": confidence_outcome_by_session,
     }
+
+    # --- Intermarket agreement (only when reference series provided) ---
+    if result.reference_bias_series is not None:
+        def _agreement_bucket() -> dict:
+            return {"trades": 0, "wins": 0, "sum_pnl": 0.0, "r_values": []}
+
+        by_agreement: dict[str, dict] = {}
+        by_session_agreement: dict[str, dict[str, dict]] = {}
+        both_high_acc = _agreement_bucket()
+
+        for trade in result.trades:
+            primary = _asof_lookup(result.htf_bias_series, trade.entry_time)
+            ref = _asof_lookup(result.reference_bias_series, trade.entry_time)
+
+            # Compute agreement label
+            if ref is None:
+                label = "missing_ref"
+            elif primary is None:
+                label = "missing_primary"
+            elif primary.direction == BiasDirection.NEUTRAL or ref.direction == BiasDirection.NEUTRAL:
+                label = "neutral_involved"
+            elif primary.direction == ref.direction:
+                label = "aligned"
+            else:
+                label = "divergent"
+
+            # Store per-trade label for trace mode
+            trade.intermarket_label = label
+
+            # Accumulate into by_agreement
+            if label not in by_agreement:
+                by_agreement[label] = _agreement_bucket()
+            bucket = by_agreement[label]
+            bucket["trades"] += 1
+            bucket["sum_pnl"] += trade.pnl_points
+            if trade.outcome == TradeOutcome.WIN:
+                bucket["wins"] += 1
+            initial_risk = abs(trade.entry_price - trade.stop_price)
+            r_val = trade.pnl_points / initial_risk if initial_risk > 0 else None
+            if r_val is not None:
+                bucket["r_values"].append(r_val)
+
+            # Accumulate into by_session_agreement
+            sess = taken_setups_by_time.get(trade.entry_time, "unknown")
+            if sess not in by_session_agreement:
+                by_session_agreement[sess] = {}
+            if label not in by_session_agreement[sess]:
+                by_session_agreement[sess][label] = _agreement_bucket()
+            sb = by_session_agreement[sess][label]
+            sb["trades"] += 1
+            sb["sum_pnl"] += trade.pnl_points
+            if trade.outcome == TradeOutcome.WIN:
+                sb["wins"] += 1
+            if r_val is not None:
+                sb["r_values"].append(r_val)
+
+            # Both-high-confidence accumulator
+            if primary is not None and ref is not None:
+                if primary.confidence > 0.7 and ref.confidence > 0.7:
+                    both_high_acc["trades"] += 1
+                    both_high_acc["sum_pnl"] += trade.pnl_points
+                    if trade.outcome == TradeOutcome.WIN:
+                        both_high_acc["wins"] += 1
+                    if r_val is not None:
+                        both_high_acc["r_values"].append(r_val)
+
+        def _finalize_bucket(raw: dict) -> dict:
+            r_vals = raw["r_values"]
+            return {
+                "trades": raw["trades"],
+                "wins": raw["wins"],
+                "win_rate": raw["wins"] / raw["trades"] * 100 if raw["trades"] else 0.0,
+                "avg_pnl_pts": raw["sum_pnl"] / raw["trades"] if raw["trades"] else 0.0,
+                "total_pnl_pts": raw["sum_pnl"],
+                "avg_r": sum(r_vals) / len(r_vals) if r_vals else 0.0,
+                "total_r": sum(r_vals) if r_vals else 0.0,
+            }
+
+        finalized_agreement = {k: _finalize_bucket(v) for k, v in by_agreement.items()}
+        finalized_session = {}
+        for sk, labels in by_session_agreement.items():
+            finalized_session[sk] = {lbl: _finalize_bucket(raw) for lbl, raw in labels.items()}
+
+        bh_r = both_high_acc["r_values"]
+        diagnostics["intermarket_agreement"] = {
+            "reference_symbol": result.reference_symbol or "unknown",
+            "by_agreement": finalized_agreement,
+            "by_session_agreement": finalized_session,
+            "both_high_conf": {
+                "trades": both_high_acc["trades"],
+                "wins": both_high_acc["wins"],
+                "win_rate": both_high_acc["wins"] / both_high_acc["trades"] * 100 if both_high_acc["trades"] else 0.0,
+                "avg_r": sum(bh_r) / len(bh_r) if bh_r else 0.0,
+                "total_r": sum(bh_r) if bh_r else 0.0,
+            },
+        }
+
+    return diagnostics
 
 
 def format_backtest_report(result: UnicornBacktestResult) -> str:
@@ -1535,6 +2588,8 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines = []
     lines.append("=" * 70)
     lines.append(f"UNICORN MODEL BACKTEST REPORT - {result.symbol}")
+    if result.run_label:
+        lines.append(result.run_label)
     lines.append("=" * 70)
     lines.append(f"Period: {result.start_date.date()} to {result.end_date.date()}")
     lines.append(f"Total bars analyzed: {result.total_bars}")
@@ -1543,14 +2598,19 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     # Config diagnostics
     if result.config is not None:
         cfg = result.config
+        ver_info = MODEL_VERSIONS[MODEL_VERSION]
         lines.append("-" * 40)
         lines.append("CONFIG")
         lines.append("-" * 40)
+        lines.append(f"Model:                 {STRATEGY_FAMILY} v{MODEL_VERSION} ({MODEL_CODENAME}) — {ver_info['mandatory']}M+{ver_info['scored']}S")
+        if result.run_key:
+            lines.append(f"Run key:               {result.run_key}")
         lines.append(f"Session profile:       {cfg.session_profile.value}")
         windows = SESSION_WINDOWS.get(cfg.session_profile, MACRO_WINDOWS)
         window_strs = [f"{s.strftime('%H:%M')}-{e.strftime('%H:%M')}" for s, e in windows]
         lines.append(f"Macro windows (ET):    {', '.join(window_strs)}")
-        lines.append(f"Min scored criteria:   {cfg.min_scored_criteria}/5")
+        lines.append(f"Mandatory criteria:    5 (htf_bias, stop_valid, macro_window, mss, displacement)")
+        lines.append(f"Min scored criteria:   {cfg.min_scored_criteria}/4 (liquidity_sweep, htf_fvg, breaker_block, ltf_fvg)")
         lines.append(f"FVG ATR mult:          {cfg.fvg_min_atr_mult}")
         lines.append(f"Stop ATR mult:         {cfg.stop_max_atr_mult}")
         wick = f"{cfg.max_wick_ratio}" if cfg.max_wick_ratio is not None else "disabled"
@@ -1559,6 +2619,9 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
         lines.append(f"Range guard:           {rng}")
         disp = f"{cfg.min_displacement_atr}x ATR" if cfg.min_displacement_atr is not None else "disabled"
         lines.append(f"Displacement guard:    {disp}")
+        sweep_age = f"{cfg.max_sweep_age_bars} bars" if cfg.max_sweep_age_bars is not None else "disabled"
+        sweep_settle = "enabled" if cfg.require_sweep_settlement else "disabled"
+        lines.append(f"Sweep closure guard:   recency={sweep_age}, settlement={sweep_settle}")
         lines.append("")
 
     # Setup Analysis
@@ -1567,7 +2630,7 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append("-" * 40)
     lines.append(f"Total setups scanned:  {result.total_setups_scanned}")
     lines.append(f"Partial setups:        {result.partial_setups} ({result.partial_setups/max(1,result.total_setups_scanned)*100:.1f}%)")
-    lines.append(f"Valid setups (8/8):    {result.valid_setups} ({result.valid_setups/max(1,result.total_setups_scanned)*100:.1f}%)")
+    lines.append(f"Valid setups (9/9):    {result.valid_setups} ({result.valid_setups/max(1,result.total_setups_scanned)*100:.1f}%)")
     lines.append(f"Trades taken:          {result.trades_taken}")
     lines.append(f"Setup→Trade ratio:     {result.setup_to_trade_ratio*100:.1f}%")
     lines.append("")
@@ -1602,7 +2665,88 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
     lines.append(f"Avg MFE:               {result.avg_mfe:.2f} points")
     lines.append(f"Avg MAE:               {result.avg_mae:.2f} points")
     lines.append(f"MFE capture rate:      {result.mfe_capture_rate*100:.1f}%")
+    # MFE R-distribution (always shown)
+    all_with_risk = [t for t in result.trades if t.risk_points > 0]
+    if all_with_risk:
+        n = len(all_with_risk)
+        thresholds = [0.5, 1.0, 1.5, 2.0]
+        parts = []
+        for thr in thresholds:
+            count = sum(1 for t in all_with_risk if t.mfe >= t.risk_points * thr)
+            pct = count / n * 100
+            parts.append(f"+{thr:g}R:{pct:.0f}%")
+        lines.append(f"MFE reach:             {' | '.join(parts)}")
     lines.append("")
+
+    # Trailing Stop Analysis
+    if result.trail_activated_count > 0 or result.trail_stop_exits > 0:
+        lines.append("-" * 40)
+        lines.append("TRAILING STOP")
+        lines.append("-" * 40)
+
+        # Trail config (infer from first trade with trail_distance)
+        trail_trades = [t for t in result.trades if t.trail_distance > 0]
+        if trail_trades:
+            t0 = trail_trades[0]
+            if t0.entry_atr > 0:
+                eff_mult = t0.trail_distance / t0.entry_atr
+                lines.append(f"Trail ATR mult (eff):  {eff_mult:.2f}")
+            if t0.risk_points > 0:
+                cap_r = t0.trail_distance / t0.risk_points
+                lines.append(f"Trail distance (R):    {cap_r:.2f}R")
+
+        if result.trail_activate_r != 1.0:
+            lines.append(f"Activation threshold:  {result.trail_activate_r:.2f}R")
+
+        total = result.trades_taken
+        act_pct = (result.trail_activated_count / total * 100) if total > 0 else 0.0
+        lines.append(
+            f"Trades activated:      {result.trail_activated_count} / {total}  ({act_pct:.1f}%)"
+        )
+        lines.append(f"Trail stop exits:      {result.trail_stop_exits}")
+
+        # Avg R by exit type (all types present)
+        exit_groups = {}
+        for t in result.trades:
+            reason = t.exit_reason or "unknown"
+            exit_groups.setdefault(reason, []).append(t)
+
+        # Show trail_stop and stop_loss first, then others
+        priority_order = ["trail_stop", "stop_loss", "time_stop", "eod"]
+        shown = set()
+        for reason in priority_order:
+            if reason in exit_groups:
+                trades = exit_groups[reason]
+                avg_r = statistics.mean(t.r_multiple for t in trades)
+                lines.append(f"Avg R ({reason:>10}):  {avg_r:+.2f}R  ({len(trades)} trades)")
+                shown.add(reason)
+        for reason, trades in exit_groups.items():
+            if reason not in shown:
+                avg_r = statistics.mean(t.r_multiple for t in trades)
+                lines.append(f"Avg R ({reason:>10}):  {avg_r:+.2f}R  ({len(trades)} trades)")
+
+        # MFE capture: pnl/mfe for trades with positive MFE (includes losers)
+        trail_exits = exit_groups.get("trail_stop", [])
+        if trail_exits:
+            trail_captures = [
+                t.pnl_points / t.mfe for t in trail_exits if t.mfe > 0
+            ]
+            if trail_captures:
+                lines.append(f"MFE capture (trail):   {statistics.mean(trail_captures)*100:.1f}%")
+        lines.append(f"MFE capture (all):     {result.mfe_capture_rate*100:.1f}%")
+        lines.append("")
+
+        # MFE R-distribution: what % of trades reached each MFE milestone
+        trades_with_risk = [t for t in result.trades if t.risk_points > 0]
+        if trades_with_risk:
+            n = len(trades_with_risk)
+            thresholds = [0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
+            parts = []
+            for thr in thresholds:
+                count = sum(1 for t in trades_with_risk if t.mfe >= t.risk_points * thr)
+                parts.append(f"+{thr:.1f}R:{count}/{n}")
+            lines.append(f"MFE reach:  {' | '.join(parts)}")
+            lines.append("")
 
     # Session Breakdown
     lines.append("-" * 40)
@@ -1704,13 +2848,66 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
                     )
             lines.append("")
 
+    # Intermarket Agreement
+    if result.session_diagnostics and "intermarket_agreement" in result.session_diagnostics:
+        ia = result.session_diagnostics["intermarket_agreement"]
+        ref_sym = ia["reference_symbol"]
+        lines.append("-" * 40)
+        lines.append(f"INTERMARKET AGREEMENT (vs {ref_sym})")
+        lines.append("-" * 40)
+        lines.append(
+            f"{'Label':<20} {'Trades':>7} {'WinRate':>8} {'AvgPnL':>8} "
+            f"{'TotalPnL':>10} {'AvgR':>8} {'TotalR':>8}"
+        )
+        lines.append("-" * 72)
+
+        for label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"):
+            if label in ia["by_agreement"]:
+                b = ia["by_agreement"][label]
+                lines.append(
+                    f"{label:<20} {b['trades']:>7} {b['win_rate']:>7.1f}% "
+                    f"{b['avg_pnl_pts']:>+8.2f} {b['total_pnl_pts']:>+10.2f} "
+                    f"{b['avg_r']:>+7.2f}R {b['total_r']:>+7.2f}R"
+                )
+        lines.append("")
+
+        # Intermarket × Session
+        if ia["by_session_agreement"]:
+            lines.append("INTERMARKET × SESSION")
+            lines.append("-" * 40)
+            lines.append(
+                f"{'Session':<12} {'Label':<20} {'Trades':>7} {'WinRate':>8} "
+                f"{'AvgR':>8} {'TotalR':>8}"
+            )
+            lines.append("-" * 66)
+
+            for sess_key in sorted(ia["by_session_agreement"].keys()):
+                for label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"):
+                    if label in ia["by_session_agreement"][sess_key]:
+                        b = ia["by_session_agreement"][sess_key][label]
+                        lines.append(
+                            f"{sess_key:<12} {label:<20} {b['trades']:>7} {b['win_rate']:>7.1f}% "
+                            f"{b['avg_r']:>+7.2f}R {b['total_r']:>+7.2f}R"
+                        )
+            lines.append("")
+
+        # Both-high-confidence summary
+        bh = ia["both_high_conf"]
+        if bh["trades"] > 0:
+            lines.append(
+                f"Both-high-confidence trades: {bh['trades']} trades, "
+                f"{bh['win_rate']:.1f}% win rate, {bh['avg_r']:+.2f}R avg"
+            )
+            lines.append("")
+
     # Criteria Bottleneck
     lines.append("-" * 40)
     lines.append("CRITERIA BOTTLENECK (sorted by fail rate)")
     lines.append("-" * 40)
     for bottleneck in result.criteria_bottlenecks:
+        tag = "[M]" if bottleneck.criterion in MANDATORY_CRITERIA else "[S]"
         bar = "█" * int(bottleneck.fail_rate * 20)
-        lines.append(f"{bottleneck.criterion:<18} {bottleneck.fail_rate*100:>5.1f}% {bar}")
+        lines.append(f"{tag} {bottleneck.criterion:<15} {bottleneck.fail_rate*100:>5.1f}% {bar}")
     lines.append("")
 
     # Confidence Correlation
@@ -1729,6 +2926,318 @@ def format_backtest_report(result: UnicornBacktestResult) -> str:
 
     lines.append("")
     lines.append(f"Confidence-Win Correlation: {result.confidence_win_correlation:+.3f}")
+    lines.append("")
+
+    # Daily Governor
+    if result.governor_stats is not None:
+        gs = result.governor_stats
+        lines.append("-" * 40)
+        lines.append("DAILY GOVERNOR")
+        lines.append("-" * 40)
+        # Policy knobs (only present when daily_governor was used)
+        if "max_daily_loss_dollars" in gs:
+            lines.append(f"Max daily loss:        ${gs['max_daily_loss_dollars']:,.0f}")
+            lines.append(f"Half-loss threshold:   ${gs['half_loss_threshold']:,.0f}")
+            lines.append(f"Max trades/day:        {gs['max_trades_per_day']}")
+            lines.append("")
+        # Sizing config
+        lines.append(f"Risk budget/trade:     ${gs.get('dollars_per_trade', 0):,.0f}")
+        lines.append(f"Sizing active:         {gs.get('sizing_active', False)}")
+        # Outcomes
+        lines.append(f"Signals skipped:       {gs['signals_skipped']}")
+        lines.append(f"Days halted early:     {gs['days_halted']}")
+        lines.append(f"  Loss-limit halts:    {gs['loss_limit_halts']}")
+        lines.append(f"  Trade-limit halts:   {gs['trade_limit_halts']}")
+        lines.append(f"Half-size trades:      {gs['half_size_trades']}")
+        lines.append(f"Sizing rejects:        {gs.get('sizing_rejects', 0)}")
+        lines.append(f"Days with trades:      {gs['total_days_traded']}")
+        lines.append("")
+
+        # Eval account subsection
+        if "eval_account_size" in gs:
+            lines.append("-" * 40)
+            lines.append("EVAL ACCOUNT")
+            lines.append("-" * 40)
+            lines.append(f"Starting equity:       ${gs['eval_account_size']:,.0f}")
+            lines.append(f"Final equity:          ${gs.get('final_equity', 0):,.0f}")
+            lines.append(f"Peak equity:           ${gs.get('peak_equity', 0):,.0f}")
+            trailing_dd = gs.get("trailing_drawdown", 0)
+            max_dd = gs["eval_max_drawdown"]
+            dd_pct = (trailing_dd / max_dd * 100) if max_dd > 0 else 0.0
+            lines.append(
+                f"Trailing drawdown:     ${trailing_dd:,.0f} / ${max_dd:,.0f}  ({dd_pct:.1f}%)"
+            )
+            r_min = gs.get("r_day_min", 0)
+            r_max = gs.get("r_day_max", 0)
+            lines.append(f"R_day range:           ${r_min:,.0f} - ${r_max:,.0f}")
+            if gs.get("drawdown_halt"):
+                lines.append("*** EVAL BLOWN ***")
+            lines.append("")
+
+    lines.append("=" * 70)
+
+    return "\n".join(lines)
+
+
+def format_trade_trace(
+    trade: TradeRecord,
+    trade_index: int,
+    bar_bundle: Optional[BarBundle],
+    result: UnicornBacktestResult,
+    intrabar_policy: IntrabarPolicy,
+    slippage_points: float,
+    verbose: bool = False,
+) -> str:
+    """
+    Post-run trace: replay a single trade's management path to its recorded exit.
+
+    Does NOT re-simulate exits. Uses trade.exit_time, trade.exit_price,
+    trade.exit_reason as ground truth. Walks bars up to recorded exit
+    and shows the path. On the exit bar, verifies the recorded reason
+    matches what resolve_bar_exit() would produce.
+
+    Args:
+        trade: The TradeRecord to trace.
+        trade_index: 0-based index of this trade in result.trades.
+        bar_bundle: BarBundle with m1/m15 data for replay.
+        result: Full backtest result (for context).
+        intrabar_policy: Policy used in the backtest.
+        slippage_points: Slippage in points (per side).
+        verbose: If True, print all bars. If False, first 5 + exit bar.
+
+    Returns:
+        Plain-text trace output.
+
+    Raises:
+        ValueError: If trade_index is out of range.
+    """
+    if trade_index < 0 or trade_index >= len(result.trades):
+        raise ValueError(
+            f"trade_index {trade_index} out of range "
+            f"(0–{len(result.trades) - 1}, {len(result.trades)} trades)"
+        )
+
+    lines: list[str] = []
+    lines.append("=" * 70)
+    lines.append(f"TRADE TRACE — Trade #{trade_index}")
+    if result.run_label:
+        lines.append(result.run_label)
+    lines.append("=" * 70)
+
+    # ------------------------------------------------------------------
+    # Section 1: ENTRY CONTEXT
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("ENTRY CONTEXT")
+    lines.append("-" * 40)
+
+    entry_et = to_eastern_time(trade.entry_time)
+    lines.append(f"Entry time (ET):     {trade.entry_time.isoformat()} ({entry_et.strftime('%H:%M')} ET)")
+    lines.append(f"Entry price:         {trade.entry_price:.2f}")
+    lines.append(f"Direction:           {trade.direction.value}")
+    lines.append(f"Stop:                {trade.stop_price:.2f}")
+    if trade.target_price in (float("inf"), float("-inf")):
+        lines.append(f"Target:              none (trailing)")
+    else:
+        lines.append(f"Target:              {trade.target_price:.2f}")
+    planned_r = abs(trade.target_price - trade.entry_price) / trade.risk_points if trade.risk_points > 0 and trade.target_price not in (float("inf"), float("-inf")) else 0.0
+    lines.append(f"Planned R:           {planned_r:.2f}R")
+    lines.append(f"Risk points:         {trade.risk_points:.2f}")
+    if trade.trail_distance > 0:
+        lines.append(f"Trail distance:      {trade.trail_distance:.2f} pts (ATR={trade.entry_atr:.2f})")
+        lines.append(f"Trail activated:     {'yes' if trade.trail_active else 'no'}")
+        lines.append(f"Initial stop:        {trade.initial_stop:.2f}")
+    lines.append(f"Session:             {trade.session.value}")
+
+    criteria = trade.criteria
+    lines.append(f"Macro window:        {'yes' if criteria.in_macro_window else 'no'}")
+
+    # Guard diagnostics (from setup if available)
+    setup_record = None
+    for s in result.all_setups:
+        if s.taken and s.timestamp == trade.entry_time:
+            setup_record = s
+            break
+    if setup_record:
+        lines.append(f"Wick ratio:          {setup_record.signal_wick_ratio:.3f}")
+        lines.append(f"Range ATR mult:      {setup_record.signal_range_atr_mult:.2f}")
+        lines.append(f"Displacement ATR:    {setup_record.signal_displacement_atr:.2f}")
+
+    # ------------------------------------------------------------------
+    # Section 2: BIAS STACK
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("BIAS STACK AT ENTRY")
+    lines.append("-" * 40)
+
+    snap = criteria.bias_snapshot
+    if snap is not None:
+        tf_fields = [
+            ("h4", snap.h4_direction, snap.h4_confidence),
+            ("h1", snap.h1_direction, snap.h1_confidence),
+            ("m15", snap.m15_direction, snap.m15_confidence),
+            ("m5", snap.m5_direction, snap.m5_confidence),
+        ]
+        for tf_name, direction, confidence in tf_fields:
+            if direction is None:
+                lines.append(f"  {tf_name:>4}: not provided")
+            elif tf_name not in snap.used_tfs and direction is not None:
+                lines.append(f"  {tf_name:>4}: insufficient_data (excluded from scoring)")
+            else:
+                lines.append(f"  {tf_name:>4}: {direction.value:<8} conf={confidence:.3f}")
+        lines.append(f"  Final:  {snap.final_direction.value:<8} conf={snap.final_confidence:.3f}  alignment={snap.alignment_score:.3f}")
+        lines.append(f"  Used TFs: {', '.join(snap.used_tfs) if snap.used_tfs else 'none'}")
+
+        # Last completed candle timestamps per TF
+        tf_durations = {"h4": timedelta(hours=4), "h1": timedelta(hours=1), "m15": timedelta(minutes=15), "m5": timedelta(minutes=5)}
+        for tf in snap.used_tfs:
+            dur = tf_durations.get(tf)
+            if dur:
+                # Floor entry_time to the TF boundary
+                total_seconds = int(dur.total_seconds())
+                entry_epoch = int(trade.entry_time.timestamp())
+                last_completed = datetime.fromtimestamp(
+                    (entry_epoch // total_seconds) * total_seconds,
+                    tz=trade.entry_time.tzinfo,
+                )
+                lines.append(f"  Last completed {tf}: {last_completed.isoformat()}")
+    else:
+        lines.append("  (no bias snapshot captured)")
+
+    # Intermarket label
+    if trade.intermarket_label:
+        lines.append(f"  Intermarket:  {trade.intermarket_label}")
+
+    # ------------------------------------------------------------------
+    # Section 3: MANAGEMENT PATH
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("MANAGEMENT PATH")
+    lines.append("-" * 40)
+
+    if trade.exit_time is None:
+        lines.append("  Trade has no exit (still open at backtest end).")
+    else:
+        # Select replay bars: prefer m1, fallback to m15
+        replay_bars: list[OHLCVBar] = []
+        replay_tf = "m1"
+        if bar_bundle and bar_bundle.m1:
+            replay_bars = [
+                b for b in bar_bundle.m1
+                if trade.entry_time <= b.ts <= trade.exit_time
+            ]
+        if not replay_bars and bar_bundle and bar_bundle.m15:
+            replay_tf = "m15"
+            replay_bars = [
+                b for b in bar_bundle.m15
+                if trade.entry_time <= b.ts <= trade.exit_time
+            ]
+        if not replay_bars:
+            replay_tf = "m15"
+            # Fallback: use result htf data if accessible
+            lines.append("  (no bar data available for replay)")
+        else:
+            lines.append(f"  Replay TF: {replay_tf} ({len(replay_bars)} bars)")
+            lines.append(f"  {'Timestamp':<26} {'O':>10} {'H':>10} {'L':>10} {'C':>10} {'MFE':>8} {'MAE':>8} Event")
+            lines.append(f"  {'-'*110}")
+
+            running_mfe = 0.0
+            running_mae = 0.0
+            is_long = trade.direction == BiasDirection.BULLISH
+
+            bars_to_print = replay_bars if verbose else None
+            if not verbose:
+                # First 5 + exit bar
+                first_5 = replay_bars[:5]
+                exit_bar_candidates = [b for b in replay_bars if b.ts == trade.exit_time]
+                exit_bar = exit_bar_candidates[0] if exit_bar_candidates else replay_bars[-1] if replay_bars else None
+                # Deduplicate if exit is in first 5
+                bars_to_print_set = list(first_5)
+                if exit_bar and exit_bar not in bars_to_print_set:
+                    if len(replay_bars) > 5:
+                        bars_to_print_set.append(None)  # Ellipsis marker
+                    bars_to_print_set.append(exit_bar)
+                bars_to_print = bars_to_print_set
+
+            for idx, b in enumerate(replay_bars):
+                # Track running MFE/MAE
+                if is_long:
+                    unrealized_high = b.high - trade.entry_price
+                    unrealized_low = b.low - trade.entry_price
+                else:
+                    unrealized_high = trade.entry_price - b.low
+                    unrealized_low = trade.entry_price - b.high
+                running_mfe = max(running_mfe, unrealized_high)
+                running_mae = max(running_mae, max(0, -unrealized_low))
+
+                event = ""
+                if b.ts == trade.exit_time:
+                    event = f"EXIT: {trade.exit_reason}"
+
+                # Decide whether to print this bar
+                should_print = verbose
+                if not verbose:
+                    if b in (bars_to_print or []):
+                        should_print = True
+                    elif idx < 5:
+                        should_print = True
+                    elif b.ts == trade.exit_time:
+                        should_print = True
+
+                if should_print:
+                    lines.append(
+                        f"  {b.ts.isoformat():<26} {b.open:>10.2f} {b.high:>10.2f} "
+                        f"{b.low:>10.2f} {b.close:>10.2f} {running_mfe:>+8.2f} {running_mae:>8.2f} {event}"
+                    )
+                elif idx == 5 and not verbose:
+                    lines.append(f"  {'...':<26} (use --trace-verbose for all bars)")
+
+        # Verify exit on exit bar
+        if replay_bars and trade.exit_time:
+            exit_bar_candidates = [b for b in replay_bars if b.ts == trade.exit_time]
+            if exit_bar_candidates:
+                exit_bar = exit_bar_candidates[0]
+                verify_result = resolve_bar_exit(
+                    trade, exit_bar, intrabar_policy, slippage_points,
+                )
+                if verify_result and verify_result.exit_reason == trade.exit_reason:
+                    lines.append(f"  Replay verified: yes ({trade.exit_reason})")
+                elif verify_result:
+                    lines.append(
+                        f"  Replay mismatch: recorded={trade.exit_reason}, "
+                        f"replay={verify_result.exit_reason}"
+                    )
+                else:
+                    lines.append(f"  Unable to verify exit bar: resolve_bar_exit returned None")
+            else:
+                lines.append(f"  Unable to verify: exit bar not found in replay data")
+
+    # ------------------------------------------------------------------
+    # Section 4: EXIT SUMMARY
+    # ------------------------------------------------------------------
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("EXIT SUMMARY")
+    lines.append("-" * 40)
+
+    if trade.exit_time:
+        exit_et = to_eastern_time(trade.exit_time)
+        lines.append(f"Exit time (ET):      {trade.exit_time.isoformat()} ({exit_et.strftime('%H:%M')} ET)")
+        lines.append(f"Exit price:          {trade.exit_price:.2f}")
+        lines.append(f"Exit reason:         {trade.exit_reason}")
+        lines.append(f"PnL points:          {trade.pnl_points:+.2f}")
+        lines.append(f"R-multiple:          {trade.r_multiple:+.2f}R")
+        lines.append(f"Duration:            {trade.duration_minutes} min")
+        lines.append(f"Outcome:             {trade.outcome.value}")
+        lines.append(f"Policy:              {intrabar_policy.value}")
+        lines.append(f"MFE:                 {trade.mfe:+.2f}")
+        lines.append(f"MAE:                 {trade.mae:.2f}")
+    else:
+        lines.append("  Trade still open at backtest end.")
+
     lines.append("")
     lines.append("=" * 70)
 

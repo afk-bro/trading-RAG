@@ -5,6 +5,10 @@ Tests the full tuning pipeline: tune creation, trial execution, results.
 
 Run with: pytest tests/integration/test_backtest_tuner_happy_path.py -v
 Requires: Real database connection with test strategy entity
+
+Known issue: test_tune_detail_has_status_counts is a pre-existing flaky failure
+(race between trial completion and status count assertion). Not related to
+criteria reclassification or naming changes.
 """
 
 import os

@@ -106,9 +106,6 @@ tests/fixtures/*.html
 test-results/
 playwright-report/
 
-# Feature list (generated)
-# feature_list.json
-
 # Historical data (large files from Databento, etc.)
 docs/historical_data/
 
@@ -121,3 +118,6 @@ docs/historical_data/
 # Archived images
 docs/archive/*.jpg
 docs/archive/*.png
+
+# Temp files
+tmp/

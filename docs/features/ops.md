@@ -112,7 +112,7 @@ Configuration for external alert delivery:
 
 ## Tech Debt / Follow-ups
 
-See `docs/tech-debt.md` for current items.
+See `docs-archive` branch for historical tech debt items.
 
 ### Results Persistence Follow-ups
 

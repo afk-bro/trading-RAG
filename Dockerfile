@@ -1,4 +1,14 @@
 # Trading RAG Service Dockerfile
+
+# Stage 1: Build React dashboard
+FROM node:20-slim AS dashboard-build
+WORKDIR /dashboard
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci
+COPY dashboard/ .
+RUN npm run build
+
+# Stage 2: Python application
 FROM python:3.11-slim
 
 # Set working directory
@@ -26,6 +36,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
+
+# Copy dashboard build artifacts
+COPY --from=dashboard-build /dashboard/dist ./dashboard/dist
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app

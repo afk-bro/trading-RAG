@@ -7,6 +7,10 @@ from uuid import UUID, uuid4
 import structlog
 
 from app.config import get_settings
+from app.services.backtest.engines.eval_profile import (
+    EvalAccountProfile,
+    compute_r_day,
+)
 from app.schemas import (
     TradeIntent,
     IntentAction,
@@ -68,6 +72,7 @@ class PaperBroker(BrokerAdapter):
         events_repo: TradeEventsRepository,
         equity_repo: Optional[PaperEquityRepository] = None,
         version_repo: Optional[StrategyVersionsRepository] = None,
+        eval_profiles: Optional[dict[UUID, EvalAccountProfile]] = None,
     ):
         """
         Initialize paper broker.
@@ -76,10 +81,12 @@ class PaperBroker(BrokerAdapter):
             events_repo: Trade events repository for journaling
             equity_repo: Optional equity snapshots repository for drawdown tracking
             version_repo: Optional strategy versions repository for state gating
+            eval_profiles: Optional per-workspace eval account profiles for R-native sizing
         """
         self._events_repo = events_repo
         self._equity_repo = equity_repo
         self._version_repo = version_repo
+        self._eval_profiles: dict[UUID, EvalAccountProfile] = eval_profiles or {}
         self._states: dict[UUID, PaperState] = {}  # workspace_id -> state
         self._settings = get_settings()
         self._policy_engine = PolicyEngine()
@@ -166,7 +173,7 @@ class PaperBroker(BrokerAdapter):
 
         # 4. Re-evaluate policy internally
         state = self._get_or_create_state(intent.workspace_id)
-        current_state = self._build_current_state(state, intent.workspace_id)
+        current_state = self._build_current_state(state, intent.workspace_id, intent)
         decision = self._policy_engine.evaluate(intent, current_state)
 
         if not decision.approved:
@@ -287,6 +294,12 @@ class PaperBroker(BrokerAdapter):
         # Record equity snapshot for drawdown tracking (if repo available)
         await self._record_equity_snapshot(state)
 
+        # Update peak equity for trailing drawdown tracking
+        current_equity = state.cash + sum(
+            p.quantity * p.avg_price for p in state.positions.values()
+        )
+        state.peak_equity = max(state.peak_equity, current_equity)
+
         return ExecutionResult(
             success=True,
             intent_id=intent.id,
@@ -354,7 +367,10 @@ class PaperBroker(BrokerAdapter):
             )
 
     def _build_current_state(
-        self, state: PaperState, workspace_id: UUID
+        self,
+        state: PaperState,
+        workspace_id: UUID,
+        intent: TradeIntent,
     ) -> CurrentState:
         """Build CurrentState for policy evaluation."""
         # Convert positions to PositionState format
@@ -374,6 +390,20 @@ class PaperBroker(BrokerAdapter):
                     )
                 )
 
+        # Resolve risk budget: intent metadata > eval profile > config fallback > None
+        risk_budget_dollars = intent.metadata.get("risk_budget_dollars")
+        if risk_budget_dollars is None:
+            profile = self._eval_profiles.get(workspace_id)
+            if profile is not None:
+                equity = state.cash + sum(
+                    p.quantity * p.avg_price for p in state.positions.values()
+                )
+                risk_budget_dollars = compute_r_day(
+                    profile, equity, state.peak_equity
+                )
+        if risk_budget_dollars is None:
+            risk_budget_dollars = self._settings.paper_default_risk_budget_dollars
+
         return CurrentState(
             kill_switch_active=False,
             trading_enabled=True,
@@ -381,6 +411,8 @@ class PaperBroker(BrokerAdapter):
             account_equity=state.cash
             + sum(p.quantity * p.avg_price for p in state.positions.values()),
             daily_pnl=state.realized_pnl,
+            risk_budget_dollars=risk_budget_dollars,
+            risk_multiplier=1.0,
         )
 
     def _action_to_side(self, action: IntentAction) -> OrderSide:
@@ -557,10 +589,12 @@ class PaperBroker(BrokerAdapter):
     def _get_or_create_state(self, workspace_id: UUID) -> PaperState:
         """Get or create workspace state."""
         if workspace_id not in self._states:
+            starting = self._settings.paper_starting_equity
             self._states[workspace_id] = PaperState(
                 workspace_id=workspace_id,
-                starting_equity=self._settings.paper_starting_equity,
-                cash=self._settings.paper_starting_equity,
+                starting_equity=starting,
+                cash=starting,
+                peak_equity=starting,
             )
         return self._states[workspace_id]
 

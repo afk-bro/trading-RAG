@@ -60,6 +60,22 @@ _static_dir = Path(__file__).parent / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
+# Mount React dashboard (if built)
+_dashboard_dist = Path(__file__).parent.parent / "dashboard" / "dist"
+if _dashboard_dist.exists():
+    app.mount(
+        "/dashboard/assets",
+        StaticFiles(directory=str(_dashboard_dist / "assets")),
+        name="dashboard-assets",
+    )
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    @app.get("/dashboard/{rest_of_path:path}", response_class=HTMLResponse)
+    async def dashboard_spa(rest_of_path: str = ""):
+        """Serve React SPA for all dashboard routes."""
+        return HTMLResponse(content=(_dashboard_dist / "index.html").read_text())
+
+
 # Setup templates for landing page
 _templates_dir = Path(__file__).parent / "admin" / "templates"
 _templates = Jinja2Templates(directory=str(_templates_dir))

@@ -44,6 +44,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+from app.utils.instruments import data_root
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -422,8 +424,8 @@ class DatabentoFetcher:
             symbol: Root symbol (e.g., "NQ", "ES")
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
-            htf_interval: Higher timeframe interval (15m, 1h)
-            ltf_interval: Lower timeframe interval (1m, 5m)
+            htf_interval: Higher timeframe interval (5m, 15m, 1h, 4h)
+            ltf_interval: Lower timeframe interval (1m, 5m, 15m)
             use_cache: Whether to use local cache
 
         Returns:
@@ -501,7 +503,7 @@ class DatabentoFetcher:
 
         Args:
             bars: List of OHLCVBar objects (1-minute)
-            interval: Target interval (1m, 5m, 15m, 1h)
+            interval: Target interval (1m, 5m, 15m, 1h, 4h)
 
         Returns:
             Resampled list of OHLCVBar objects
@@ -520,6 +522,10 @@ class DatabentoFetcher:
             minutes = 15
         elif interval == "1h":
             minutes = 60
+        elif interval == "4h":
+            minutes = 240
+        elif interval in ("1d", "1w"):
+            return self._resample_bars_calendar(bars, interval)
         else:
             raise ValueError(f"Unsupported interval: {interval}")
 
@@ -552,6 +558,25 @@ class DatabentoFetcher:
             resampled.append(self._aggregate_bars(current_group))
 
         return resampled
+
+    def _resample_bars_calendar(self, bars: list, interval: str) -> list:
+        """Resample 1m bars to daily or weekly using calendar boundaries.
+
+        Daily: group by date.
+        Weekly: group by ISO week (Mon–Sun).
+        """
+        from collections import OrderedDict
+
+        groups: OrderedDict = OrderedDict()
+        for bar in bars:
+            if interval == "1d":
+                key = bar.ts.date()
+            else:  # 1w
+                iso = bar.ts.isocalendar()
+                key = (iso[0], iso[1])  # (year, week)
+            groups.setdefault(key, []).append(bar)
+
+        return [self._aggregate_bars(g) for g in groups.values()]
 
     def _aggregate_bars(self, bars: list):
         """Aggregate multiple bars into one OHLCV bar."""
@@ -590,8 +615,8 @@ class DatabentoFetcher:
             symbol: Root symbol to filter (e.g., "NQ", "ES")
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
-            htf_interval: Higher timeframe interval (15m, 1h)
-            ltf_interval: Lower timeframe interval (1m, 5m)
+            htf_interval: Higher timeframe interval (5m, 15m, 1h, 4h)
+            ltf_interval: Lower timeframe interval (1m, 5m, 15m)
             front_month_only: If True, only load front-month contracts (handles rolls)
 
         Returns:
@@ -612,10 +637,13 @@ class DatabentoFetcher:
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
 
+        # Resolve micro → full-size root for data loading (MNQ→NQ, MES→ES)
+        csv_root = data_root(symbol)
+
         # Build front-month contract mapping if needed
         front_month_contracts: dict[str, str] = {}  # date_str -> contract symbol
         if front_month_only:
-            contracts = get_continuous_symbols(symbol, start_dt, end_dt)
+            contracts = get_continuous_symbols(csv_root, start_dt, end_dt)
             for contract_symbol, period_start, period_end in contracts:
                 # Map each date in the period to this contract
                 current = period_start
@@ -667,7 +695,7 @@ class DatabentoFetcher:
                     continue
 
                 # Check if symbol starts with our root
-                if not sym.startswith(symbol):
+                if not sym.startswith(csv_root):
                     continue
 
                 # Parse timestamp
@@ -734,6 +762,167 @@ class DatabentoFetcher:
         )
 
         return htf_bars, ltf_bars
+
+    def fetch_multi_tf(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        use_cache: bool = True,
+    ):
+        """
+        Fetch futures data and resample to all timeframes for multi-TF backtesting.
+
+        Fetches 1m bars and resamples to 4h, 1h, 15m, 5m, returning a BarBundle
+        alongside the raw 1m bars.
+
+        Args:
+            symbol: Root symbol (e.g., "NQ", "ES")
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            use_cache: Whether to use local cache
+
+        Returns:
+            BarBundle with all timeframes populated
+        """
+        from app.services.strategy.models import OHLCVBar
+        from app.services.backtest.engines.unicorn_runner import BarBundle
+
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        contracts = get_continuous_symbols(symbol, start_dt, end_dt)
+
+        all_1m_bars = []
+        for contract_symbol, period_start, period_end in contracts:
+            bars = self.fetch_ohlcv(
+                symbol=contract_symbol,
+                start_date=period_start.strftime("%Y-%m-%d"),
+                end_date=period_end.strftime("%Y-%m-%d"),
+                schema="ohlcv-1m",
+                use_cache=use_cache,
+            )
+            all_1m_bars.extend(bars)
+
+        if not all_1m_bars:
+            raise ValueError(f"No data fetched for {symbol} {start_date} to {end_date}")
+
+        ohlcv_bars = []
+        for bar in all_1m_bars:
+            ts = datetime.fromisoformat(bar["ts"].replace("Z", "+00:00"))
+            ohlcv_bars.append(OHLCVBar(
+                ts=ts, open=bar["open"], high=bar["high"],
+                low=bar["low"], close=bar["close"], volume=bar["volume"],
+            ))
+        ohlcv_bars.sort(key=lambda b: b.ts)
+
+        return self._resample_to_bundle(ohlcv_bars)
+
+    def load_multi_tf_from_csv(
+        self,
+        csv_path: str | Path,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        front_month_only: bool = True,
+    ):
+        """
+        Load futures data from a local Databento CSV and resample to all timeframes.
+
+        Args:
+            csv_path: Path to the CSV file
+            symbol: Root symbol to filter (e.g., "NQ", "ES")
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            front_month_only: If True, only load front-month contracts
+
+        Returns:
+            BarBundle with all timeframes populated
+        """
+        from app.services.strategy.models import OHLCVBar
+        from app.services.backtest.engines.unicorn_runner import BarBundle
+
+        csv_path = Path(csv_path)
+        if csv_path.suffix == ".zst":
+            csv_path = self._decompress_zst(csv_path)
+
+        if not csv_path.exists():
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        # Resolve micro → full-size root for data loading (MNQ→NQ, MES→ES)
+        csv_root = data_root(symbol)
+
+        front_month_contracts: dict[str, str] = {}
+        if front_month_only:
+            contracts = get_continuous_symbols(csv_root, start_dt, end_dt)
+            for contract_symbol, period_start, period_end in contracts:
+                current = period_start
+                while current <= period_end:
+                    front_month_contracts[current.strftime("%Y-%m-%d")] = contract_symbol
+                    current += timedelta(days=1)
+
+        ohlcv_bars = []
+        with open(csv_path, "r") as f:
+            header = f.readline().strip().split(",")
+            col_idx = {name: i for i, name in enumerate(header)}
+            required = ["ts_event", "open", "high", "low", "close", "volume", "symbol"]
+            missing = [c for c in required if c not in col_idx]
+            if missing:
+                raise ValueError(f"CSV missing required columns: {missing}")
+
+            for line in f:
+                parts = line.strip().split(",")
+                sym = parts[col_idx["symbol"]]
+                if "-" in sym or not sym.startswith(csv_root):
+                    continue
+                ts_str = parts[col_idx["ts_event"]]
+                try:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if ts.date() < start_dt.date() or ts.date() > end_dt.date():
+                    continue
+                if front_month_only:
+                    date_str = ts.strftime("%Y-%m-%d")
+                    expected_contract = front_month_contracts.get(date_str)
+                    if expected_contract and sym != expected_contract:
+                        continue
+                try:
+                    ohlcv_bars.append(OHLCVBar(
+                        ts=ts,
+                        open=float(parts[col_idx["open"]]),
+                        high=float(parts[col_idx["high"]]),
+                        low=float(parts[col_idx["low"]]),
+                        close=float(parts[col_idx["close"]]),
+                        volume=float(parts[col_idx["volume"]]),
+                    ))
+                except (ValueError, IndexError):
+                    continue
+
+        if not ohlcv_bars:
+            raise ValueError(
+                f"No data found for {symbol} between {start_date} and {end_date}"
+            )
+
+        ohlcv_bars.sort(key=lambda b: b.ts)
+        return self._resample_to_bundle(ohlcv_bars)
+
+    def _resample_to_bundle(self, m1_bars: list):
+        """Resample 1m bars into a BarBundle with all timeframes."""
+        from app.services.backtest.engines.unicorn_runner import BarBundle
+
+        return BarBundle(
+            h4=self._resample_bars(m1_bars, "4h"),
+            h1=self._resample_bars(m1_bars, "1h"),
+            m15=self._resample_bars(m1_bars, "15m"),
+            m5=self._resample_bars(m1_bars, "5m"),
+            m1=m1_bars,
+            daily=self._resample_bars(m1_bars, "1d"),
+            weekly=self._resample_bars(m1_bars, "1w"),
+        )
 
     def _decompress_zst(self, zst_path: Path) -> Path:
         """Decompress a .zst file if the uncompressed version doesn't exist."""

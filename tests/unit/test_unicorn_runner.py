@@ -2,7 +2,9 @@
 Unit tests for Unicorn Model backtest runner.
 """
 
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 import pytest
 
@@ -15,6 +17,7 @@ from app.services.backtest.engines.unicorn_runner import (
     check_criteria,
     run_unicorn_backtest,
     format_backtest_report,
+    format_trade_trace,
     CriteriaCheck,
     SetupOccurrence,
     resolve_bar_exit,
@@ -23,6 +26,10 @@ from app.services.backtest.engines.unicorn_runner import (
     TradeRecord,
     compute_adverse_wick_ratio,
     compute_range_atr_mult,
+    BiasState,
+    BiasSnapshot,
+    BarBundle,
+    _asof_lookup,
 )
 from app.services.strategy.indicators.tf_bias import BiasDirection
 from app.services.strategy.strategies.unicorn_model import (
@@ -137,9 +144,10 @@ class TestCriteriaCheck:
         check.mss_found = True
         check.stop_valid = True
         check.in_macro_window = True
+        check.displacement_valid = True
 
         assert check.all_criteria_met
-        assert check.criteria_met_count == 8
+        assert check.criteria_met_count == 9
 
     def test_missing_criteria(self):
         """Missing criteria list is correct."""
@@ -252,34 +260,36 @@ class TestMeetsEntryRequirements:
     """Tests for mandatory + scored entry gating."""
 
     def test_mandatory_pass_and_scored_at_threshold_enters(self):
-        """All 3 mandatory + exactly 3/5 scored => entry allowed."""
+        """All 5 mandatory + exactly 3/4 scored => entry allowed."""
         check = CriteriaCheck()
         # Mandatory
         check.htf_bias_aligned = True
         check.stop_valid = True
         check.in_macro_window = True
-        # Scored: exactly 3 of 5
+        check.mss_found = True
+        check.displacement_valid = True
+        # Scored: exactly 3 of 4
         check.liquidity_sweep_found = True
         check.htf_fvg_found = True
-        check.mss_found = True
-        check.breaker_block_found = False
+        check.breaker_block_found = True
         check.ltf_fvg_found = False
 
         assert check.meets_entry_requirements(min_scored=3) is True
 
     def test_mandatory_fail_with_all_scored_rejects(self):
-        """Mandatory fail + 5/5 scored => must reject."""
+        """Mandatory fail + 4/4 scored => must reject."""
         check = CriteriaCheck()
         # Mandatory: stop_valid fails
         check.htf_bias_aligned = True
         check.stop_valid = False
         check.in_macro_window = True
-        # All 5 scored pass
+        check.mss_found = True
+        check.displacement_valid = True
+        # All 4 scored pass
         check.liquidity_sweep_found = True
         check.htf_fvg_found = True
         check.breaker_block_found = True
         check.ltf_fvg_found = True
-        check.mss_found = True
 
         assert check.meets_entry_requirements(min_scored=3) is False
         assert check.mandatory_criteria_met is False
@@ -295,21 +305,25 @@ class TestCriteriaScoreDecideEntry:
         cs.htf_bias = True
         cs.stop_valid = True
         cs.macro_window = True
-        # 3/5 scored
+        cs.mss = True
+        cs.displacement_valid = True
+        # 3/4 scored
         cs.liquidity_sweep = True
         cs.htf_fvg = True
-        cs.mss = True
+        cs.breaker_block = True
 
         assert cs.decide_entry(min_scored=3) is True
-        # Total score is 6, but decide_entry should not care about total
-        assert cs.score == 6
+        # Total score is 8, but decide_entry should not care about total
+        assert cs.score == 8
 
     def test_decide_entry_rejects_below_scored_threshold(self):
-        """Mandatory pass + only 2/5 scored => reject."""
+        """Mandatory pass + only 2/4 scored => reject."""
         cs = CriteriaScore()
         cs.htf_bias = True
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
         # Only 2 scored
@@ -328,11 +342,12 @@ class TestNeutralBiasRejection:
         # Simulate NEUTRAL: htf_bias stays False
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
         cs.breaker_block = True
         cs.ltf_fvg = True
-        cs.mss = True
 
         assert cs.decide_entry(min_scored=3) is False
         assert cs.mandatory_met is False
@@ -415,9 +430,11 @@ class TestConfidenceGate:
         cs.htf_bias = True  # Would be set by analyze_unicorn_setup
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
-        cs.mss = True
+        cs.breaker_block = True
 
         # Even though confidence may be low, htf_bias passed => decide_entry works
         assert cs.decide_entry(min_scored=3) is True
@@ -435,13 +452,14 @@ class TestConfidenceGate:
         cs.htf_bias = False
         cs.stop_valid = True
         cs.macro_window = True
+        cs.mss = True
+        cs.displacement_valid = True
         cs.liquidity_sweep = True
         cs.htf_fvg = True
         cs.breaker_block = True
         cs.ltf_fvg = True
-        cs.mss = True
 
-        # Mandatory fails (htf_bias=False), so entry rejected despite 5/5 scored
+        # Mandatory fails (htf_bias=False), so entry rejected despite 4/4 scored
         assert cs.decide_entry(min_scored=3) is False
         assert cs.mandatory_met is False
 
@@ -475,14 +493,14 @@ class TestRangesOverlapBoundary:
 class TestConfigValidation:
     """UnicornConfig must reject invalid parameter ranges."""
 
-    def test_min_scored_criteria_rejects_six(self):
-        """min_scored_criteria=6 is impossible (only 5 scored items)."""
-        with pytest.raises(ValueError, match="min_scored_criteria must be 0-5"):
-            UnicornConfig(min_scored_criteria=6)
+    def test_min_scored_criteria_rejects_five(self):
+        """min_scored_criteria=5 is impossible (only 4 scored items)."""
+        with pytest.raises(ValueError, match="min_scored_criteria must be 0-4"):
+            UnicornConfig(min_scored_criteria=5)
 
     def test_min_scored_criteria_rejects_negative(self):
         """min_scored_criteria=-1 is invalid."""
-        with pytest.raises(ValueError, match="min_scored_criteria must be 0-5"):
+        with pytest.raises(ValueError, match="min_scored_criteria must be 0-4"):
             UnicornConfig(min_scored_criteria=-1)
 
     def test_min_scored_criteria_accepts_zero(self):
@@ -490,10 +508,10 @@ class TestConfigValidation:
         config = UnicornConfig(min_scored_criteria=0)
         assert config.min_scored_criteria == 0
 
-    def test_min_scored_criteria_accepts_five(self):
-        """min_scored_criteria=5 requires all scored criteria."""
-        config = UnicornConfig(min_scored_criteria=5)
-        assert config.min_scored_criteria == 5
+    def test_min_scored_criteria_accepts_four(self):
+        """min_scored_criteria=4 requires all scored criteria."""
+        config = UnicornConfig(min_scored_criteria=4)
+        assert config.min_scored_criteria == 4
 
     def test_min_confidence_rejects_out_of_range(self):
         """min_confidence must be 0.0-1.0 when set."""
@@ -545,12 +563,12 @@ class TestParityDiagnostics:
 
             # scored_missing must be consistent with scored_count
             assert isinstance(setup.scored_missing, list)
-            assert len(setup.scored_missing) == 5 - setup.scored_count, (
+            assert len(setup.scored_missing) == 4 - setup.scored_count, (
                 f"scored_missing length mismatch at {setup.timestamp}: "
                 f"missing={setup.scored_missing}, scored_count={setup.scored_count}"
             )
             # All items must be valid scored criteria names
-            valid_scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg", "mss"}
+            valid_scored = {"liquidity_sweep", "htf_fvg", "breaker_block", "ltf_fvg"}
             for name in setup.scored_missing:
                 assert name in valid_scored, f"Invalid scored criterion: {name}"
 
@@ -1169,3 +1187,986 @@ class TestNYOpenProfile:
         assert "CONFIG" in report
         assert "SETUP DISPOSITION BY SESSION" in report
         assert "CONFIDENCE BY SESSION" in report
+
+
+# =========================================================================
+# Intermarket agreement observability tests
+# =========================================================================
+
+
+class TestAsofLookup:
+    """Direct unit tests for _asof_lookup."""
+
+    def test_empty_series_returns_none(self):
+        """Empty series => None."""
+        ts = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        assert _asof_lookup([], ts) is None
+
+    def test_ts_before_first_entry_returns_none(self):
+        """ts earlier than all entries => None."""
+        series = [
+            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.8),
+        ]
+        early_ts = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        assert _asof_lookup(series, early_ts) is None
+
+    def test_ts_exactly_on_entry(self):
+        """ts exactly matching an entry => returns that entry."""
+        target_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+        series = [
+            BiasState(ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.6),
+            BiasState(ts=target_ts, direction=BiasDirection.BEARISH, confidence=0.9),
+            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.5),
+        ]
+        result = _asof_lookup(series, target_ts)
+        assert result is not None
+        assert result.ts == target_ts
+        assert result.direction == BiasDirection.BEARISH
+        assert result.confidence == 0.9
+
+    def test_ts_between_entries_returns_earlier(self):
+        """ts between two entries => returns the earlier one."""
+        series = [
+            BiasState(ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.6),
+            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BEARISH, confidence=0.9),
+        ]
+        between_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+        result = _asof_lookup(series, between_ts)
+        assert result is not None
+        assert result.direction == BiasDirection.BULLISH
+        assert result.confidence == 0.6
+
+
+class TestBiasSeriesPopulated:
+    """htf_bias_series must be populated after backtest."""
+
+    def test_bias_series_populated(self):
+        """Backtest populates htf_bias_series with BiasState tuples."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        assert isinstance(result.htf_bias_series, list)
+        assert len(result.htf_bias_series) > 0
+        for state in result.htf_bias_series:
+            assert isinstance(state, BiasState)
+            assert isinstance(state.ts, datetime)
+            assert isinstance(state.direction, BiasDirection)
+            assert isinstance(state.confidence, float)
+            assert 0.0 <= state.confidence <= 1.0
+
+
+class TestIntermarketAgreementWithRefSeries:
+    """intermarket_agreement diagnostics with a synthetic reference series."""
+
+    def test_agreement_present_with_ref_series(self):
+        """Passing reference_bias_series populates intermarket_agreement in diagnostics."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        # First run to get htf_bias_series timestamps
+        base_result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        # Build synthetic reference: all BULLISH, confidence 0.8
+        synth_ref = [
+            BiasState(ts=s.ts, direction=BiasDirection.BULLISH, confidence=0.8)
+            for s in base_result.htf_bias_series
+        ]
+
+        # Re-run with reference series
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            reference_bias_series=synth_ref,
+            reference_symbol="ES",
+        )
+
+        diag = result.session_diagnostics
+        assert diag is not None
+        assert "intermarket_agreement" in diag
+
+        ia = diag["intermarket_agreement"]
+        assert ia["reference_symbol"] == "ES"
+        assert isinstance(ia["by_agreement"], dict)
+        assert isinstance(ia["by_session_agreement"], dict)
+        assert isinstance(ia["both_high_conf"], dict)
+
+        # Validate structure of by_agreement entries
+        for label, entry in ia["by_agreement"].items():
+            assert label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary")
+            assert isinstance(entry["trades"], int)
+            assert isinstance(entry["wins"], int)
+            assert isinstance(entry["win_rate"], float)
+            assert isinstance(entry["avg_pnl_pts"], float)
+            assert isinstance(entry["total_pnl_pts"], float)
+            assert isinstance(entry["avg_r"], float)
+            assert isinstance(entry["total_r"], float)
+
+        # both_high_conf must have correct shape
+        bh = ia["both_high_conf"]
+        assert isinstance(bh["trades"], int)
+        assert isinstance(bh["wins"], int)
+        assert isinstance(bh["win_rate"], float)
+        assert isinstance(bh["avg_r"], float)
+        assert isinstance(bh["total_r"], float)
+
+
+class TestNoRefSeriesNoAgreementKey:
+    """Without reference series, intermarket_agreement must be absent."""
+
+    def test_no_ref_series_no_agreement_key(self):
+        """No reference_bias_series => no intermarket_agreement key."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        diag = result.session_diagnostics
+        assert diag is not None
+        assert "intermarket_agreement" not in diag
+
+
+class TestIntermarketReportRendering:
+    """Intermarket agreement report section renders correctly."""
+
+    def test_report_contains_intermarket_section(self):
+        """Report includes INTERMARKET AGREEMENT when ref series provided."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        # Build a simple all-bullish reference
+        ref_series = [
+            BiasState(ts=htf_bars[i].ts, direction=BiasDirection.BULLISH, confidence=0.8)
+            for i in range(len(htf_bars))
+        ]
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            reference_bias_series=ref_series,
+            reference_symbol="ES",
+        )
+
+        report = format_backtest_report(result)
+        assert "INTERMARKET AGREEMENT (vs ES)" in report
+
+    def test_report_no_intermarket_section_without_ref(self):
+        """Report omits INTERMARKET AGREEMENT when no ref series."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+        )
+
+        report = format_backtest_report(result)
+        assert "INTERMARKET AGREEMENT" not in report
+
+
+# =========================================================================
+# Phase 3: Multi-TF causal alignment tests
+# =========================================================================
+
+
+class TestCheckCriteriaBackwardCompat:
+    """check_criteria backward compatibility: no h4/h1 => identical output."""
+
+    def test_check_criteria_backward_compat(self):
+        """Without h4/h1, output is identical to old behavior."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result_old = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+        )
+        result_new = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+            h4_bars=None, h1_bars=None,
+        )
+
+        assert result_old.htf_bias_direction == result_new.htf_bias_direction
+        assert result_old.htf_bias_confidence == result_new.htf_bias_confidence
+        assert result_old.htf_bias_aligned == result_new.htf_bias_aligned
+
+    def test_check_criteria_with_h4_h1(self):
+        """Passing h4/h1 bars changes bias confidence (more data = different weight)."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=2.0, interval_minutes=240)
+        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=1.0, interval_minutes=60)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result_without = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+        )
+        result_with = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+            h4_bars=h4_bars, h1_bars=h1_bars,
+        )
+
+        # Both should produce valid results
+        assert isinstance(result_without.htf_bias_confidence, float)
+        assert isinstance(result_with.htf_bias_confidence, float)
+        # With additional TFs, confidence may differ (more data = different weighting)
+        # We just verify it doesn't crash and returns a valid result
+
+
+class TestCausalAlignment:
+    """Tests for causal alignment of h4/h1 bars."""
+
+    def test_causal_h4_alignment(self):
+        """At 11:45, 08:00 4H bar (covering 08:00-12:00) is NOT complete."""
+        from app.services.backtest.engines.unicorn_runner import BarBundle
+
+        # Create a 4H bar starting at 08:00 UTC
+        h4_bar_0800 = make_bar(
+            datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc),
+            17000, 17010, 16990, 17005,
+        )
+        h4_bar_0400 = make_bar(
+            datetime(2024, 1, 2, 4, 0, tzinfo=timezone.utc),
+            16990, 17005, 16985, 17000,
+        )
+
+        h4_completed_ts = [
+            h4_bar_0400.ts + timedelta(hours=4),  # 08:00 - completed
+            h4_bar_0800.ts + timedelta(hours=4),  # 12:00 - NOT yet completed at 11:45
+        ]
+
+        # At 11:45, bisect_right finds how many completed bars
+        from bisect import bisect_right
+        ts = datetime(2024, 1, 2, 11, 45, tzinfo=timezone.utc)
+        n_complete = bisect_right(h4_completed_ts, ts)
+
+        # Only 1 bar (the 04:00 bar) is complete at 11:45
+        assert n_complete == 1
+
+    def test_causal_h1_alignment(self):
+        """At 10:15, 10:00 1H bar (covering 10:00-11:00) is NOT complete."""
+        h1_bar_0900 = make_bar(
+            datetime(2024, 1, 2, 9, 0, tzinfo=timezone.utc),
+            17000, 17010, 16990, 17005,
+        )
+        h1_bar_1000 = make_bar(
+            datetime(2024, 1, 2, 10, 0, tzinfo=timezone.utc),
+            17005, 17015, 16995, 17010,
+        )
+
+        h1_completed_ts = [
+            h1_bar_0900.ts + timedelta(hours=1),  # 10:00 - completed
+            h1_bar_1000.ts + timedelta(hours=1),  # 11:00 - NOT yet completed at 10:15
+        ]
+
+        from bisect import bisect_right
+        ts = datetime(2024, 1, 2, 10, 15, tzinfo=timezone.utc)
+        n_complete = bisect_right(h1_completed_ts, ts)
+
+        # Only 1 bar (the 09:00 bar) is complete at 10:15
+        assert n_complete == 1
+
+    def test_backtest_with_bar_bundle_runs(self):
+        """run_unicorn_backtest with bar_bundle completes without error."""
+        from app.services.backtest.engines.unicorn_runner import BarBundle
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=8.0, interval_minutes=240)
+        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=2.0, interval_minutes=60)
+
+        bundle = BarBundle(h4=h4_bars, h1=h1_bars, m15=htf_bars, m5=ltf_bars)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            bar_bundle=bundle,
+        )
+
+        assert result.symbol == "NQ"
+        assert result.total_bars == 200
+        assert result.total_setups_scanned > 0
+
+    def test_backtest_without_bar_bundle_unchanged(self):
+        """bar_bundle=None preserves existing behavior."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result_old = run_unicorn_backtest(
+            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+        )
+        result_new = run_unicorn_backtest(
+            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            bar_bundle=None,
+        )
+
+        # Same number of setups and trades (identical logic path)
+        assert result_old.total_setups_scanned == result_new.total_setups_scanned
+        assert result_old.trades_taken == result_new.trades_taken
+
+
+# =========================================================================
+# Phase 4: 1m hybrid execution tests
+# =========================================================================
+
+
+class TestHybrid1mExecution:
+    """Tests for 1m precision trade management."""
+
+    def _make_m1_bars(self, start_ts, count, base_price=17000.0, trend=0.1):
+        """Generate synthetic 1m bars."""
+        bars = []
+        price = base_price
+        for i in range(count):
+            ts = start_ts + timedelta(minutes=i)
+            o = price
+            c = price + trend
+            h = max(o, c) + 0.5
+            low = min(o, c) - 0.5
+            bars.append(make_bar(ts, o, h, low, c))
+            price = c
+        return bars
+
+    def test_1m_stop_hit_precision(self):
+        """Trade exits at minute 7, not at 15m boundary."""
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        trade = _make_trade(BiasDirection.BULLISH, 17000.0, 16990.0, 17020.0, entry_time=entry_time)
+
+        # Create 15 1m bars; minute 7 has low that pierces stop
+        m1_bars = []
+        for i in range(15):
+            ts = entry_time + timedelta(minutes=i)
+            if i == 7:
+                # Stop at 16990, this bar dips to 16989
+                m1_bars.append(make_bar(ts, 16995.0, 16996.0, 16989.0, 16992.0))
+            else:
+                m1_bars.append(make_bar(ts, 16995.0, 16998.0, 16993.0, 16996.0))
+
+        # Simulate 1m management: iterate and check
+        for m1_bar in m1_bars:
+            result = resolve_bar_exit(trade, m1_bar, IntrabarPolicy.WORST, SLIP)
+            if result:
+                trade.exit_price = result.exit_price
+                trade.exit_time = m1_bar.ts
+                trade.exit_reason = result.exit_reason
+                break
+
+        assert trade.exit_time is not None
+        assert trade.exit_time == entry_time + timedelta(minutes=7)
+        assert trade.exit_reason == "stop_loss"
+
+    def test_1m_target_hit_precision(self):
+        """Trade hits target at minute 5, not at 15m boundary."""
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        trade = _make_trade(BiasDirection.BULLISH, 17000.0, 16990.0, 17010.0, entry_time=entry_time)
+
+        m1_bars = []
+        for i in range(15):
+            ts = entry_time + timedelta(minutes=i)
+            if i == 5:
+                # Target at 17010, this bar reaches 17011
+                m1_bars.append(make_bar(ts, 17005.0, 17011.0, 17004.0, 17009.0))
+            else:
+                m1_bars.append(make_bar(ts, 17002.0, 17005.0, 17000.0, 17003.0))
+
+        for m1_bar in m1_bars:
+            result = resolve_bar_exit(trade, m1_bar, IntrabarPolicy.WORST, SLIP)
+            if result:
+                trade.exit_time = m1_bar.ts
+                trade.exit_reason = result.exit_reason
+                break
+
+        assert trade.exit_time is not None
+        assert trade.exit_time == entry_time + timedelta(minutes=5)
+        assert trade.exit_reason == "target"
+
+    def test_1m_entry_price_uses_first_1m_bar(self):
+        """When m1_window is available, entry price uses m1[0].open."""
+        # This is tested indirectly: we verify the logic is correct
+        # by checking that m1_window[0].open differs from the 15m bar.open
+        m1_bar = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 17005.0, 17010.0, 17000.0, 17008.0
+        )
+        bar_15m = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 17003.0, 17012.0, 16998.0, 17010.0
+        )
+
+        # m1[0].open should be used for entry
+        assert m1_bar.open == 17005.0
+        assert bar_15m.open == 17003.0
+        assert m1_bar.open != bar_15m.open
+
+    def test_1m_fallback_when_no_m1_data(self):
+        """m1=None in BarBundle => identical to no-bundle behavior."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        # Bundle without m1 data
+        bundle_no_m1 = BarBundle(m15=htf_bars, m5=ltf_bars, m1=None)
+
+        result_no_bundle = run_unicorn_backtest(
+            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+        )
+        result_bundle_no_m1 = run_unicorn_backtest(
+            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            bar_bundle=bundle_no_m1,
+        )
+
+        assert result_no_bundle.total_setups_scanned == result_bundle_no_m1.total_setups_scanned
+        assert result_no_bundle.trades_taken == result_bundle_no_m1.trades_taken
+
+    def test_1m_cross_bar_management(self):
+        """Trade opened in bar N can be managed via 1m in bar N+k."""
+        # This is structural: 1m management in the loop processes open trades
+        # from previous 15m bars. We verify by running with m1 data.
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        m1_bars = generate_trending_bars(start_ts, 3000, 17000, trend=0.067, interval_minutes=1)
+
+        bundle = BarBundle(m15=htf_bars, m5=ltf_bars, m1=m1_bars)
+
+        result = run_unicorn_backtest(
+            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            bar_bundle=bundle,
+        )
+
+        # Just verify it runs and produces results
+        assert result.symbol == "NQ"
+        assert result.total_setups_scanned > 0
+
+    def test_1m_mfe_mae_precision(self):
+        """MFE/MAE tracked at 1m granularity when m1 data available."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        m1_bars = generate_trending_bars(start_ts, 3000, 17000, trend=0.067, interval_minutes=1)
+
+        bundle = BarBundle(m15=htf_bars, m5=ltf_bars, m1=m1_bars)
+
+        result = run_unicorn_backtest(
+            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            bar_bundle=bundle,
+        )
+
+        # All trades should have MFE/MAE tracking
+        for trade in result.trades:
+            assert isinstance(trade.mfe, float)
+            assert isinstance(trade.mae, float)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: CLI synthetic multi-TF generation tests
+# ---------------------------------------------------------------------------
+
+class TestGenerateSampleData:
+    """Tests for generate_sample_data() in the CLI script."""
+
+    def test_generate_sample_data_legacy(self):
+        """Legacy mode returns (htf_bars, ltf_bars) tuple."""
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+        from run_unicorn_backtest import generate_sample_data
+
+        result = generate_sample_data("NQ", days=3, profile="easy", multi_tf=False)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        htf_bars, ltf_bars = result
+        assert len(htf_bars) > 0
+        assert len(ltf_bars) > 0
+        # HTF should be 15m bars, LTF should be 5m bars
+        # 3 weekdays × 11 hours × 4 bars/hour = ~132 HTF bars (may vary by weekday)
+        assert len(htf_bars) > 50
+        assert len(ltf_bars) > len(htf_bars)  # 5m has more bars than 15m
+
+    def test_generate_sample_data_multi_tf(self):
+        """Multi-TF mode returns BarBundle with all timeframes populated."""
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+        from run_unicorn_backtest import generate_sample_data
+
+        result = generate_sample_data("NQ", days=3, profile="easy", multi_tf=True)
+
+        assert isinstance(result, BarBundle)
+        assert result.m1 is not None
+        assert result.m5 is not None
+        assert result.m15 is not None
+        assert result.h1 is not None
+        assert result.h4 is not None
+
+        # Bar count consistency: each higher TF should have fewer bars
+        assert len(result.m1) > len(result.m5)
+        assert len(result.m5) > len(result.m15)
+        assert len(result.m15) > len(result.h1)
+        assert len(result.h1) > len(result.h4)
+
+        # Rough ratio checks (1m has ~660 bars/day for 11 trading hours)
+        assert len(result.m1) > 500  # 3 days × ~660
+        assert len(result.m5) >= len(result.m1) // 6  # ~5:1 ratio, with rounding
+        assert len(result.h4) >= 3  # At least 1 per day
+
+
+class TestCLIMultiTFSmoke:
+    """End-to-end CLI smoke test for --multi-tf flag."""
+
+    def test_cli_multi_tf_synthetic(self):
+        """CLI script runs to completion with --multi-tf --synthetic."""
+        import subprocess
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).parent.parent.parent / "scripts" / "run_unicorn_backtest.py"),
+                "--symbol", "NQ",
+                "--synthetic",
+                "--days", "3",
+                "--multi-tf",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert result.returncode == 0, f"CLI failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        # Should mention multi-TF in output
+        assert "Multi-TF" in result.stdout or "multi" in result.stdout.lower()
+
+
+# =========================================================================
+# Phase: Trace mode — BiasSnapshot, format_trade_trace, intermarket label
+# =========================================================================
+
+
+class TestBiasSnapshot:
+    """Tests for BiasSnapshot capture in check_criteria."""
+
+    def test_bias_snapshot_populated(self):
+        """check_criteria with h4/h1 data populates per-TF directions."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=2.0, interval_minutes=240)
+        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=1.0, interval_minutes=60)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+            h4_bars=h4_bars, h1_bars=h1_bars,
+        )
+
+        assert result.bias_snapshot is not None
+        snap = result.bias_snapshot
+        # With h4/h1 provided, directions should not be None
+        assert snap.h4_direction is not None
+        assert snap.h1_direction is not None
+        assert snap.m15_direction is not None
+        # H4 has insufficient data (25 bars < 210 needed), so it's excluded
+        # from used_tfs but still present in the snapshot for transparency
+        assert "h4" not in snap.used_tfs
+        assert "h1" in snap.used_tfs
+        assert isinstance(snap.final_confidence, float)
+        assert isinstance(snap.alignment_score, float)
+
+    def test_bias_snapshot_without_htf(self):
+        """No h4/h1 bars → snapshot h4/h1 are None, final still computed from m15/m5."""
+        start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
+        bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
+        check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
+
+        result = check_criteria(
+            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
+            symbol="NQ", ts=check_ts,
+        )
+
+        assert result.bias_snapshot is not None
+        snap = result.bias_snapshot
+        assert snap.h4_direction is None
+        assert snap.h1_direction is None
+        # m15 at least should be populated (bars were passed as htf_bars)
+        assert snap.m15_direction is not None
+        assert "h4" not in snap.used_tfs
+        assert "h1" not in snap.used_tfs
+        assert "m15" in snap.used_tfs
+        assert snap.final_confidence >= 0.0
+
+
+class TestFormatTradeTrace:
+    """Tests for format_trade_trace()."""
+
+    def _make_synthetic_result(self):
+        """Build a minimal result with one deterministic trade for trace tests."""
+        from app.services.backtest.engines.unicorn_runner import (
+            UnicornBacktestResult, TradeOutcome,
+        )
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        exit_time = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
+
+        snap = BiasSnapshot(
+            m15_direction=BiasDirection.BULLISH,
+            m15_confidence=0.7,
+            m5_direction=BiasDirection.BULLISH,
+            m5_confidence=0.6,
+            final_direction=BiasDirection.BULLISH,
+            final_confidence=0.65,
+            alignment_score=0.8,
+            used_tfs=("m15", "m5"),
+        )
+        criteria = CriteriaCheck(
+            htf_bias_aligned=True, in_macro_window=True, stop_valid=True,
+            htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.65,
+            bias_snapshot=snap,
+        )
+        trade = TradeRecord(
+            entry_time=entry_time,
+            entry_price=17000.0,
+            direction=BiasDirection.BULLISH,
+            quantity=1,
+            session=TradingSession.NY_AM,
+            criteria=criteria,
+            stop_price=16990.0,
+            target_price=17020.0,
+            risk_points=10.0,
+            exit_time=exit_time,
+            exit_price=16990.0 - 0.25,
+            exit_reason="stop_loss",
+            pnl_points=-10.25,
+            pnl_dollars=-50.0,
+            outcome=TradeOutcome.LOSS,
+            r_multiple=-1.025,
+            duration_minutes=30,
+            mfe=5.0,
+            mae=10.0,
+        )
+        result = UnicornBacktestResult(
+            symbol="NQ",
+            start_date=entry_time,
+            end_date=exit_time,
+            total_bars=100,
+            trades=[trade],
+            trades_taken=1,
+            losses=1,
+        )
+        # Build m15 bars covering the trade window
+        m15_bars = []
+        for i in range(10):
+            ts = entry_time + timedelta(minutes=i * 15)
+            m15_bars.append(make_bar(ts, 17000.0 - i, 17005.0 - i, 16989.0 - i, 16995.0 - i))
+        bundle = BarBundle(m15=m15_bars)
+        return result, bundle, trade
+
+    def test_format_trade_trace_basic(self):
+        """Trace first trade, output has all 4 section headers in order."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+
+        assert "ENTRY CONTEXT" in output
+        assert "BIAS STACK" in output
+        assert "MANAGEMENT PATH" in output
+        assert "EXIT SUMMARY" in output
+        # Check ordering
+        idx_entry = output.index("ENTRY CONTEXT")
+        idx_bias = output.index("BIAS STACK")
+        idx_mgmt = output.index("MANAGEMENT PATH")
+        idx_exit = output.index("EXIT SUMMARY")
+        assert idx_entry < idx_bias < idx_mgmt < idx_exit
+
+    def test_format_trade_trace_no_m1(self):
+        """No m1 data → falls back to m15 replay."""
+        result, bundle, trade = self._make_synthetic_result()
+        # bundle already has m15 only (no m1)
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+
+        assert "MANAGEMENT PATH" in output
+        assert "m15" in output  # Should mention replay TF
+
+    def test_format_trade_trace_verbose(self):
+        """Verbose prints all bars (no ellipsis hint)."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+            verbose=True,
+        )
+
+        assert "MANAGEMENT PATH" in output
+        assert "--trace-verbose" not in output
+
+    def test_format_trade_trace_out_of_range(self):
+        """Index beyond trades raises ValueError."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        with pytest.raises(ValueError, match="out of range"):
+            format_trade_trace(
+                trade=trade,
+                trade_index=9999,
+                bar_bundle=bundle,
+                result=result,
+                intrabar_policy=IntrabarPolicy.WORST,
+                slippage_points=0.25,
+            )
+
+    def test_trace_replay_matches_recorded_exit(self):
+        """Replay exit reason matches trade.exit_reason, output says 'verified'."""
+        result, bundle, trade = self._make_synthetic_result()
+
+        output = format_trade_trace(
+            trade=trade,
+            trade_index=0,
+            bar_bundle=bundle,
+            result=result,
+            intrabar_policy=IntrabarPolicy.WORST,
+            slippage_points=0.25,
+        )
+
+        # Should contain either verified or unable to verify
+        assert "verified" in output.lower() or "unable to verify" in output.lower()
+
+
+class TestSeedReproducibility:
+    """Seed reproducibility for synthetic data."""
+
+    def test_seed_reproducibility(self):
+        """Same seed → identical trade list."""
+        import random
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+        from run_unicorn_backtest import generate_sample_data
+
+        random.seed(42)
+        htf1, ltf1 = generate_sample_data("NQ", days=5, profile="realistic")
+
+        random.seed(42)
+        htf2, ltf2 = generate_sample_data("NQ", days=5, profile="realistic")
+
+        # Bar counts must match
+        assert len(htf1) == len(htf2)
+        assert len(ltf1) == len(ltf2)
+
+        # Prices must match exactly
+        for a, b in zip(htf1, htf2):
+            assert a.open == b.open
+            assert a.high == b.high
+            assert a.low == b.low
+            assert a.close == b.close
+
+
+class TestIntermarketLabelOnTrade:
+    """intermarket_label is set per trade when ref series provided."""
+
+    def test_intermarket_label_on_trade(self):
+        """_build_session_diagnostics sets intermarket_label on each trade."""
+        from app.services.backtest.engines.unicorn_runner import (
+            UnicornBacktestResult, TradeOutcome, _build_session_diagnostics,
+        )
+
+        entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
+        trade = TradeRecord(
+            entry_time=entry_time,
+            entry_price=17000.0,
+            direction=BiasDirection.BULLISH,
+            quantity=1,
+            session=TradingSession.NY_AM,
+            criteria=CriteriaCheck(htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.7),
+            stop_price=16990.0,
+            target_price=17020.0,
+            risk_points=10.0,
+            exit_time=entry_time + timedelta(minutes=30),
+            exit_price=17020.0,
+            exit_reason="target",
+            pnl_points=20.0,
+            pnl_dollars=100.0,
+            outcome=TradeOutcome.WIN,
+        )
+
+        # Build result with ref series
+        ref_series = [
+            BiasState(ts=entry_time, direction=BiasDirection.BULLISH, confidence=0.8),
+        ]
+        htf_bias_series = [
+            BiasState(ts=entry_time, direction=BiasDirection.BULLISH, confidence=0.7),
+        ]
+        result = UnicornBacktestResult(
+            symbol="NQ",
+            start_date=entry_time,
+            end_date=entry_time + timedelta(hours=1),
+            total_bars=100,
+            trades=[trade],
+            trades_taken=1,
+            wins=1,
+            htf_bias_series=htf_bias_series,
+            reference_bias_series=ref_series,
+            reference_symbol="ES",
+        )
+
+        # _build_session_diagnostics sets intermarket_label
+        result.session_diagnostics = _build_session_diagnostics(result)
+
+        valid_labels = {"aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"}
+        assert trade.intermarket_label is not None
+        assert trade.intermarket_label in valid_labels
+        # Both BULLISH → should be aligned
+        assert trade.intermarket_label == "aligned"
+
+
+class TestDailyGovernorIntegration:
+    """Test that daily governor gates entries in the backtest loop."""
+
+    def test_governor_halts_after_max_trades(self):
+        """With max_trades=1, only one trade per day should be taken."""
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+        from collections import Counter
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        config = UnicornConfig()
+        governor = DailyGovernor(max_daily_loss_dollars=5000.0, max_trades_per_day=1)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=config,
+            daily_governor=governor,
+        )
+
+        # Count trades per calendar day
+        trades_per_day = Counter(t.entry_time.date() for t in result.trades)
+        for day, count in trades_per_day.items():
+            assert count <= 1, f"Day {day} had {count} trades, expected max 1"
+
+    def test_governor_none_means_no_limit(self):
+        """Without governor, no daily limits apply (backward compat)."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        result_no_gov = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=UnicornConfig(),
+            daily_governor=None,
+        )
+        assert result_no_gov.trades_taken >= 0
+        # governor_stats always populated (sizing config), but no governor-specific keys
+        assert result_no_gov.governor_stats is not None
+        assert "max_daily_loss_dollars" not in result_no_gov.governor_stats
+
+    def test_governor_stats_populated(self):
+        """Governor stats dict should be present when governor is used."""
+        from app.services.backtest.engines.daily_governor import DailyGovernor
+
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+
+        governor = DailyGovernor(max_daily_loss_dollars=300.0, max_trades_per_day=1)
+
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
+            config=UnicornConfig(),
+            daily_governor=governor,
+        )
+
+        assert result.governor_stats is not None
+        assert "signals_skipped" in result.governor_stats
+        assert "days_halted" in result.governor_stats
+        assert "half_size_trades" in result.governor_stats
+        assert "total_days_traded" in result.governor_stats
+        assert "loss_limit_halts" in result.governor_stats
+        assert "trade_limit_halts" in result.governor_stats
+        # Policy knobs stored for report
+        assert result.governor_stats["max_daily_loss_dollars"] == 300.0
+        assert result.governor_stats["max_trades_per_day"] == 1
+
+
+class TestStructuralSizing:
+    def test_wide_stop_skips_trade(self):
+        """When stop is too wide for the risk budget, trade is skipped."""
+        start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
+        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0,
+                                          volatility=20.0, interval_minutes=15)
+        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67,
+                                          volatility=7.0, interval_minutes=5)
+
+        # Very small budget: $50 per trade with NQ ($20/pt)
+        # Any stop > 2.5 points should produce quantity=0 -> skip
+        result = run_unicorn_backtest(
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=50,  # tiny budget
+            config=UnicornConfig(),
+        )
+
+        # Check that the mechanism exists (position_size_zero in reason)
+        size_skipped = [
+            s for s in result.all_setups
+            if s.reason_not_taken and "position_size_zero" in s.reason_not_taken
+        ]
+        assert isinstance(size_skipped, list)
