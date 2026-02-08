@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.lifespan import get_db_pool
+from app.repositories.trade_events import EventFilters, TradeEventsRepository
+from app.schemas import TradeEventType
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -502,4 +504,128 @@ async def get_dashboard_summary(
             "total_active": total_active_alerts,
             "by_severity": alert_counts,
         },
+    }
+
+
+# =============================================================================
+# Trade Events Endpoints
+# =============================================================================
+
+
+def _normalize_event(event) -> dict:
+    """Extract common fields from trade event payload for UI consumption."""
+    payload = event.payload or {}
+    metadata = event.metadata or {}
+
+    # Derive side from payload or event_type
+    side = payload.get("side")
+    if not side:
+        et = (
+            event.event_type.value
+            if hasattr(event.event_type, "value")
+            else str(event.event_type)
+        )
+        if "long" in et.lower() or et in ("POSITION_OPENED",):
+            side = payload.get("side", "long")
+        elif "short" in et.lower():
+            side = "short"
+
+    # Derive prices
+    entry_price = (
+        payload.get("entry_price")
+        or payload.get("fill_price")
+        or payload.get("avg_price")
+    )
+    exit_price = None
+    et_str = (
+        event.event_type.value
+        if hasattr(event.event_type, "value")
+        else str(event.event_type)
+    )
+    if et_str == "position_closed":
+        exit_price = payload.get("exit_price") or payload.get("fill_price")
+
+    pnl = payload.get("pnl") or payload.get("realized_pnl")
+
+    return {
+        "id": str(event.id),
+        "correlation_id": event.correlation_id,
+        "event_type": et_str,
+        "event_time": event.created_at.isoformat() if event.created_at else None,
+        "symbol": event.symbol,
+        "side": side,
+        "entry_price": float(entry_price) if entry_price is not None else None,
+        "exit_price": float(exit_price) if exit_price is not None else None,
+        "pnl": float(pnl) if pnl is not None else None,
+        "duration_s": payload.get("duration_s"),
+        "strategy_entity_id": (
+            str(event.strategy_entity_id) if event.strategy_entity_id else None
+        ),
+        "payload": payload,
+        "metadata": metadata,
+    }
+
+
+@router.get("/{workspace_id}/trade-events")
+async def list_trade_events(
+    workspace_id: UUID,
+    event_type: Optional[str] = None,
+    symbol: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    days: Annotated[int, Query(ge=1, le=90)] = 30,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    pool: Any = Depends(get_db_pool),
+) -> dict:
+    """List trade events with normalized fields for dashboard display."""
+    since = datetime.now(timezone.utc) - __import__("datetime").timedelta(days=days)
+
+    event_types = None
+    if event_type:
+        try:
+            event_types = [TradeEventType(event_type)]
+        except ValueError:
+            pass
+
+    filters = EventFilters(
+        workspace_id=workspace_id,
+        event_types=event_types,
+        symbol=symbol,
+        correlation_id=correlation_id,
+        since=since,
+    )
+
+    repo = TradeEventsRepository(pool)
+    events, total = await repo.list_events(filters, limit=limit, offset=offset)
+
+    return {
+        "items": [_normalize_event(e) for e in events],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/{workspace_id}/trade-events/{event_id}")
+async def get_trade_event_detail(
+    workspace_id: UUID,
+    event_id: UUID,
+    pool: Any = Depends(get_db_pool),
+) -> dict:
+    """Get a single trade event with related events by correlation_id."""
+    repo = TradeEventsRepository(pool)
+    event = await repo.get_by_id(event_id)
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    if event.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    related = await repo.get_by_correlation_id(event.correlation_id)
+    related_normalized = [_normalize_event(e) for e in related if e.id != event_id]
+
+    return {
+        "event": _normalize_event(event),
+        "related_events": related_normalized,
     }

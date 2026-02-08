@@ -1,0 +1,50 @@
+import { useOutletContext } from "react-router-dom";
+import type { DashboardContext } from "@/components/layout/DashboardShell";
+import { useUrlState } from "@/hooks/use-url-state";
+import { useSummary } from "@/hooks/use-summary";
+import { useEquity } from "@/hooks/use-equity";
+import { useIntelTimeline } from "@/hooks/use-intel-timeline";
+import { useAlerts } from "@/hooks/use-alerts";
+import { useEventStream } from "@/hooks/use-event-stream";
+import { KpiCardsRow } from "@/components/kpi/KpiCardsRow";
+import { EquityChart } from "@/components/equity/EquityChart";
+import { TradeExplorer } from "@/components/trades/TradeExplorer";
+import { WorkspacePicker } from "@/components/layout/WorkspacePicker";
+
+export function DashboardPage() {
+  const { days } = useOutletContext<DashboardContext>();
+  const [workspaceId, setWorkspaceId] = useUrlState("workspace_id", "");
+
+  // Data hooks
+  const { data: summary, isLoading: summaryLoading } = useSummary(
+    workspaceId || null,
+  );
+  const { data: equity } = useEquity(workspaceId || null, days);
+  const { data: intel } = useIntelTimeline(workspaceId || null, days);
+  const { data: alerts } = useAlerts(workspaceId || null, days, true);
+
+  // SSE connection
+  useEventStream(workspaceId || null);
+
+  // Flatten regime snapshots from all versions
+  const regimeSnapshots =
+    intel?.versions.flatMap((v) => v.snapshots) ?? [];
+
+  if (!workspaceId) {
+    return <WorkspacePicker onSelect={setWorkspaceId} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      <KpiCardsRow summary={summary} isLoading={summaryLoading} />
+
+      <EquityChart
+        data={equity?.data ?? []}
+        alerts={alerts?.alerts}
+        regimeSnapshots={regimeSnapshots}
+      />
+
+      <TradeExplorer workspaceId={workspaceId} days={days} />
+    </div>
+  );
+}

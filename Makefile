@@ -1,4 +1,4 @@
-.PHONY: setup dev docker-up docker-down test test-all lint format clean
+.PHONY: setup dev docker-up docker-down test test-all lint format clean dashboard-dev dashboard-build
 
 setup:
 	python -m venv .venv
@@ -32,3 +32,9 @@ format:
 clean:
 	rm -rf __pycache__ .mypy_cache .pytest_cache htmlcov .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+dashboard-dev:
+	cd dashboard && npm run dev
+
+dashboard-build:
+	cd dashboard && npm run build

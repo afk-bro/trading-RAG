@@ -5,6 +5,49 @@ Multi-tenant RAG platform for trading research, backtesting, and strategy evalua
 [![CI](https://github.com/afk-bro/trading-RAG/actions/workflows/ci.yml/badge.svg)](https://github.com/afk-bro/trading-RAG/actions/workflows/ci.yml)
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
 
+> **Why this dashboard exists** — This dashboard exists to make trading system
+> behavior visually obvious: how equity responds to market regimes, alerts, and
+> strategy changes — not just whether it made money. Regime-colored bands show
+> *when* the system was confident, alert pins show *where* risk events occurred,
+> and the RAG context tab shows *why* a trade was taken. Numbers tell you what
+> happened; this tells you whether you should trust it.
+
+## Dashboard
+
+React SPA with regime-aware equity chart, alert markers, and RAG-backed trade context.
+
+**Equity curve with regime strip and alert pins** — colored bands track market regime (bullish/bearish/ranging), alert markers pin risk events to the timeline:
+
+![Equity + regime + alerts](docs/dashboard/equity-regime-alerts.svg)
+
+**Trade Explorer with RAG context drawer** — click any trade event to see related events and semantically retrieved knowledge chunks:
+
+![Trade Explorer and Context drawer](docs/dashboard/trade-explorer-drawer.svg)
+
+**KPI cards with live SSE updates** — alert count updates automatically when the backend fires an event:
+
+![KPI cards updating after alert](docs/dashboard/kpi-alert-update.svg)
+
+```
+┌─────────────────────┐
+│   React Dashboard    │
+│  (Vite + TypeScript) │
+└──────────┬──────────┘
+           │ REST + SSE
+┌──────────▼──────────┐
+│      FastAPI         │
+│     (rag-core)       │
+└──┬───────┬───────┬──┘
+   │       │       │
+   ▼       ▼       ▼
+Postgres  Qdrant  Redis
+```
+
+```bash
+make dashboard-dev    # Vite dev server at :5173/dashboard/
+make dashboard-build  # Production build → dashboard/dist/
+```
+
 ## Highlights
 
 - **Async-first FastAPI service** with 221 test files, CI pipeline (lint + unit + integration), and Prometheus alerting (28 rules across 10 subsystems)
@@ -127,16 +170,24 @@ trading-RAG/
 │   ├── admin/                  # Admin UI (router + Jinja2 templates)
 │   ├── deps/                   # Auth, rate limiting, concurrency
 │   └── jobs/                   # Async job handlers
+├── dashboard/                  # React SPA (Vite + TypeScript + Tailwind)
+│   ├── src/
+│   │   ├── api/                # Typed API client + endpoint functions
+│   │   ├── components/         # UI components (equity chart, trades, KPI)
+│   │   ├── hooks/              # React Query hooks, SSE, URL state
+│   │   └── pages/              # Dashboard page composition
+│   └── dist/                   # Production build (gitignored)
 ├── tests/                      # 221 test files (unit, integration, e2e)
 ├── migrations/                 # 76 SQL migrations
 ├── ops/                        # Prometheus alerting rules
 ├── dashboards/                 # Grafana dashboards
 ├── docs/
+│   ├── dashboard/              # Dashboard screenshots and diagrams
 │   ├── features/               # Feature documentation
 │   ├── ops/                    # Runbooks, alerting, hardening
 │   └── reranker/               # Reranker component docs
 ├── docker-compose.rag.yml
-├── Dockerfile
+├── Dockerfile                  # Multi-stage: Node build + Python runtime
 ├── Makefile
 └── requirements.txt
 ```
@@ -144,13 +195,15 @@ trading-RAG/
 ## Development
 
 ```bash
-make setup       # Create venv, install deps, copy .env.example
-make dev         # Start uvicorn with hot reload
-make test        # Run unit tests
-make test-all    # Run full test suite
-make lint        # black --check + flake8 + mypy
-make format      # Auto-format with black
-make clean       # Remove caches and build artifacts
+make setup           # Create venv, install deps, copy .env.example
+make dev             # Start uvicorn with hot reload
+make test            # Run unit tests
+make test-all        # Run full test suite
+make lint            # black --check + flake8 + mypy
+make format          # Auto-format with black
+make clean           # Remove caches and build artifacts
+make dashboard-dev   # Vite dev server (localhost:5173/dashboard/)
+make dashboard-build # Production build → dashboard/dist/
 ```
 
 ### CI Pipeline

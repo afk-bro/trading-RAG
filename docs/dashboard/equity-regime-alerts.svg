@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
+  <!-- Background -->
+  <rect width="900" height="500" fill="#0d1117" rx="8"/>
+
+  <!-- Header bar -->
+  <rect x="0" y="0" width="900" height="44" fill="#161b22" rx="8"/>
+  <rect x="0" y="36" width="900" height="8" fill="#161b22"/>
+  <line x1="0" y1="44" x2="900" y2="44" stroke="#30363d" stroke-width="1"/>
+  <text x="20" y="28" fill="#58a6ff" font-size="14" font-weight="600">Trading Dashboard</text>
+  <text x="170" y="28" fill="#8b949e" font-size="11" font-family="SF Mono,Consolas,monospace">a1b2c3d4...</text>
+  <rect x="760" y="12" width="28" height="20" rx="4" fill="#58a6ff"/>
+  <text x="767" y="26" fill="#0d1117" font-size="10" font-weight="600">30d</text>
+  <rect x="792" y="12" width="28" height="20" rx="4" fill="#21262d"/>
+  <text x="799" y="26" fill="#8b949e" font-size="10">90d</text>
+  <rect x="824" y="12" width="28" height="20" rx="4" fill="#21262d"/>
+  <text x="831" y="26" fill="#8b949e" font-size="10">14d</text>
+  <rect x="856" y="12" width="28" height="20" rx="4" fill="#21262d"/>
+  <text x="865" y="26" fill="#8b949e" font-size="10">7d</text>
+
+  <!-- KPI Cards -->
+  <rect x="16" y="56" width="210" height="64" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="28" y="76" fill="#8b949e" font-size="10">Net PnL</text>
+  <text x="28" y="104" fill="#3fb950" font-size="22" font-weight="600">+$4,218</text>
+
+  <rect x="236" y="56" width="210" height="64" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="248" y="76" fill="#8b949e" font-size="10">Drawdown</text>
+  <text x="248" y="104" fill="#d29922" font-size="22" font-weight="600">3.41%</text>
+
+  <rect x="456" y="56" width="210" height="64" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="468" y="76" fill="#8b949e" font-size="10">Total Return</text>
+  <text x="468" y="104" fill="#3fb950" font-size="22" font-weight="600">+8.72%</text>
+
+  <rect x="676" y="56" width="210" height="64" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="688" y="76" fill="#8b949e" font-size="10">Active Alerts</text>
+  <text x="688" y="104" fill="#f85149" font-size="22" font-weight="600">2</text>
+
+  <!-- Equity Chart Container -->
+  <rect x="16" y="132" width="868" height="340" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="28" y="154" fill="#f0f6fc" font-size="12" font-weight="500">Equity Curve</text>
+
+  <!-- Drawdown toggle -->
+  <rect x="790" y="140" width="80" height="22" rx="4" fill="rgba(248,81,73,0.15)"/>
+  <text x="804" y="155" fill="#f85149" font-size="10">Drawdown</text>
+
+  <!-- Regime color bands -->
+  <rect x="28" y="166" width="200" height="286" fill="rgba(63,185,80,0.15)" rx="0"/>
+  <rect x="228" y="166" width="140" height="286" fill="rgba(210,153,34,0.15)" rx="0"/>
+  <rect x="368" y="166" width="220" height="286" fill="rgba(63,185,80,0.15)" rx="0"/>
+  <rect x="588" y="166" width="120" height="286" fill="rgba(248,81,73,0.15)" rx="0"/>
+  <rect x="708" y="166" width="164" height="286" fill="rgba(63,185,80,0.15)" rx="0"/>
+
+  <!-- Regime legend -->
+  <circle cx="640" y="154" r="3" fill="#3fb950"/>
+  <text x="648" y="158" fill="#8b949e" font-size="9">bullish</text>
+  <circle cx="700" y="154" r="3" fill="#d29922"/>
+  <text x="708" y="158" fill="#8b949e" font-size="9">ranging</text>
+  <circle cx="755" y="154" r="3" fill="#f85149"/>
+  <text x="763" y="158" fill="#8b949e" font-size="9">bearish</text>
+
+  <!-- Grid lines -->
+  <line x1="28" y1="216" x2="872" y2="216" stroke="#21262d" stroke-width="0.5"/>
+  <line x1="28" y1="266" x2="872" y2="266" stroke="#21262d" stroke-width="0.5"/>
+  <line x1="28" y1="316" x2="872" y2="316" stroke="#21262d" stroke-width="0.5"/>
+  <line x1="28" y1="366" x2="872" y2="366" stroke="#21262d" stroke-width="0.5"/>
+  <line x1="28" y1="416" x2="872" y2="416" stroke="#21262d" stroke-width="0.5"/>
+
+  <!-- Y-axis labels -->
+  <text x="872" y="220" fill="#8b949e" font-size="9" text-anchor="end">$52k</text>
+  <text x="872" y="270" fill="#8b949e" font-size="9" text-anchor="end">$51k</text>
+  <text x="872" y="320" fill="#8b949e" font-size="9" text-anchor="end">$50k</text>
+  <text x="872" y="370" fill="#8b949e" font-size="9" text-anchor="end">$49k</text>
+  <text x="872" y="420" fill="#8b949e" font-size="9" text-anchor="end">$48k</text>
+
+  <!-- Equity line -->
+  <polyline
+    fill="none"
+    stroke="#58a6ff"
+    stroke-width="2"
+    points="40,400 80,385 120,370 160,340 200,310 240,330 280,345 320,320 360,290 400,270 440,260 480,280 520,300 560,310 600,340 640,360 680,350 720,320 760,290 800,260 840,240"
+  />
+
+  <!-- Alert markers -->
+  <polygon points="520,270 516,260 524,260" fill="#f85149"/>
+  <polygon points="640,350 636,340 644,340" fill="#d29922"/>
+
+  <!-- Annotations (callout lines) -->
+  <!-- Regime annotation -->
+  <line x1="120" y1="168" x2="120" y2="145" stroke="#8b949e" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="80" y="140" fill="#c9d1d9" font-size="10" font-style="italic">regime bands track</text>
+  <text x="80" y="128" fill="#c9d1d9" font-size="10" font-style="italic">pan/zoom</text>
+
+  <!-- Alert annotation -->
+  <line x1="524" y1="258" x2="555" y2="230" stroke="#8b949e" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <rect x="555" y="218" width="120" height="28" rx="4" fill="#161b22" stroke="#30363d" stroke-width="0.5"/>
+  <text x="564" y="230" fill="#f85149" font-size="9" font-weight="500">critical alert pin</text>
+  <text x="564" y="241" fill="#8b949e" font-size="8">click for details</text>
+</svg>

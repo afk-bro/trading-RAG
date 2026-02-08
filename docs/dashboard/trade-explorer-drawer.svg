@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 460" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
+  <!-- Background -->
+  <rect width="900" height="460" fill="#0d1117" rx="8"/>
+
+  <!-- Trade Explorer table container -->
+  <rect x="16" y="12" width="460" height="436" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Table header -->
+  <text x="28" y="34" fill="#f0f6fc" font-size="12" font-weight="500">Trade Events</text>
+  <text x="412" y="34" fill="#8b949e" font-size="10">47 events</text>
+  <line x1="16" y1="44" x2="476" y2="44" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Column headers -->
+  <text x="28" y="62" fill="#8b949e" font-size="10" font-weight="500">Time</text>
+  <text x="110" y="62" fill="#8b949e" font-size="10" font-weight="500">Type</text>
+  <text x="210" y="62" fill="#8b949e" font-size="10" font-weight="500">Symbol</text>
+  <text x="280" y="62" fill="#8b949e" font-size="10" font-weight="500">Side</text>
+  <text x="330" y="62" fill="#8b949e" font-size="10" font-weight="500">PnL</text>
+  <text x="400" y="62" fill="#8b949e" font-size="10" font-weight="500">Duration</text>
+  <line x1="16" y1="70" x2="476" y2="70" stroke="#30363d" stroke-width="0.5"/>
+
+  <!-- Table rows -->
+  <!-- Row 1 (selected) -->
+  <rect x="16" y="72" width="460" height="30" fill="#21262d"/>
+  <text x="28" y="91" fill="#8b949e" font-size="10">Jan 15, 14:30</text>
+  <text x="110" y="91" fill="#c9d1d9" font-size="10" font-family="SF Mono,Consolas,monospace">position_closed</text>
+  <text x="210" y="91" fill="#f0f6fc" font-size="10" font-weight="500">BTCUSDT</text>
+  <text x="280" y="91" fill="#3fb950" font-size="10" font-weight="500">long</text>
+  <text x="330" y="91" fill="#3fb950" font-size="10" font-weight="500">+$1,240</text>
+  <text x="400" y="91" fill="#8b949e" font-size="10">4h 12m</text>
+
+  <!-- Row 2 -->
+  <text x="28" y="121" fill="#8b949e" font-size="10">Jan 15, 10:18</text>
+  <text x="110" y="121" fill="#c9d1d9" font-size="10" font-family="SF Mono,Consolas,monospace">position_opened</text>
+  <text x="210" y="121" fill="#f0f6fc" font-size="10" font-weight="500">BTCUSDT</text>
+  <text x="280" y="121" fill="#3fb950" font-size="10" font-weight="500">long</text>
+  <text x="330" y="121" fill="#8b949e" font-size="10">--</text>
+  <text x="400" y="121" fill="#8b949e" font-size="10">--</text>
+  <line x1="16" y1="130" x2="476" y2="130" stroke="#21262d" stroke-width="0.5"/>
+
+  <!-- Row 3 -->
+  <rect x="16" y="132" width="460" height="30" fill="#161b22"/>
+  <text x="28" y="151" fill="#8b949e" font-size="10">Jan 14, 22:05</text>
+  <text x="110" y="151" fill="#c9d1d9" font-size="10" font-family="SF Mono,Consolas,monospace">position_closed</text>
+  <text x="210" y="151" fill="#f0f6fc" font-size="10" font-weight="500">ETHUSDT</text>
+  <text x="280" y="151" fill="#f85149" font-size="10" font-weight="500">short</text>
+  <text x="330" y="151" fill="#f85149" font-size="10" font-weight="500">-$380</text>
+  <text x="400" y="151" fill="#8b949e" font-size="10">1h 45m</text>
+
+  <!-- Row 4 -->
+  <text x="28" y="181" fill="#8b949e" font-size="10">Jan 14, 20:20</text>
+  <text x="110" y="181" fill="#c9d1d9" font-size="10" font-family="SF Mono,Consolas,monospace">intent_approved</text>
+  <text x="210" y="181" fill="#f0f6fc" font-size="10" font-weight="500">ETHUSDT</text>
+  <text x="280" y="181" fill="#8b949e" font-size="10">--</text>
+  <text x="330" y="181" fill="#8b949e" font-size="10">--</text>
+  <text x="400" y="181" fill="#8b949e" font-size="10">--</text>
+  <line x1="16" y1="190" x2="476" y2="190" stroke="#21262d" stroke-width="0.5"/>
+
+  <!-- More rows indicator -->
+  <text x="28" y="210" fill="#8b949e" font-size="10">Jan 14, 18:42</text>
+  <text x="110" y="210" fill="#c9d1d9" font-size="10" font-family="SF Mono,Consolas,monospace">order_filled</text>
+  <text x="210" y="210" fill="#f0f6fc" font-size="10" font-weight="500">BTCUSDT</text>
+  <text x="280" y="210" fill="#3fb950" font-size="10" font-weight="500">long</text>
+  <text x="330" y="210" fill="#8b949e" font-size="10">--</text>
+  <text x="400" y="210" fill="#8b949e" font-size="10">--</text>
+
+  <!-- Pagination -->
+  <text x="180" y="432" fill="#8b949e" font-size="10">Page 1 of 3</text>
+  <text x="130" y="432" fill="#8b949e" font-size="10">&#x276E; Prev</text>
+  <text x="260" y="432" fill="#8b949e" font-size="10">Next &#x276F;</text>
+
+  <!-- Arrow from table to drawer -->
+  <line x1="476" y1="86" x2="498" y2="86" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
+    </marker>
+  </defs>
+
+  <!-- Drawer panel -->
+  <rect x="500" y="0" width="400" height="460" fill="#161b22" stroke="#30363d" stroke-width="1" rx="0"/>
+
+  <!-- Drawer header -->
+  <text x="516" y="28" fill="#f0f6fc" font-size="12" font-weight="500">position_closed</text>
+  <text x="640" y="28" fill="#8b949e" font-size="11">BTCUSDT</text>
+  <text x="876" y="28" fill="#8b949e" font-size="14">&#x2715;</text>
+  <line x1="500" y1="38" x2="900" y2="38" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Tabs -->
+  <rect x="516" y="46" width="60" height="24" rx="4" fill="#21262d"/>
+  <text x="530" y="62" fill="#f0f6fc" font-size="10" font-weight="500">Details</text>
+  <rect x="582" y="46" width="60" height="24" rx="4" fill="#58a6ff"/>
+  <text x="593" y="62" fill="#0d1117" font-size="10" font-weight="500">Context</text>
+  <line x1="500" y1="78" x2="900" y2="78" stroke="#30363d" stroke-width="0.5"/>
+
+  <!-- Context tab content -->
+  <text x="516" y="98" fill="#8b949e" font-size="10">Relevant knowledge for <tspan fill="#c9d1d9" font-weight="500">BTCUSDT</tspan></text>
+  <text x="840" y="98" fill="#8b949e" font-size="10">Re-run</text>
+
+  <!-- RAG chunk card 1 -->
+  <rect x="516" y="110" width="368" height="90" rx="6" fill="#0d1117" stroke="#21262d" stroke-width="1"/>
+  <text x="528" y="130" fill="#f0f6fc" font-size="10" font-weight="500">BTC Macro Analysis - Q1 Outlook</text>
+  <!-- Score bar -->
+  <rect x="810" y="122" width="50" height="4" rx="2" fill="#21262d"/>
+  <rect x="810" y="122" width="43" height="4" rx="2" fill="#58a6ff"/>
+  <text x="866" y="130" fill="#8b949e" font-size="8">86%</text>
+  <text x="528" y="146" fill="#c9d1d9" font-size="9" xml:space="preserve">Bitcoin showing strength above 50-week MA with</text>
+  <text x="528" y="158" fill="#c9d1d9" font-size="9" xml:space="preserve">increasing institutional flow. The macro regime</text>
+  <text x="528" y="170" fill="#c9d1d9" font-size="9" xml:space="preserve">suggests continuation through early February...</text>
+  <text x="528" y="190" fill="#58a6ff" font-size="8">Source &#x2197;</text>
+
+  <!-- RAG chunk card 2 -->
+  <rect x="516" y="208" width="368" height="90" rx="6" fill="#0d1117" stroke="#21262d" stroke-width="1"/>
+  <text x="528" y="228" fill="#f0f6fc" font-size="10" font-weight="500">On-chain Metrics: Exchange Flows</text>
+  <rect x="810" y="220" width="50" height="4" rx="2" fill="#21262d"/>
+  <rect x="810" y="220" width="36" height="4" rx="2" fill="#58a6ff"/>
+  <text x="866" y="228" fill="#8b949e" font-size="8">72%</text>
+  <text x="528" y="244" fill="#c9d1d9" font-size="9" xml:space="preserve">Net exchange outflows accelerating, with 24k BTC</text>
+  <text x="528" y="256" fill="#c9d1d9" font-size="9" xml:space="preserve">moved to cold storage this week. This pattern</text>
+  <text x="528" y="268" fill="#c9d1d9" font-size="9" xml:space="preserve">historically precedes 15-30 day bullish moves...</text>
+  <text x="528" y="288" fill="#58a6ff" font-size="8">Source &#x2197;</text>
+
+  <!-- RAG chunk card 3 -->
+  <rect x="516" y="306" width="368" height="90" rx="6" fill="#0d1117" stroke="#21262d" stroke-width="1"/>
+  <text x="528" y="326" fill="#f0f6fc" font-size="10" font-weight="500">Momentum Strategy Backtest Notes</text>
+  <rect x="810" y="318" width="50" height="4" rx="2" fill="#21262d"/>
+  <rect x="810" y="318" width="28" height="4" rx="2" fill="#58a6ff"/>
+  <text x="866" y="326" fill="#8b949e" font-size="8">56%</text>
+  <text x="528" y="342" fill="#c9d1d9" font-size="9" xml:space="preserve">The BTCUSDT 4h momentum config (v3) showed</text>
+  <text x="528" y="354" fill="#c9d1d9" font-size="9" xml:space="preserve">best OOS Sharpe of 1.8 with 12% max drawdown</text>
+  <text x="528" y="366" fill="#c9d1d9" font-size="9" xml:space="preserve">during trending regimes. Risk-adjusted returns...</text>
+  <text x="528" y="386" fill="#58a6ff" font-size="8">Source &#x2197;</text>
+
+  <!-- Annotation: click flow -->
+  <text x="28" y="280" fill="#58a6ff" font-size="10" font-style="italic">click row</text>
+  <text x="28" y="293" fill="#58a6ff" font-size="10" font-style="italic">to open</text>
+  <line x1="75" y1="270" x2="75" y2="92" stroke="#58a6ff" stroke-width="0.8" stroke-dasharray="3,2"/>
+</svg>
