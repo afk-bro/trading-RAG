@@ -15,8 +15,12 @@ export default defineConfig({
     proxy: {
       "/backtests": "http://localhost:8000",
       "/dashboards": "http://localhost:8000",
+      "/workspaces": "http://localhost:8000",
+      "/strategies": "http://localhost:8000",
+      "/execute": "http://localhost:8000",
       "/admin": "http://localhost:8000",
       "/query": "http://localhost:8000",
+      "/health": "http://localhost:8000",
     },
   },
 });
