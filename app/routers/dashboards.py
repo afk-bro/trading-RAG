@@ -1,16 +1,33 @@
 """Read-only dashboard endpoints for trust-building visualizations."""
 
+import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.lifespan import get_db_pool
 from app.deps.security import check_workspace_consistency
+from app.repositories.run_events import RunEventsRepository
 from app.repositories.trade_events import EventFilters, TradeEventsRepository
 from app.schemas import TradeEventType
+from app.services.backtest.loss_attribution import compute_loss_attribution
+from app.services.backtest.process_score import compute_process_score
+from app.services.backtest.run_lineage import (
+    build_trajectory,
+    compute_comparison_warnings,
+    compute_deltas,
+    compute_param_diffs,
+    find_lineage_candidates,
+    find_previous_run,
+    find_run_by_id,
+)
+
+_log = structlog.get_logger(__name__)
 
 router = APIRouter(
     prefix="/dashboards",
@@ -702,6 +719,8 @@ async def get_backtest_run_detail(
     workspace_id: UUID,
     run_id: UUID,
     trades_limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    include_coaching: bool = Query(False),
+    baseline_run_id: Optional[UUID] = Query(None),
     pool: Any = Depends(get_db_pool),
 ) -> dict:
     """
@@ -735,7 +754,7 @@ async def get_backtest_run_detail(
             br.strategy_entity_id,
             br.strategy_version_id,
             -- Strategy name via kb_entities
-            ke.title AS strategy_name
+            ke.name AS strategy_name
         FROM backtest_runs br
         LEFT JOIN kb_entities ke ON br.strategy_entity_id = ke.id
         WHERE br.id = $1
@@ -787,7 +806,7 @@ async def get_backtest_run_detail(
             "tags": tags,
         }
 
-    return {
+    result = {
         "run_id": str(row["id"]),
         "workspace_id": str(workspace_id),
         "status": row["status"],
@@ -816,4 +835,348 @@ async def get_backtest_run_detail(
         "warnings": _parse_jsonb(row["warnings"]) or [],
         "regime_is": _regime_tags(row["regime_is"]),
         "regime_oos": _regime_tags(row["regime_oos"]),
+    }
+
+    # Coaching data (only for completed runs when requested)
+    if include_coaching and row["status"] == "completed":
+        coaching = await _build_coaching_data(
+            pool=pool,
+            workspace_id=workspace_id,
+            run_id=run_id,
+            row=row,
+            trades=trades,
+            summary=summary,
+            params=params,
+            dataset_meta=dataset_meta,
+            regime_is=_parse_jsonb(row["regime_is"]),
+            regime_oos=_parse_jsonb(row["regime_oos"]),
+            baseline_run_id=baseline_run_id,
+        )
+        if coaching:
+            result.update(coaching)
+
+    return result
+
+
+async def _build_coaching_data(
+    *,
+    pool: Any,
+    workspace_id: UUID,
+    run_id: UUID,
+    row: Any,
+    trades: list[dict],
+    summary: dict,
+    params: dict,
+    dataset_meta: dict,
+    regime_is: Any,
+    regime_oos: Any,
+    baseline_run_id: Optional[UUID],
+) -> dict[str, Any]:
+    """Build coaching + trajectory data with a 500ms timeout budget."""
+    budget_start = time.monotonic()
+    BUDGET_MS = 500
+
+    strategy_entity_id = row["strategy_entity_id"]
+    completed_at = row["completed_at"]
+
+    if not strategy_entity_id or not completed_at:
+        return {}
+
+    # Phase 1: Parallel async I/O
+    events_repo = RunEventsRepository(pool)
+
+    async def _fetch_events():
+        return await events_repo.get_events(run_id, workspace_id)
+
+    async def _fetch_previous():
+        if baseline_run_id:
+            return await find_run_by_id(pool, baseline_run_id, workspace_id)
+        return await find_previous_run(
+            pool, workspace_id, strategy_entity_id, run_id, completed_at
+        )
+
+    async def _fetch_trajectory():
+        return await build_trajectory(pool, workspace_id, strategy_entity_id, limit=10)
+
+    # Use asyncio.wait so completed tasks return even if others timeout
+    coaching_partial = False
+    task_events = asyncio.create_task(_fetch_events())
+    task_previous = asyncio.create_task(_fetch_previous())
+    task_trajectory = asyncio.create_task(_fetch_trajectory())
+    all_tasks = [task_events, task_previous, task_trajectory]
+
+    done, pending = await asyncio.wait(all_tasks, timeout=0.4)
+    for t in pending:
+        t.cancel()
+    if pending:
+        coaching_partial = True
+        _log.warning(
+            "coaching_io_partial_timeout",
+            run_id=str(run_id),
+            pending_count=len(pending),
+        )
+
+    def _safe_result(task, default=None):
+        if task in done:
+            try:
+                return task.result()
+            except Exception:
+                return default
+        return default
+
+    events_raw = _safe_result(task_events)
+    previous_raw = _safe_result(task_previous)
+    trajectory_runs = _safe_result(task_trajectory, default=[])
+
+    # Phase 2: CPU-bound compute
+    elapsed = (time.monotonic() - budget_start) * 1000
+
+    # Build lineage
+    lineage: dict[str, Any] = {
+        "previous_run_id": None,
+        "previous_completed_at": None,
+        "deltas": [],
+        "params_changed": False,
+        "param_diffs": {},
+        "comparison_warnings": [],
+    }
+
+    if previous_raw:
+        prev_summary = (
+            previous_raw.summary
+            if hasattr(previous_raw, "summary")
+            else previous_raw.get("summary", {})
+        )
+        prev_run_id = (
+            previous_raw.run_id
+            if hasattr(previous_raw, "run_id")
+            else previous_raw.get("run_id")
+        )
+        prev_completed = (
+            previous_raw.completed_at
+            if hasattr(previous_raw, "completed_at")
+            else previous_raw.get("completed_at")
+        )
+        prev_params = (
+            previous_raw.get("params", {}) if isinstance(previous_raw, dict) else {}
+        )
+        prev_dataset = (
+            previous_raw.get("dataset", {}) if isinstance(previous_raw, dict) else {}
+        )
+        prev_run_kind = (
+            previous_raw.get("run_kind", "") if isinstance(previous_raw, dict) else ""
+        )
+
+        lineage["previous_run_id"] = prev_run_id
+        lineage["previous_completed_at"] = prev_completed
+
+        if prev_summary:
+            deltas = compute_deltas(summary, prev_summary)
+            lineage["deltas"] = [
+                {
+                    "metric": d.metric,
+                    "current": d.current,
+                    "previous": d.previous,
+                    "delta": d.delta,
+                    "improved": d.improved,
+                    "higher_is_better": d.higher_is_better,
+                }
+                for d in deltas
+            ]
+
+        if prev_params:
+            pdiffs = compute_param_diffs(params, prev_params)
+            lineage["params_changed"] = bool(pdiffs)
+            lineage["param_diffs"] = pdiffs
+
+        # Comparison warnings
+        current_run_info = {
+            "dataset": dataset_meta,
+            "run_kind": row["run_kind"],
+        }
+        prev_run_info = {
+            "dataset": prev_dataset,
+            "run_kind": prev_run_kind,
+        }
+        lineage["comparison_warnings"] = compute_comparison_warnings(
+            current_run_info, prev_run_info
+        )
+
+    # Process score and loss attribution (skip if budget exceeded)
+    process_score_data: Optional[dict] = None
+    loss_attr_data: Optional[dict] = None
+
+    elapsed = (time.monotonic() - budget_start) * 1000
+    if elapsed >= BUDGET_MS:
+        coaching_partial = True
+    if elapsed < BUDGET_MS:
+        try:
+            ps = compute_process_score(
+                trades=trades,
+                events=events_raw,
+                regime_is=regime_is,
+                regime_oos=regime_oos,
+                summary=summary,
+            )
+            process_score_data = {
+                "total": ps.total,
+                "grade": ps.grade,
+                "components": [
+                    {
+                        "name": c.name,
+                        "score": c.score,
+                        "weight": c.weight,
+                        "detail": c.detail,
+                        "available": c.available,
+                    }
+                    for c in ps.components
+                ],
+            }
+        except Exception:
+            _log.exception("process_score_error", run_id=str(run_id))
+            process_score_data = {
+                "total": None,
+                "grade": "unavailable",
+                "components": [],
+            }
+
+    elapsed = (time.monotonic() - budget_start) * 1000
+    if elapsed >= BUDGET_MS:
+        coaching_partial = True
+    if elapsed < BUDGET_MS:
+        try:
+            la = compute_loss_attribution(
+                trades=trades,
+                regime_is=regime_is,
+                regime_oos=regime_oos,
+                events=events_raw,
+            )
+            loss_attr_data = {
+                "time_clusters": [
+                    {
+                        "label": c.label,
+                        "trade_count": c.trade_count,
+                        "total_loss": c.total_loss,
+                        "pct_of_total_losses": c.pct_of_total_losses,
+                    }
+                    for c in la.time_clusters
+                ],
+                "size_clusters": [
+                    {
+                        "label": c.label,
+                        "trade_count": c.trade_count,
+                        "total_loss": c.total_loss,
+                        "pct_of_total_losses": c.pct_of_total_losses,
+                    }
+                    for c in la.size_clusters
+                ],
+                "regime_summary": (
+                    {
+                        "regime_tags": la.regime_summary.regime_tags,
+                        "loss_count": la.regime_summary.loss_count,
+                        "context": la.regime_summary.context,
+                    }
+                    if la.regime_summary
+                    else None
+                ),
+                "counterfactuals": [
+                    {
+                        "description": cf.description,
+                        "metric_name": cf.metric_name,
+                        "actual": cf.actual,
+                        "hypothetical": cf.hypothetical,
+                        "delta": cf.delta,
+                    }
+                    for cf in la.counterfactuals
+                ],
+                "total_losses": la.total_losses,
+                "total_loss_amount": la.total_loss_amount,
+            }
+        except Exception:
+            _log.exception("loss_attribution_error", run_id=str(run_id))
+
+    # Trajectory data
+    trajectory_data = {
+        "runs": [
+            {
+                "run_id": r.run_id,
+                "completed_at": r.completed_at,
+                "sharpe": r.sharpe,
+                "return_pct": r.return_pct,
+                "max_drawdown_pct": r.max_drawdown_pct,
+                "win_rate": r.win_rate,
+                "trades": r.trades,
+            }
+            for r in trajectory_runs
+        ]
+    }
+
+    coaching: dict[str, Any] = {"lineage": lineage}
+    if process_score_data is not None:
+        coaching["process_score"] = process_score_data
+    else:
+        coaching_partial = True
+        coaching["process_score"] = {
+            "total": None,
+            "grade": "timed_out",
+            "components": [],
+        }
+    if loss_attr_data is not None:
+        coaching["loss_attribution"] = loss_attr_data
+    else:
+        coaching_partial = True
+        coaching["loss_attribution"] = {"timed_out": True}
+
+    coaching["coaching_partial"] = coaching_partial
+
+    return {
+        "coaching": coaching,
+        "trajectory": trajectory_data,
+    }
+
+
+# =============================================================================
+# Lineage Candidates Endpoint
+# =============================================================================
+
+
+@router.get("/{workspace_id}/backtests/{run_id}/lineage")
+async def get_run_lineage(
+    workspace_id: UUID,
+    run_id: UUID,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    pool: Any = Depends(get_db_pool),
+) -> dict:
+    """Return recent runs for the same strategy — powers baseline selector."""
+    # Fetch current run to get strategy_entity_id
+    query = """
+        SELECT strategy_entity_id, completed_at
+        FROM backtest_runs
+        WHERE id = $1 AND workspace_id = $2
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(query, run_id, workspace_id)
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+
+    strategy_entity_id = row["strategy_entity_id"]
+    if not strategy_entity_id:
+        return {"candidates": []}
+
+    candidates = await find_lineage_candidates(
+        pool, workspace_id, strategy_entity_id, run_id, limit
+    )
+
+    return {
+        "candidates": [
+            {
+                "run_id": c.run_id,
+                "completed_at": c.completed_at,
+                "sharpe": c.sharpe,
+                "return_pct": c.return_pct,
+                "is_auto_baseline": c.is_auto_baseline,
+            }
+            for c in candidates
+        ]
     }

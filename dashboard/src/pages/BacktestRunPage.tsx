@@ -4,7 +4,12 @@ import type { DashboardContext } from "@/components/layout/DashboardShell";
 import { useUrlState } from "@/hooks/use-url-state";
 import { useRunDetail } from "@/hooks/use-run-detail";
 import { useRunEvents } from "@/hooks/use-run-events";
-import { RunKpiStrip } from "@/components/backtests/RunKpiStrip";
+import { useRunLineage } from "@/hooks/use-run-lineage";
+import { DeltaKpiStrip } from "@/components/coaching/DeltaKpiStrip";
+import { WhatYouLearnedCard } from "@/components/coaching/WhatYouLearnedCard";
+import { ProcessScoreCard } from "@/components/coaching/ProcessScoreCard";
+import { BaselineSelector } from "@/components/coaching/BaselineSelector";
+import { LossAttributionPanel } from "@/components/coaching/LossAttributionPanel";
 import { EquityChart, type TradeMarker } from "@/components/equity/EquityChart";
 import { BacktestTradesTable } from "@/components/backtests/BacktestTradesTable";
 import { BacktestTradeDrawer } from "@/components/backtests/BacktestTradeDrawer";
@@ -42,12 +47,20 @@ export function BacktestRunPage() {
   const workspaceId = ctxWorkspaceId || urlWsId;
   const [tradesPage, setTradesPage] = useState(1);
   const [activeTab, setActiveTab] = useState<Tab>("results");
+  const [baselineRunId, setBaselineRunId] = useState<string | null>(null);
+
   const { data, isLoading, isError, refetch } = useRunDetail(
     workspaceId || null,
     runId ?? null,
+    true, // include coaching
+    baselineRunId,
   );
   const { data: eventsData } = useRunEvents(
     activeTab === "replay" ? (runId ?? null) : null,
+  );
+  const { data: lineageData } = useRunLineage(
+    workspaceId || null,
+    runId ?? null,
   );
 
   if (!workspaceId) {
@@ -97,6 +110,14 @@ export function BacktestRunPage() {
     const tags = [r.trend_tag, r.vol_tag, r.efficiency_tag].filter(Boolean);
     if (tags.length) regimeBadges.push(`OOS: ${tags.join(", ")}`);
   }
+
+  // Coaching data
+  const coaching = data?.coaching;
+  const trajectory = data?.trajectory;
+
+  // Lineage candidates for baseline selector
+  const candidates = lineageData?.candidates ?? [];
+  const autoBaselineId = candidates.find((c) => c.is_auto_baseline)?.run_id ?? null;
 
   function handleExportCsv() {
     if (!runId || totalTrades === 0) return;
@@ -265,8 +286,33 @@ export function BacktestRunPage() {
 
       {activeTab === "results" ? (
         <>
-          {/* KPI strip */}
-          <RunKpiStrip summary={data.summary} />
+          {/* Coaching: What You Learned */}
+          {coaching?.lineage && (
+            <WhatYouLearnedCard lineage={coaching.lineage} />
+          )}
+
+          {/* Coaching: Process Score */}
+          {coaching?.process_score && (
+            <ProcessScoreCard score={coaching.process_score} />
+          )}
+
+          {/* Baseline selector + KPI strip */}
+          <div className="space-y-2">
+            {candidates.length > 0 && (
+              <BaselineSelector
+                candidates={candidates}
+                currentBaselineId={baselineRunId}
+                autoBaselineId={autoBaselineId}
+                onSelect={setBaselineRunId}
+              />
+            )}
+            <DeltaKpiStrip
+              summary={data.summary}
+              deltas={coaching?.lineage?.deltas}
+              trajectory={trajectory?.runs}
+              isLoading={isLoading}
+            />
+          </div>
 
           {/* Equity chart */}
           {data.equity.length === 0 ? (
@@ -276,6 +322,12 @@ export function BacktestRunPage() {
           ) : (
             <EquityChart data={equityData} tradeMarkers={tradeMarkers} />
           )}
+
+          {/* Loss Attribution */}
+          {coaching?.loss_attribution &&
+            !("timed_out" in coaching.loss_attribution) && (
+              <LossAttributionPanel attribution={coaching.loss_attribution} />
+            )}
 
           {/* Trades table */}
           <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">

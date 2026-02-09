@@ -367,6 +367,101 @@ export interface RunDetailResponse {
   warnings: string[];
   regime_is: RunDetailRegime | null;
   regime_oos: RunDetailRegime | null;
+  coaching?: CoachingData;
+  trajectory?: { runs: TrajectoryRun[] };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Coaching Types                                                     */
+/* ------------------------------------------------------------------ */
+
+export interface KpiDelta {
+  metric: string;
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  improved: boolean | null;
+  higher_is_better: boolean;
+}
+
+export interface LineageData {
+  previous_run_id: string | null;
+  previous_completed_at: string | null;
+  deltas: KpiDelta[];
+  params_changed: boolean;
+  param_diffs: Record<string, [string, string]>;
+  comparison_warnings: string[];
+}
+
+export interface ScoreComponent {
+  name: string;
+  score: number;
+  weight: number;
+  detail: string;
+  available: boolean;
+}
+
+export interface ProcessScore {
+  total: number | null;
+  grade: string;
+  components: ScoreComponent[];
+}
+
+export interface LossCluster {
+  label: string;
+  trade_count: number;
+  total_loss: number;
+  pct_of_total_losses: number;
+}
+
+export interface Counterfactual {
+  description: string;
+  metric_name: string;
+  actual: number;
+  hypothetical: number;
+  delta: number;
+}
+
+export interface LossAttribution {
+  time_clusters: LossCluster[];
+  size_clusters: LossCluster[];
+  regime_summary: {
+    regime_tags: string[];
+    loss_count: number;
+    context: string;
+  } | null;
+  counterfactuals: Counterfactual[];
+  total_losses: number;
+  total_loss_amount: number;
+}
+
+export interface CoachingData {
+  lineage: LineageData;
+  process_score: ProcessScore;
+  loss_attribution: LossAttribution;
+  coaching_partial?: boolean;
+}
+
+export interface TrajectoryRun {
+  run_id: string;
+  completed_at: string;
+  sharpe?: number;
+  return_pct?: number;
+  max_drawdown_pct?: number;
+  win_rate?: number;
+  trades?: number;
+}
+
+export interface LineageCandidate {
+  run_id: string;
+  completed_at: string;
+  sharpe?: number;
+  return_pct?: number;
+  is_auto_baseline: boolean;
+}
+
+export interface LineageCandidatesResponse {
+  candidates: LineageCandidate[];
 }
 
 /* ------------------------------------------------------------------ */

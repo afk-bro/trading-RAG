@@ -14,6 +14,7 @@ import type {
   BacktestChartData,
   RunDetailResponse,
   RunEventsResponse,
+  LineageCandidatesResponse,
 } from "./types";
 
 export function getWorkspaces() {
@@ -115,8 +116,22 @@ export function getBacktestChartData(
   return apiGet<BacktestChartData>(`/backtests/runs/${runId}/chart-data`, params);
 }
 
-export function getRunDetail(ws: string, runId: string) {
-  return apiGet<RunDetailResponse>(`/dashboards/${ws}/backtests/${runId}`);
+export function getRunDetail(
+  ws: string,
+  runId: string,
+  includeCoaching?: boolean,
+  baselineRunId?: string | null,
+) {
+  const params: Record<string, string | number | boolean> = {};
+  if (includeCoaching) params.include_coaching = true;
+  if (baselineRunId) params.baseline_run_id = baselineRunId;
+  return apiGet<RunDetailResponse>(`/dashboards/${ws}/backtests/${runId}`, params);
+}
+
+export function getRunLineage(ws: string, runId: string) {
+  return apiGet<LineageCandidatesResponse>(
+    `/dashboards/${ws}/backtests/${runId}/lineage`,
+  );
 }
 
 export function getRunEvents(runId: string) {
