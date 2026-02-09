@@ -17,5 +17,9 @@ export function useBacktestCharts(idA: string | null, idB: string | null) {
     b: results[1]?.data as BacktestChartData | undefined,
     isLoading: results.some((r) => r.isLoading),
     isError: results.some((r) => r.isError),
+    refetch: () => {
+      results[0]?.refetch();
+      results[1]?.refetch();
+    },
   };
 }

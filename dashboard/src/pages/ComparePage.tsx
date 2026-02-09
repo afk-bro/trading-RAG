@@ -3,7 +3,9 @@ import { useBacktestCharts } from "@/hooks/use-backtest-charts";
 import { CompareKpiTable } from "@/components/compare/CompareKpiTable";
 import { CompareEquityChart } from "@/components/compare/CompareEquityChart";
 import { ConfigDiffPanel } from "@/components/compare/ConfigDiffPanel";
-import { ArrowLeft } from "lucide-react";
+import { Skeleton } from "@/components/Skeleton";
+import { ErrorAlert } from "@/components/ErrorAlert";
+import { ArrowLeft, GitCompareArrows, ArrowRight } from "lucide-react";
 
 function buildLabel(meta?: Record<string, unknown>): string {
   const symbol = (meta?.symbol as string) ?? "";
@@ -18,14 +20,20 @@ export function ComparePage() {
   const idA = searchParams.get("a");
   const idB = searchParams.get("b");
 
-  const { a, b, isLoading, isError } = useBacktestCharts(idA, idB);
+  const { a, b, isLoading, isError, refetch } = useBacktestCharts(idA, idB);
 
   if (!idA || !idB) {
     return (
-      <div className="text-center py-12 text-text-muted">
-        Select two runs to compare.{" "}
-        <Link to="/backtests" className="text-accent hover:underline">
-          Back to runs
+      <div className="py-16 text-center space-y-3">
+        <GitCompareArrows className="w-10 h-10 text-text-muted mx-auto" />
+        <p className="text-sm font-medium text-text-muted">
+          Select two runs to compare
+        </p>
+        <Link
+          to="/backtests"
+          className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+        >
+          Go to backtests <ArrowRight className="w-3 h-3" />
         </Link>
       </div>
     );
@@ -34,22 +42,20 @@ export function ComparePage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="h-8 w-64 bg-bg-tertiary rounded animate-pulse" />
-        <div className="h-48 bg-bg-tertiary rounded animate-pulse" />
-        <div className="h-[400px] bg-bg-tertiary rounded animate-pulse" />
-        <div className="h-12 bg-bg-tertiary rounded animate-pulse" />
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-48" />
+        <Skeleton className="h-[400px]" />
+        <Skeleton className="h-12" />
       </div>
     );
   }
 
   if (isError || !a || !b) {
     return (
-      <div className="text-center py-12 text-text-muted">
-        Failed to load one or both runs.{" "}
-        <Link to="/backtests" className="text-accent hover:underline">
-          Back to runs
-        </Link>
-      </div>
+      <ErrorAlert
+        message="Failed to load one or both runs"
+        onRetry={() => refetch()}
+      />
     );
   }
 

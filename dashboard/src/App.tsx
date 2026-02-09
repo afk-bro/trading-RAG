@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DashboardShell } from "@/components/layout/DashboardShell";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { BacktestsPage } from "@/pages/BacktestsPage";
 import { BacktestRunPage } from "@/pages/BacktestRunPage";
@@ -21,7 +22,7 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter basename="/dashboard">
         <Routes>
-          <Route element={<DashboardShell />}>
+          <Route element={<ErrorBoundary><DashboardShell /></ErrorBoundary>}>
             <Route index element={<DashboardPage />} />
             <Route path="backtests" element={<BacktestsPage />} />
             <Route path="backtests/compare" element={<ComparePage />} />

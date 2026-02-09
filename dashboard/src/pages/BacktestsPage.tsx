@@ -5,8 +5,10 @@ import { useUrlState } from "@/hooks/use-url-state";
 import { useBacktestRuns } from "@/hooks/use-backtest-runs";
 import { BacktestsTable } from "@/components/backtests/BacktestsTable";
 import { WorkspacePicker } from "@/components/layout/WorkspacePicker";
+import { Skeleton } from "@/components/Skeleton";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, GitCompareArrows } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitCompareArrows, Inbox } from "lucide-react";
 
 const STATUSES = ["all", "completed", "failed", "running"] as const;
 const PAGE_SIZE = 25;
@@ -21,7 +23,7 @@ export function BacktestsPage() {
   const status = searchParams.get("status") ?? "all";
   const offset = parseInt(searchParams.get("offset") ?? "0", 10) || 0;
 
-  const { data, isLoading } = useBacktestRuns(
+  const { data, isLoading, isError, refetch } = useBacktestRuns(
     workspaceId || null,
     status,
     PAGE_SIZE,
@@ -103,11 +105,15 @@ export function BacktestsPage() {
         {isLoading ? (
           <div className="p-4 space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-10 bg-bg-tertiary rounded animate-pulse"
-              />
+              <Skeleton key={i} className="h-10" />
             ))}
+          </div>
+        ) : isError ? (
+          <div className="p-4">
+            <ErrorAlert
+              message="Failed to load backtest runs"
+              onRetry={() => refetch()}
+            />
           </div>
         ) : data && data.items.length > 0 ? (
           <BacktestsTable
@@ -116,8 +122,14 @@ export function BacktestsPage() {
             onSelectionChange={setSelectedIds}
           />
         ) : (
-          <div className="p-8 text-center text-text-muted text-sm">
-            No backtest runs found
+          <div className="p-12 text-center space-y-2">
+            <Inbox className="w-10 h-10 text-text-muted mx-auto" />
+            <p className="text-sm font-medium text-text-muted">
+              No backtest runs found
+            </p>
+            <p className="text-xs text-text-muted/70">
+              Run a backtest via the API to see results here
+            </p>
           </div>
         )}
       </div>

@@ -9,11 +9,14 @@ import { BacktestTradeDrawer } from "@/components/backtests/BacktestTradeDrawer"
 import { mapBacktestEquity } from "@/lib/chart-utils";
 import { downloadFile } from "@/api/client";
 import type { BacktestChartTradeRecord } from "@/api/types";
+import { Skeleton } from "@/components/Skeleton";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   Download,
   AlertTriangle,
+  BarChart3,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -26,7 +29,7 @@ export function BacktestRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const { workspaceId } = useOutletContext<DashboardContext>();
   const [tradesPage, setTradesPage] = useState(1);
-  const { data, isLoading } = useBacktestChart(runId ?? null, tradesPage);
+  const { data, isLoading, isError, refetch } = useBacktestChart(runId ?? null, tradesPage);
 
   const [drawerTrade, setDrawerTrade] = useState<BacktestChartTradeRecord | null>(null);
 
@@ -79,14 +82,23 @@ export function BacktestRunPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="h-8 w-64 bg-bg-tertiary rounded animate-pulse" />
+        <Skeleton className="h-8 w-64" />
         <div className="grid grid-cols-6 gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-20 bg-bg-tertiary rounded animate-pulse" />
+            <Skeleton key={i} className="h-20" />
           ))}
         </div>
-        <div className="h-[400px] bg-bg-tertiary rounded animate-pulse" />
+        <Skeleton className="h-[400px]" />
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <ErrorAlert
+        message="Failed to load backtest run"
+        onRetry={() => refetch()}
+      />
     );
   }
 
@@ -232,8 +244,14 @@ export function BacktestRunPage() {
             onTradeClick={setDrawerTrade}
           />
         ) : (
-          <div className="p-8 text-center text-text-muted text-sm">
-            No trades recorded
+          <div className="p-12 text-center space-y-2">
+            <BarChart3 className="w-10 h-10 text-text-muted mx-auto" />
+            <p className="text-sm font-medium text-text-muted">
+              No trades executed
+            </p>
+            <p className="text-xs text-text-muted/70">
+              Strategy did not generate entry signals for this run
+            </p>
           </div>
         )}
       </div>

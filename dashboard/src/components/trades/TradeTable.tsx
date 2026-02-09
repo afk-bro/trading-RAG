@@ -11,7 +11,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatDuration } from "@/lib/chart-utils";
 import type { TradeEventItem } from "@/api/types";
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, TrendingUp } from "lucide-react";
 
 const col = createColumnHelper<TradeEventItem>();
 
@@ -155,9 +155,15 @@ export function TradeTable({ data, onRowClick }: Props) {
       </table>
 
       {data.length === 0 && (
-        <p className="text-center py-8 text-text-muted text-sm">
-          No trade events found
-        </p>
+        <div className="py-12 text-center space-y-2">
+          <TrendingUp className="w-10 h-10 text-text-muted mx-auto" />
+          <p className="text-sm font-medium text-text-muted">
+            No trade events found
+          </p>
+          <p className="text-xs text-text-muted/70">
+            Try adjusting the time range or filters
+          </p>
+        </div>
       )}
     </div>
   );
