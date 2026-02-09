@@ -8,10 +8,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.lifespan import get_db_pool
+from app.deps.security import check_workspace_consistency
 from app.repositories.trade_events import EventFilters, TradeEventsRepository
 from app.schemas import TradeEventType
 
-router = APIRouter(prefix="/dashboards", tags=["dashboards"])
+router = APIRouter(
+    prefix="/dashboards",
+    tags=["dashboards"],
+    dependencies=[Depends(check_workspace_consistency)],
+)
 
 
 # =============================================================================

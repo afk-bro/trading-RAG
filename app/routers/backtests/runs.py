@@ -323,3 +323,61 @@ async def delete_backtest_run(
         )
 
     await backtest_repo.delete_run(run_id)
+
+
+# =============================================================================
+# Run Events (Replay Data)
+# =============================================================================
+
+# Event types emitted by ORB strategies:
+#   orb_range_update  – OR window still forming, high/low updated
+#   orb_range_locked  – OR window closed, range is fixed
+#   setup_valid       – confirmed breakout of OR level
+#   entry_signal      – trade entry triggered
+
+
+@router.get(
+    "/{run_id}/events",
+    summary="Get run events for replay",
+    description=(
+        "Returns structured events emitted during a backtest run. "
+        "Used by the replay UI to mark candles and power the coach panel."
+    ),
+    responses={
+        200: {"description": "Events retrieved"},
+        404: {"description": "Run not found or no events stored"},
+    },
+)
+async def get_run_events(
+    run_id: UUID,
+    ws: WorkspaceContext = Depends(get_workspace_ctx),
+):
+    """Get replay events for a backtest run."""
+    from app.repositories.run_events import RunEventsRepository
+
+    if _db_pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection not available",
+        )
+
+    # Ownership check via existing backtest_runs table
+    _, backtest_repo = _get_repos()
+    run = await backtest_repo.get_run(run_id)
+    if not run or str(run.get("workspace_id")) != str(ws.workspace_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backtest run {run_id} not found",
+        )
+
+    events_repo = RunEventsRepository(_db_pool)
+    events = await events_repo.get_events(run_id, ws.workspace_id)
+
+    if events is None:
+        return {"run_id": str(run_id), "events": [], "event_count": 0}
+
+    return {
+        "run_id": str(run_id),
+        "events": events,
+        "event_count": len(events),
+    }

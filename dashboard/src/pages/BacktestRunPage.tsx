@@ -3,10 +3,12 @@ import { useParams, Link, useOutletContext } from "react-router-dom";
 import type { DashboardContext } from "@/components/layout/DashboardShell";
 import { useUrlState } from "@/hooks/use-url-state";
 import { useRunDetail } from "@/hooks/use-run-detail";
+import { useRunEvents } from "@/hooks/use-run-events";
 import { RunKpiStrip } from "@/components/backtests/RunKpiStrip";
 import { EquityChart, type TradeMarker } from "@/components/equity/EquityChart";
 import { BacktestTradesTable } from "@/components/backtests/BacktestTradesTable";
 import { BacktestTradeDrawer } from "@/components/backtests/BacktestTradeDrawer";
+import { ReplayPanel } from "@/components/backtests/ReplayPanel";
 import { mapBacktestEquity } from "@/lib/chart-utils";
 import { downloadFile } from "@/api/client";
 import type { BacktestChartTradeRecord } from "@/api/types";
@@ -19,6 +21,8 @@ import {
   Download,
   AlertTriangle,
   BarChart3,
+  Film,
+  Table2,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -29,15 +33,21 @@ const STATUS_COLORS: Record<string, string> = {
 
 const PAGE_SIZE = 50;
 
+type Tab = "results" | "replay";
+
 export function BacktestRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const { workspaceId: ctxWorkspaceId } = useOutletContext<DashboardContext>();
   const [urlWsId, setUrlWsId] = useUrlState("workspace_id", "");
   const workspaceId = ctxWorkspaceId || urlWsId;
   const [tradesPage, setTradesPage] = useState(1);
+  const [activeTab, setActiveTab] = useState<Tab>("results");
   const { data, isLoading, isError, refetch } = useRunDetail(
     workspaceId || null,
     runId ?? null,
+  );
+  const { data: eventsData } = useRunEvents(
+    activeTab === "replay" ? (runId ?? null) : null,
   );
 
   if (!workspaceId) {
@@ -222,74 +232,120 @@ export function BacktestRunPage() {
         </div>
       )}
 
-      {/* KPI strip */}
-      <RunKpiStrip summary={data.summary} />
-
-      {/* Equity chart */}
-      {data.equity.length === 0 ? (
-        <div className="bg-bg-secondary border border-border rounded-lg p-8 text-center text-text-muted text-sm">
-          Equity curve not available for this run
-        </div>
-      ) : (
-        <EquityChart data={equityData} tradeMarkers={tradeMarkers} />
-      )}
-
-      {/* Trades table */}
-      <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-medium text-text-emphasis">
-            Trades ({totalTrades})
-          </h3>
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 text-xs text-text-muted">
-              <button
-                disabled={tradesPage <= 1}
-                onClick={() => setTradesPage((p) => p - 1)}
-                className="px-2 py-1 rounded border border-border disabled:opacity-40
-                           hover:bg-bg-tertiary transition-colors"
-              >
-                Prev
-              </button>
-              <span>
-                {tradesPage} / {totalPages}
-              </span>
-              <button
-                disabled={tradesPage >= totalPages}
-                onClick={() => setTradesPage((p) => p + 1)}
-                className="px-2 py-1 rounded border border-border disabled:opacity-40
-                           hover:bg-bg-tertiary transition-colors"
-              >
-                Next
-              </button>
-            </div>
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-border">
+        <button
+          onClick={() => setActiveTab("results")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
+            activeTab === "results"
+              ? "border-accent text-foreground"
+              : "border-transparent text-text-muted hover:text-foreground",
           )}
-        </div>
-        {pagedTrades.length > 0 ? (
-          <BacktestTradesTable
-            data={pagedTrades}
-            onTradeClick={setDrawerTrade}
-          />
-        ) : (
-          <div className="p-12 text-center space-y-2">
-            <BarChart3 className="w-10 h-10 text-text-muted mx-auto" />
-            <p className="text-sm font-medium text-text-muted">
-              No trades executed
-            </p>
-            <p className="text-xs text-text-muted/70">
-              Strategy did not generate entry signals for this run
-            </p>
-          </div>
-        )}
+        >
+          <Table2 className="w-3.5 h-3.5" /> Results
+        </button>
+        <button
+          onClick={() => setActiveTab("replay")}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
+            activeTab === "replay"
+              ? "border-accent text-foreground"
+              : "border-transparent text-text-muted hover:text-foreground",
+          )}
+        >
+          <Film className="w-3.5 h-3.5" /> Replay
+          {eventsData && eventsData.event_count > 0 && (
+            <span className="ml-1 text-[10px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full">
+              {eventsData.event_count}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* Trade drawer */}
-      <BacktestTradeDrawer
-        open={!!drawerTrade}
-        onClose={() => setDrawerTrade(null)}
-        trade={drawerTrade}
-        symbol={symbol}
-        workspaceId={workspaceId}
-      />
+      {activeTab === "results" ? (
+        <>
+          {/* KPI strip */}
+          <RunKpiStrip summary={data.summary} />
+
+          {/* Equity chart */}
+          {data.equity.length === 0 ? (
+            <div className="bg-bg-secondary border border-border rounded-lg p-8 text-center text-text-muted text-sm">
+              Equity curve not available for this run
+            </div>
+          ) : (
+            <EquityChart data={equityData} tradeMarkers={tradeMarkers} />
+          )}
+
+          {/* Trades table */}
+          <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <h3 className="text-sm font-medium text-text-emphasis">
+                Trades ({totalTrades})
+              </h3>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2 text-xs text-text-muted">
+                  <button
+                    disabled={tradesPage <= 1}
+                    onClick={() => setTradesPage((p) => p - 1)}
+                    className="px-2 py-1 rounded border border-border disabled:opacity-40
+                               hover:bg-bg-tertiary transition-colors"
+                  >
+                    Prev
+                  </button>
+                  <span>
+                    {tradesPage} / {totalPages}
+                  </span>
+                  <button
+                    disabled={tradesPage >= totalPages}
+                    onClick={() => setTradesPage((p) => p + 1)}
+                    className="px-2 py-1 rounded border border-border disabled:opacity-40
+                               hover:bg-bg-tertiary transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+            {pagedTrades.length > 0 ? (
+              <BacktestTradesTable
+                data={pagedTrades}
+                onTradeClick={setDrawerTrade}
+              />
+            ) : (
+              <div className="p-12 text-center space-y-2">
+                <BarChart3 className="w-10 h-10 text-text-muted mx-auto" />
+                <p className="text-sm font-medium text-text-muted">
+                  No trades executed
+                </p>
+                <p className="text-xs text-text-muted/70">
+                  Strategy did not generate entry signals for this run
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Trade drawer */}
+          <BacktestTradeDrawer
+            open={!!drawerTrade}
+            onClose={() => setDrawerTrade(null)}
+            trade={drawerTrade}
+            symbol={symbol}
+            workspaceId={workspaceId}
+          />
+        </>
+      ) : (
+        <>
+          {/* Replay tab content */}
+          {data.equity.length > 0 && (
+            <EquityChart data={equityData} tradeMarkers={tradeMarkers} />
+          )}
+          <ReplayPanel
+            events={eventsData?.events ?? []}
+            maxBarIndex={data.equity.length > 0 ? data.equity.length - 1 : 0}
+          />
+        </>
+      )}
     </div>
   );
 }

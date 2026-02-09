@@ -13,6 +13,7 @@ import type {
   BacktestRunListResponse,
   BacktestChartData,
   RunDetailResponse,
+  RunEventsResponse,
 } from "./types";
 
 export function getWorkspaces() {
@@ -116,4 +117,8 @@ export function getBacktestChartData(
 
 export function getRunDetail(ws: string, runId: string) {
   return apiGet<RunDetailResponse>(`/dashboards/${ws}/backtests/${runId}`);
+}
+
+export function getRunEvents(runId: string) {
+  return apiGet<RunEventsResponse>(`/backtests/runs/${runId}/events`);
 }

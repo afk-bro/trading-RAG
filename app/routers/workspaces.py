@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.lifespan import get_db_pool
+from app.deps.security import check_workspace_consistency
 
 router = APIRouter()
 
@@ -132,7 +133,11 @@ async def create_workspace(
     }
 
 
-@router.patch("/{workspace_id}", response_model=WorkspaceOut)
+@router.patch(
+    "/{workspace_id}",
+    response_model=WorkspaceOut,
+    dependencies=[Depends(check_workspace_consistency)],
+)
 async def update_workspace(
     workspace_id: str,
     body: UpdateWorkspaceBody,

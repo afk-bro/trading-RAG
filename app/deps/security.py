@@ -201,12 +201,50 @@ class WorkspaceContext:
     workspace_id: UUID
 
 
+def _parse_uuid(raw: str, source: str) -> UUID:
+    """Parse a string to UUID, raising 400 with source context on failure."""
+    try:
+        return UUID(raw)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid workspace ID in {source}: {raw}",
+        )
+
+
+def check_workspace_consistency(request: Request) -> None:
+    """
+    Verify that X-Workspace-Id header matches path {workspace_id} when both present.
+
+    Apply as a router-level dependency on routers that use path-param workspace_id
+    (dashboards, execution) to prevent cross-workspace bugs where the UI thinks
+    it's in workspace A but the URL hits workspace B.
+
+    Usage:
+        router = APIRouter(dependencies=[Depends(check_workspace_consistency)])
+    """
+    path_ws = request.path_params.get("workspace_id")
+    header_ws = request.headers.get("X-Workspace-Id")
+
+    if path_ws and header_ws:
+        path_uuid = _parse_uuid(str(path_ws), "URL path")
+        header_uuid = _parse_uuid(header_ws, "X-Workspace-Id header")
+        if path_uuid != header_uuid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Workspace ID mismatch: URL has {path_uuid}, "
+                    f"X-Workspace-Id header has {header_uuid}"
+                ),
+            )
+
+
 def get_workspace_ctx(request: Request) -> WorkspaceContext:
     """
-    Extract and validate workspace ID from request header.
+    Extract and validate workspace ID from request.
 
-    Reads from X-Workspace-Id header (preferred) or falls back to
-    workspace_id query parameter for backward compatibility.
+    Resolution order: X-Workspace-Id header > workspace_id query param > path param.
+    If multiple sources are present, they must all agree (400 on mismatch).
 
     Usage:
         @router.get("/stuff")
@@ -215,26 +253,41 @@ def get_workspace_ctx(request: Request) -> WorkspaceContext:
             ...
 
     Raises:
-        HTTPException 400: Missing or invalid workspace ID
+        HTTPException 400: Missing or invalid workspace ID, or source mismatch
     """
     ws_header = request.headers.get("X-Workspace-Id")
     ws_param = request.query_params.get("workspace_id")
+    ws_path = request.path_params.get("workspace_id")
 
-    raw = ws_header or ws_param
+    sources: dict[str, str] = {}
+    if ws_header:
+        sources["header"] = ws_header
+    if ws_param:
+        sources["query"] = ws_param
+    if ws_path:
+        sources["path"] = str(ws_path)
 
-    if not raw:
+    if not sources:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing workspace ID. Provide X-Workspace-Id header.",
         )
 
-    try:
-        ws_id = UUID(raw)
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid workspace ID: {raw}",
-        )
+    # Pick primary (header preferred)
+    raw = ws_header or ws_param or str(ws_path)
+    ws_id = _parse_uuid(raw, "primary source")
+
+    # Verify all sources agree
+    for source_name, source_val in sources.items():
+        parsed = _parse_uuid(str(source_val), source_name)
+        if parsed != ws_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Workspace ID mismatch: {source_name} has {parsed}, "
+                    f"expected {ws_id}"
+                ),
+            )
 
     return WorkspaceContext(workspace_id=ws_id)
 

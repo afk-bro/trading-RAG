@@ -6,11 +6,13 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.deps.security import require_admin_token
 from app.repositories.strategy_intel import StrategyIntelRepository, IntelSnapshot
 from app.repositories.strategy_versions import StrategyVersionsRepository
 from app.services.intel import IntelRunner
+from app.strategies.presets import PRESETS
 from app.schemas import (
     BacktestSummary,
     BacktestSummaryStatus,
@@ -123,6 +125,123 @@ def _row_to_detail(row: dict) -> StrategyDetailResponse:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+# =============================================================================
+# Strategy Presets
+# =============================================================================
+
+
+class InstantiatePresetRequest(BaseModel):
+    """Request body for instantiating a strategy preset."""
+
+    workspace_id: UUID = Field(..., description="Target workspace")
+    name_override: Optional[str] = Field(
+        None, max_length=200, description="Custom name (defaults to preset name)"
+    )
+
+
+@router.get(
+    "/presets",
+    summary="List available strategy presets",
+    description="Returns all built-in strategy templates with param schemas.",
+)
+async def list_presets() -> list[dict[str, Any]]:
+    """List all available strategy presets."""
+    return [p.to_dict() for p in PRESETS.values()]
+
+
+@router.get(
+    "/presets/{slug}",
+    summary="Get a specific strategy preset",
+)
+async def get_preset(slug: str) -> dict[str, Any]:
+    """Get a preset by slug."""
+    preset = PRESETS.get(slug)
+    if not preset:
+        raise HTTPException(404, f"Preset '{slug}' not found")
+    return preset.to_dict()
+
+
+@router.post(
+    "/presets/{slug}/instantiate",
+    status_code=201,
+    summary="Instantiate strategy from preset",
+    description=(
+        "Creates a strategy + draft version in the target workspace "
+        "from a built-in preset template."
+    ),
+)
+async def instantiate_preset(
+    slug: str,
+    request: InstantiatePresetRequest,
+    _: bool = Depends(require_admin_token),
+) -> dict[str, Any]:
+    """Create a strategy and draft version from a preset."""
+    preset = PRESETS.get(slug)
+    if not preset:
+        raise HTTPException(404, f"Preset '{slug}' not found")
+
+    pool = _get_pool()
+    strategy_repo = StrategyRepository(pool)
+    version_repo = StrategyVersionsRepository(pool)
+
+    name = request.name_override or preset.name
+
+    # Create the strategy record
+    strategy = await strategy_repo.create(
+        workspace_id=request.workspace_id,
+        name=name,
+        engine=preset.engine,
+        description=preset.description,
+        status="active",
+        tags=preset.tags,
+    )
+
+    strategy_id = strategy["id"]
+
+    # Create a draft version with the default config
+    version = None
+    if strategy.get("strategy_entity_id"):
+        try:
+            version = await version_repo.create_version(
+                strategy_id=strategy_id,
+                config_snapshot=preset.to_config_snapshot(),
+                created_by="preset:" + slug,
+                version_tag="v1.0",
+            )
+        except ValueError:
+            # entity_id missing or hash collision — strategy still created
+            pass
+
+    logger.info(
+        "strategy_instantiated_from_preset",
+        preset_slug=slug,
+        strategy_id=str(strategy_id),
+        workspace_id=str(request.workspace_id),
+        version_id=str(version.id) if version else None,
+    )
+
+    result: dict[str, Any] = {
+        "strategy": strategy,
+        "preset_slug": slug,
+        "param_space": preset.to_param_space(),
+    }
+    if version:
+        result["version"] = {
+            "id": str(version.id),
+            "version_number": version.version_number,
+            "version_tag": version.version_tag,
+            "state": version.state,
+            "config_snapshot": version.config_snapshot,
+        }
+
+    return result
+
+
+# =============================================================================
+# Strategy Cards & CRUD
+# =============================================================================
 
 
 @router.get(

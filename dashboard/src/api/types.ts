@@ -368,3 +368,20 @@ export interface RunDetailResponse {
   regime_is: RunDetailRegime | null;
   regime_oos: RunDetailRegime | null;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Run Events (Replay)                                               */
+/* ------------------------------------------------------------------ */
+
+export interface RunEvent {
+  type: "orb_range_update" | "orb_range_locked" | "setup_valid" | "entry_signal";
+  bar_index: number;
+  ts: string;
+  [key: string]: unknown;
+}
+
+export interface RunEventsResponse {
+  run_id: string;
+  events: RunEvent[];
+  event_count: number;
+}
