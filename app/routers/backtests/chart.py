@@ -8,7 +8,9 @@ from typing import Any, Literal, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from app.deps.security import WorkspaceContext, get_workspace_ctx
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -350,6 +352,7 @@ def _parse_regime_info(raw: Any) -> Optional[RegimeInfo]:
 )
 async def get_chart_data(
     run_id: UUID,
+    ws: WorkspaceContext = Depends(get_workspace_ctx),
     page: int = Query(1, ge=1, description="Trades page number"),
     page_size: int = Query(50, ge=10, le=100, description="Trades per page"),
 ):
@@ -368,9 +371,10 @@ async def get_chart_data(
                 equity_curve, trades, run_kind,
                 regime_is, regime_oos
             FROM backtest_runs
-            WHERE id = $1
+            WHERE id = $1 AND workspace_id = $2
             """,
             run_id,
+            ws.workspace_id,
         )
 
     if not row:
@@ -448,7 +452,9 @@ async def get_chart_data(
     },
     summary="Export trades as CSV",
 )
-async def export_trades_csv(run_id: UUID):
+async def export_trades_csv(
+    run_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)
+):
     """Export all trades as CSV file."""
     if _db_pool is None:
         raise HTTPException(
@@ -458,8 +464,9 @@ async def export_trades_csv(run_id: UUID):
 
     async with _db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT trades FROM backtest_runs WHERE id = $1",
+            "SELECT trades FROM backtest_runs WHERE id = $1 AND workspace_id = $2",
             run_id,
+            ws.workspace_id,
         )
 
     if not row:
@@ -550,7 +557,9 @@ async def export_trades_csv(run_id: UUID):
     },
     summary="Export full JSON snapshot",
 )
-async def export_json_snapshot(run_id: UUID):
+async def export_json_snapshot(
+    run_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)
+):
     """Export full run data as JSON snapshot (all trades, no pagination)."""
     if _db_pool is None:
         raise HTTPException(
@@ -565,9 +574,10 @@ async def export_json_snapshot(run_id: UUID):
                 id, status, params, summary, dataset_meta,
                 equity_curve, trades, run_kind, created_at
             FROM backtest_runs
-            WHERE id = $1
+            WHERE id = $1 AND workspace_id = $2
             """,
             run_id,
+            ws.workspace_id,
         )
 
     if not row:
@@ -689,6 +699,7 @@ def _downsample_equity(points: list[EquityPoint], max_points: int) -> list[float
 )
 async def get_sparkline(
     run_id: UUID,
+    ws: WorkspaceContext = Depends(get_workspace_ctx),
     max_points: int = Query(
         SPARKLINE_MAX_POINTS, ge=10, le=200, description="Maximum points to return"
     ),
@@ -705,9 +716,10 @@ async def get_sparkline(
             """
             SELECT equity_curve, status
             FROM backtest_runs
-            WHERE id = $1
+            WHERE id = $1 AND workspace_id = $2
             """,
             run_id,
+            ws.workspace_id,
         )
 
     if not row:

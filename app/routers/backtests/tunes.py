@@ -8,6 +8,7 @@ from uuid import UUID
 import structlog
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Form,
     Header,
@@ -16,6 +17,8 @@ from fastapi import (
     UploadFile,
     status,
 )
+
+from app.deps.security import WorkspaceContext, get_workspace_ctx
 from fastapi.responses import JSONResponse
 
 from .schemas import (
@@ -542,12 +545,12 @@ async def create_tune(
     response_model=TuneResponse,
     summary="Get tune details",
 )
-async def get_tune(tune_id: UUID):
+async def get_tune(tune_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)):
     """Get details of a parameter tuning session including status counts."""
     _, _, tune_repo = _get_repos()
 
     tune = await tune_repo.get_tune(tune_id)
-    if not tune:
+    if not tune or str(tune.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tune {tune_id} not found",
@@ -595,7 +598,7 @@ async def get_tune(tune_id: UUID):
     response_model=CancelTuneResponse,
     summary="Cancel a tuning session",
 )
-async def cancel_tune(tune_id: UUID):
+async def cancel_tune(tune_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)):
     """
     Cancel a running or queued tuning session.
 
@@ -607,7 +610,7 @@ async def cancel_tune(tune_id: UUID):
 
     # Check tune exists and is in cancelable state
     tune = await tune_repo.get_tune(tune_id)
-    if not tune:
+    if not tune or str(tune.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tune {tune_id} not found",
@@ -644,12 +647,21 @@ async def cancel_tune(tune_id: UUID):
 )
 async def list_tune_runs(
     tune_id: UUID,
+    ws: WorkspaceContext = Depends(get_workspace_ctx),
     status_filter: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     """List trial runs for a tuning session."""
     _, _, tune_repo = _get_repos()
+
+    # Verify tune belongs to workspace
+    tune = await tune_repo.get_tune(tune_id)
+    if not tune or str(tune.get("workspace_id")) != str(ws.workspace_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tune {tune_id} not found",
+        )
 
     runs, total = await tune_repo.list_tune_runs(
         tune_id=tune_id,
@@ -886,13 +898,15 @@ async def get_leaderboard(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a tuning session",
 )
-async def delete_tune(tune_id: UUID):
+async def delete_tune(tune_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)):
     """Delete a tuning session and all its trial runs."""
     _, _, tune_repo = _get_repos()
 
-    deleted = await tune_repo.delete_tune(tune_id)
-    if not deleted:
+    tune = await tune_repo.get_tune(tune_id)
+    if not tune or str(tune.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tune {tune_id} not found",
         )
+
+    await tune_repo.delete_tune(tune_id)

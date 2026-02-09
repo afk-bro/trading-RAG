@@ -5,7 +5,9 @@ from typing import Any, Literal, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from app.deps.security import WorkspaceContext, get_workspace_ctx
 from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["backtests"])
@@ -173,6 +175,7 @@ def _parse_equity_curve(
 )
 async def get_wfo_chart_data(
     wfo_id: UUID,
+    ws: WorkspaceContext = Depends(get_workspace_ctx),
     fold_index: Optional[int] = Query(
         None, ge=0, description="Fold to get equity curve for"
     ),
@@ -197,9 +200,10 @@ async def get_wfo_chart_data(
                 s.name as strategy_name
             FROM wfo_runs w
             LEFT JOIN strategies s ON s.strategy_entity_id = w.strategy_entity_id
-            WHERE w.id = $1
+            WHERE w.id = $1 AND w.workspace_id = $2
             """,
             wfo_id,
+            ws.workspace_id,
         )
 
     if not wfo:

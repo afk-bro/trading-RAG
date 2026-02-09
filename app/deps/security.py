@@ -185,6 +185,61 @@ def require_workspace_access(
 
 
 # =============================================================================
+# Workspace Context (header-based)
+# =============================================================================
+
+
+@dataclass
+class WorkspaceContext:
+    """Resolved workspace context from request header.
+
+    Single dependency that every workspace-scoped endpoint can use.
+    Reads X-Workspace-Id header, validates format, and returns typed UUID.
+    In single-tenant mode, no membership check—just format validation.
+    """
+
+    workspace_id: UUID
+
+
+def get_workspace_ctx(request: Request) -> WorkspaceContext:
+    """
+    Extract and validate workspace ID from request header.
+
+    Reads from X-Workspace-Id header (preferred) or falls back to
+    workspace_id query parameter for backward compatibility.
+
+    Usage:
+        @router.get("/stuff")
+        async def get_stuff(ws: WorkspaceContext = Depends(get_workspace_ctx)):
+            # ws.workspace_id is a validated UUID
+            ...
+
+    Raises:
+        HTTPException 400: Missing or invalid workspace ID
+    """
+    ws_header = request.headers.get("X-Workspace-Id")
+    ws_param = request.query_params.get("workspace_id")
+
+    raw = ws_header or ws_param
+
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing workspace ID. Provide X-Workspace-Id header.",
+        )
+
+    try:
+        ws_id = UUID(raw)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid workspace ID: {raw}",
+        )
+
+    return WorkspaceContext(workspace_id=ws_id)
+
+
+# =============================================================================
 # JWT-based Authentication (v2)
 # =============================================================================
 

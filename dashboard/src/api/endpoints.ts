@@ -1,5 +1,7 @@
 import { apiGet, apiPost } from "./client";
 import type {
+  Workspace,
+  WorkspaceListResponse,
   EquityResponse,
   IntelTimelineResponse,
   AlertsResponse,
@@ -10,7 +12,20 @@ import type {
   SSETicketResponse,
   BacktestRunListResponse,
   BacktestChartData,
+  RunDetailResponse,
 } from "./types";
+
+export function getWorkspaces() {
+  return apiGet<WorkspaceListResponse>("/workspaces");
+}
+
+export function createWorkspace(body: {
+  name: string;
+  slug?: string;
+  description?: string;
+}) {
+  return apiPost<Workspace>("/workspaces", body);
+}
 
 export function getEquity(ws: string, days: number) {
   return apiGet<EquityResponse>(`/dashboards/${ws}/equity`, { days });
@@ -97,4 +112,8 @@ export function getBacktestChartData(
   if (page != null) params.page = page;
   if (pageSize != null) params.page_size = pageSize;
   return apiGet<BacktestChartData>(`/backtests/runs/${runId}/chart-data`, params);
+}
+
+export function getRunDetail(ws: string, runId: string) {
+  return apiGet<RunDetailResponse>(`/dashboards/${ws}/backtests/${runId}`);
 }

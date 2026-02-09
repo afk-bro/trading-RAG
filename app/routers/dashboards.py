@@ -1,5 +1,6 @@
 """Read-only dashboard endpoints for trust-building visualizations."""
 
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 from uuid import UUID
@@ -628,4 +629,186 @@ async def get_trade_event_detail(
     return {
         "event": _normalize_event(event),
         "related_events": related_normalized,
+    }
+
+
+# =============================================================================
+# Backtest Run Detail (workspace-scoped, UI-shaped DTO)
+# =============================================================================
+
+
+def _parse_jsonb(raw: Any) -> Any:
+    """Parse a JSONB field that might be a string."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    return raw
+
+
+def _build_drawdown_series(equity_points: list[dict]) -> list[dict]:
+    """Compute drawdown series from equity points."""
+    if not equity_points:
+        return []
+    peak = equity_points[0].get("equity", 0)
+    result = []
+    for p in equity_points:
+        eq = p.get("equity", 0)
+        if eq > peak:
+            peak = eq
+        dd = (peak - eq) / peak if peak > 0 else 0.0
+        result.append({"t": p.get("t", ""), "drawdown_pct": round(dd, 6)})
+    return result
+
+
+def _slim_trades(trades_raw: Any, limit: int = 200) -> list[dict]:
+    """Return slim trade records (no full payload)."""
+    data = _parse_jsonb(trades_raw)
+    if not data or not isinstance(data, list):
+        return []
+    out = []
+    for t in data[:limit]:
+        if not isinstance(t, dict):
+            continue
+        t_entry = t.get("t_entry") or t.get("entry_time") or t.get("EntryTime") or ""
+        t_exit = t.get("t_exit") or t.get("exit_time") or t.get("ExitTime") or ""
+        side = t.get("side") or t.get("Size", "long")
+        if isinstance(side, (int, float)):
+            side = "long" if side > 0 else "short"
+        out.append(
+            {
+                "t_entry": str(t_entry),
+                "t_exit": str(t_exit),
+                "side": str(side).lower(),
+                "entry_price": t.get("entry_price") or t.get("EntryPrice"),
+                "exit_price": t.get("exit_price") or t.get("ExitPrice"),
+                "pnl": float(t.get("pnl") or t.get("PnL") or 0),
+                "return_pct": float(t.get("return_pct") or t.get("ReturnPct") or 0),
+            }
+        )
+    return out
+
+
+@router.get("/{workspace_id}/backtests/{run_id}")
+async def get_backtest_run_detail(
+    workspace_id: UUID,
+    run_id: UUID,
+    trades_limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    pool: Any = Depends(get_db_pool),
+) -> dict:
+    """
+    Workspace-scoped backtest run detail.
+
+    Returns a UI-shaped DTO with:
+    - Headline metrics (summary)
+    - Equity curve series
+    - Drawdown series (computed)
+    - Trade list (slim, capped)
+    - Dataset + strategy metadata
+    - Regime tags
+    """
+    query = """
+        SELECT
+            br.id,
+            br.status,
+            br.created_at,
+            br.started_at,
+            br.completed_at,
+            br.params,
+            br.summary,
+            br.dataset_meta,
+            br.equity_curve,
+            br.trades,
+            br.warnings,
+            br.run_kind,
+            br.regime_is,
+            br.regime_oos,
+            br.trade_count,
+            br.strategy_entity_id,
+            br.strategy_version_id,
+            -- Strategy name via kb_entities
+            ke.title AS strategy_name
+        FROM backtest_runs br
+        LEFT JOIN kb_entities ke ON br.strategy_entity_id = ke.id
+        WHERE br.id = $1
+          AND br.workspace_id = $2
+    """
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(query, run_id, workspace_id)
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+
+    # Parse equity curve
+    equity_raw = _parse_jsonb(row["equity_curve"])
+    equity_points: list[dict] = []
+    if isinstance(equity_raw, list):
+        for p in equity_raw:
+            if isinstance(p, dict):
+                t = p.get("t") or p.get("timestamp") or p.get("time")
+                eq = p.get("equity") or p.get("value") or p.get("Equity")
+                if t is not None and eq is not None:
+                    equity_points.append({"t": str(t), "equity": float(eq)})
+
+    # Compute drawdown series
+    drawdown = _build_drawdown_series(equity_points)
+
+    # Summary metrics
+    summary = _parse_jsonb(row["summary"]) or {}
+
+    # Dataset metadata
+    dataset_meta = _parse_jsonb(row["dataset_meta"]) or {}
+
+    # Slim trades
+    trades = _slim_trades(row["trades"], limit=trades_limit)
+
+    # Params
+    params = _parse_jsonb(row["params"]) or {}
+
+    # Regime tags
+    def _regime_tags(raw: Any) -> Optional[dict]:
+        data = _parse_jsonb(raw)
+        if not data or not isinstance(data, dict):
+            return None
+        tags = data.get("regime_tags") or data.get("tags") or []
+        return {
+            "trend_tag": data.get("trend_tag"),
+            "vol_tag": data.get("vol_tag"),
+            "efficiency_tag": data.get("efficiency_tag"),
+            "tags": tags,
+        }
+
+    return {
+        "run_id": str(row["id"]),
+        "workspace_id": str(workspace_id),
+        "status": row["status"],
+        "run_kind": row["run_kind"],
+        "created_at": (row["created_at"].isoformat() if row["created_at"] else None),
+        "started_at": (row["started_at"].isoformat() if row["started_at"] else None),
+        "completed_at": (
+            row["completed_at"].isoformat() if row["completed_at"] else None
+        ),
+        "strategy": {
+            "entity_id": (
+                str(row["strategy_entity_id"]) if row["strategy_entity_id"] else None
+            ),
+            "version_id": (
+                str(row["strategy_version_id"]) if row["strategy_version_id"] else None
+            ),
+            "name": row["strategy_name"],
+        },
+        "dataset": dataset_meta,
+        "params": params,
+        "summary": summary,
+        "equity": equity_points,
+        "drawdown": drawdown,
+        "trades": trades,
+        "trade_count": row["trade_count"] or len(trades),
+        "warnings": _parse_jsonb(row["warnings"]) or [],
+        "regime_is": _regime_tags(row["regime_is"]),
+        "regime_oos": _regime_tags(row["regime_oos"]),
     }

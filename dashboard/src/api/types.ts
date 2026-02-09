@@ -1,4 +1,20 @@
 /* ------------------------------------------------------------------ */
+/*  Workspaces                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface WorkspaceListResponse {
+  workspaces: Workspace[];
+}
+
+/* ------------------------------------------------------------------ */
 /*  Equity                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -298,4 +314,57 @@ export interface BacktestChartData {
   notes: string[];
   regime_is?: RegimeInfo;
   regime_oos?: RegimeInfo;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Run Detail DTO (workspace-scoped, UI-shaped)                       */
+/* ------------------------------------------------------------------ */
+
+export interface RunDetailStrategy {
+  entity_id: string | null;
+  version_id: string | null;
+  name: string | null;
+}
+
+export interface DrawdownPoint {
+  t: string;
+  drawdown_pct: number;
+}
+
+export interface RunDetailRegime {
+  trend_tag: string | null;
+  vol_tag: string | null;
+  efficiency_tag: string | null;
+  tags: string[];
+}
+
+export interface RunDetailTrade {
+  t_entry: string;
+  t_exit: string;
+  side: string;
+  entry_price?: number;
+  exit_price?: number;
+  pnl: number;
+  return_pct: number;
+}
+
+export interface RunDetailResponse {
+  run_id: string;
+  workspace_id: string;
+  status: string;
+  run_kind: string;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  strategy: RunDetailStrategy;
+  dataset: DatasetMeta;
+  params: Record<string, unknown>;
+  summary: BacktestChartSummary;
+  equity: BacktestChartEquityPoint[];
+  drawdown: DrawdownPoint[];
+  trades: RunDetailTrade[];
+  trade_count: number;
+  warnings: string[];
+  regime_is: RunDetailRegime | null;
+  regime_oos: RunDetailRegime | null;
 }

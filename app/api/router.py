@@ -22,6 +22,7 @@ from app.routers import (
     strategies,
     testing,
     unified_ingest,
+    workspaces,
     youtube,
     youtube_pine,
 )
@@ -68,6 +69,9 @@ api_router.include_router(
 
 # Strategy Registry
 api_router.include_router(strategies.router, prefix="/strategies", tags=["Strategies"])
+
+# Workspaces
+api_router.include_router(workspaces.router, prefix="/workspaces", tags=["Workspaces"])
 
 # Dashboards (read-only views)
 api_router.include_router(dashboards.router, tags=["Dashboards"])

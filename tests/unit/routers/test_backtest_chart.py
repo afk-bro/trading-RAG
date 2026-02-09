@@ -6,10 +6,20 @@ from uuid import uuid4
 
 import pytest
 
+from app.deps.security import WorkspaceContext
+
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
+SAMPLE_WS_ID = uuid4()
+
+
+@pytest.fixture
+def sample_ws():
+    """Sample workspace context."""
+    return WorkspaceContext(workspace_id=SAMPLE_WS_ID)
 
 
 @pytest.fixture
@@ -38,6 +48,7 @@ def sample_backtest_row():
     """Sample backtest_runs row with full data."""
     return {
         "id": uuid4(),
+        "workspace_id": SAMPLE_WS_ID,
         "status": "completed",
         "params": {"lookback": 20, "threshold": 0.02},
         "summary": {
@@ -245,7 +256,7 @@ class TestChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_chart_data_returns_full_response(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test chart data returns full response with equity, summary, trades."""
         from app.routers.backtests import chart
@@ -254,7 +265,7 @@ class TestChartDataEndpoint:
         chart.set_db_pool(pool)
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, page=1, page_size=50)
+        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
 
         assert result.status == "completed"
         assert len(result.equity) == 3
@@ -266,7 +277,7 @@ class TestChartDataEndpoint:
         assert result.notes == []
 
     @pytest.mark.asyncio
-    async def test_chart_data_404_on_missing_run(self, sample_run_id, mock_pool):
+    async def test_chart_data_404_on_missing_run(self, sample_run_id, sample_ws, mock_pool):
         """Test 404 for non-existent run."""
         from fastapi import HTTPException
 
@@ -277,13 +288,13 @@ class TestChartDataEndpoint:
         conn.fetchrow.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await chart.get_chart_data(sample_run_id, page=1, page_size=50)
+            await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
 
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_chart_data_empty_equity_adds_note(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test empty equity curve adds note."""
         from app.routers.backtests import chart
@@ -295,7 +306,7 @@ class TestChartDataEndpoint:
         sample_backtest_row["equity_curve"] = []
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, page=1, page_size=50)
+        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
 
         assert result.equity_source == "missing"
         assert len(result.equity) == 0
@@ -303,7 +314,7 @@ class TestChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_chart_data_tune_variant_adds_note(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test tune variant without equity adds specific note."""
         from app.routers.backtests import chart
@@ -316,13 +327,13 @@ class TestChartDataEndpoint:
         sample_backtest_row["run_kind"] = "tune_variant"
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, page=1, page_size=50)
+        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
 
         assert "tune variants" in result.notes[0].lower()
 
     @pytest.mark.asyncio
     async def test_chart_data_no_trades_adds_note(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test no trades adds note."""
         from app.routers.backtests import chart
@@ -334,7 +345,7 @@ class TestChartDataEndpoint:
         sample_backtest_row["trades"] = None
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, page=1, page_size=50)
+        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
 
         assert result.trades_pagination.total == 0
         assert result.exports.trades_csv is None
@@ -342,7 +353,7 @@ class TestChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_chart_data_pagination_works(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test pagination returns correct page."""
         from app.routers.backtests import chart
@@ -364,13 +375,13 @@ class TestChartDataEndpoint:
         conn.fetchrow.return_value = sample_backtest_row
 
         # Page 1
-        result1 = await chart.get_chart_data(sample_run_id, page=1, page_size=3)
+        result1 = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=3)
         assert result1.trades_pagination.total == 7
         assert result1.trades_pagination.page == 1
         assert len(result1.trades_page) == 3
 
         # Page 2
-        result2 = await chart.get_chart_data(sample_run_id, page=2, page_size=3)
+        result2 = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=2, page_size=3)
         assert result2.trades_pagination.page == 2
         assert len(result2.trades_page) == 3
 
@@ -385,7 +396,7 @@ class TestExportEndpoints:
 
     @pytest.mark.asyncio
     async def test_trades_csv_export(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test trades CSV export returns CSV."""
         from app.routers.backtests import chart
@@ -394,7 +405,7 @@ class TestExportEndpoints:
         chart.set_db_pool(pool)
         conn.fetchrow.return_value = {"trades": sample_backtest_row["trades"]}
 
-        response = await chart.export_trades_csv(sample_run_id)
+        response = await chart.export_trades_csv(sample_run_id, ws=sample_ws)
 
         assert response.media_type == "text/csv"
         # Check headers
@@ -404,7 +415,7 @@ class TestExportEndpoints:
         assert ".csv" in headers["content-disposition"]
 
     @pytest.mark.asyncio
-    async def test_trades_csv_404_no_trades(self, sample_run_id, mock_pool):
+    async def test_trades_csv_404_no_trades(self, sample_run_id, sample_ws, mock_pool):
         """Test trades CSV export returns 404 when no trades."""
         from fastapi import HTTPException
 
@@ -415,13 +426,13 @@ class TestExportEndpoints:
         conn.fetchrow.return_value = {"trades": []}
 
         with pytest.raises(HTTPException) as exc_info:
-            await chart.export_trades_csv(sample_run_id)
+            await chart.export_trades_csv(sample_run_id, ws=sample_ws)
 
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_json_snapshot_export(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test JSON snapshot export returns full data."""
         from app.routers.backtests import chart
@@ -430,7 +441,7 @@ class TestExportEndpoints:
         chart.set_db_pool(pool)
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.export_json_snapshot(sample_run_id)
+        result = await chart.export_json_snapshot(sample_run_id, ws=sample_ws)
 
         assert result["run_id"] == str(sample_run_id)
         assert result["status"] == "completed"
@@ -449,7 +460,7 @@ class TestSparklineEndpoint:
 
     @pytest.mark.asyncio
     async def test_sparkline_returns_downsampled_data(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test sparkline returns downsampled equity values."""
         from app.routers.backtests import chart
@@ -458,7 +469,7 @@ class TestSparklineEndpoint:
         chart.set_db_pool(pool)
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_sparkline(sample_run_id, max_points=96)
+        result = await chart.get_sparkline(sample_run_id, ws=sample_ws, max_points=96)
 
         assert result.status == "ok"
         assert len(result.y) == 3  # Original has 3 points, no downsampling needed
@@ -467,7 +478,7 @@ class TestSparklineEndpoint:
         assert result.y[2] == 10200.0
 
     @pytest.mark.asyncio
-    async def test_sparkline_404_on_missing_run(self, sample_run_id, mock_pool):
+    async def test_sparkline_404_on_missing_run(self, sample_run_id, sample_ws, mock_pool):
         """Test 404 for non-existent run."""
         from fastapi import HTTPException
 
@@ -478,13 +489,13 @@ class TestSparklineEndpoint:
         conn.fetchrow.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await chart.get_sparkline(sample_run_id)
+            await chart.get_sparkline(sample_run_id, ws=sample_ws)
 
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_sparkline_pending_run_returns_empty(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test pending run returns empty sparkline with pending status."""
         from app.routers.backtests import chart
@@ -495,14 +506,14 @@ class TestSparklineEndpoint:
         sample_backtest_row["status"] = "running"
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_sparkline(sample_run_id)
+        result = await chart.get_sparkline(sample_run_id, ws=sample_ws)
 
         assert result.status == "pending"
         assert len(result.y) == 0
 
     @pytest.mark.asyncio
     async def test_sparkline_empty_equity_returns_empty(
-        self, sample_run_id, mock_pool, sample_backtest_row
+        self, sample_run_id, sample_ws, mock_pool, sample_backtest_row
     ):
         """Test run without equity returns empty sparkline."""
         from app.routers.backtests import chart
@@ -513,7 +524,7 @@ class TestSparklineEndpoint:
         sample_backtest_row["equity_curve"] = []
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_sparkline(sample_run_id)
+        result = await chart.get_sparkline(sample_run_id, ws=sample_ws)
 
         assert result.status == "empty"
         assert len(result.y) == 0

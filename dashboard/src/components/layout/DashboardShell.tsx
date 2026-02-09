@@ -1,12 +1,40 @@
+import { useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { useUrlState } from "@/hooks/use-url-state";
+import { useSetWorkspaceId, useWorkspaceId } from "@/context/workspace";
 import { DateRangeSelector } from "./DateRangeSelector";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function DashboardShell() {
-  const [workspaceId] = useUrlState("workspace_id", "");
+  const [urlWsId, setUrlWsId] = useUrlState("workspace_id", "");
+  const globalWsId = useWorkspaceId();
+  const setGlobalWsId = useSetWorkspaceId();
   const [daysStr, setDays] = useUrlState("days", "30");
+
+  // Sync: URL → global context (URL is source of truth when present)
+  useEffect(() => {
+    if (urlWsId && urlWsId !== globalWsId) {
+      setGlobalWsId(urlWsId);
+    }
+  }, [urlWsId, globalWsId, setGlobalWsId]);
+
+  // On mount: if no URL param but global has one, populate URL
+  useEffect(() => {
+    if (!urlWsId && globalWsId) {
+      setUrlWsId(globalWsId);
+    }
+    // Only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const workspaceId = urlWsId || globalWsId;
+
+  function setWorkspaceId(id: string) {
+    setUrlWsId(id);
+    setGlobalWsId(id);
+  }
   const days = parseInt(daysStr, 10) || 30;
   const location = useLocation();
 
@@ -45,11 +73,10 @@ export function DashboardShell() {
                 Backtests
               </Link>
             </nav>
-            {workspaceId && (
-              <span className="text-xs text-text-muted font-mono bg-bg-tertiary px-2 py-1 rounded-md">
-                {workspaceId.slice(0, 8)}...
-              </span>
-            )}
+            <WorkspaceSwitcher
+              currentId={workspaceId}
+              onSelect={(id) => setWorkspaceId(id)}
+            />
           </div>
 
           {workspaceId && !isBacktests && (

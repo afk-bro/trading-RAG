@@ -6,10 +6,20 @@ from uuid import uuid4
 
 import pytest
 
+from app.deps.security import WorkspaceContext
+
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
+SAMPLE_WS_ID = uuid4()
+
+
+@pytest.fixture
+def sample_ws():
+    """Sample workspace context."""
+    return WorkspaceContext(workspace_id=SAMPLE_WS_ID)
 
 
 @pytest.fixture
@@ -40,6 +50,7 @@ def sample_wfo_row():
     tune_id_2 = uuid4()
     return {
         "id": uuid4(),
+        "workspace_id": SAMPLE_WS_ID,
         "status": "completed",
         "n_folds": 3,
         "folds_completed": 3,
@@ -247,7 +258,7 @@ class TestWFOChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_wfo_chart_data_returns_full_response(
-        self, sample_wfo_id, mock_pool, sample_wfo_row, sample_tune_rows
+        self, sample_wfo_id, sample_ws, mock_pool, sample_wfo_row, sample_tune_rows
     ):
         """Test WFO chart data returns full response with folds and candidates."""
         from app.routers.backtests import wfo_chart
@@ -259,7 +270,7 @@ class TestWFOChartDataEndpoint:
         conn.fetchrow.return_value = sample_wfo_row
         conn.fetch.return_value = sample_tune_rows
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id)
+        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws)
 
         assert result.status == "completed"
         assert result.n_folds == 3
@@ -272,7 +283,7 @@ class TestWFOChartDataEndpoint:
         assert result.notes == []
 
     @pytest.mark.asyncio
-    async def test_wfo_chart_data_404_on_missing_wfo(self, sample_wfo_id, mock_pool):
+    async def test_wfo_chart_data_404_on_missing_wfo(self, sample_wfo_id, sample_ws, mock_pool):
         """Test 404 for non-existent WFO."""
         from fastapi import HTTPException
 
@@ -283,7 +294,7 @@ class TestWFOChartDataEndpoint:
         conn.fetchrow.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await wfo_chart.get_wfo_chart_data(sample_wfo_id)
+            await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws)
 
         assert exc_info.value.status_code == 404
 
@@ -291,6 +302,7 @@ class TestWFOChartDataEndpoint:
     async def test_wfo_chart_data_with_fold_selection(
         self,
         sample_wfo_id,
+        sample_ws,
         mock_pool,
         sample_wfo_row,
         sample_tune_rows,
@@ -323,7 +335,7 @@ class TestWFOChartDataEndpoint:
         conn.fetchrow.side_effect = fetchrow_results
         conn.fetch.return_value = sample_tune_rows
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, fold_index=0)
+        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws, fold_index=0)
 
         assert result.selected_fold is not None
         assert result.selected_fold.fold_index == 0
@@ -332,7 +344,7 @@ class TestWFOChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_wfo_chart_data_fold_out_of_range(
-        self, sample_wfo_id, mock_pool, sample_wfo_row, sample_tune_rows
+        self, sample_wfo_id, sample_ws, mock_pool, sample_wfo_row, sample_tune_rows
     ):
         """Test WFO chart data adds note when fold index out of range."""
         from app.routers.backtests import wfo_chart
@@ -343,14 +355,14 @@ class TestWFOChartDataEndpoint:
         conn.fetchrow.return_value = sample_wfo_row
         conn.fetch.return_value = sample_tune_rows
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, fold_index=99)
+        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws, fold_index=99)
 
         assert result.selected_fold is None
         assert any("does not exist" in n for n in result.notes)
 
     @pytest.mark.asyncio
     async def test_wfo_chart_data_no_candidates(
-        self, sample_wfo_id, mock_pool, sample_wfo_row
+        self, sample_wfo_id, sample_ws, mock_pool, sample_wfo_row
     ):
         """Test WFO chart data handles no candidates."""
         from app.routers.backtests import wfo_chart
@@ -364,7 +376,7 @@ class TestWFOChartDataEndpoint:
         sample_wfo_row["child_tune_ids"] = []
         conn.fetchrow.return_value = sample_wfo_row
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id)
+        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws)
 
         assert len(result.candidates) == 0
         assert result.best_candidate is None
@@ -372,7 +384,7 @@ class TestWFOChartDataEndpoint:
 
     @pytest.mark.asyncio
     async def test_wfo_chart_data_parses_config(
-        self, sample_wfo_id, mock_pool, sample_wfo_row
+        self, sample_wfo_id, sample_ws, mock_pool, sample_wfo_row
     ):
         """Test WFO chart data correctly parses config."""
         from app.routers.backtests import wfo_chart
@@ -383,7 +395,7 @@ class TestWFOChartDataEndpoint:
         sample_wfo_row["child_tune_ids"] = []
         conn.fetchrow.return_value = sample_wfo_row
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id)
+        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws)
 
         assert result.wfo_config["train_days"] == 90
         assert result.wfo_config["test_days"] == 30

@@ -1,20 +1,5 @@
-import { useState, useEffect } from "react";
-
-const STORAGE_KEY = "dashboard_recent_workspaces";
-
-function getRecent(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
-
-function addRecent(id: string) {
-  const list = getRecent().filter((w) => w !== id);
-  list.unshift(id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, 5)));
-}
+import { useState } from "react";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,12 +9,10 @@ interface Props {
 
 export function WorkspacePicker({ onSelect }: Props) {
   const [input, setInput] = useState("");
-  const [recent, setRecent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { data, isLoading } = useWorkspaces();
 
-  useEffect(() => {
-    setRecent(getRecent());
-  }, []);
+  const workspaces = data?.workspaces ?? [];
 
   function submit() {
     const trimmed = input.trim();
@@ -37,7 +20,6 @@ export function WorkspacePicker({ onSelect }: Props) {
       setError("Enter a valid UUID");
       return;
     }
-    addRecent(trimmed);
     onSelect(trimmed);
   }
 
@@ -46,6 +28,34 @@ export function WorkspacePicker({ onSelect }: Props) {
       <div className="w-full max-w-md p-6 bg-bg-secondary rounded-lg border border-border">
         <h2 className="text-xl text-text-emphasis mb-4">Select Workspace</h2>
 
+        {/* Workspace list from API */}
+        {isLoading ? (
+          <div className="text-sm text-text-muted mb-4">Loading workspaces...</div>
+        ) : workspaces.length > 0 ? (
+          <div className="flex flex-col gap-2 mb-4">
+            {workspaces.map((ws) => (
+              <button
+                key={ws.id}
+                onClick={() => onSelect(ws.id)}
+                className="text-left px-3 py-3 rounded-md border border-border
+                           hover:border-accent hover:bg-bg-tertiary transition-colors"
+              >
+                <div className="text-sm font-medium text-text-emphasis">{ws.name}</div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-xs text-text-muted">{ws.slug}</span>
+                  <span className="text-xs text-text-muted">
+                    {new Date(ws.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-text-muted mb-4">No workspaces found</div>
+        )}
+
+        {/* UUID fallback */}
+        <p className="text-text-muted text-xs mb-2">Or enter UUID directly</p>
         <div className="flex gap-2 mb-3">
           <input
             className="flex-1 bg-background border border-border rounded-md px-3 py-2
@@ -69,27 +79,6 @@ export function WorkspacePicker({ onSelect }: Props) {
         </div>
 
         {error && <p className="text-danger text-xs mb-3">{error}</p>}
-
-        {recent.length > 0 && (
-          <div>
-            <p className="text-text-muted text-xs mb-2">Recent</p>
-            <div className="flex flex-col gap-1">
-              {recent.map((id) => (
-                <button
-                  key={id}
-                  onClick={() => {
-                    addRecent(id);
-                    onSelect(id);
-                  }}
-                  className="text-left px-3 py-2 rounded-md text-sm text-foreground
-                             hover:bg-bg-tertiary font-mono transition-colors truncate"
-                >
-                  {id}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

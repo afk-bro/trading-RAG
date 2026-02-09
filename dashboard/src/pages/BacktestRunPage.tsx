@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useParams, Link, useOutletContext } from "react-router-dom";
 import type { DashboardContext } from "@/components/layout/DashboardShell";
-import { useBacktestChart } from "@/hooks/use-backtest-chart";
+import { useUrlState } from "@/hooks/use-url-state";
+import { useRunDetail } from "@/hooks/use-run-detail";
 import { RunKpiStrip } from "@/components/backtests/RunKpiStrip";
 import { EquityChart, type TradeMarker } from "@/components/equity/EquityChart";
 import { BacktestTradesTable } from "@/components/backtests/BacktestTradesTable";
@@ -11,6 +12,7 @@ import { downloadFile } from "@/api/client";
 import type { BacktestChartTradeRecord } from "@/api/types";
 import { Skeleton } from "@/components/Skeleton";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { WorkspacePicker } from "@/components/layout/WorkspacePicker";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -25,11 +27,22 @@ const STATUS_COLORS: Record<string, string> = {
   running: "bg-accent/15 text-accent",
 };
 
+const PAGE_SIZE = 50;
+
 export function BacktestRunPage() {
   const { runId } = useParams<{ runId: string }>();
-  const { workspaceId } = useOutletContext<DashboardContext>();
+  const { workspaceId: ctxWorkspaceId } = useOutletContext<DashboardContext>();
+  const [urlWsId, setUrlWsId] = useUrlState("workspace_id", "");
+  const workspaceId = ctxWorkspaceId || urlWsId;
   const [tradesPage, setTradesPage] = useState(1);
-  const { data, isLoading, isError, refetch } = useBacktestChart(runId ?? null, tradesPage);
+  const { data, isLoading, isError, refetch } = useRunDetail(
+    workspaceId || null,
+    runId ?? null,
+  );
+
+  if (!workspaceId) {
+    return <WorkspacePicker onSelect={setUrlWsId} />;
+  }
 
   const [drawerTrade, setDrawerTrade] = useState<BacktestChartTradeRecord | null>(null);
 
@@ -38,20 +51,29 @@ export function BacktestRunPage() {
     [data?.equity],
   );
 
+  // Client-side pagination for trades
+  const allTrades = data?.trades ?? [];
+  const totalTrades = data?.trade_count ?? allTrades.length;
+  const totalPages = Math.ceil(totalTrades / PAGE_SIZE);
+  const pagedTrades = useMemo(() => {
+    const start = (tradesPage - 1) * PAGE_SIZE;
+    return allTrades.slice(start, start + PAGE_SIZE);
+  }, [allTrades, tradesPage]);
+
   const tradeMarkers: TradeMarker[] = useMemo(() => {
-    if (!data?.trades_page) return [];
-    return data.trades_page.map((t) => ({
+    return pagedTrades.map((t) => ({
       time: t.t_entry,
       side: t.side,
     }));
-  }, [data?.trades_page]);
+  }, [pagedTrades]);
 
-  const meta = data?.dataset_meta;
+  const meta = data?.dataset;
+  const strategyName = data?.strategy?.name;
   const symbol = meta?.symbol ?? "";
   const timeframe = meta?.timeframe ?? "";
   const dateRange =
     meta?.date_min && meta?.date_max
-      ? `${meta.date_min.slice(0, 10)} — ${meta.date_max.slice(0, 10)}`
+      ? `${String(meta.date_min).slice(0, 10)} — ${String(meta.date_max).slice(0, 10)}`
       : "";
 
   const regimeBadges: string[] = [];
@@ -67,15 +89,18 @@ export function BacktestRunPage() {
   }
 
   function handleExportCsv() {
-    if (!data?.exports?.trades_csv) return;
-    downloadFile(data.exports.trades_csv, `trades_${runId?.slice(0, 8)}.csv`);
+    if (!runId || totalTrades === 0) return;
+    downloadFile(
+      `/backtests/runs/${runId}/export/trades.csv`,
+      `trades_${runId.slice(0, 8)}.csv`,
+    );
   }
 
   function handleExportJson() {
-    if (!data?.exports?.json_snapshot) return;
+    if (!runId) return;
     downloadFile(
-      data.exports.json_snapshot,
-      `snapshot_${runId?.slice(0, 8)}.json`,
+      `/backtests/runs/${runId}/export/snapshot.json`,
+      `snapshot_${runId.slice(0, 8)}.json`,
     );
   }
 
@@ -110,8 +135,9 @@ export function BacktestRunPage() {
     );
   }
 
-  const pagination = data.trades_pagination;
-  const totalPages = Math.ceil(pagination.total / pagination.page_size);
+  const title = strategyName
+    ? `${strategyName}${symbol ? ` · ${symbol}` : ""}`
+    : symbol || `Run ${runId?.slice(0, 8)}`;
 
   return (
     <div className="space-y-4">
@@ -126,7 +152,7 @@ export function BacktestRunPage() {
           </Link>
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-lg font-semibold text-text-emphasis">
-              {meta?.symbol ?? `Run ${runId?.slice(0, 8)}`}
+              {title}
             </h2>
             {timeframe && (
               <span className="text-sm text-text-muted">{timeframe}</span>
@@ -161,7 +187,7 @@ export function BacktestRunPage() {
 
         {/* Export buttons */}
         <div className="flex gap-2 flex-shrink-0">
-          {data.exports?.trades_csv && (
+          {totalTrades > 0 && (
             <button
               onClick={handleExportCsv}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
@@ -182,12 +208,12 @@ export function BacktestRunPage() {
         </div>
       </div>
 
-      {/* Notes bar */}
-      {data.notes.length > 0 && (
+      {/* Warnings bar */}
+      {data.warnings.length > 0 && (
         <div className="flex items-start gap-2 p-3 bg-warning/10 border border-warning/20 rounded-lg">
           <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
           <div className="space-y-1">
-            {data.notes.map((note, i) => (
+            {data.warnings.map((note, i) => (
               <p key={i} className="text-xs text-warning">
                 {note}
               </p>
@@ -200,7 +226,7 @@ export function BacktestRunPage() {
       <RunKpiStrip summary={data.summary} />
 
       {/* Equity chart */}
-      {data.equity_source === "missing" ? (
+      {data.equity.length === 0 ? (
         <div className="bg-bg-secondary border border-border rounded-lg p-8 text-center text-text-muted text-sm">
           Equity curve not available for this run
         </div>
@@ -212,7 +238,7 @@ export function BacktestRunPage() {
       <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-medium text-text-emphasis">
-            Trades ({pagination.total})
+            Trades ({totalTrades})
           </h3>
           {totalPages > 1 && (
             <div className="flex items-center gap-2 text-xs text-text-muted">
@@ -238,9 +264,9 @@ export function BacktestRunPage() {
             </div>
           )}
         </div>
-        {data.trades_page.length > 0 ? (
+        {pagedTrades.length > 0 ? (
           <BacktestTradesTable
-            data={data.trades_page}
+            data={pagedTrades}
             onTradeClick={setDrawerTrade}
           />
         ) : (

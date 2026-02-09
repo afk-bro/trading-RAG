@@ -8,6 +8,7 @@ from uuid import UUID
 import structlog
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -15,6 +16,8 @@ from fastapi import (
     UploadFile,
     status,
 )
+
+from app.deps.security import WorkspaceContext, get_workspace_ctx
 
 from .schemas import (
     BacktestError,
@@ -221,12 +224,14 @@ async def run_backtest(
     },
     summary="Get backtest run details",
 )
-async def get_backtest_run(run_id: UUID):
+async def get_backtest_run(
+    run_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)
+):
     """Get detailed results of a backtest run."""
     _, backtest_repo = _get_repos()
 
     run = await backtest_repo.get_run(run_id)
-    if not run:
+    if not run or str(run.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Backtest run {run_id} not found",
@@ -304,13 +309,17 @@ async def list_backtest_runs(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a backtest run",
 )
-async def delete_backtest_run(run_id: UUID):
+async def delete_backtest_run(
+    run_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)
+):
     """Delete a backtest run and its results."""
     _, backtest_repo = _get_repos()
 
-    deleted = await backtest_repo.delete_run(run_id)
-    if not deleted:
+    run = await backtest_repo.get_run(run_id)
+    if not run or str(run.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Backtest run {run_id} not found",
         )
+
+    await backtest_repo.delete_run(run_id)

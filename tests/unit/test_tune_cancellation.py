@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+SAMPLE_WS_ID = uuid4()
+
 
 class TestCancellationInvariants:
     """Cancellation semantic invariants."""
@@ -119,6 +121,7 @@ class TestCancellationAPISemantics:
         # Mock the repos
         mock_tune = {
             "id": uuid4(),
+            "workspace_id": SAMPLE_WS_ID,
             "status": "completed",
             "search_type": "grid",
             "n_trials": 10,
@@ -136,7 +139,10 @@ class TestCancellationAPISemantics:
             app.include_router(router)
             client = TestClient(app)
 
-            response = client.post(f"/backtests/tunes/{mock_tune['id']}/cancel")
+            response = client.post(
+                f"/backtests/tunes/{mock_tune['id']}/cancel",
+                headers={"X-Workspace-Id": str(SAMPLE_WS_ID)},
+            )
 
             assert response.status_code == 400
             assert "completed" in response.json()["detail"]
@@ -149,6 +155,7 @@ class TestCancellationAPISemantics:
 
         mock_tune = {
             "id": uuid4(),
+            "workspace_id": SAMPLE_WS_ID,
             "status": "canceled",
             "search_type": "grid",
             "n_trials": 10,
@@ -166,7 +173,10 @@ class TestCancellationAPISemantics:
             app.include_router(router)
             client = TestClient(app)
 
-            response = client.post(f"/backtests/tunes/{mock_tune['id']}/cancel")
+            response = client.post(
+                f"/backtests/tunes/{mock_tune['id']}/cancel",
+                headers={"X-Workspace-Id": str(SAMPLE_WS_ID)},
+            )
 
             assert response.status_code == 400
             assert "canceled" in response.json()["detail"]

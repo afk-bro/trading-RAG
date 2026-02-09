@@ -1,8 +1,10 @@
+import { getActiveWorkspaceId } from "@/context/workspace";
+
 const BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? window.location.origin;
 
 async function request<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown,
   params?: Record<string, string | number | boolean>,
@@ -23,6 +25,11 @@ async function request<T>(
   const token = localStorage.getItem("admin_token");
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const wsId = getActiveWorkspaceId();
+  if (wsId) {
+    headers["X-Workspace-Id"] = wsId;
   }
 
   const res = await fetch(url.toString(), {
@@ -48,6 +55,10 @@ export function apiGet<T>(
 
 export function apiPost<T>(path: string, body: unknown): Promise<T> {
   return request<T>("POST", path, body);
+}
+
+export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>("PATCH", path, body);
 }
 
 export async function downloadFile(path: string, filename: string) {

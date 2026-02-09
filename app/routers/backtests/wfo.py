@@ -7,11 +7,14 @@ from uuid import UUID
 import structlog
 from fastapi import (
     APIRouter,
+    Depends,
     Form,
     HTTPException,
     Query,
     status,
 )
+
+from app.deps.security import WorkspaceContext, get_workspace_ctx
 
 from .schemas import (
     CancelWFOResponse,
@@ -234,12 +237,12 @@ async def create_wfo(
     response_model=WFOResponse,
     summary="Get WFO run details",
 )
-async def get_wfo(wfo_id: UUID):
+async def get_wfo(wfo_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)):
     """Get details of a WFO run including candidates and status."""
     wfo_repo = _get_wfo_repo()
 
     wfo = await wfo_repo.get_wfo(wfo_id)
-    if not wfo:
+    if not wfo or str(wfo.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"WFO run {wfo_id} not found",
@@ -364,7 +367,7 @@ async def list_wfos(
     response_model=CancelWFOResponse,
     summary="Cancel a WFO run",
 )
-async def cancel_wfo(wfo_id: UUID):
+async def cancel_wfo(wfo_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)):
     """
     Cancel a running or pending WFO run.
 
@@ -375,7 +378,7 @@ async def cancel_wfo(wfo_id: UUID):
 
     # Check WFO exists and is cancelable
     wfo = await wfo_repo.get_wfo(wfo_id)
-    if not wfo:
+    if not wfo or str(wfo.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"WFO run {wfo_id} not found",
@@ -408,13 +411,15 @@ async def cancel_wfo(wfo_id: UUID):
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a WFO run",
 )
-async def delete_wfo(wfo_id: UUID):
+async def delete_wfo(wfo_id: UUID, ws: WorkspaceContext = Depends(get_workspace_ctx)):
     """Delete a WFO run."""
     wfo_repo = _get_wfo_repo()
 
-    deleted = await wfo_repo.delete_wfo(wfo_id)
-    if not deleted:
+    wfo = await wfo_repo.get_wfo(wfo_id)
+    if not wfo or str(wfo.get("workspace_id")) != str(ws.workspace_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"WFO run {wfo_id} not found",
         )
+
+    await wfo_repo.delete_wfo(wfo_id)
