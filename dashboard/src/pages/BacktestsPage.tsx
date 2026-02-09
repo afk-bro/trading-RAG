@@ -1,19 +1,22 @@
-import { useOutletContext, useSearchParams } from "react-router-dom";
+import { useState } from "react";
+import { useOutletContext, useSearchParams, useNavigate } from "react-router-dom";
 import type { DashboardContext } from "@/components/layout/DashboardShell";
 import { useUrlState } from "@/hooks/use-url-state";
 import { useBacktestRuns } from "@/hooks/use-backtest-runs";
 import { BacktestsTable } from "@/components/backtests/BacktestsTable";
 import { WorkspacePicker } from "@/components/layout/WorkspacePicker";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitCompareArrows } from "lucide-react";
 
 const STATUSES = ["all", "completed", "failed", "running"] as const;
 const PAGE_SIZE = 25;
 
 export function BacktestsPage() {
   useOutletContext<DashboardContext>();
+  const navigate = useNavigate();
   const [workspaceId, setWorkspaceId] = useUrlState("workspace_id", "");
   const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const status = searchParams.get("status") ?? "all";
   const offset = parseInt(searchParams.get("offset") ?? "0", 10) || 0;
@@ -26,6 +29,7 @@ export function BacktestsPage() {
   );
 
   function setFilter(key: string, value: string) {
+    setSelectedIds(new Set());
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -42,6 +46,12 @@ export function BacktestsPage() {
     );
   }
 
+  function handleCompare() {
+    const ids = Array.from(selectedIds);
+    if (ids.length !== 2) return;
+    navigate(`/backtests/compare?a=${ids[0]}&b=${ids[1]}`);
+  }
+
   if (!workspaceId) {
     return <WorkspacePicker onSelect={setWorkspaceId} />;
   }
@@ -54,9 +64,20 @@ export function BacktestsPage() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-text-emphasis">
-          Backtest Runs
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-text-emphasis">
+            Backtest Runs
+          </h2>
+          {selectedIds.size === 2 && (
+            <button
+              onClick={handleCompare}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                         bg-accent text-white rounded-md hover:bg-accent/90 transition-colors"
+            >
+              <GitCompareArrows className="w-3.5 h-3.5" /> Compare
+            </button>
+          )}
+        </div>
 
         {/* Status filter */}
         <div className="flex gap-1">
@@ -89,7 +110,11 @@ export function BacktestsPage() {
             ))}
           </div>
         ) : data && data.items.length > 0 ? (
-          <BacktestsTable data={data.items} />
+          <BacktestsTable
+            data={data.items}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+          />
         ) : (
           <div className="p-8 text-center text-text-muted text-sm">
             No backtest runs found

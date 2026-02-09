@@ -4,6 +4,7 @@ import { DashboardShell } from "@/components/layout/DashboardShell";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { BacktestsPage } from "@/pages/BacktestsPage";
 import { BacktestRunPage } from "@/pages/BacktestRunPage";
+import { ComparePage } from "@/pages/ComparePage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ export function App() {
           <Route element={<DashboardShell />}>
             <Route index element={<DashboardPage />} />
             <Route path="backtests" element={<BacktestsPage />} />
+            <Route path="backtests/compare" element={<ComparePage />} />
             <Route path="backtests/:runId" element={<BacktestRunPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -15,6 +15,8 @@ import { ArrowUpDown } from "lucide-react";
 
 interface Props {
   data: BacktestRunListItem[];
+  selectedIds?: Set<string>;
+  onSelectionChange?: (ids: Set<string>) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -33,12 +35,46 @@ function fmtNum(n: number | undefined | null, decimals = 2): string {
   return n.toFixed(decimals);
 }
 
-export function BacktestsTable({ data }: Props) {
+export function BacktestsTable({ data, selectedIds, onSelectionChange }: Props) {
   const navigate = useNavigate();
   const [sorting, setSorting] = useState<SortingState>([]);
 
+  const hasSelection = selectedIds !== undefined && onSelectionChange !== undefined;
+
   const columns = useMemo<ColumnDef<BacktestRunListItem>[]>(
     () => [
+      ...(hasSelection
+        ? [
+            {
+              id: "select",
+              enableSorting: false,
+              header: () => null,
+              cell: ({ row }: { row: { original: BacktestRunListItem } }) => {
+                const id = row.original.id;
+                const checked = selectedIds?.has(id) ?? false;
+                const disabled = !checked && (selectedIds?.size ?? 0) >= 2;
+                return (
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    className="accent-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    onChange={() => {
+                      const next = new Set(selectedIds);
+                      if (next.has(id)) {
+                        next.delete(id);
+                      } else {
+                        next.add(id);
+                      }
+                      onSelectionChange?.(next);
+                    }}
+                  />
+                );
+              },
+            } satisfies ColumnDef<BacktestRunListItem>,
+          ]
+        : []),
       {
         accessorKey: "created_at",
         header: "Date",
@@ -131,7 +167,8 @@ export function BacktestsTable({ data }: Props) {
         },
       },
     ],
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hasSelection, selectedIds, onSelectionChange],
   );
 
   const table = useReactTable({
@@ -152,7 +189,11 @@ export function BacktestsTable({ data }: Props) {
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
-                  className="text-left px-3 py-2 text-xs font-medium text-text-muted cursor-pointer select-none hover:text-foreground"
+                  className={cn(
+                    "text-left px-3 py-2 text-xs font-medium text-text-muted select-none",
+                    header.column.getCanSort() && "cursor-pointer hover:text-foreground",
+                    header.id === "select" && "w-8",
+                  )}
                   onClick={header.column.getToggleSortingHandler()}
                 >
                   <div className="flex items-center gap-1">
@@ -160,7 +201,9 @@ export function BacktestsTable({ data }: Props) {
                       header.column.columnDef.header,
                       header.getContext(),
                     )}
-                    <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    {header.column.getCanSort() && (
+                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    )}
                   </div>
                 </th>
               ))}
