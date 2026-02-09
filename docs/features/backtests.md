@@ -230,6 +230,99 @@ Validated defaults (MNQ 18-month backtest, eval mode, 2024-01 to 2025-07):
 - Exit engineering is now data-validated; entry selectivity is the bottleneck (32% of trades reach +1R MFE)
 - See `docs-archive` branch for forensic analysis details
 
+## Coaching (Post-Run Experience)
+
+Transforms the backtest post-run experience from results-first to experiment-oriented. Every run feels informative regardless of outcome by showing progress, process quality, and explained losses.
+
+**Architecture** (`app/services/backtest/`):
+```
+Run Completed → Coaching Data Builder (500ms budget)
+                ├── Process Score (process_score.py)
+                ├── Loss Attribution (loss_attribution.py)
+                └── Run Lineage + Deltas (run_lineage.py)
+```
+
+### Process Score
+
+Composite 0–100 score measuring execution quality independent of outcome.
+
+**Components** (weights redistribute proportionally when unavailable):
+
+| Component | Weight | Source | Logic |
+|-----------|--------|--------|-------|
+| Rule Adherence | 0.25 | run_events | % of `entry_signal` preceded by `setup_valid` within bar window |
+| Regime Alignment | 0.20 | regime + trades | % of trades aligned with regime direction (uptrend→long, downtrend→short) |
+| Risk Discipline | 0.25 | trades | worst/median loss ratio + position sizing CV |
+| Exit Quality | 0.15 | trades | avg winner / avg loser return ratio |
+| Consistency | 0.15 | trades | CV of return_pct (N ≥ 5 required) |
+
+**Grade mapping**: A (80+), B (65–79), C (50–64), D (35–49), F (0–34), `unavailable` (>50k trades or no data).
+
+### Loss Attribution
+
+Analyzes losing trades with clustering and actionable counterfactuals.
+
+**Outputs**:
+- **Time clusters**: Losses bucketed by hour-of-day from `t_entry`
+- **Size clusters**: Losses bucketed by |pnl| into small/medium/large
+- **Regime context**: Run-level regime tags with aggregate loss stats
+- **Policy counterfactuals** (equity recomputed, compounding preserved):
+  - "If you skipped trades during hour X, return would be Y%"
+  - "If you enforced regime filter, drawdown would be X%"
+  - "If you capped max trades/day at K, return would be Y%"
+  - "If you skipped the first N minutes after ORB lock, return would be Y%"
+
+**Compute ceiling**: >50k trades returns counts only (no counterfactual recompute).
+
+### Run Lineage
+
+Detects the previous completed run for the same strategy and computes deltas.
+
+**Functions**:
+- `compute_deltas()` — KPI deltas with `HIGHER_IS_BETTER` map and `improved` flag
+- `compute_param_diffs()` — changed params with JSON-serialized `[old, new]` values
+- `compute_comparison_warnings()` — symbol, timeframe, date range, run_kind mismatches
+- `build_trajectory()` — last N runs ordered by `completed_at` for sparklines
+- `find_previous_run()` / `find_lineage_candidates()` — async DB queries
+
+All ordering uses `completed_at`, not `created_at`.
+
+### API
+
+**Extended endpoint** — `GET /dashboards/{ws}/backtests/{run_id}`:
+- `?include_coaching=true` — adds `coaching` and `trajectory` keys to response
+- `?baseline_run_id=UUID` — override auto-detected previous run
+
+**New endpoint** — `GET /dashboards/{ws}/backtests/{run_id}/lineage`:
+- Returns recent runs for the same strategy (powers baseline selector dropdown)
+
+**Timeout budget**: 500ms total. I/O phase uses `asyncio.wait()` with partial recovery — completed tasks return even if others time out. `coaching_partial: true` flag signals degraded data.
+
+### Dashboard Components
+
+Seven components in `dashboard/src/components/coaching/`:
+
+| Component | Purpose |
+|-----------|---------|
+| `WhatYouLearnedCard` | Improved/tradeoffs/unchanged columns, first-run "Baseline captured" state, comparison warnings, expandable param diff |
+| `ProcessScoreCard` | SVG gauge arc (270°) with grade letter, component bars, focus area sentence |
+| `DeltaKpiStrip` | 6-metric grid with delta arrows + sparklines (falls back to plain display without lineage) |
+| `DeltaKpiCard` | Enhanced KPI card with delta value, color coding, optional sparkline |
+| `BaselineSelector` | Dropdown for manual baseline override with "(auto)" badge |
+| `LossAttributionPanel` | Collapsible: time-of-day bars, size buckets, regime context, counterfactual cards with "Hypothetical" badge |
+| `TrajectorySparkline` | Pure SVG polyline mini chart |
+
+**Results tab layout**: WhatYouLearned → ProcessScore → BaselineSelector + DeltaKpiStrip → EquityChart → LossAttribution → TradesTable.
+
+All coaching sections guarded by optional chaining — non-completed runs and `include_coaching=false` show the existing layout unchanged.
+
+### Tests
+
+- `tests/unit/test_process_score.py` — 36 tests (components, weight redistribution, ceiling, grade boundaries, NaN/Inf)
+- `tests/unit/test_loss_attribution.py` — 19 tests (clusters, counterfactuals, edge cases)
+- `tests/unit/test_run_lineage.py` — 22 tests (deltas, param diffs, comparison warnings)
+- `tests/e2e/test_coaching_api.py` — 8 Playwright API smoke tests (contract shape, backward compat)
+
 ## Eval Mode (Prop-Firm Simulation)
 
 Simulates a prop-firm evaluation with trailing drawdown limits and R-native position sizing.

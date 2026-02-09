@@ -128,6 +128,8 @@ All tables FK to workspaces. Migrations in `migrations/`.
 - `GET /dashboards/{workspace_id}/intel-timeline` - Confidence history
 - `GET /dashboards/{workspace_id}/alerts` - Active alerts
 - `GET /dashboards/{workspace_id}/summary` - Combined overview
+- `GET /dashboards/{workspace_id}/backtests/{run_id}` - Run detail (`?include_coaching=true` for coaching data)
+- `GET /dashboards/{workspace_id}/backtests/{run_id}/lineage` - Lineage candidates for baseline selector
 
 **Admin** (requires `X-Admin-Token`):
 - `GET /admin/system/health`, `/admin/ops/snapshot`
@@ -163,7 +165,7 @@ See `docs/features/ops.md` for full details.
 
 Detailed documentation for subsystems:
 
-- `docs/features/backtests.md` - Backtest tuning, WFO, test generator, pre-entry guards (wick/range/displacement)
+- `docs/features/backtests.md` - Backtest tuning, WFO, test generator, pre-entry guards, coaching (process score, loss attribution, run lineage)
 - `docs/features/pine-scripts.md` - Pine Script registry, ingest, auto-strategy
 - `docs/features/execution.md` - Paper execution, strategy runner
 - `docs/features/coverage.md` - Coverage triage workflow
