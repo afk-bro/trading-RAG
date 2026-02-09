@@ -8,6 +8,8 @@ import type {
   TradeEventDetail,
   RagQueryResponse,
   SSETicketResponse,
+  BacktestRunListResponse,
+  BacktestChartData,
 } from "./types";
 
 export function getEquity(ws: string, days: number) {
@@ -74,4 +76,25 @@ export function postQuery(
 
 export function getSSETicket() {
   return apiPost<SSETicketResponse>("/admin/events/ticket", undefined);
+}
+
+export function getBacktestRuns(
+  ws: string,
+  params: { status?: string; limit?: number; offset?: number } = {},
+) {
+  return apiGet<BacktestRunListResponse>("/backtests/", {
+    workspace_id: ws,
+    ...params,
+  } as Record<string, string | number | boolean>);
+}
+
+export function getBacktestChartData(
+  runId: string,
+  page?: number,
+  pageSize?: number,
+) {
+  const params: Record<string, string | number | boolean> = {};
+  if (page != null) params.page = page;
+  if (pageSize != null) params.page_size = pageSize;
+  return apiGet<BacktestChartData>(`/backtests/runs/${runId}/chart-data`, params);
 }

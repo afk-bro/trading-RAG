@@ -195,3 +195,107 @@ export interface SSETicketResponse {
   ticket: string;
   expires_in_seconds: number;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Backtest Types                                                     */
+/* ------------------------------------------------------------------ */
+
+export interface BacktestSummary {
+  return_pct: number;
+  max_drawdown_pct: number;
+  sharpe?: number;
+  win_rate: number;
+  trades: number;
+  profit_factor?: number;
+  avg_trade_pct?: number;
+  buy_hold_return_pct?: number;
+}
+
+export interface BacktestRunListItem {
+  id: string;
+  created_at: string;
+  strategy_entity_id: string;
+  strategy_name?: string;
+  status: string;
+  summary?: BacktestSummary;
+  dataset_meta: Record<string, unknown>;
+}
+
+export interface BacktestRunListResponse {
+  items: BacktestRunListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BacktestChartEquityPoint {
+  t: string;
+  equity: number;
+}
+
+export interface BacktestChartTradeRecord {
+  t_entry: string;
+  t_exit: string;
+  side: string;
+  size?: number;
+  entry_price?: number;
+  exit_price?: number;
+  pnl: number;
+  return_pct: number;
+}
+
+export interface BacktestChartSummary {
+  return_pct?: number;
+  max_drawdown_pct?: number;
+  sharpe?: number;
+  trades?: number;
+  win_rate?: number;
+  profit_factor?: number;
+  avg_trade_pct?: number;
+  buy_hold_return_pct?: number;
+  [k: string]: unknown;
+}
+
+export interface DatasetMeta {
+  symbol?: string;
+  timeframe?: string;
+  date_min?: string;
+  date_max?: string;
+  row_count?: number;
+  [k: string]: unknown;
+}
+
+export interface RegimeInfo {
+  trend_tag?: string;
+  vol_tag?: string;
+  efficiency_tag?: string;
+  ts_start?: string;
+  ts_end?: string;
+}
+
+export interface TradesPagination {
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface ExportLinks {
+  trades_csv?: string;
+  json_snapshot: string;
+}
+
+export interface BacktestChartData {
+  run_id: string;
+  status: string;
+  dataset_meta?: DatasetMeta;
+  params: Record<string, unknown>;
+  summary: BacktestChartSummary;
+  equity: BacktestChartEquityPoint[];
+  equity_source: string;
+  trades_page: BacktestChartTradeRecord[];
+  trades_pagination: TradesPagination;
+  exports: ExportLinks;
+  notes: string[];
+  regime_is?: RegimeInfo;
+  regime_oos?: RegimeInfo;
+}

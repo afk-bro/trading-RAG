@@ -49,3 +49,28 @@ export function apiGet<T>(
 export function apiPost<T>(path: string, body: unknown): Promise<T> {
   return request<T>("POST", path, body);
 }
+
+export async function downloadFile(path: string, filename: string) {
+  const url = new URL(path, BASE_URL);
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem("admin_token");
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status}: ${text}`);
+  }
+
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}

@@ -21,13 +21,19 @@ import { RegimeStrip } from "./RegimeStrip";
 import { AlertTooltip } from "./AlertTooltip";
 import { SEVERITY_COLORS } from "@/lib/chart-utils";
 
+export interface TradeMarker {
+  time: string;
+  side: "long" | "short" | string;
+}
+
 interface Props {
   data: EquityDataPoint[];
   alerts?: AlertItem[];
   regimeSnapshots?: IntelSnapshot[];
+  tradeMarkers?: TradeMarker[];
 }
 
-export function EquityChart({ data, alerts, regimeSnapshots }: Props) {
+export function EquityChart({ data, alerts, regimeSnapshots, tradeMarkers }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const equitySeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -133,20 +139,21 @@ export function EquityChart({ data, alerts, regimeSnapshots }: Props) {
     drawdownSeriesRef.current?.applyOptions({ visible: showDrawdown });
   }, [showDrawdown]);
 
-  // Alert markers
+  // Alert + trade markers
   useEffect(() => {
-    if (!equitySeriesRef.current || !alerts?.length || !data.length) {
+    if (!equitySeriesRef.current || !data.length) {
       equitySeriesRef.current?.setMarkers([]);
       return;
     }
 
+    const allMarkers: SeriesMarker<Time>[] = [];
     const equityTimes = data.map((d) => toUnixSeconds(d.snapshot_ts));
 
-    const markers: SeriesMarker<Time>[] = alerts
-      .filter((a) => a.last_triggered_at)
-      .map((a) => {
-        const alertTime = toUnixSeconds(a.last_triggered_at!);
-        // Find nearest equity point
+    // Alert markers
+    if (alerts?.length) {
+      for (const a of alerts) {
+        if (!a.last_triggered_at) continue;
+        const alertTime = toUnixSeconds(a.last_triggered_at);
         let closest = equityTimes[0]!;
         let minDist = Math.abs(alertTime - closest);
         for (const t of equityTimes) {
@@ -160,7 +167,7 @@ export function EquityChart({ data, alerts, regimeSnapshots }: Props) {
         const isCritical =
           a.severity === "critical" || a.severity === "high";
 
-        return {
+        allMarkers.push({
           time: closest as Time,
           position: "aboveBar" as const,
           shape: isCritical
@@ -169,12 +176,40 @@ export function EquityChart({ data, alerts, regimeSnapshots }: Props) {
           color: SEVERITY_COLORS[a.severity] ?? "#8b949e",
           text: a.rule_type,
           id: a.id,
-        };
-      })
-      .sort((a, b) => (a.time as number) - (b.time as number));
+        });
+      }
+    }
 
-    equitySeriesRef.current.setMarkers(markers);
-  }, [alerts, data]);
+    // Trade entry markers (backtest)
+    if (tradeMarkers?.length) {
+      for (const tm of tradeMarkers) {
+        const tmTime = toUnixSeconds(tm.time);
+        let closest = equityTimes[0]!;
+        let minDist = Math.abs(tmTime - closest);
+        for (const t of equityTimes) {
+          const dist = Math.abs(tmTime - t);
+          if (dist < minDist) {
+            minDist = dist;
+            closest = t;
+          }
+        }
+
+        const isLong = tm.side === "long";
+        allMarkers.push({
+          time: closest as Time,
+          position: isLong ? ("belowBar" as const) : ("aboveBar" as const),
+          shape: isLong
+            ? ("arrowUp" as const)
+            : ("arrowDown" as const),
+          color: isLong ? "#3fb950" : "#f85149",
+          text: isLong ? "L" : "S",
+        });
+      }
+    }
+
+    allMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+    equitySeriesRef.current.setMarkers(allMarkers);
+  }, [alerts, data, tradeMarkers]);
 
   const handleMarkerClick = useCallback(
     (_e: React.MouseEvent) => {

@@ -13,6 +13,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/backtests": "http://localhost:8000",
       "/dashboards": "http://localhost:8000",
       "/admin": "http://localhost:8000",
       "/query": "http://localhost:8000",
