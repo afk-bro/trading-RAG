@@ -231,6 +231,24 @@ class BacktestRunner:
                 warnings=warnings,
             )
 
+            # Persist run events if engine produced them
+            if result.events:
+                try:
+                    from app.repositories.run_events import RunEventsRepository
+
+                    events_repo = RunEventsRepository(self.backtest_repo.pool)
+                    await events_repo.save_events(
+                        run_id=run_id,
+                        workspace_id=workspace_id,
+                        events=result.events,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to save run events",
+                        run_id=str(run_id),
+                        error=str(e),
+                    )
+
             logger.info(
                 "Backtest completed",
                 run_id=str(run_id),
@@ -269,4 +287,8 @@ class BacktestRunner:
             from app.services.backtest.engines.ict_blueprint import ICTBlueprintEngine
 
             return ICTBlueprintEngine()
+        if engine_name == "orb":
+            from app.services.backtest.engines.orb import ORBEngine
+
+            return ORBEngine()
         return self._default_engine

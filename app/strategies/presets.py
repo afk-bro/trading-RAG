@@ -36,6 +36,8 @@ class StrategyPreset:
     default_params: dict[str, Any]
     events: list[str] = field(default_factory=list)
     tags: dict[str, list[str]] = field(default_factory=dict)
+    version: str = "1.0"
+    schema_version: str = ""
 
     def to_param_space(self) -> dict[str, Any]:
         """Convert param_schema to a tune/WFO-compatible param_space dict.
@@ -47,7 +49,9 @@ class StrategyPreset:
         for name, pdef in self.param_schema.items():
             if pdef.choices is not None:
                 space[name] = pdef.choices
-            elif pdef.min is not None and pdef.max is not None and pdef.step is not None:
+            elif (
+                pdef.min is not None and pdef.max is not None and pdef.step is not None
+            ):
                 # Generate range
                 vals: list[Any] = []
                 v = pdef.min
@@ -63,6 +67,9 @@ class StrategyPreset:
         """Build config_snapshot dict for strategy_versions table."""
         return {
             "preset_slug": self.slug,
+            "preset_version": self.version,
+            "engine": self.engine,
+            "schema_version": self.schema_version,
             "params": dict(self.default_params),
             "param_schema": {
                 k: {
@@ -86,6 +93,8 @@ class StrategyPreset:
             "name": self.name,
             "description": self.description,
             "engine": self.engine,
+            "version": self.version,
+            "schema_version": self.schema_version,
             "param_schema": {
                 k: {
                     "type": v.type,
@@ -108,6 +117,7 @@ class StrategyPreset:
 # Preset registry
 # ---------------------------------------------------------------------------
 
+# FROZEN: do not mutate. Clone to ny-am-orb-v1.1 for changes.
 NY_AM_ORB_V1 = StrategyPreset(
     slug="ny-am-orb-v1",
     name="NY AM ORB v1",
@@ -116,7 +126,7 @@ NY_AM_ORB_V1 = StrategyPreset(
         "Waits for the opening range to form, then trades confirmed "
         "breakouts with a stop at the opposite OR level."
     ),
-    engine="python",
+    engine="orb",
     param_schema={
         "or_minutes": ParamDef(
             type="int",
@@ -177,6 +187,8 @@ NY_AM_ORB_V1 = StrategyPreset(
         "timeframe_buckets": ["intraday"],
         "topics": ["equities", "futures", "forex"],
     },
+    version="1.0",
+    schema_version="1.0.0",
 )
 
 

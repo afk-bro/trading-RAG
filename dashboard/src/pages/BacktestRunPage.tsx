@@ -14,6 +14,7 @@ import { EquityChart, type TradeMarker } from "@/components/equity/EquityChart";
 import { BacktestTradesTable } from "@/components/backtests/BacktestTradesTable";
 import { BacktestTradeDrawer } from "@/components/backtests/BacktestTradeDrawer";
 import { ReplayPanel } from "@/components/backtests/ReplayPanel";
+import { ORBSummaryPanel } from "@/components/backtests/ORBSummaryPanel";
 import { mapBacktestEquity } from "@/lib/chart-utils";
 import { downloadFile } from "@/api/client";
 import type { BacktestChartTradeRecord } from "@/api/types";
@@ -55,9 +56,7 @@ export function BacktestRunPage() {
     true, // include coaching
     baselineRunId,
   );
-  const { data: eventsData } = useRunEvents(
-    activeTab === "replay" ? (runId ?? null) : null,
-  );
+  const { data: eventsData } = useRunEvents(runId ?? null);
   const { data: lineageData } = useRunLineage(
     workspaceId || null,
     runId ?? null,
@@ -201,6 +200,11 @@ export function BacktestRunPage() {
             >
               {data.status}
             </span>
+            {eventsData && eventsData.event_count > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                ORB v1 · schema {String((eventsData.events[0] as Record<string, unknown>)?.schema_version ?? "1.0.0")}
+              </span>
+            )}
           </div>
           {regimeBadges.length > 0 && (
             <div className="flex gap-2 mt-1">
@@ -313,6 +317,18 @@ export function BacktestRunPage() {
               isLoading={isLoading}
             />
           </div>
+
+          {/* ORB engine summary (renders only for ORB runs) */}
+          {eventsData && eventsData.event_count > 0 && (
+            <ORBSummaryPanel
+              params={data.params}
+              events={eventsData.events}
+              trades={allTrades.map((t) => ({
+                pnl: t.pnl,
+                side: t.side,
+              }))}
+            />
+          )}
 
           {/* Equity chart */}
           {data.equity.length === 0 ? (

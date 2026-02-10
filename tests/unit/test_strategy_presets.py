@@ -35,10 +35,17 @@ class TestOrbV1Preset:
         assert NY_AM_ORB_V1.slug == "ny-am-orb-v1"
 
     def test_engine(self):
-        assert NY_AM_ORB_V1.engine == "python"
+        assert NY_AM_ORB_V1.engine == "orb"
 
     def test_required_params_present(self):
-        expected = {"or_minutes", "confirm_mode", "stop_mode", "target_r", "max_trades", "session"}
+        expected = {
+            "or_minutes",
+            "confirm_mode",
+            "stop_mode",
+            "target_r",
+            "max_trades",
+            "session",
+        }
         assert set(NY_AM_ORB_V1.param_schema.keys()) == expected
 
     def test_defaults_match_schema(self):
@@ -93,6 +100,18 @@ class TestConfigSnapshot:
         snap = NY_AM_ORB_V1.to_config_snapshot()
         assert snap["preset_slug"] == "ny-am-orb-v1"
 
+    def test_has_preset_version(self):
+        snap = NY_AM_ORB_V1.to_config_snapshot()
+        assert snap["preset_version"] == "1.0"
+
+    def test_has_engine(self):
+        snap = NY_AM_ORB_V1.to_config_snapshot()
+        assert snap["engine"] == "orb"
+
+    def test_has_schema_version(self):
+        snap = NY_AM_ORB_V1.to_config_snapshot()
+        assert snap["schema_version"] == "1.0.0"
+
     def test_has_params(self):
         snap = NY_AM_ORB_V1.to_config_snapshot()
         assert snap["params"]["or_minutes"] == 30
@@ -116,14 +135,35 @@ class TestToDict:
         d = NY_AM_ORB_V1.to_dict()
         assert d["slug"] == "ny-am-orb-v1"
         assert d["name"] == "NY AM ORB v1"
-        assert d["engine"] == "python"
+        assert d["engine"] == "orb"
         assert "or_minutes" in d["param_schema"]
         assert d["default_params"]["or_minutes"] == 30
         assert len(d["events"]) == 4
 
+    def test_has_version_fields(self):
+        d = NY_AM_ORB_V1.to_dict()
+        assert d["version"] == "1.0"
+        assert d["schema_version"] == "1.0.0"
+
     def test_param_schema_includes_description(self):
         d = NY_AM_ORB_V1.to_dict()
         assert "description" in d["param_schema"]["or_minutes"]
+
+
+class TestOrbV1VersionIdentity:
+    """NY AM ORB v1 version contract is frozen."""
+
+    def test_version(self):
+        assert NY_AM_ORB_V1.version == "1.0"
+
+    def test_schema_version(self):
+        assert NY_AM_ORB_V1.schema_version == "1.0.0"
+
+    def test_config_snapshot_carries_version(self):
+        snap = NY_AM_ORB_V1.to_config_snapshot()
+        assert snap["preset_version"] == "1.0"
+        assert snap["schema_version"] == "1.0.0"
+        assert snap["engine"] == "orb"
 
 
 class TestPresetImmutability:

@@ -51,13 +51,22 @@ class RunEventsRepository:
         workspace_id: UUID,
         events: list[dict[str, Any]],
     ) -> None:
-        """Upsert events for a run."""
+        """Upsert events for a run.
+
+        Idempotent: re-calling with the same run_id overwrites events and
+        bumps updated_at. The workspace_id on update is verified to match
+        (WHERE clause ensures no cross-workspace overwrites).
+        """
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO backtest_run_events (run_id, workspace_id, events)
-                VALUES ($1, $2, $3::jsonb)
-                ON CONFLICT (run_id) DO UPDATE SET events = EXCLUDED.events
+                INSERT INTO backtest_run_events
+                    (run_id, workspace_id, events, updated_at)
+                VALUES ($1, $2, $3::jsonb, now())
+                ON CONFLICT (run_id) DO UPDATE
+                    SET events = EXCLUDED.events,
+                        updated_at = now()
+                WHERE backtest_run_events.workspace_id = EXCLUDED.workspace_id
                 """,
                 run_id,
                 workspace_id,

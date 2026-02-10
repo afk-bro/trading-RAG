@@ -112,6 +112,29 @@ class TestRunEventsRepository:
         assert call_args[2] == SAMPLE_WS_ID
 
     @pytest.mark.asyncio
+    async def test_save_events_sets_updated_at(self, mock_pool):
+        pool, conn = mock_pool
+        conn.execute.return_value = None
+
+        repo = RunEventsRepository(pool)
+        await repo.save_events(SAMPLE_RUN_ID, SAMPLE_WS_ID, SAMPLE_EVENTS)
+
+        sql = conn.execute.call_args[0][0]
+        assert "updated_at" in sql
+
+    @pytest.mark.asyncio
+    async def test_save_events_guards_workspace_id(self, mock_pool):
+        """UPSERT includes workspace_id guard to prevent cross-ws overwrites."""
+        pool, conn = mock_pool
+        conn.execute.return_value = None
+
+        repo = RunEventsRepository(pool)
+        await repo.save_events(SAMPLE_RUN_ID, SAMPLE_WS_ID, SAMPLE_EVENTS)
+
+        sql = conn.execute.call_args[0][0]
+        assert "workspace_id = EXCLUDED.workspace_id" in sql
+
+    @pytest.mark.asyncio
     async def test_get_event_count(self, mock_pool):
         pool, conn = mock_pool
         conn.fetchval.return_value = 4

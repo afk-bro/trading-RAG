@@ -14,11 +14,12 @@ def pytest_collection_modifyitems(config, items):
     These tests require a running server and should not run in CI
     unless explicitly invoked.
     """
-    # Check if user explicitly requested e2e or smoke tests
+    # Check if user explicitly requested e2e, smoke, or slow tests
     # via -m marker or by specifying the test path directly
     markexpr = config.getoption("-m", default="")
     explicit_e2e = "e2e" in markexpr
     explicit_smoke = "smoke" in markexpr
+    explicit_slow = "slow" in markexpr
 
     # Check if running specific test paths
     args = config.args
@@ -31,6 +32,9 @@ def pytest_collection_modifyitems(config, items):
     skip_smoke = pytest.mark.skip(
         reason="smoke tests require running server. Run with: pytest tests/smoke -m smoke"
     )
+    skip_slow = pytest.mark.skip(
+        reason="slow tests skipped by default. Run with: pytest -m slow"
+    )
 
     for item in items:
         # Skip e2e tests unless explicitly requested
@@ -40,3 +44,7 @@ def pytest_collection_modifyitems(config, items):
         # Skip smoke tests unless explicitly requested
         if "smoke" in item.keywords and not explicit_smoke and not running_smoke_path:
             item.add_marker(skip_smoke)
+
+        # Skip slow tests unless explicitly requested
+        if "slow" in item.keywords and not explicit_slow:
+            item.add_marker(skip_slow)

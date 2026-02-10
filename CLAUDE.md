@@ -144,9 +144,12 @@ All tables FK to workspaces. Migrations in `migrations/`.
 pytest tests/unit/ -v                        # Fast, no deps
 pytest tests/integration/ -m "not requires_db"  # Needs Qdrant
 pytest tests/e2e/ -m e2e -v                  # Needs running server
+pytest -m slow -v                            # Slow tests (large data, skipped by default)
 ```
 
 **Markers**: `@pytest.mark.requires_db`, `@pytest.mark.e2e`, `@pytest.mark.smoke`, `@pytest.mark.slow`
+
+**Auto-skip**: `e2e`, `smoke`, and `slow` markers are auto-skipped by `tests/conftest.py` unless explicitly requested via `-m`.
 
 **CI Jobs**: lint, unit-tests, integration-tests, integration-tests-full (nightly), smoke-test (nightly)
 
@@ -166,6 +169,8 @@ See `docs/features/ops.md` for full details.
 Detailed documentation for subsystems:
 
 - `docs/features/backtests.md` - Backtest tuning, WFO, test generator, pre-entry guards, coaching (process score, loss attribution, run lineage)
+- `docs/features/orb-engine.md` - ORB v1 engine specification, event contract, v1.1 roadmap
+- `docs/features/engine-protocol.md` - Reference engine protocol (interface, events, versioning, golden fixtures, consumer checklist)
 - `docs/features/pine-scripts.md` - Pine Script registry, ingest, auto-strategy
 - `docs/features/execution.md` - Paper execution, strategy runner
 - `docs/features/coverage.md` - Coverage triage workflow

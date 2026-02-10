@@ -373,3 +373,27 @@ python scripts/run_unicorn_backtest.py --eval-mode --symbol MNQ \
   --eval-r-min 100 --eval-r-max 300 \
   --databento-csv data/mnq.csv --start-date 2024-01-01 --end-date 2024-06-30 --multi-tf
 ```
+
+## ORB Engine (Opening Range Breakout)
+
+Dedicated backtest engine for intraday Opening Range Breakout strategies. See `docs/features/orb-engine.md` for full specification and `docs/features/engine-protocol.md` for the engine protocol that ORB v1 defines.
+
+**Engine**: `app/services/backtest/engines/orb/` (engine, contracts, types)
+
+**Preset**: `NY_AM_ORB_V1` — frozen at `version="1.0"`, `schema_version="1.0.0"`. Do not mutate; clone to `ny-am-orb-v1.1` for changes.
+
+**Event types**: `orb_range_update`, `orb_range_locked`, `setup_valid`, `entry_signal`. All events carry `schema_version` and pass `validate_events()` contract validation.
+
+**State machine**: PREMARKET → OR_BUILD → BREAKOUT_SCAN → ENTRY → TRADE_MGMT → EXIT → LOCKOUT
+
+**Confirm modes**: `close-beyond` (bar close past OR level) and `retest` (break + pullback confirmation with expiry window).
+
+**Dashboard components**:
+- `ORBSummaryPanel` — OR range, lock info, modes, trade outcome with "why no trade" explanations
+- `ORRangeDisplay` — Visual OR state during replay (forming/locked/breakout/entry phases)
+- Engine badge in `BacktestRunPage` header: `ORB v1 · schema 1.0.0`
+
+**Tests**:
+- `tests/unit/services/backtest/engines/test_orb_engine.py` — 40+ tests (state machine, breakout logic, invariants, contract validation)
+- `tests/golden/test_orb_golden.py` — 21 parametrized tests across 3 golden fixtures (long/short/retest)
+- `tests/golden/test_orb_live_smoke.py` — 9 live-data smoke tests on NQ 1m (`@pytest.mark.slow`)

@@ -9,6 +9,7 @@ import {
   Rewind,
   Clock,
 } from "lucide-react";
+import { ORRangeDisplay } from "./ORRangeDisplay";
 
 const EVENT_COLORS: Record<string, string> = {
   orb_range_update: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -194,6 +195,9 @@ export function ReplayPanel({
           Bar {barIndex} / {maxBarIndex}
         </span>
       </div>
+
+      {/* OR Range visualization */}
+      <ORRangeDisplay events={events} barIndex={barIndex} />
 
       {/* Coach panel: current + next event */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

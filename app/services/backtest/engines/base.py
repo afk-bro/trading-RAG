@@ -45,6 +45,9 @@ class BacktestResult:
     # Trades: list of trade records as dicts
     trades: list[dict[str, Any]]
 
+    # Run events for replay (ORB engine, etc.)
+    events: list[dict[str, Any]] = field(default_factory=list)
+
     # Warnings generated during backtest
     warnings: list[str] = field(default_factory=list)
 
