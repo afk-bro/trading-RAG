@@ -9,7 +9,8 @@ interface Props {
 
 export function KpiCardsRow({ summary, isLoading }: Props) {
   const eq = summary?.equity;
-  const startingEquity = eq ? eq.peak_equity / (1 - eq.drawdown_pct) : null;
+  const denom = eq ? 1 - eq.drawdown_pct : 0;
+  const startingEquity = eq && denom > 0 ? eq.peak_equity / denom : null;
   const netPnl =
     eq && startingEquity ? eq.equity - startingEquity : null;
   const totalReturn = eq

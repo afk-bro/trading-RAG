@@ -28,6 +28,7 @@ export function AlertTooltip({ alert, x, y, onClose }: Props) {
         </div>
         <button
           onClick={onClose}
+          aria-label="Close alert tooltip"
           className="text-text-muted hover:text-foreground"
         >
           <X className="w-3 h-3" />

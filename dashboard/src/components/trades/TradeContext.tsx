@@ -4,35 +4,35 @@ import type { TradeEventItem } from "@/api/types";
 import { RefreshCw, ExternalLink } from "lucide-react";
 
 interface Props {
-  event: TradeEventItem;
+  event?: TradeEventItem;
+  symbol?: string;
+  entryTime?: string;
   workspaceId: string;
   active: boolean;
 }
 
-export function TradeContext({ event, workspaceId, active }: Props) {
+export function TradeContext({ event, symbol: propSymbol, entryTime, workspaceId, active }: Props) {
   const queryClient = useQueryClient();
+  const symbol = event?.symbol ?? propSymbol ?? "";
+  const time = event?.event_time ?? entryTime ?? "";
+
   const { data, isLoading, isFetching } = useRagContext(
-    workspaceId,
-    event.symbol,
-    event.event_time,
+    workspaceId || null,
+    symbol || null,
+    time || null,
     active,
   );
 
   function rerun() {
     queryClient.invalidateQueries({
-      queryKey: [
-        "rag-context",
-        workspaceId,
-        event.symbol,
-        event.event_time,
-      ],
+      queryKey: ["rag-context", workspaceId, symbol, time],
     });
   }
 
-  if (!event.symbol) {
+  if (!symbol) {
     return (
       <p className="text-sm text-text-muted py-4">
-        No symbol associated with this event — RAG context unavailable.
+        No symbol — RAG context unavailable.
       </p>
     );
   }
@@ -42,7 +42,7 @@ export function TradeContext({ event, workspaceId, active }: Props) {
       <div className="flex items-center justify-between">
         <p className="text-xs text-text-muted">
           Relevant knowledge for{" "}
-          <span className="text-foreground font-medium">{event.symbol}</span>
+          <span className="text-foreground font-medium">{symbol}</span>
         </p>
         <button
           onClick={rerun}

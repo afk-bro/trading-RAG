@@ -10,6 +10,8 @@ export function DrawdownToggle({ active, onToggle }: Props) {
   return (
     <button
       onClick={onToggle}
+      aria-label={active ? "Hide drawdown overlay" : "Show drawdown overlay"}
+      aria-pressed={active}
       className={cn(
         "flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors",
         active

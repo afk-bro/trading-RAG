@@ -1,5 +1,10 @@
 import { useRef, useEffect } from "react";
-import { createChart, type IChartApi, type Time } from "lightweight-charts";
+import {
+  createChart,
+  type IChartApi,
+  type ISeriesApi,
+  type Time,
+} from "lightweight-charts";
 import { toUnixSeconds } from "@/lib/chart-utils";
 import type { BacktestChartEquityPoint } from "@/api/types";
 
@@ -23,7 +28,10 @@ function normalize(points: BacktestChartEquityPoint[]) {
 export function CompareEquityChart({ equityA, equityB, labelA, labelB }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const seriesARef = useRef<ISeriesApi<"Line"> | null>(null);
+  const seriesBRef = useRef<ISeriesApi<"Line"> | null>(null);
 
+  // Create chart once
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -46,23 +54,17 @@ export function CompareEquityChart({ equityA, equityB, labelA, labelB }: Props) 
       timeScale: { borderColor: "#30363d", timeVisible: true },
     });
 
-    const seriesA = chart.addLineSeries({
+    seriesARef.current = chart.addLineSeries({
       color: "#58a6ff",
       lineWidth: 2,
       priceScaleId: "right",
-      title: labelA,
     });
 
-    const seriesB = chart.addLineSeries({
+    seriesBRef.current = chart.addLineSeries({
       color: "#a371f7",
       lineWidth: 2,
       priceScaleId: "right",
-      title: labelB,
     });
-
-    seriesA.setData(normalize(equityA));
-    seriesB.setData(normalize(equityB));
-    chart.timeScale().fitContent();
 
     chartRef.current = chart;
 
@@ -77,7 +79,20 @@ export function CompareEquityChart({ equityA, equityB, labelA, labelB }: Props) 
       window.removeEventListener("resize", handleResize);
       chart.remove();
       chartRef.current = null;
+      seriesARef.current = null;
+      seriesBRef.current = null;
     };
+  }, []);
+
+  // Update data and labels when props change
+  useEffect(() => {
+    if (!seriesARef.current || !seriesBRef.current) return;
+
+    seriesARef.current.applyOptions({ title: labelA });
+    seriesBRef.current.applyOptions({ title: labelB });
+    seriesARef.current.setData(normalize(equityA));
+    seriesBRef.current.setData(normalize(equityB));
+    chartRef.current?.timeScale().fitContent();
   }, [equityA, equityB, labelA, labelB]);
 
   return (

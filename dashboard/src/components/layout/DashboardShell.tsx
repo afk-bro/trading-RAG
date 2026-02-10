@@ -18,7 +18,9 @@ export function DashboardShell() {
     if (urlWsId && urlWsId !== globalWsId) {
       setGlobalWsId(urlWsId);
     }
-  }, [urlWsId, globalWsId, setGlobalWsId]);
+    // Only react to URL changes, not global changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlWsId]);
 
   // On mount: if no URL param but global has one, populate URL
   useEffect(() => {

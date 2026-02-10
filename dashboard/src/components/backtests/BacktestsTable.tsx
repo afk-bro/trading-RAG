@@ -158,7 +158,6 @@ export function BacktestsTable({ data, selectedIds, onSelectionChange }: Props) 
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [hasSelection, selectedIds, onSelectionChange],
   );
 

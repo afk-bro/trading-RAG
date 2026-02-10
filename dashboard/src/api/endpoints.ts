@@ -99,9 +99,11 @@ export function getBacktestRuns(
   ws: string,
   params: { status?: string; limit?: number; offset?: number } = {},
 ) {
+  const { status, ...rest } = params;
   return apiGet<BacktestRunListResponse>("/backtests/", {
     workspace_id: ws,
-    ...params,
+    ...(status ? { status_filter: status } : {}),
+    ...rest,
   } as Record<string, string | number | boolean>);
 }
 

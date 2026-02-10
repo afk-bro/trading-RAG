@@ -12,11 +12,22 @@ export function useEventStream(workspaceId: string | null) {
   const esRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryDelay = useRef(5_000);
+  const retryCount = useRef(0);
+  const MAX_RETRIES = 8;
 
   useEffect(() => {
     if (!workspaceId) return;
 
     let cancelled = false;
+
+    function scheduleRetry() {
+      if (cancelled || retryCount.current >= MAX_RETRIES) return;
+      retryCount.current += 1;
+      retryRef.current = setTimeout(() => {
+        retryDelay.current = Math.min(retryDelay.current * 2, 60_000);
+        connect();
+      }, retryDelay.current);
+    }
 
     async function connect() {
       try {
@@ -26,7 +37,7 @@ export function useEventStream(workspaceId: string | null) {
         );
 
         // Set cookie for EventSource auth
-        document.cookie = `sse_ticket=${ticket}; path=/; SameSite=Lax`;
+        document.cookie = `sse_ticket=${ticket}; path=/; SameSite=Lax; Secure`;
 
         if (cancelled) return;
 
@@ -35,7 +46,8 @@ export function useEventStream(workspaceId: string | null) {
         esRef.current = es;
 
         es.onopen = () => {
-          retryDelay.current = 5_000; // reset backoff
+          retryDelay.current = 5_000;
+          retryCount.current = 0;
         };
 
         es.onmessage = () => {
@@ -46,21 +58,10 @@ export function useEventStream(workspaceId: string | null) {
         es.onerror = () => {
           es.close();
           esRef.current = null;
-          if (!cancelled) {
-            retryRef.current = setTimeout(() => {
-              retryDelay.current = Math.min(retryDelay.current * 2, 60_000);
-              connect();
-            }, retryDelay.current);
-          }
+          scheduleRetry();
         };
       } catch {
-        // ticket fetch failed — retry
-        if (!cancelled) {
-          retryRef.current = setTimeout(() => {
-            retryDelay.current = Math.min(retryDelay.current * 2, 60_000);
-            connect();
-          }, retryDelay.current);
-        }
+        scheduleRetry();
       }
     }
 

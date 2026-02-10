@@ -18,16 +18,23 @@ export function WorkspaceSwitcher({ currentId, onSelect }: Props) {
   const current = workspaces.find((w) => w.id === currentId);
   const label = current?.name ?? (currentId ? `${currentId.slice(0, 8)}...` : "Select workspace");
 
-  // Close on click-outside
+  // Close on click-outside and Escape
   useEffect(() => {
     if (!open) return;
-    function handler(e: MouseEvent) {
+    function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [open]);
 
   return (
@@ -55,6 +62,8 @@ export function WorkspaceSwitcher({ currentId, onSelect }: Props) {
               {workspaces.map((ws) => (
                 <button
                   key={ws.id}
+                  role="option"
+                  aria-selected={ws.id === currentId}
                   onClick={() => {
                     onSelect(ws.id);
                     setOpen(false);

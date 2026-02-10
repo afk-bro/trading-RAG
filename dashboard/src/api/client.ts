@@ -8,6 +8,7 @@ async function request<T>(
   path: string,
   body?: unknown,
   params?: Record<string, string | number | boolean>,
+  signal?: AbortSignal,
 ): Promise<T> {
   const url = new URL(path, BASE_URL);
   if (params) {
@@ -36,6 +37,7 @@ async function request<T>(
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
 
   if (!res.ok) {
@@ -49,16 +51,17 @@ async function request<T>(
 export function apiGet<T>(
   path: string,
   params?: Record<string, string | number | boolean>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  return request<T>("GET", path, undefined, params);
+  return request<T>("GET", path, undefined, params, signal);
 }
 
-export function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return request<T>("POST", path, body);
+export function apiPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return request<T>("POST", path, body, undefined, signal);
 }
 
-export function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  return request<T>("PATCH", path, body);
+export function apiPatch<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return request<T>("PATCH", path, body, undefined, signal);
 }
 
 export async function downloadFile(path: string, filename: string) {

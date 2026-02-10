@@ -233,6 +233,7 @@ export function BacktestRunPage() {
           )}
           <button
             onClick={handleExportJson}
+            aria-label="Export run snapshot as JSON"
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
                        border border-border rounded-md text-text-muted
                        hover:text-foreground hover:bg-bg-tertiary transition-colors"

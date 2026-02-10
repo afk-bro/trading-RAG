@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { TradeEventItem } from "@/api/types";
 import { TradeDetails } from "./TradeDetails";
 import { TradeContext } from "./TradeContext";
@@ -16,11 +16,34 @@ type Tab = "details" | "context";
 
 export function TradeDrawer({ open, onClose, event, workspaceId }: Props) {
   const [tab, setTab] = useState<Tab>("details");
+  const drawerRef = useRef<HTMLDivElement>(null);
 
   // Reset tab when event changes
   useEffect(() => {
     setTab("details");
   }, [event?.id]);
+
+  // Trap focus and handle Escape
+  useEffect(() => {
+    if (!open) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab" || !drawerRef.current) return;
+      const focusable = drawerRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open, onClose]);
 
   if (!open || !event) return null;
 
@@ -33,7 +56,7 @@ export function TradeDrawer({ open, onClose, event, workspaceId }: Props) {
       />
 
       {/* Drawer */}
-      <div role="dialog" aria-modal="true" className="fixed top-0 right-0 z-[501] h-full w-full max-w-[480px] bg-bg-secondary border-l border-border overflow-y-auto">
+      <div ref={drawerRef} role="dialog" aria-modal="true" className="fixed top-0 right-0 z-[501] h-full w-full max-w-[480px] bg-bg-secondary border-l border-border overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-bg-secondary border-b border-border px-4 py-3 z-10">
           <div className="flex items-center justify-between mb-3">
@@ -45,6 +68,7 @@ export function TradeDrawer({ open, onClose, event, workspaceId }: Props) {
             </h3>
             <button
               onClick={onClose}
+              aria-label="Close trade drawer"
               className="text-text-muted hover:text-foreground p-1"
             >
               <X className="w-4 h-4" />

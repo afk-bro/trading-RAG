@@ -55,13 +55,13 @@ export function ConfigDiffPanel({ paramsA, paramsB, labelA, labelB }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left px-3 py-2 text-xs font-medium text-text-muted">
+                <th scope="col" className="text-left px-3 py-2 text-xs font-medium text-text-muted">
                   Param
                 </th>
-                <th className="text-right px-3 py-2 text-xs font-medium text-text-muted">
+                <th scope="col" className="text-right px-3 py-2 text-xs font-medium text-text-muted">
                   {labelA}
                 </th>
-                <th className="text-right px-3 py-2 text-xs font-medium text-text-muted">
+                <th scope="col" className="text-right px-3 py-2 text-xs font-medium text-text-muted">
                   {labelB}
                 </th>
               </tr>

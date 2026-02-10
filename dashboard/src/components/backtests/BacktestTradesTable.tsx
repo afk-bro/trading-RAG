@@ -9,18 +9,13 @@ import {
 } from "@tanstack/react-table";
 import type { BacktestChartTradeRecord } from "@/api/types";
 import { cn } from "@/lib/utils";
-import { fmtPct, fmtPnl } from "@/lib/chart-utils";
+import { fmtPct, fmtPnl, fmtPrice } from "@/lib/chart-utils";
 import { format } from "date-fns";
 import { ArrowUpDown } from "lucide-react";
 
 interface Props {
   data: BacktestChartTradeRecord[];
   onTradeClick: (trade: BacktestChartTradeRecord) => void;
-}
-
-function fmtPrice(n: number | undefined | null): string {
-  if (n == null) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 5 });
 }
 
 export function BacktestTradesTable({ data, onTradeClick }: Props) {

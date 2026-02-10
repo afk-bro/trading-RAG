@@ -2,7 +2,6 @@ import {
   useRef,
   useEffect,
   useState,
-  useCallback,
   type RefObject,
 } from "react";
 import {
@@ -149,21 +148,26 @@ export function EquityChart({ data, alerts, regimeSnapshots, tradeMarkers }: Pro
     const allMarkers: SeriesMarker<Time>[] = [];
     const equityTimes = data.map((d) => toUnixSeconds(d.snapshot_ts));
 
+    // Binary search for closest time in sorted equityTimes
+    function snapToClosest(target: number): number {
+      let lo = 0;
+      let hi = equityTimes.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (equityTimes[mid]! < target) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo === 0) return equityTimes[0]!;
+      const prev = equityTimes[lo - 1]!;
+      const curr = equityTimes[lo]!;
+      return Math.abs(target - prev) <= Math.abs(target - curr) ? prev : curr;
+    }
+
     // Alert markers
     if (alerts?.length) {
       for (const a of alerts) {
         if (!a.last_triggered_at) continue;
-        const alertTime = toUnixSeconds(a.last_triggered_at);
-        let closest = equityTimes[0]!;
-        let minDist = Math.abs(alertTime - closest);
-        for (const t of equityTimes) {
-          const dist = Math.abs(alertTime - t);
-          if (dist < minDist) {
-            minDist = dist;
-            closest = t;
-          }
-        }
-
+        const closest = snapToClosest(toUnixSeconds(a.last_triggered_at));
         const isCritical =
           a.severity === "critical" || a.severity === "high";
 
@@ -183,17 +187,7 @@ export function EquityChart({ data, alerts, regimeSnapshots, tradeMarkers }: Pro
     // Trade entry markers (backtest)
     if (tradeMarkers?.length) {
       for (const tm of tradeMarkers) {
-        const tmTime = toUnixSeconds(tm.time);
-        let closest = equityTimes[0]!;
-        let minDist = Math.abs(tmTime - closest);
-        for (const t of equityTimes) {
-          const dist = Math.abs(tmTime - t);
-          if (dist < minDist) {
-            minDist = dist;
-            closest = t;
-          }
-        }
-
+        const closest = snapToClosest(toUnixSeconds(tm.time));
         const isLong = tm.side === "long";
         allMarkers.push({
           time: closest as Time,
@@ -211,15 +205,6 @@ export function EquityChart({ data, alerts, regimeSnapshots, tradeMarkers }: Pro
     equitySeriesRef.current.setMarkers(allMarkers);
   }, [alerts, data, tradeMarkers]);
 
-  const handleMarkerClick = useCallback(
-    (_e: React.MouseEvent) => {
-      if (tooltipAlert) {
-        setTooltipAlert(null);
-      }
-    },
-    [tooltipAlert],
-  );
-
   return (
     <div className="bg-bg-secondary border border-border rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -232,7 +217,7 @@ export function EquityChart({ data, alerts, regimeSnapshots, tradeMarkers }: Pro
         />
       </div>
 
-      <div className="relative" onClick={handleMarkerClick}>
+      <div className="relative" onClick={() => tooltipAlert && setTooltipAlert(null)}>
         {regimeSnapshots && regimeSnapshots.length > 0 && chartRef.current && (
           <RegimeStrip
             snapshots={regimeSnapshots}

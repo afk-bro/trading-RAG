@@ -92,9 +92,9 @@ export function RegimeStrip({ snapshots, chart, chartContainer }: Props) {
       </div>
 
       {/* Colored bands */}
-      {segments.map((seg, i) => (
+      {segments.map((seg) => (
         <div
-          key={i}
+          key={`${seg.regime}-${seg.left}`}
           className="absolute top-0 bottom-0"
           style={{
             left: seg.left,

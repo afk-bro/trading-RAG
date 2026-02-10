@@ -14,8 +14,9 @@ import { TradeExplorer } from "@/components/trades/TradeExplorer";
 import { WorkspacePicker } from "@/components/layout/WorkspacePicker";
 
 export function DashboardPage() {
-  const { days } = useOutletContext<DashboardContext>();
-  const [workspaceId, setWorkspaceId] = useUrlState("workspace_id", "");
+  const { workspaceId: ctxWorkspaceId, days } = useOutletContext<DashboardContext>();
+  const [urlWsId, setWorkspaceId] = useUrlState("workspace_id", "");
+  const workspaceId = ctxWorkspaceId || urlWsId;
 
   // Data hooks
   const { data: summary, isLoading: summaryLoading } = useSummary(
@@ -55,6 +56,10 @@ export function DashboardPage() {
           message="Failed to load equity data"
           onRetry={() => refetchEquity()}
         />
+      ) : equity?.data?.length === 0 ? (
+        <div className="bg-bg-secondary border border-border rounded-lg p-8 text-center text-text-muted text-sm">
+          No equity data available yet
+        </div>
       ) : (
         <EquityChart
           data={equity?.data ?? []}

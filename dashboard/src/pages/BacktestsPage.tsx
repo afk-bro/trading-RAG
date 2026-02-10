@@ -51,7 +51,8 @@ export function BacktestsPage() {
   function handleCompare() {
     const ids = Array.from(selectedIds);
     if (ids.length !== 2) return;
-    navigate(`/backtests/compare?a=${ids[0]}&b=${ids[1]}`);
+    const wsParam = workspaceId ? `&workspace_id=${workspaceId}` : "";
+    navigate(`/backtests/compare?a=${ids[0]}&b=${ids[1]}${wsParam}`);
   }
 
   if (!workspaceId) {

@@ -24,7 +24,7 @@ function HBar({
       <div className="flex items-center justify-between text-xs">
         <span className="text-text-muted">{label}</span>
         <span className="text-text-muted font-mono">
-          {count} trades · ${Math.abs(value).toFixed(0)}
+          {count} {count === 1 ? "trade" : "trades"} · ${Math.abs(value).toFixed(0)}
         </span>
       </div>
       <div className="h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
