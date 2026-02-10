@@ -51,8 +51,8 @@ def require_admin_token(request: Request) -> bool:
             os.environ.get("ALLOW_LOCALHOST_ADMIN", "false").lower() == "true"
         )
         if allow_localhost:
-            host = request.headers.get("host", "")
-            if "localhost" in host or "127.0.0.1" in host:
+            client_host = request.client.host if request.client else ""
+            if client_host in ("127.0.0.1", "::1", "localhost"):
                 logger.warning(
                     "Admin access via localhost (no token)",
                     path=request.url.path,

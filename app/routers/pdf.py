@@ -1,5 +1,6 @@
 """PDF ingestion endpoint."""
 
+import asyncio
 import hashlib
 from typing import Optional
 from uuid import UUID
@@ -114,7 +115,7 @@ async def ingest_pdf(
 
     # Extract PDF content
     try:
-        extraction_result = extract_pdf(file_bytes, pdf_config)
+        extraction_result = await asyncio.to_thread(extract_pdf, file_bytes, pdf_config)
     except ImportError as e:
         logger.error("PDF library not installed", error=str(e))
         raise HTTPException(

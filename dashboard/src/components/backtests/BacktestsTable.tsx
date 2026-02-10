@@ -189,6 +189,7 @@ export function BacktestsTable({ data, selectedIds, onSelectionChange }: Props) 
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
+                  scope="col"
                   className={cn(
                     "text-left px-3 py-2 text-xs font-medium text-text-muted select-none",
                     header.column.getCanSort() && "cursor-pointer hover:text-foreground",

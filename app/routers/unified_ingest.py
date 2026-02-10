@@ -1,5 +1,6 @@
 """Unified ingestion endpoint with auto-detection."""
 
+import asyncio
 from typing import Optional
 from uuid import UUID
 
@@ -415,7 +416,7 @@ async def _process_pdf_bytes(
     )
 
     try:
-        extraction_result = extract_pdf(pdf_bytes, pdf_config)
+        extraction_result = await asyncio.to_thread(extract_pdf, pdf_bytes, pdf_config)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"PDF extraction failed: {str(e)}")
 

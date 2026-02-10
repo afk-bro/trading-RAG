@@ -135,6 +135,7 @@ export function BacktestTradesTable({ data, onTradeClick }: Props) {
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
+                  scope="col"
                   className="text-left px-3 py-2 text-xs font-medium text-text-muted cursor-pointer select-none hover:text-foreground"
                   onClick={header.column.getToggleSortingHandler()}
                 >

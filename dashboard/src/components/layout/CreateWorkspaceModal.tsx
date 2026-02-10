@@ -41,7 +41,7 @@ export function CreateWorkspaceModal({ onCreated, onClose }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md bg-bg-secondary rounded-lg border border-border p-6">
+      <div role="dialog" aria-modal="true" className="w-full max-w-md bg-bg-secondary rounded-lg border border-border p-6">
         <h3 className="text-lg text-text-emphasis mb-4">New Workspace</h3>
 
         {/* Quick suggestions */}

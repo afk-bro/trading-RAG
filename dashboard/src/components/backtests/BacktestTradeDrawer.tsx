@@ -189,7 +189,7 @@ export function BacktestTradeDrawer({
       />
 
       {/* Drawer */}
-      <div className="fixed top-0 right-0 z-[501] h-full w-full max-w-[480px] bg-bg-secondary border-l border-border overflow-y-auto">
+      <div role="dialog" aria-modal="true" className="fixed top-0 right-0 z-[501] h-full w-full max-w-[480px] bg-bg-secondary border-l border-border overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-bg-secondary border-b border-border px-4 py-3 z-10">
           <div className="flex items-center justify-between mb-3">

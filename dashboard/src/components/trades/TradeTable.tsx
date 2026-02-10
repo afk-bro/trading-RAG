@@ -118,6 +118,7 @@ export function TradeTable({ data, onRowClick }: Props) {
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
+                  scope="col"
                   onClick={header.column.getToggleSortingHandler()}
                   className="text-left px-3 py-2 text-xs font-medium text-text-muted cursor-pointer
                              hover:text-foreground select-none whitespace-nowrap"

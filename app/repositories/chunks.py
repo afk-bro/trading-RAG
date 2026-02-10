@@ -53,17 +53,46 @@ class ChunkRepository:
         if not chunks:
             return []
 
-        query = """
+        # Build multi-row INSERT for batch efficiency (avoids N round-trips)
+        params: list = []
+        value_clauses: list[str] = []
+        for i, chunk in enumerate(chunks):
+            offset = i * 17
+            value_clauses.append(
+                f"(${offset+1}, ${offset+2}, ${offset+3}, ${offset+4}, "
+                f"${offset+5}, ${offset+6}, ${offset+7}, ${offset+8}, "
+                f"${offset+9}, ${offset+10}, ${offset+11}, ${offset+12}, "
+                f"${offset+13}, ${offset+14}, ${offset+15}, ${offset+16}, "
+                f"${offset+17}, NOW(), NOW())"
+            )
+            params.extend([
+                doc_id,
+                workspace_id,
+                chunk.get("chunk_index", 0),
+                chunk["content"],
+                chunk.get("content_hash", ""),
+                chunk.get("token_count", 0),
+                chunk.get("section"),
+                chunk.get("time_start_secs"),
+                chunk.get("time_end_secs"),
+                chunk.get("page_start"),
+                chunk.get("page_end"),
+                chunk.get("locator_label"),
+                chunk.get("speaker"),
+                chunk.get("symbols", []),
+                chunk.get("entities", []),
+                chunk.get("topics", []),
+                chunk.get("quality_score", 1.0),
+            ])
+
+        query = f"""
             INSERT INTO chunks (
                 doc_id, workspace_id, chunk_index, content, content_hash,
                 token_count, section, time_start_secs, time_end_secs,
                 page_start, page_end, locator_label, speaker,
                 symbols, entities, topics, quality_score,
                 created_at, updated_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17, NOW(), NOW()
-            )
+            ) VALUES {", ".join(value_clauses)}
             RETURNING id
         """
 
@@ -71,28 +100,8 @@ class ChunkRepository:
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                for chunk in chunks:
-                    row = await conn.fetchrow(
-                        query,
-                        doc_id,
-                        workspace_id,
-                        chunk.get("chunk_index", 0),
-                        chunk["content"],
-                        chunk.get("content_hash", ""),
-                        chunk.get("token_count", 0),
-                        chunk.get("section"),
-                        chunk.get("time_start_secs"),
-                        chunk.get("time_end_secs"),
-                        chunk.get("page_start"),
-                        chunk.get("page_end"),
-                        chunk.get("locator_label"),
-                        chunk.get("speaker"),
-                        chunk.get("symbols", []),
-                        chunk.get("entities", []),
-                        chunk.get("topics", []),
-                        chunk.get("quality_score", 1.0),
-                    )
-                    chunk_ids.append(row["id"])
+                rows = await conn.fetch(query, *params)
+                chunk_ids = [row["id"] for row in rows]
 
         logger.info(
             "Created chunks",

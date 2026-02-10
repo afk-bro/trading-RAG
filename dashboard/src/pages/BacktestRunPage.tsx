@@ -49,6 +49,7 @@ export function BacktestRunPage() {
   const [tradesPage, setTradesPage] = useState(1);
   const [activeTab, setActiveTab] = useState<Tab>("results");
   const [baselineRunId, setBaselineRunId] = useState<string | null>(null);
+  const [drawerTrade, setDrawerTrade] = useState<BacktestChartTradeRecord | null>(null);
 
   const { data, isLoading, isError, refetch } = useRunDetail(
     workspaceId || null,
@@ -65,8 +66,6 @@ export function BacktestRunPage() {
   if (!workspaceId) {
     return <WorkspacePicker onSelect={setUrlWsId} />;
   }
-
-  const [drawerTrade, setDrawerTrade] = useState<BacktestChartTradeRecord | null>(null);
 
   const equityData = useMemo(
     () => (data?.equity ? mapBacktestEquity(data.equity) : []),
@@ -258,8 +257,10 @@ export function BacktestRunPage() {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border">
+      <div role="tablist" className="flex gap-1 border-b border-border">
         <button
+          role="tab"
+          aria-selected={activeTab === "results"}
           onClick={() => setActiveTab("results")}
           className={cn(
             "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
@@ -271,6 +272,8 @@ export function BacktestRunPage() {
           <Table2 className="w-3.5 h-3.5" /> Results
         </button>
         <button
+          role="tab"
+          aria-selected={activeTab === "replay"}
           onClick={() => setActiveTab("replay")}
           className={cn(
             "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
@@ -289,7 +292,7 @@ export function BacktestRunPage() {
       </div>
 
       {activeTab === "results" ? (
-        <>
+        <div role="tabpanel" className="space-y-4">
           {/* Coaching: What You Learned */}
           {coaching?.lineage && (
             <WhatYouLearnedCard lineage={coaching.lineage} />
@@ -401,9 +404,9 @@ export function BacktestRunPage() {
             symbol={symbol}
             workspaceId={workspaceId}
           />
-        </>
+        </div>
       ) : (
-        <>
+        <div role="tabpanel" className="space-y-4">
           {/* Replay tab content */}
           {data.equity.length > 0 && (
             <EquityChart data={equityData} tradeMarkers={tradeMarkers} />
@@ -412,7 +415,7 @@ export function BacktestRunPage() {
             events={eventsData?.events ?? []}
             maxBarIndex={data.equity.length > 0 ? data.equity.length - 1 : 0}
           />
-        </>
+        </div>
       )}
     </div>
   );

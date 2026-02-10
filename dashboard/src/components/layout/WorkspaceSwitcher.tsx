@@ -34,6 +34,8 @@ export function WorkspaceSwitcher({ currentId, onSelect }: Props) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium
                    bg-bg-tertiary text-text-muted hover:text-foreground transition-colors"
       >
@@ -49,7 +51,7 @@ export function WorkspaceSwitcher({ currentId, onSelect }: Props) {
           ) : workspaces.length === 0 ? (
             <div className="px-3 py-2 text-xs text-text-muted">No workspaces</div>
           ) : (
-            <div className="max-h-60 overflow-y-auto">
+            <div role="listbox" className="max-h-60 overflow-y-auto">
               {workspaces.map((ws) => (
                 <button
                   key={ws.id}

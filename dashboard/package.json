@@ -15,7 +15,6 @@
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-table": "^8.20.0",
     "lightweight-charts": "^4.2.0",
-    "recharts": "^2.13.0",
     "date-fns": "^4.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

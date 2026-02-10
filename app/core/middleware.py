@@ -1,5 +1,6 @@
 """Middleware configuration for the FastAPI application."""
 
+import hmac
 import os
 import time
 import uuid
@@ -116,7 +117,9 @@ def create_request_middleware(settings: Settings):
                         "X-API-Version": __version__,
                     },
                 )
-            if provided_key != settings.api_key:
+            if not hmac.compare_digest(
+                provided_key.encode(), settings.api_key.encode()
+            ):
                 logger.warning(
                     "Invalid API key",
                     path=request.url.path,

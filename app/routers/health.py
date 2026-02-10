@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app import __version__
 from app.config import Settings, get_settings
 from app.core.resilience import get_circuit_status
+from app.deps.security import require_admin_token
 from app.schemas import (
     CircuitBreakerStatus,
     DependencyHealth,
@@ -371,7 +372,10 @@ async def health_check(settings: Settings = Depends(get_settings)) -> HealthResp
 
 
 @router.get("/debug/db")
-async def debug_db_pool(settings: Settings = Depends(get_settings)):
+async def debug_db_pool(
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+):
     """Debug endpoint to check database pool status."""
     from app.routers import ingest as ingest_router
 
@@ -390,7 +394,10 @@ async def debug_db_pool(settings: Settings = Depends(get_settings)):
 
 
 @router.get("/debug/db/test")
-async def debug_db_test(settings: Settings = Depends(get_settings)):
+async def debug_db_test(
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+):
     """Test database connection and list workspaces."""
     import asyncpg
     import traceback
@@ -434,7 +441,10 @@ async def debug_db_test(settings: Settings = Depends(get_settings)):
 
 
 @router.get("/debug/network")
-async def debug_network(settings: Settings = Depends(get_settings)):
+async def debug_network(
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+):
     """Debug network connectivity from container."""
     import socket
     import re
@@ -492,7 +502,10 @@ async def debug_network(settings: Settings = Depends(get_settings)):
 
 
 @router.get("/debug/workspaces")
-async def list_workspaces(settings: Settings = Depends(get_settings)):
+async def list_workspaces(
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+):
     """List all workspaces in the database."""
     import asyncpg
     import traceback
@@ -546,6 +559,7 @@ class CreateWorkspaceRequest(BaseModel):
 async def create_workspace(
     request: CreateWorkspaceRequest = CreateWorkspaceRequest(),
     settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
 ):
     """Create a test workspace for testing."""
     import asyncpg
@@ -599,7 +613,10 @@ async def create_workspace(
 
 
 @router.get("/debug/chunk_vectors")
-async def list_chunk_vectors(settings: Settings = Depends(get_settings)):
+async def list_chunk_vectors(
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+):
     """List chunk_vectors records to verify the table tracking."""
     import asyncpg
     import traceback
@@ -663,7 +680,10 @@ async def list_chunk_vectors(settings: Settings = Depends(get_settings)):
 
 
 @router.get("/debug/documents")
-async def list_documents(settings: Settings = Depends(get_settings)):
+async def list_documents(
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
+):
     """List documents table to verify ingestion."""
     import asyncpg
     import traceback
@@ -730,7 +750,9 @@ async def list_documents(settings: Settings = Depends(get_settings)):
 
 @router.get("/debug/chunks/count")
 async def count_chunks_by_workspace(
-    workspace_id: str, settings: Settings = Depends(get_settings)
+    workspace_id: str,
+    settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
 ):
     """Count chunks for a specific workspace."""
     import asyncpg
@@ -765,6 +787,7 @@ async def list_chunks(
     doc_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     settings: Settings = Depends(get_settings),
+    _: bool = Depends(require_admin_token),
 ):
     """List chunks table to verify chunking. Optionally filter by doc_id or workspace_id."""
     import asyncpg
