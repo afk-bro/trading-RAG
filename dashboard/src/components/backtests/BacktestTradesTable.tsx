@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-table";
 import type { BacktestChartTradeRecord } from "@/api/types";
 import { cn } from "@/lib/utils";
+import { fmtPct, fmtPnl } from "@/lib/chart-utils";
 import { format } from "date-fns";
 import { ArrowUpDown } from "lucide-react";
 
@@ -20,17 +21,6 @@ interface Props {
 function fmtPrice(n: number | undefined | null): string {
   if (n == null) return "—";
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 5 });
-}
-
-function fmtPct(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return `${(n * 100).toFixed(2)}%`;
-}
-
-function fmtPnl(n: number | null | undefined): string {
-  if (n == null) return "—";
-  const sign = n >= 0 ? "+" : "";
-  return `${sign}${n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 export function BacktestTradesTable({ data, onTradeClick }: Props) {

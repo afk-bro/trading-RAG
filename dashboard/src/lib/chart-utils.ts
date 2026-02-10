@@ -19,6 +19,25 @@ export function formatPnl(n: number | null | undefined): string {
   return `${sign}${formatCurrency(n)}`;
 }
 
+/** Short percent formatter used by KPI strips and tables. */
+export function fmtPct(n: number | undefined | null): string {
+  if (n == null) return "—";
+  return `${(n * 100).toFixed(2)}%`;
+}
+
+/** Short number formatter used by KPI strips and tables. */
+export function fmtNum(n: number | undefined | null, decimals = 2): string {
+  if (n == null) return "—";
+  return n.toFixed(decimals);
+}
+
+/** Signed currency PnL formatter (+$1,234 / -$567). */
+export function fmtPnl(n: number | null | undefined): string {
+  if (n == null) return "—";
+  const sign = n >= 0 ? "+" : "";
+  return `${sign}${n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
 export function formatDuration(seconds: number | null | undefined): string {
   if (seconds == null) return "—";
   const h = Math.floor(seconds / 3600);

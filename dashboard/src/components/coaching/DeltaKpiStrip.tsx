@@ -5,22 +5,13 @@ import type {
   TrajectoryRun,
 } from "@/api/types";
 import { DeltaKpiCard } from "./DeltaKpiCard";
+import { fmtPct, fmtNum } from "@/lib/chart-utils";
 
 interface Props {
   summary: BacktestChartSummary;
   deltas?: KpiDelta[];
   trajectory?: TrajectoryRun[];
   isLoading?: boolean;
-}
-
-function fmtPct(n: number | undefined | null): string {
-  if (n == null) return "\u2014";
-  return `${(n * 100).toFixed(2)}%`;
-}
-
-function fmtNum(n: number | undefined | null, decimals = 2): string {
-  if (n == null) return "\u2014";
-  return n.toFixed(decimals);
 }
 
 interface MetricConfig {

@@ -4,6 +4,8 @@ import { useRagContext } from "@/hooks/use-rag-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { X, RefreshCw, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtPct, fmtPnl } from "@/lib/chart-utils";
+import { Field } from "@/components/ui/Field";
 import { format } from "date-fns";
 
 interface Props {
@@ -19,36 +21,6 @@ type Tab = "details" | "context";
 function fmtPrice(n: number | undefined | null): string {
   if (n == null) return "—";
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 5 });
-}
-
-function fmtPnl(n: number | null | undefined): string {
-  if (n == null) return "—";
-  const sign = n >= 0 ? "+" : "";
-  return `${sign}${n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
-
-function fmtPct(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return `${(n * 100).toFixed(2)}%`;
-}
-
-function Field({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div>
-      <p className="text-[10px] text-text-muted">{label}</p>
-      <p className={cn("text-sm font-medium text-foreground", className)}>
-        {value}
-      </p>
-    </div>
-  );
 }
 
 function ContextTab({

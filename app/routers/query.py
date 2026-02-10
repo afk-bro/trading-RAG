@@ -336,7 +336,7 @@ async def _execute_query(
         logger.error("Failed to embed query", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Embedding service unavailable: {str(e)}",
+            detail="Embedding service unavailable",
         )
 
     # Step 2: Vector search with filters
@@ -358,7 +358,7 @@ async def _execute_query(
         logger.error("Vector search failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Vector search failed: {str(e)}",
+            detail="Vector search failed",
         )
 
     if not search_results:
@@ -396,7 +396,7 @@ async def _execute_query(
         logger.error("Failed to fetch chunks", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve chunk content: {str(e)}",
+            detail="Failed to retrieve chunk content",
         )
 
     # Build candidates
@@ -668,7 +668,7 @@ async def _execute_query(
             except Exception as e:
                 logger.error("Answer generation failed", error=str(e))
                 # Don't fail the whole request, just return without answer
-                answer = f"[Error generating answer: {str(e)}]"
+                answer = "[Error generating answer]"
         answer_ms = int((time.perf_counter() - answer_start) * 1000)
 
     # Step 8: If mode=learn, run KB pipeline (extract → verify → persist → synthesize)
@@ -757,7 +757,7 @@ async def _execute_query(
 
             except Exception as e:
                 logger.error("Learn mode failed", error=str(e))
-                answer = f"[Error in learn mode: {str(e)}]"
+                answer = "[Error in learn mode]"
 
     # Step 9: If mode=kb_answer, answer from truth store
     kb_answer_response = None
@@ -910,7 +910,7 @@ async def _execute_query(
 
             except Exception as e:
                 logger.error("KB answer mode failed", error=str(e))
-                answer = f"[Error in kb_answer mode: {str(e)}]"
+                answer = "[Error in kb_answer mode]"
 
     # Build final QueryMeta
     total_ms = int((time.perf_counter() - total_start) * 1000)
@@ -1093,7 +1093,7 @@ async def query_compare(
         logger.error("Failed to embed query", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Embedding service unavailable: {str(e)}",
+            detail="Embedding service unavailable",
         )
 
     # Step 2: Vector search once (using rerank candidates_k as superset)
@@ -1110,7 +1110,7 @@ async def query_compare(
         logger.error("Vector search failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Vector search failed: {str(e)}",
+            detail="Vector search failed",
         )
 
     # Step 3: Fetch chunk metadata once
@@ -1160,7 +1160,7 @@ async def query_compare(
         logger.error("Failed to fetch chunks", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve chunk content: {str(e)}",
+            detail="Failed to retrieve chunk content",
         )
 
     # Build candidates once

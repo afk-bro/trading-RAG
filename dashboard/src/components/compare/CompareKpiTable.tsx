@@ -1,5 +1,9 @@
 import type { BacktestChartSummary } from "@/api/types";
 import { cn } from "@/lib/utils";
+import {
+  fmtPct as _fmtPct,
+  fmtNum as _fmtNum,
+} from "@/lib/chart-utils";
 
 interface Props {
   summaryA: BacktestChartSummary;
@@ -15,20 +19,12 @@ interface KpiRow {
   higherIsBetter: boolean;
 }
 
-function fmtPct(v: unknown): string {
-  if (v == null) return "—";
-  return `${((v as number) * 100).toFixed(2)}%`;
-}
-
-function fmtNum(v: unknown, decimals = 2): string {
-  if (v == null) return "—";
-  return (v as number).toFixed(decimals);
-}
-
-function fmtInt(v: unknown): string {
-  if (v == null) return "—";
-  return (v as number).toFixed(0);
-}
+/* Thin wrappers to satisfy the (v: unknown) => string callback signature */
+const fmtPct = (v: unknown): string => _fmtPct(v as number | undefined | null);
+const fmtNum = (v: unknown, decimals = 2): string =>
+  _fmtNum(v as number | undefined | null, decimals);
+const fmtInt = (v: unknown): string =>
+  _fmtNum(v as number | undefined | null, 0);
 
 const ROWS: KpiRow[] = [
   { label: "Net Return", key: "return_pct", format: fmtPct, higherIsBetter: true },

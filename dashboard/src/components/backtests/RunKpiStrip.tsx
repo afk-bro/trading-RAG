@@ -1,19 +1,10 @@
 import { KpiCard } from "@/components/kpi/KpiCard";
 import type { BacktestChartSummary } from "@/api/types";
+import { fmtPct, fmtNum } from "@/lib/chart-utils";
 
 interface Props {
   summary: BacktestChartSummary;
   isLoading?: boolean;
-}
-
-function fmtPct(n: number | undefined | null): string {
-  if (n == null) return "—";
-  return `${(n * 100).toFixed(2)}%`;
-}
-
-function fmtNum(n: number | undefined | null, decimals = 2): string {
-  if (n == null) return "—";
-  return n.toFixed(decimals);
 }
 
 export function RunKpiStrip({ summary, isLoading }: Props) {

@@ -35,6 +35,7 @@ class OllamaEmbedder:
         self.timeout = timeout or settings.ollama_timeout
         self.batch_size = batch_size or settings.embed_batch_size
         self._dimension: Optional[int] = None
+        self._client = httpx.AsyncClient(timeout=self.timeout)
 
     async def get_dimension(self) -> int:
         """
@@ -65,23 +66,22 @@ class OllamaEmbedder:
         Returns:
             Embedding vector as list of floats
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/api/embed",
-                json={
-                    "model": self.model,
-                    "input": text,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self.base_url}/api/embed",
+            json={
+                "model": self.model,
+                "input": text,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            # Ollama returns embeddings in "embeddings" array
-            embeddings = data.get("embeddings", [])
-            if embeddings:
-                return embeddings[0]
+        # Ollama returns embeddings in "embeddings" array
+        embeddings = data.get("embeddings", [])
+        if embeddings:
+            return embeddings[0]
 
-            raise ValueError("No embedding returned from Ollama")
+        raise ValueError("No embedding returned from Ollama")
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
@@ -102,19 +102,18 @@ class OllamaEmbedder:
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]  # noqa: E203
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/embed",
-                    json={
-                        "model": self.model,
-                        "input": batch,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await self._client.post(
+                f"{self.base_url}/api/embed",
+                json={
+                    "model": self.model,
+                    "input": batch,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                batch_embeddings = data.get("embeddings", [])
-                embeddings.extend(batch_embeddings)
+            batch_embeddings = data.get("embeddings", [])
+            embeddings.extend(batch_embeddings)
 
             logger.debug(
                 "Embedded batch",
@@ -128,19 +127,20 @@ class OllamaEmbedder:
     async def health_check(self) -> bool:
         """Check if Ollama is available and model is loaded."""
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(f"{self.base_url}/api/tags")
-                if response.status_code != 200:
-                    return False
+            response = await self._client.get(f"{self.base_url}/api/tags")
+            if response.status_code != 200:
+                return False
 
-                data = response.json()
-                models = [
-                    m.get("name", "").split(":")[0] for m in data.get("models", [])
-                ]
-                return self.model in models
+            data = response.json()
+            models = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+            return self.model in models
         except Exception as e:
             logger.error("Ollama health check failed", error=str(e))
             return False
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
 
 # Singleton instance

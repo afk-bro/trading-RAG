@@ -561,5 +561,5 @@ async def ingest_document(
         logger.exception("Ingestion failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ingestion failed: {str(e)}",
+            detail="Ingestion failed",
         )

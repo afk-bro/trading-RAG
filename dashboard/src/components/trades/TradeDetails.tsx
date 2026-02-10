@@ -3,7 +3,7 @@ import { getTradeEventDetail } from "@/api/endpoints";
 import { format } from "date-fns";
 import { formatCurrency } from "@/lib/chart-utils";
 import type { TradeEventItem } from "@/api/types";
-import { cn } from "@/lib/utils";
+import { Field } from "@/components/ui/Field";
 
 interface Props {
   event: TradeEventItem;
@@ -116,25 +116,6 @@ export function TradeDetails({ event, workspaceId }: Props) {
           </pre>
         </div>
       )}
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div>
-      <p className="text-[10px] text-text-muted">{label}</p>
-      <p className={cn("text-sm font-medium text-foreground", className)}>
-        {value}
-      </p>
     </div>
   );
 }

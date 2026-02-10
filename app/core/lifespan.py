@@ -380,6 +380,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await _shutdown_reranker()
 
+    # Close embedder HTTP client
+    try:
+        from app.services.embedder import _embedder
+
+        if _embedder is not None:
+            await _embedder.close()
+            logger.info("Ollama embedder client closed")
+    except Exception as e:
+        logger.warning("Error closing embedder client", error=str(e))
+
     if _db_pool:
         await _db_pool.close()
         logger.info("Database pool closed")

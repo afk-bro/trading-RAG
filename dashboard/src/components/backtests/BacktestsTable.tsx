@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import type { BacktestRunListItem } from "@/api/types";
 import { cn } from "@/lib/utils";
+import { fmtPct, fmtNum } from "@/lib/chart-utils";
 import { format } from "date-fns";
 import { ArrowUpDown } from "lucide-react";
 
@@ -24,16 +25,6 @@ const STATUS_COLORS: Record<string, string> = {
   failed: "bg-danger/15 text-danger",
   running: "bg-accent/15 text-accent",
 };
-
-function fmtPct(n: number | undefined | null): string {
-  if (n == null) return "—";
-  return `${(n * 100).toFixed(2)}%`;
-}
-
-function fmtNum(n: number | undefined | null, decimals = 2): string {
-  if (n == null) return "—";
-  return n.toFixed(decimals);
-}
 
 export function BacktestsTable({ data, selectedIds, onSelectionChange }: Props) {
   const navigate = useNavigate();
