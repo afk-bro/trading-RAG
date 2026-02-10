@@ -187,7 +187,7 @@ app/
 
 | File | Purpose |
 |------|---------|
-| [runbook.md](./runbook.md) | Operational guide, troubleshooting |
+| [runbook.md](../ops/reranker-runbook.md) | Operational guide, troubleshooting |
 
 ## Testing
 
@@ -316,4 +316,4 @@ docker compose logs trading-rag-svc | grep "rerank_ms" | jq '.rerank_ms'
 | P95 rerank_ms > 500ms | Warning |
 | P95 rerank_ms > 1000ms | Critical |
 
-See [runbook.md](./runbook.md) for detailed alert configuration.
+See [runbook.md](../ops/reranker-runbook.md) for detailed alert configuration.

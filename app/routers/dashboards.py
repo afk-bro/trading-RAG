@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.lifespan import get_db_pool
 from app.deps.security import check_workspace_consistency
+from app.repositories.dashboards import DashboardsRepository
 from app.repositories.run_events import RunEventsRepository
 from app.repositories.trade_events import EventFilters, TradeEventsRepository
 from app.schemas import TradeEventType
@@ -58,43 +59,8 @@ async def get_equity_curve(
 
     Use for equity curve chart with drawdown overlay.
     """
-    query = """
-        WITH snapshots AS (
-            SELECT
-                snapshot_ts,
-                computed_at,
-                equity,
-                cash,
-                positions_value,
-                realized_pnl,
-                -- Calculate rolling peak and drawdown
-                MAX(equity) OVER (
-                    ORDER BY snapshot_ts
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS peak_equity
-            FROM paper_equity_snapshots
-            WHERE workspace_id = $1
-              AND snapshot_ts >= NOW() - make_interval(days => $2)
-            ORDER BY snapshot_ts ASC
-        )
-        SELECT
-            snapshot_ts,
-            computed_at,
-            equity,
-            cash,
-            positions_value,
-            realized_pnl,
-            peak_equity,
-            CASE
-                WHEN peak_equity > 0 THEN (peak_equity - equity) / peak_equity
-                ELSE 0.0
-            END AS drawdown_pct
-        FROM snapshots
-        ORDER BY snapshot_ts ASC
-    """
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(query, workspace_id, days)
+    repo = DashboardsRepository(pool)
+    rows = await repo.get_equity_curve(workspace_id, days)
 
     data_points = [
         {
@@ -163,56 +129,8 @@ async def get_intel_timeline(
 
     If version_id is not specified, returns data for all active versions.
     """
-    # Build query based on whether version_id is specified
-    if version_id:
-        query = """
-            SELECT
-                sis.id,
-                sis.strategy_version_id,
-                sv.version_number,
-                sv.version_tag,
-                s.name AS strategy_name,
-                sis.as_of_ts,
-                sis.computed_at,
-                sis.regime,
-                sis.confidence_score,
-                sis.confidence_components,
-                sis.source_snapshot_id
-            FROM strategy_intel_snapshots sis
-            JOIN strategy_versions sv ON sis.strategy_version_id = sv.id
-            JOIN strategies s ON sv.strategy_id = s.id
-            WHERE s.workspace_id = $1
-              AND sis.strategy_version_id = $2
-              AND sis.as_of_ts >= NOW() - make_interval(days => $3)
-            ORDER BY sis.as_of_ts DESC
-        """
-        params = [workspace_id, version_id, days]
-    else:
-        query = """
-            SELECT
-                sis.id,
-                sis.strategy_version_id,
-                sv.version_number,
-                sv.version_tag,
-                s.name AS strategy_name,
-                sis.as_of_ts,
-                sis.computed_at,
-                sis.regime,
-                sis.confidence_score,
-                sis.confidence_components,
-                sis.source_snapshot_id
-            FROM strategy_intel_snapshots sis
-            JOIN strategy_versions sv ON sis.strategy_version_id = sv.id
-            JOIN strategies s ON sv.strategy_id = s.id
-            WHERE s.workspace_id = $1
-              AND sv.state = 'active'
-              AND sis.as_of_ts >= NOW() - make_interval(days => $2)
-            ORDER BY sis.as_of_ts DESC
-        """
-        params = [workspace_id, days]
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
+    repo = DashboardsRepository(pool)
+    rows = await repo.get_intel_timeline(workspace_id, days, version_id=version_id)
 
     # Group by version
     by_version: dict[str, list[dict]] = {}
@@ -286,52 +204,8 @@ async def get_active_alerts(
 
     Use for alerts list/dashboard.
     """
-    if include_resolved:
-        status_filter = "1=1"  # No filter
-    else:
-        status_filter = "status = 'active'"
-
-    query = f"""
-        SELECT
-            id,
-            workspace_id,
-            rule_type,
-            severity,
-            status,
-            dedupe_key,
-            payload,
-            source,
-            rule_version,
-            occurrence_count,
-            first_triggered_at,
-            last_triggered_at,
-            acknowledged_at,
-            acknowledged_by,
-            resolved_at,
-            resolved_by,
-            resolution_note,
-            created_at
-        FROM ops_alerts
-        WHERE workspace_id = $1
-          AND {status_filter}
-          AND created_at >= NOW() - make_interval(days => $2)
-        ORDER BY
-            CASE status
-                WHEN 'active' THEN 0
-                WHEN 'acknowledged' THEN 1
-                WHEN 'resolved' THEN 2
-            END,
-            CASE severity
-                WHEN 'critical' THEN 0
-                WHEN 'high' THEN 1
-                WHEN 'medium' THEN 2
-                WHEN 'low' THEN 3
-            END,
-            last_triggered_at DESC
-    """
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(query, workspace_id, days)
+    repo = DashboardsRepository(pool)
+    rows = await repo.get_alerts(workspace_id, days, include_resolved=include_resolved)
 
     alerts = [
         {
@@ -409,77 +283,10 @@ async def get_dashboard_summary(
 
     Use as a single call for dashboard overview cards.
     """
-    # Get latest equity snapshot
-    equity_query = """
-        WITH latest AS (
-            SELECT
-                equity,
-                cash,
-                positions_value,
-                snapshot_ts,
-                MAX(equity) OVER (
-                    ORDER BY snapshot_ts
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS peak_equity
-            FROM paper_equity_snapshots
-            WHERE workspace_id = $1
-              AND snapshot_ts >= NOW() - INTERVAL '30 days'
-            ORDER BY snapshot_ts DESC
-            LIMIT 1
-        )
-        SELECT
-            equity,
-            cash,
-            positions_value,
-            snapshot_ts,
-            peak_equity,
-            CASE
-                WHEN peak_equity > 0 THEN (peak_equity - equity) / peak_equity
-                ELSE 0.0
-            END AS drawdown_pct
-        FROM latest
-    """
-
-    # Get latest intel for active versions
-    intel_query = """
-        WITH latest_per_version AS (
-            SELECT
-                sis.strategy_version_id,
-                sv.version_number,
-                s.name AS strategy_name,
-                sis.regime,
-                sis.confidence_score,
-                sis.as_of_ts,
-                ROW_NUMBER() OVER (
-                    PARTITION BY sis.strategy_version_id
-                    ORDER BY sis.as_of_ts DESC
-                ) AS rn
-            FROM strategy_intel_snapshots sis
-            JOIN strategy_versions sv ON sis.strategy_version_id = sv.id
-            JOIN strategies s ON sv.strategy_id = s.id
-            WHERE s.workspace_id = $1
-              AND sv.state = 'active'
-        )
-        SELECT *
-        FROM latest_per_version
-        WHERE rn = 1
-    """
-
-    # Get active alert counts
-    alerts_query = """
-        SELECT
-            severity,
-            COUNT(*) AS count
-        FROM ops_alerts
-        WHERE workspace_id = $1
-          AND status = 'active'
-        GROUP BY severity
-    """
-
-    async with pool.acquire() as conn:
-        equity_row = await conn.fetchrow(equity_query, workspace_id)
-        intel_rows = await conn.fetch(intel_query, workspace_id)
-        alert_rows = await conn.fetch(alerts_query, workspace_id)
+    repo = DashboardsRepository(pool)
+    equity_row = await repo.get_summary_equity(workspace_id)
+    intel_rows = await repo.get_summary_intel(workspace_id)
+    alert_rows = await repo.get_summary_alert_counts(workspace_id)
 
     # Build equity summary
     equity_summary = None
@@ -734,35 +541,8 @@ async def get_backtest_run_detail(
     - Dataset + strategy metadata
     - Regime tags
     """
-    query = """
-        SELECT
-            br.id,
-            br.status,
-            br.created_at,
-            br.started_at,
-            br.completed_at,
-            br.params,
-            br.summary,
-            br.dataset_meta,
-            br.equity_curve,
-            br.trades,
-            br.warnings,
-            br.run_kind,
-            br.regime_is,
-            br.regime_oos,
-            br.trade_count,
-            br.strategy_entity_id,
-            br.strategy_version_id,
-            -- Strategy name via kb_entities
-            ke.name AS strategy_name
-        FROM backtest_runs br
-        LEFT JOIN kb_entities ke ON br.strategy_entity_id = ke.id
-        WHERE br.id = $1
-          AND br.workspace_id = $2
-    """
-
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(query, run_id, workspace_id)
+    repo = DashboardsRepository(pool)
+    row = await repo.get_backtest_run(run_id, workspace_id)
 
     if not row:
         raise HTTPException(status_code=404, detail="Backtest run not found")
@@ -1148,14 +928,8 @@ async def get_run_lineage(
     pool: Any = Depends(get_db_pool),
 ) -> dict:
     """Return recent runs for the same strategy — powers baseline selector."""
-    # Fetch current run to get strategy_entity_id
-    query = """
-        SELECT strategy_entity_id, completed_at
-        FROM backtest_runs
-        WHERE id = $1 AND workspace_id = $2
-    """
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(query, run_id, workspace_id)
+    repo = DashboardsRepository(pool)
+    row = await repo.get_backtest_run_strategy(run_id, workspace_id)
 
     if not row:
         raise HTTPException(status_code=404, detail="Backtest run not found")
