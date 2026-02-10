@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 # Allow importing the script as a module
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
-from compare_unicorn_runs import compare_runs, MANDATORY_CRITERIA
-from run_unicorn_backtest import _build_output_dict
+from compare_unicorn_runs import compare_runs, MANDATORY_CRITERIA  # noqa: E402
+from run_unicorn_backtest import _build_output_dict  # noqa: E402
 
 
 def _make_run(
@@ -124,12 +124,16 @@ class TestMissingOptionalFields:
 # Helpers for _build_output_dict tests
 # ---------------------------------------------------------------------------
 
+
 class _FakeSession:
     """Hashable stand-in for TradingSession enum."""
+
     def __init__(self, value: str):
         self.value = value
+
     def __hash__(self):
         return hash(self.value)
+
     def __eq__(self, other):
         return self.value == getattr(other, "value", other)
 
@@ -139,8 +143,11 @@ def _fake_session_stats():
     _sess = _FakeSession("ny_am")
     return {
         _sess: SimpleNamespace(
-            total_setups=5, valid_setups=3, trades_taken=2,
-            win_rate=0.5, total_pnl_points=10.0,
+            total_setups=5,
+            valid_setups=3,
+            trades_taken=2,
+            win_rate=0.5,
+            total_pnl_points=10.0,
         ),
     }
 
@@ -178,8 +185,11 @@ def _fake_result(**overrides):
         session_stats=_fake_session_stats(),
         confidence_buckets=[
             SimpleNamespace(
-                min_confidence=0.5, max_confidence=0.7,
-                trade_count=4, win_rate=0.75, avg_r_multiple=1.2,
+                min_confidence=0.5,
+                max_confidence=0.7,
+                trade_count=4,
+                win_rate=0.75,
+                avg_r_multiple=1.2,
             ),
         ],
         session_diagnostics={"intermarket_agreement": None},
@@ -210,13 +220,20 @@ def _fake_args(**overrides):
 # _build_output_dict tests
 # ---------------------------------------------------------------------------
 
+
 class TestBuildOutputDict:
     """Verify _build_output_dict produces all keys compare_runs reads."""
 
     COMPARE_KEYS = {
-        "run_key", "trades_taken", "win_rate", "profit_factor",
-        "expectancy_points", "total_pnl_points", "total_pnl_dollars",
-        "largest_loss_points", "criteria_bottlenecks",
+        "run_key",
+        "trades_taken",
+        "win_rate",
+        "profit_factor",
+        "expectancy_points",
+        "total_pnl_points",
+        "total_pnl_dollars",
+        "largest_loss_points",
+        "criteria_bottlenecks",
     }
 
     def test_build_output_dict_has_required_keys(self):
@@ -242,11 +259,13 @@ class TestBaselineCompareIntegration:
 
         a = _build_output_dict(
             _fake_result(run_key="baseline_run", total_pnl_points=10.0),
-            config, args,
+            config,
+            args,
         )
         b = _build_output_dict(
             _fake_result(run_key="current_run", total_pnl_points=25.0),
-            config, args,
+            config,
+            args,
         )
 
         output = compare_runs(a, b)

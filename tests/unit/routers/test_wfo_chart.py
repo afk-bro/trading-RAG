@@ -283,7 +283,9 @@ class TestWFOChartDataEndpoint:
         assert result.notes == []
 
     @pytest.mark.asyncio
-    async def test_wfo_chart_data_404_on_missing_wfo(self, sample_wfo_id, sample_ws, mock_pool):
+    async def test_wfo_chart_data_404_on_missing_wfo(
+        self, sample_wfo_id, sample_ws, mock_pool
+    ):
         """Test 404 for non-existent WFO."""
         from fastapi import HTTPException
 
@@ -335,7 +337,9 @@ class TestWFOChartDataEndpoint:
         conn.fetchrow.side_effect = fetchrow_results
         conn.fetch.return_value = sample_tune_rows
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws, fold_index=0)
+        result = await wfo_chart.get_wfo_chart_data(
+            sample_wfo_id, ws=sample_ws, fold_index=0
+        )
 
         assert result.selected_fold is not None
         assert result.selected_fold.fold_index == 0
@@ -355,7 +359,9 @@ class TestWFOChartDataEndpoint:
         conn.fetchrow.return_value = sample_wfo_row
         conn.fetch.return_value = sample_tune_rows
 
-        result = await wfo_chart.get_wfo_chart_data(sample_wfo_id, ws=sample_ws, fold_index=99)
+        result = await wfo_chart.get_wfo_chart_data(
+            sample_wfo_id, ws=sample_ws, fold_index=99
+        )
 
         assert result.selected_fold is None
         assert any("does not exist" in n for n in result.notes)

@@ -43,7 +43,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from app.utils.instruments import data_root
 import structlog
@@ -55,15 +55,15 @@ GLBX_DATASET = "GLBX.MDP3"
 
 # Contract month codes
 MONTH_CODES = {
-    1: "F",   # January
-    2: "G",   # February
-    3: "H",   # March
-    4: "J",   # April
-    5: "K",   # May
-    6: "M",   # June
-    7: "N",   # July
-    8: "Q",   # August
-    9: "U",   # September
+    1: "F",  # January
+    2: "G",  # February
+    3: "H",  # March
+    4: "J",  # April
+    5: "K",  # May
+    6: "M",  # June
+    7: "N",  # July
+    8: "Q",  # August
+    9: "U",  # September
     10: "V",  # October
     11: "X",  # November
     12: "Z",  # December
@@ -76,7 +76,7 @@ QUARTERLY_MONTHS = [3, 6, 9, 12]
 INTERVAL_TO_SCHEMA = {
     "1s": "ohlcv-1s",
     "1m": "ohlcv-1m",
-    "5m": "ohlcv-1m",   # Will be resampled from 1m
+    "5m": "ohlcv-1m",  # Will be resampled from 1m
     "15m": "ohlcv-1m",  # Will be resampled from 1m
     "1h": "ohlcv-1h",
     "1d": "ohlcv-1d",
@@ -205,6 +205,7 @@ def get_continuous_symbols(
 @dataclass
 class FetchResult:
     """Result of fetching data from Databento."""
+
     symbol: str
     interval: str
     start_date: datetime
@@ -250,6 +251,7 @@ class DatabentoFetcher:
         if self._client is None:
             try:
                 import databento as db
+
                 self._client = db.Historical(self.api_key)
             except ImportError:
                 raise ImportError(
@@ -467,14 +469,16 @@ class DatabentoFetcher:
         ohlcv_bars = []
         for bar in all_1m_bars:
             ts = datetime.fromisoformat(bar["ts"].replace("Z", "+00:00"))
-            ohlcv_bars.append(OHLCVBar(
-                ts=ts,
-                open=bar["open"],
-                high=bar["high"],
-                low=bar["low"],
-                close=bar["close"],
-                volume=bar["volume"],
-            ))
+            ohlcv_bars.append(
+                OHLCVBar(
+                    ts=ts,
+                    open=bar["open"],
+                    high=bar["high"],
+                    low=bar["low"],
+                    close=bar["close"],
+                    volume=bar["volume"],
+                )
+            )
 
         # Sort by timestamp
         ohlcv_bars.sort(key=lambda b: b.ts)
@@ -508,8 +512,6 @@ class DatabentoFetcher:
         Returns:
             Resampled list of OHLCVBar objects
         """
-        from app.services.strategy.models import OHLCVBar
-
         if not bars:
             return []
 
@@ -531,7 +533,7 @@ class DatabentoFetcher:
 
         # Group bars by interval
         resampled = []
-        current_group = []
+        current_group: list[Any] = []
         current_bucket = None
 
         for bar in bars:
@@ -648,12 +650,16 @@ class DatabentoFetcher:
                 # Map each date in the period to this contract
                 current = period_start
                 while current <= period_end:
-                    front_month_contracts[current.strftime("%Y-%m-%d")] = contract_symbol
+                    front_month_contracts[current.strftime("%Y-%m-%d")] = (
+                        contract_symbol
+                    )
                     current += timedelta(days=1)
 
             logger.info(
                 "Front-month contracts for period",
-                contracts=[(c[0], str(c[1].date()), str(c[2].date())) for c in contracts],
+                contracts=[
+                    (c[0], str(c[1].date()), str(c[2].date())) for c in contracts
+                ],
             )
 
         logger.info(
@@ -786,7 +792,6 @@ class DatabentoFetcher:
             BarBundle with all timeframes populated
         """
         from app.services.strategy.models import OHLCVBar
-        from app.services.backtest.engines.unicorn_runner import BarBundle
 
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
@@ -810,10 +815,16 @@ class DatabentoFetcher:
         ohlcv_bars = []
         for bar in all_1m_bars:
             ts = datetime.fromisoformat(bar["ts"].replace("Z", "+00:00"))
-            ohlcv_bars.append(OHLCVBar(
-                ts=ts, open=bar["open"], high=bar["high"],
-                low=bar["low"], close=bar["close"], volume=bar["volume"],
-            ))
+            ohlcv_bars.append(
+                OHLCVBar(
+                    ts=ts,
+                    open=bar["open"],
+                    high=bar["high"],
+                    low=bar["low"],
+                    close=bar["close"],
+                    volume=bar["volume"],
+                )
+            )
         ohlcv_bars.sort(key=lambda b: b.ts)
 
         return self._resample_to_bundle(ohlcv_bars)
@@ -840,7 +851,6 @@ class DatabentoFetcher:
             BarBundle with all timeframes populated
         """
         from app.services.strategy.models import OHLCVBar
-        from app.services.backtest.engines.unicorn_runner import BarBundle
 
         csv_path = Path(csv_path)
         if csv_path.suffix == ".zst":
@@ -861,7 +871,9 @@ class DatabentoFetcher:
             for contract_symbol, period_start, period_end in contracts:
                 current = period_start
                 while current <= period_end:
-                    front_month_contracts[current.strftime("%Y-%m-%d")] = contract_symbol
+                    front_month_contracts[current.strftime("%Y-%m-%d")] = (
+                        contract_symbol
+                    )
                     current += timedelta(days=1)
 
         ohlcv_bars = []
@@ -891,14 +903,16 @@ class DatabentoFetcher:
                     if expected_contract and sym != expected_contract:
                         continue
                 try:
-                    ohlcv_bars.append(OHLCVBar(
-                        ts=ts,
-                        open=float(parts[col_idx["open"]]),
-                        high=float(parts[col_idx["high"]]),
-                        low=float(parts[col_idx["low"]]),
-                        close=float(parts[col_idx["close"]]),
-                        volume=float(parts[col_idx["volume"]]),
-                    ))
+                    ohlcv_bars.append(
+                        OHLCVBar(
+                            ts=ts,
+                            open=float(parts[col_idx["open"]]),
+                            high=float(parts[col_idx["high"]]),
+                            low=float(parts[col_idx["low"]]),
+                            close=float(parts[col_idx["close"]]),
+                            volume=float(parts[col_idx["volume"]]),
+                        )
+                    )
                 except (ValueError, IndexError):
                     continue
 
@@ -985,7 +999,9 @@ def main():
                 start_date=period_start.strftime("%Y-%m-%d"),
                 end_date=period_end.strftime("%Y-%m-%d"),
             )
-            print(f"  {contract}: {period_start.date()} to {period_end.date()} - ${cost:.2f}")
+            print(
+                f"  {contract}: {period_start.date()} to {period_end.date()} - ${cost:.2f}"
+            )
             total_cost += cost
 
         print(f"\nTotal estimated cost: ${total_cost:.2f}")

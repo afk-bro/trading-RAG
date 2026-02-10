@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import numpy as np
@@ -39,7 +38,6 @@ from .types import (
     LTFSetup,
     Position,
     SetupPhase,
-    Side,
     SwingPoint,
 )
 
@@ -76,7 +74,8 @@ class ICTBlueprintEngine:
 
         # Build provider
         provider = DefaultHTFProvider(
-            htf_df, bp,
+            htf_df,
+            bp,
             session_close_hour=config.get("session_close_hour", bp.session_close_hour),
         )
 
@@ -109,7 +108,9 @@ class ICTBlueprintEngine:
             bar_idx, bar_ts, bar_open, bar_high, bar_low, bar_close = bar
 
             # Update LTF swings
-            swings = ltf_swing_det.push(bar_idx, bar_ts, bar_open, bar_high, bar_low, bar_close)
+            swings = ltf_swing_det.push(
+                bar_idx, bar_ts, bar_open, bar_high, bar_low, bar_close
+            )
             for sp in swings:
                 if sp.is_high:
                     ltf_swing_highs.append(sp)
@@ -135,8 +136,13 @@ class ICTBlueprintEngine:
                 if exit_result is not None:
                     exit_price, reason = exit_result
                     trade = close_position(
-                        position, exit_price, bar_ts, reason,
-                        point_value, commission_bps, slippage_bps,
+                        position,
+                        exit_price,
+                        bar_ts,
+                        reason,
+                        point_value,
+                        commission_bps,
+                        slippage_bps,
                     )
                     trade.pnl_dollars += partial_pnl_dollars
                     closed_trades.append(trade)
@@ -148,7 +154,9 @@ class ICTBlueprintEngine:
                         for s in active_setups:
                             if s.ob.ob_id == position.ob_id:
                                 s.ob.attempts_used += 1
-                                s.ob.last_setup_bar_index = max(s.ob.last_setup_bar_index, bar_idx)
+                                s.ob.last_setup_bar_index = max(
+                                    s.ob.last_setup_bar_index, bar_idx
+                                )
                                 s.last_exit_bar_index = bar_idx
                                 # Reset to scanning for re-entry
                                 if s.ob.attempts_used < bp.max_attempts_per_ob:
@@ -190,18 +198,32 @@ class ICTBlueprintEngine:
 
             h1_mid = (bar_high + bar_low) / 2.0
             if htf_snap.bias == Bias.BULLISH:
-                if not is_in_discount(h1_mid, htf_snap.current_range, bp.discount_threshold):
+                if not is_in_discount(
+                    h1_mid, htf_snap.current_range, bp.discount_threshold
+                ):
                     # Not in discount — don't activate new setups, but advance existing
                     self._advance_existing_setups(
-                        active_setups, bar, ltf_swing_lows, ltf_swing_highs,
-                        h1_bars[:bar_pos + 1], bp, htf_snap,
+                        active_setups,
+                        bar,
+                        ltf_swing_lows,
+                        ltf_swing_highs,
+                        h1_bars[: bar_pos + 1],
+                        bp,
+                        htf_snap,
                     )
                     continue
             else:
-                if not is_in_premium(h1_mid, htf_snap.current_range, bp.discount_threshold):
+                if not is_in_premium(
+                    h1_mid, htf_snap.current_range, bp.discount_threshold
+                ):
                     self._advance_existing_setups(
-                        active_setups, bar, ltf_swing_lows, ltf_swing_highs,
-                        h1_bars[:bar_pos + 1], bp, htf_snap,
+                        active_setups,
+                        bar,
+                        ltf_swing_lows,
+                        ltf_swing_highs,
+                        h1_bars[: bar_pos + 1],
+                        bp,
+                        htf_snap,
                     )
                     continue
 
@@ -216,8 +238,13 @@ class ICTBlueprintEngine:
                     continue
                 # Check if H1 bar enters OB zone
                 if check_ob_zone_entry(
-                    bar_open, bar_high, bar_low, bar_close, ob,
-                    bp.ob_zone_entry_requirement, bp.ob_zone_overlap_pct,
+                    bar_open,
+                    bar_high,
+                    bar_low,
+                    bar_close,
+                    ob,
+                    bp.ob_zone_entry_requirement,
+                    bp.ob_zone_overlap_pct,
                 ):
                     setup = create_setup_for_ob(ob, htf_snap.bias)
                     active_setups.append(setup)
@@ -226,17 +253,26 @@ class ICTBlueprintEngine:
             candidates = select_candidate_setups(active_setups)
             for setup in candidates:
                 entry_price = advance_setup(
-                    setup, bar, ltf_swing_lows, ltf_swing_highs,
-                    h1_bars[:bar_pos + 1], bp, htf_snap,
+                    setup,
+                    bar,
+                    ltf_swing_lows,
+                    ltf_swing_highs,
+                    h1_bars[: bar_pos + 1],
+                    bp,
+                    htf_snap,
                 )
                 if entry_price is not None:
                     # Compute stop
-                    stop = compute_stop_price(setup, bp.stop_mode, setup.side, bp.stop_buffer_ticks)
+                    stop = compute_stop_price(
+                        setup, bp.stop_mode, setup.side, bp.stop_buffer_ticks
+                    )
                     if stop is None:
                         continue
 
                     # Entry-exit collision check
-                    if check_entry_exit_collision(entry_price, stop, bar_high, bar_low, setup.side):
+                    if check_entry_exit_collision(
+                        entry_price, stop, bar_high, bar_low, setup.side
+                    ):
                         setup.ob.attempts_used += 1
                         setup.last_exit_bar_index = bar_idx
                         if setup.ob.attempts_used >= bp.max_attempts_per_ob:
@@ -253,19 +289,29 @@ class ICTBlueprintEngine:
 
                     # Compute target
                     target = compute_target_price(
-                        entry_price, stop, setup.side, bp.tp_mode,
-                        htf_snap, bp.fixed_rr,
+                        entry_price,
+                        stop,
+                        setup.side,
+                        bp.tp_mode,
+                        htf_snap,
+                        bp.fixed_rr,
                     )
                     if target is None:
                         continue
 
                     # R:R gate
-                    if not check_rr_gate(entry_price, stop, target, bp.min_rr, setup.side):
+                    if not check_rr_gate(
+                        entry_price, stop, target, bp.min_rr, setup.side
+                    ):
                         continue
 
                     # Position sizing
                     size = compute_position_size(
-                        equity, risk_pct, entry_price, stop, point_value,
+                        equity,
+                        risk_pct,
+                        entry_price,
+                        stop,
+                        point_value,
                     )
                     if size <= 0:
                         continue
@@ -301,16 +347,27 @@ class ICTBlueprintEngine:
         if position is not None and h1_bars:
             last_bar = h1_bars[-1]
             trade = close_position(
-                position, last_bar[5], last_bar[1], "eod_close",
-                point_value, commission_bps, slippage_bps,
+                position,
+                last_bar[5],
+                last_bar[1],
+                "eod_close",
+                point_value,
+                commission_bps,
+                slippage_bps,
             )
             trade.pnl_dollars += partial_pnl_dollars
             closed_trades.append(trade)
             equity += trade.pnl_dollars
 
         return self._build_result(
-            closed_trades, equity_curve, initial_cash, equity, max_dd,
-            h1_bars, point_value, warnings,
+            closed_trades,
+            equity_curve,
+            initial_cash,
+            equity,
+            max_dd,
+            h1_bars,
+            point_value,
+            warnings,
         )
 
     # ------------------------------------------------------------------
@@ -363,17 +420,20 @@ class ICTBlueprintEngine:
         bars = []
         for i, (ts_val, row) in enumerate(df.iterrows()):
             ts_ns = int(pd.Timestamp(ts_val).value)
-            bars.append((
-                i, ts_ns,
-                float(row["Open"]), float(row["High"]),
-                float(row["Low"]), float(row["Close"]),
-            ))
+            bars.append(
+                (
+                    i,
+                    ts_ns,
+                    float(row["Open"]),
+                    float(row["High"]),
+                    float(row["Low"]),
+                    float(row["Close"]),
+                )
+            )
         return bars
 
     @staticmethod
-    def _record_equity(
-        curve: list[dict[str, Any]], ts_ns: int, equity: float
-    ) -> None:
+    def _record_equity(curve: list[dict[str, Any]], ts_ns: int, equity: float) -> None:
         dt = pd.Timestamp(ts_ns, unit="ns").isoformat()
         curve.append({"t": dt, "equity": equity})
 
@@ -421,11 +481,19 @@ class ICTBlueprintEngine:
         warnings: list[str],
     ) -> BacktestResult:
         num_trades = len(closed_trades)
-        return_pct = ((final_equity - initial_cash) / initial_cash * 100.0) if initial_cash > 0 else 0.0
+        return_pct = (
+            ((final_equity - initial_cash) / initial_cash * 100.0)
+            if initial_cash > 0
+            else 0.0
+        )
 
         # Buy & hold
         if h1_bars:
-            bh_return = ((h1_bars[-1][5] - h1_bars[0][5]) / h1_bars[0][5] * 100.0) if h1_bars[0][5] != 0 else 0.0
+            bh_return = (
+                ((h1_bars[-1][5] - h1_bars[0][5]) / h1_bars[0][5] * 100.0)
+                if h1_bars[0][5] != 0
+                else 0.0
+            )
         else:
             bh_return = 0.0
 
@@ -454,19 +522,21 @@ class ICTBlueprintEngine:
             entry_dt = pd.Timestamp(t.entry_time, unit="ns")
             exit_dt = pd.Timestamp(t.exit_time, unit="ns")
 
-            trade_dicts.append({
-                "entry_time": entry_dt.isoformat(),
-                "exit_time": exit_dt.isoformat(),
-                "side": t.side.value,
-                "entry_price": t.entry_price,
-                "exit_price": t.exit_price,
-                "size": t.size,
-                "pnl": t.pnl_dollars,
-                "pnl_points": t.pnl_points,
-                "return_pct": pct,
-                "exit_reason": t.exit_reason,
-                "duration_hours": dur_hours,
-            })
+            trade_dicts.append(
+                {
+                    "entry_time": entry_dt.isoformat(),
+                    "exit_time": exit_dt.isoformat(),
+                    "side": t.side.value,
+                    "entry_price": t.entry_price,
+                    "exit_price": t.exit_price,
+                    "size": t.size,
+                    "pnl": t.pnl_dollars,
+                    "pnl_points": t.pnl_points,
+                    "return_pct": pct,
+                    "exit_reason": t.exit_reason,
+                    "duration_hours": dur_hours,
+                }
+            )
 
         win_rate = (wins / num_trades) if num_trades > 0 else 0.0
         avg_trade_pct = (total_return_pct / num_trades) if num_trades > 0 else 0.0

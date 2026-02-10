@@ -460,9 +460,9 @@ def _compute_stability(
     import hashlib
 
     def _params_key(params: dict) -> str:
-        return hashlib.sha256(
-            json.dumps(params, sort_keys=True).encode()
-        ).hexdigest()[:16]
+        return hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()[
+            :16
+        ]
 
     keys = [_params_key(s.best_params) for s in completed]  # type: ignore[arg-type]
     unique = set(keys)
@@ -617,6 +617,7 @@ async def get_wfo_segments(
                     WFOSegment(
                         fold_index=idx,
                         tune_id=str(tune_id),
+                        run_id=None,
                         status="missing",
                     )
                 )
@@ -638,9 +639,7 @@ async def get_wfo_segments(
                 ),
                 train_end=data_split.get("train_end"),
                 test_start=data_split.get("test_start"),
-                test_end=(
-                    data_split.get("test_end") or dataset_meta.get("date_max")
-                ),
+                test_end=(data_split.get("test_end") or dataset_meta.get("date_max")),
                 best_params=best_params,
                 best_score=row.get("best_score"),
                 oos_metrics=oos_metrics,
@@ -656,7 +655,9 @@ async def get_wfo_segments(
                 if oos_points:
                     fold_equities.append((idx, oos_points))
                 else:
-                    notes.append(f"Fold {idx}: no OOS equity points after {test_start_str}")
+                    notes.append(
+                        f"Fold {idx}: no OOS equity points after {test_start_str}"
+                    )
 
     # Stitch OOS equity
     stitched = _stitch_equity_curves(fold_equities)

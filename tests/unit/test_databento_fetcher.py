@@ -133,7 +133,7 @@ class TestLoadFromCSV:
         """Front month filtering maps correct contracts to dates."""
         from app.services.backtest.data import DatabentoFetcher
 
-        fetcher = DatabentoFetcher()
+        DatabentoFetcher()
 
         # Get contracts for a 6-month period
         start = datetime(2024, 1, 1)
@@ -149,7 +149,9 @@ class TestLoadFromCSV:
     def test_roll_date_boundaries(self):
         """Roll dates correctly transition between contracts."""
         # March 2024 roll: H4 -> M4 around March 5-10
-        contracts = get_continuous_symbols("NQ", datetime(2024, 2, 1), datetime(2024, 4, 1))
+        contracts = get_continuous_symbols(
+            "NQ", datetime(2024, 2, 1), datetime(2024, 4, 1)
+        )
 
         h4_end = None
         m4_start = None
@@ -180,14 +182,16 @@ class TestResample4H:
         price = base_price
         for i in range(count):
             ts = start_ts + timedelta(minutes=i)
-            bars.append(OHLCVBar(
-                ts=ts,
-                open=price,
-                high=price + 1.0,
-                low=price - 1.0,
-                close=price + 0.5,
-                volume=100.0,
-            ))
+            bars.append(
+                OHLCVBar(
+                    ts=ts,
+                    open=price,
+                    high=price + 1.0,
+                    low=price - 1.0,
+                    close=price + 0.5,
+                    volume=100.0,
+                )
+            )
             price += 0.5
         return bars
 
@@ -219,10 +223,22 @@ class TestResample4H:
         # 03:59 is in bucket [0:00-4:00), bucket_key = (date, 0)
         # 04:00 is in bucket [4:00-8:00), bucket_key = (date, 240)
         bars = [
-            OHLCVBar(ts=datetime(2024, 1, 2, 3, 59, tzinfo=timezone.utc), open=100, high=101,
-                     low=99, close=100.5, volume=50),
-            OHLCVBar(ts=datetime(2024, 1, 2, 4, 0, tzinfo=timezone.utc), open=101, high=102,
-                     low=100, close=101.5, volume=60),
+            OHLCVBar(
+                ts=datetime(2024, 1, 2, 3, 59, tzinfo=timezone.utc),
+                open=100,
+                high=101,
+                low=99,
+                close=100.5,
+                volume=50,
+            ),
+            OHLCVBar(
+                ts=datetime(2024, 1, 2, 4, 0, tzinfo=timezone.utc),
+                open=101,
+                high=102,
+                low=100,
+                close=101.5,
+                volume=60,
+            ),
         ]
 
         result = fetcher._resample_bars(bars, "4h")
@@ -255,7 +271,11 @@ class TestBarBundle:
 
         bar = OHLCVBar(
             ts=datetime(2024, 1, 2, 0, 0, tzinfo=timezone.utc),
-            open=100, high=101, low=99, close=100.5, volume=100,
+            open=100,
+            high=101,
+            low=99,
+            close=100.5,
+            volume=100,
         )
         bundle = BarBundle(
             h4=[bar],
@@ -298,10 +318,16 @@ class TestFetchMultiTF:
         price = base_price
         for i in range(count):
             ts = start_ts + timedelta(minutes=i)
-            bars.append(OHLCVBar(
-                ts=ts, open=price, high=price + 1.0,
-                low=price - 1.0, close=price + 0.5, volume=100.0,
-            ))
+            bars.append(
+                OHLCVBar(
+                    ts=ts,
+                    open=price,
+                    high=price + 1.0,
+                    low=price - 1.0,
+                    close=price + 0.5,
+                    volume=100.0,
+                )
+            )
             price += 0.5
         return bars
 
@@ -319,10 +345,10 @@ class TestFetchMultiTF:
         assert bundle.m1 is not None
         assert len(bundle.m1) == 1440
         assert bundle.m5 is not None
-        assert len(bundle.m5) == 288   # 1440 / 5
+        assert len(bundle.m5) == 288  # 1440 / 5
         assert bundle.m15 is not None
-        assert len(bundle.m15) == 96   # 1440 / 15
+        assert len(bundle.m15) == 96  # 1440 / 15
         assert bundle.h1 is not None
-        assert len(bundle.h1) == 24    # 1440 / 60
+        assert len(bundle.h1) == 24  # 1440 / 60
         assert bundle.h4 is not None
-        assert len(bundle.h4) == 6     # 1440 / 240
+        assert len(bundle.h4) == 6  # 1440 / 240

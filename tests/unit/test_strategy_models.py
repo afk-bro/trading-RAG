@@ -57,6 +57,7 @@ class TestOHLCVBar:
     def test_non_utc_tz_accepted(self):
         """Non-UTC tz-aware datetime is accepted (converted at usage site)."""
         from zoneinfo import ZoneInfo
+
         bar = OHLCVBar(
             ts=datetime(2024, 1, 1, tzinfo=ZoneInfo("America/New_York")),
             open=100.0,
@@ -517,72 +518,84 @@ class TestUnicornConfigGuardValidation:
     def test_max_wick_ratio_rejects_invalid(self):
         """max_wick_ratio=1.5 is out of (0.0, 1.0] range."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         with pytest.raises(ValueError, match="max_wick_ratio must be in"):
             UnicornConfig(max_wick_ratio=1.5)
 
     def test_max_wick_ratio_rejects_zero(self):
         """max_wick_ratio=0.0 is out of (0.0, 1.0] range (exclusive lower bound)."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         with pytest.raises(ValueError, match="max_wick_ratio must be in"):
             UnicornConfig(max_wick_ratio=0.0)
 
     def test_max_wick_ratio_accepts_none(self):
         """Default None is valid (guard disabled)."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         config = UnicornConfig()
         assert config.max_wick_ratio is None
 
     def test_max_wick_ratio_accepts_one(self):
         """max_wick_ratio=1.0 is the upper boundary, should be accepted."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         config = UnicornConfig(max_wick_ratio=1.0)
         assert config.max_wick_ratio == 1.0
 
     def test_max_range_atr_mult_rejects_zero(self):
         """max_range_atr_mult=0 must raise ValueError."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         with pytest.raises(ValueError, match="max_range_atr_mult must be > 0"):
             UnicornConfig(max_range_atr_mult=0)
 
     def test_max_range_atr_mult_rejects_negative(self):
         """max_range_atr_mult=-1.0 must raise ValueError."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         with pytest.raises(ValueError, match="max_range_atr_mult must be > 0"):
             UnicornConfig(max_range_atr_mult=-1.0)
 
     def test_max_range_atr_mult_accepts_none(self):
         """Default None is valid (guard disabled)."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         config = UnicornConfig()
         assert config.max_range_atr_mult is None
 
     def test_max_range_atr_mult_accepts_positive(self):
         """max_range_atr_mult=3.0 should be accepted."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         config = UnicornConfig(max_range_atr_mult=3.0)
         assert config.max_range_atr_mult == 3.0
 
     def test_min_displacement_atr_rejects_zero(self):
         """min_displacement_atr=0 must raise ValueError."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         with pytest.raises(ValueError, match="min_displacement_atr must be > 0"):
             UnicornConfig(min_displacement_atr=0)
 
     def test_min_displacement_atr_rejects_negative(self):
         """min_displacement_atr=-0.5 must raise ValueError."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         with pytest.raises(ValueError, match="min_displacement_atr must be > 0"):
             UnicornConfig(min_displacement_atr=-0.5)
 
     def test_min_displacement_atr_accepts_none(self):
         """Default None is valid (guard disabled)."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         config = UnicornConfig()
         assert config.min_displacement_atr is None
 
     def test_min_displacement_atr_accepts_positive(self):
         """min_displacement_atr=0.5 should be accepted."""
         from app.services.strategy.strategies.unicorn_model import UnicornConfig
+
         config = UnicornConfig(min_displacement_atr=0.5)
         assert config.min_displacement_atr == 0.5
 
@@ -592,5 +605,6 @@ class TestUnicornConfigGuardValidation:
             UnicornConfig,
             SessionProfile,
         )
+
         config = UnicornConfig(session_profile=SessionProfile.NY_OPEN)
         assert config.session_profile == SessionProfile.NY_OPEN

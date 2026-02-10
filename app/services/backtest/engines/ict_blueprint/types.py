@@ -85,7 +85,9 @@ class OrderBlock:
     attempts_used: int = 0
     invalidated: bool = False
     created_at_daily_index: int = 0
-    last_setup_bar_index: int = -1  # tracks last timeout/exit bar for fresh L0 constraint
+    last_setup_bar_index: int = (
+        -1
+    )  # tracks last timeout/exit bar for fresh L0 constraint
 
 
 @dataclass
@@ -237,6 +239,8 @@ class ICTBlueprintParams:
 
     @staticmethod
     def from_dict(d: dict) -> ICTBlueprintParams:
-        valid_fields = {f.name for f in ICTBlueprintParams.__dataclass_fields__.values()}
+        valid_fields = {
+            f.name for f in ICTBlueprintParams.__dataclass_fields__.values()
+        }
         filtered = {k: v for k, v in d.items() if k in valid_fields}
         return ICTBlueprintParams(**filtered)

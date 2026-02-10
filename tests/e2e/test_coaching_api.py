@@ -25,26 +25,25 @@ class TestCoachingEndpointContract:
     def test_coaching_no_500_on_missing_run(self, api_request):
         """Coaching endpoint returns 404, not 500, for missing run."""
         resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}"
-            f"?include_coaching=true"
+            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}" f"?include_coaching=true"
         )
         assert resp.status in (200, 404), f"Unexpected {resp.status}: {resp.text()}"
 
     def test_coaching_false_omits_key(self, api_request):
         """include_coaching=false should NOT add coaching key."""
         resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}"
-            f"?include_coaching=false"
+            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}" f"?include_coaching=false"
         )
         if resp.status == 200:
             body = resp.json()
-            assert "coaching" not in body, "coaching key present when include_coaching=false"
+            assert (
+                "coaching" not in body
+            ), "coaching key present when include_coaching=false"
 
     def test_coaching_response_shape(self, api_request):
         """When coaching is present, verify it has the expected keys."""
         resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}"
-            f"?include_coaching=true"
+            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}" f"?include_coaching=true"
         )
         if resp.status != 200:
             pytest.skip("No completed run available to test coaching shape")
@@ -81,8 +80,7 @@ class TestCoachingEndpointContract:
     def test_coaching_delta_shape(self, api_request):
         """Each delta has metric, current, previous, delta, improved, higher_is_better."""
         resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}"
-            f"?include_coaching=true"
+            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}" f"?include_coaching=true"
         )
         if resp.status != 200:
             pytest.skip("No run available")
@@ -103,8 +101,7 @@ class TestCoachingEndpointContract:
     def test_trajectory_shape(self, api_request):
         """Trajectory data returns runs list when coaching enabled."""
         resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}"
-            f"?include_coaching=true"
+            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}" f"?include_coaching=true"
         )
         if resp.status != 200:
             pytest.skip("No run available")
@@ -122,16 +119,12 @@ class TestLineageEndpoint:
 
     def test_lineage_no_500(self, api_request):
         """Lineage endpoint returns 404 or valid data, not 500."""
-        resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}/lineage"
-        )
+        resp = api_request.get(f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}/lineage")
         assert resp.status in (200, 404), f"Unexpected {resp.status}: {resp.text()}"
 
     def test_lineage_response_shape(self, api_request):
         """Lineage candidates have expected structure."""
-        resp = api_request.get(
-            f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}/lineage"
-        )
+        resp = api_request.get(f"/dashboards/{FAKE_WS}/backtests/{FAKE_RUN}/lineage")
         if resp.status != 200:
             pytest.skip("No lineage data available")
 

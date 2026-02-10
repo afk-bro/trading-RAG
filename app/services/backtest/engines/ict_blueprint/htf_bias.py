@@ -62,7 +62,9 @@ class SwingDetector:
                 is_sh = False
                 break
         if is_sh:
-            swings.append(SwingPoint(index=c_idx, timestamp=c_ts, price=c_high, is_high=True))
+            swings.append(
+                SwingPoint(index=c_idx, timestamp=c_ts, price=c_high, is_high=True)
+            )
 
         # Check swing low — strict inequality
         is_sl = True
@@ -73,7 +75,9 @@ class SwingDetector:
                 is_sl = False
                 break
         if is_sl:
-            swings.append(SwingPoint(index=c_idx, timestamp=c_ts, price=c_low, is_high=False))
+            swings.append(
+                SwingPoint(index=c_idx, timestamp=c_ts, price=c_low, is_high=False)
+            )
 
         return swings
 
@@ -152,10 +156,14 @@ def define_range(
         return None
 
     midpoint = range_low + (range_high - range_low) * 0.5
-    return TradingRange(high=range_high, low=range_low, midpoint=midpoint, bias=msb_type)
+    return TradingRange(
+        high=range_high, low=range_low, midpoint=midpoint, bias=msb_type
+    )
 
 
-def _find_preceding_swing(swings: list[SwingPoint], before_index: int) -> Optional[SwingPoint]:
+def _find_preceding_swing(
+    swings: list[SwingPoint], before_index: int
+) -> Optional[SwingPoint]:
     """Find the most recent swing point with index < before_index."""
     for sp in reversed(swings):
         if sp.index < before_index:
@@ -241,13 +249,17 @@ def identify_order_block(
 # ---------------------------------------------------------------------------
 
 
-def is_in_discount(price: float, trading_range: TradingRange, threshold: float = 0.5) -> bool:
+def is_in_discount(
+    price: float, trading_range: TradingRange, threshold: float = 0.5
+) -> bool:
     """True if price is below the threshold level of the range (discount for longs)."""
     level = trading_range.low + (trading_range.high - trading_range.low) * threshold
     return price < level
 
 
-def is_in_premium(price: float, trading_range: TradingRange, threshold: float = 0.5) -> bool:
+def is_in_premium(
+    price: float, trading_range: TradingRange, threshold: float = 0.5
+) -> bool:
     """True if price is above the threshold level of the range (premium for shorts)."""
     level = trading_range.low + (trading_range.high - trading_range.low) * threshold
     return price > level
@@ -316,7 +328,9 @@ def update_htf(
         state.last_msb_bar_index = bar_index
 
         # 3. Define range
-        new_range = define_range(new_bias, state.swing_highs, state.swing_lows, msb_swing)
+        new_range = define_range(
+            new_bias, state.swing_highs, state.swing_lows, msb_swing
+        )
         if new_range is not None:
             state.current_range = new_range
 

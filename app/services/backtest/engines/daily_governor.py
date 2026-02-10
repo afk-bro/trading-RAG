@@ -31,10 +31,12 @@ class DailyGovernor:
     max_daily_loss_r: Optional[float] = None  # R-based daily loss cap (e.g. 1.0 = 1R)
 
     # Adaptive confidence tiering config (None = disabled)
-    adaptive_tier_streak: Optional[int] = None     # activate after N consecutive losses
-    adaptive_tier_dd_pct: Optional[float] = None   # activate when trailing DD > X% of max DD
-    adaptive_tier_a: float = 0.80                  # tier A threshold when adaptive is active
-    adaptive_tier_b: float = 0.70                  # tier B threshold when adaptive is active
+    adaptive_tier_streak: Optional[int] = None  # activate after N consecutive losses
+    adaptive_tier_dd_pct: Optional[float] = (
+        None  # activate when trailing DD > X% of max DD
+    )
+    adaptive_tier_a: float = 0.80  # tier A threshold when adaptive is active
+    adaptive_tier_b: float = 0.70  # tier B threshold when adaptive is active
 
     # --- Per-day mutable state ---
     day_loss_dollars: float = 0.0
@@ -76,7 +78,9 @@ class DailyGovernor:
             return False
         return True
 
-    def record_trade_close(self, pnl_dollars: float, is_partial_leg: bool = False) -> None:
+    def record_trade_close(
+        self, pnl_dollars: float, is_partial_leg: bool = False
+    ) -> None:
         """Update state after a trade closes.
 
         Args:
@@ -136,5 +140,8 @@ class DailyGovernor:
 
     def check_adaptive_dd(self, trailing_dd_pct: float) -> None:
         """Activate confidence tiering if trailing DD exceeds threshold."""
-        if self.adaptive_tier_dd_pct is not None and trailing_dd_pct >= self.adaptive_tier_dd_pct:
+        if (
+            self.adaptive_tier_dd_pct is not None
+            and trailing_dd_pct >= self.adaptive_tier_dd_pct
+        ):
             self.confidence_tier_active = True

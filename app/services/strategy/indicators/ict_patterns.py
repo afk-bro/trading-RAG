@@ -10,7 +10,7 @@ Implements detection for:
 - Displacement moves
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -692,7 +692,9 @@ def detect_displacement(
             direction = "bullish" if bar.close > bar.open else "bearish"
 
             # Check if this displacement created an FVG
-            creates_fvg = i in fvg_indices or (i - 1) in fvg_indices or (i + 1) in fvg_indices
+            creates_fvg = (
+                i in fvg_indices or (i - 1) in fvg_indices or (i + 1) in fvg_indices
+            )
 
             displacements.append(
                 DisplacementMove(

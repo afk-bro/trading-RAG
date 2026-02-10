@@ -16,11 +16,12 @@ from app.services.strategy.indicators.ict_patterns import LiquiditySweep
 from app.services.strategy.indicators.tf_bias import BiasDirection
 from app.services.backtest.engines.unicorn_runner import (
     check_criteria,
-    CriteriaCheck,
 )
 
 
-def _make_bar(idx: int, open_: float, high: float, low: float, close: float) -> OHLCVBar:
+def _make_bar(
+    idx: int, open_: float, high: float, low: float, close: float
+) -> OHLCVBar:
     """Helper: create a bar at index-derived timestamp during NY AM macro window."""
     # Use 9:30 ET = 14:30 UTC as base, increment by minutes wrapping into hours
     base_hour = 14
@@ -36,7 +37,9 @@ def _make_bars(n: int = 60) -> list[OHLCVBar]:
     return [_make_bar(i % 60, 100.0, 101.0, 99.0, 100.0) for i in range(n)]
 
 
-def _make_sweep(bar_index: int, sweep_type: str = "low", swept_level: float = 99.0) -> LiquiditySweep:
+def _make_sweep(
+    bar_index: int, sweep_type: str = "low", swept_level: float = 99.0
+) -> LiquiditySweep:
     ts = datetime(2024, 6, 3, 14, 30, tzinfo=timezone.utc)
     return LiquiditySweep(
         sweep_type=sweep_type,
@@ -58,7 +61,9 @@ BIAS_PATCH = "app.services.backtest.engines.unicorn_runner.compute_tf_bias"
 def _mock_bias(*args, **kwargs):
     """Return a bullish bias so check_criteria reaches the sweep block."""
     from app.services.strategy.indicators.tf_bias import (
-        TimeframeBias, TimeframeBiasComponent, BiasStrength,
+        TimeframeBias,
+        TimeframeBiasComponent,
+        BiasStrength,
     )
 
     m15 = TimeframeBiasComponent(
@@ -89,11 +94,16 @@ class TestSweepClosureGateDisabledByDefault:
         # Sweep at bar 10 (age=49 from last bar 59) — very stale but should pass
         old_sweep = _make_sweep(bar_index=10)
 
-        with patch(SWEEP_PATCH, return_value=[old_sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[old_sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is True
@@ -109,11 +119,16 @@ class TestSweepRecencyGate:
         # Sweep at bar 10 → age = 59 - 10 = 49 bars — exceeds threshold of 10
         stale_sweep = _make_sweep(bar_index=10)
 
-        with patch(SWEEP_PATCH, return_value=[stale_sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[stale_sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is False
@@ -126,11 +141,16 @@ class TestSweepRecencyGate:
         # Sweep at bar 55 → age = 59 - 55 = 4 — within threshold
         fresh_sweep = _make_sweep(bar_index=55)
 
-        with patch(SWEEP_PATCH, return_value=[fresh_sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[fresh_sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is True
@@ -149,11 +169,16 @@ class TestSweepSettlementGate:
         # Make bar 51 close below swept level
         bars[51] = _make_bar(51 % 60, 98.0, 99.0, 97.0, 98.0)
 
-        with patch(SWEEP_PATCH, return_value=[sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is False
@@ -166,11 +191,16 @@ class TestSweepSettlementGate:
         bars = _make_bars(60)
         sweep = _make_sweep(bar_index=59)  # last bar
 
-        with patch(SWEEP_PATCH, return_value=[sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is False
@@ -187,11 +217,16 @@ class TestSweepClosureGateCombined:
         sweep = _make_sweep(bar_index=55, swept_level=99.0)
         bars[56] = _make_bar(56 % 60, 99.0, 101.0, 98.5, 100.0)  # close=100 >= 99
 
-        with patch(SWEEP_PATCH, return_value=[sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is True
@@ -209,11 +244,16 @@ class TestSweepNewestFirst:
         old_sweep = _make_sweep(bar_index=30)
         new_sweep = _make_sweep(bar_index=50)
 
-        with patch(SWEEP_PATCH, return_value=[old_sweep, new_sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[old_sweep, new_sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config,
             )
 
         assert check.liquidity_sweep_found is True
@@ -231,11 +271,16 @@ class TestSweepClosureDiagnostics:
         # Case 1: stale sweep
         config_stale = UnicornConfig(max_sweep_age_bars=5)
         stale = _make_sweep(bar_index=10)
-        with patch(SWEEP_PATCH, return_value=[stale]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[stale]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config_stale,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config_stale,
             )
         assert check.sweep_age_bars == 49
         assert check.sweep_reject_reason == "stale"
@@ -246,11 +291,16 @@ class TestSweepClosureDiagnostics:
         sweep = _make_sweep(bar_index=50, swept_level=99.0)
         bars_copy = _make_bars(60)
         bars_copy[51] = _make_bar(51 % 60, 98.0, 99.0, 97.0, 97.5)  # close < 99
-        with patch(SWEEP_PATCH, return_value=[sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars_copy, htf_bars=bars_copy, ltf_bars=bars_copy,
-                symbol="NQ", ts=bars_copy[-1].ts, config=config_settle,
+                bars=bars_copy,
+                htf_bars=bars_copy,
+                ltf_bars=bars_copy,
+                symbol="NQ",
+                ts=bars_copy[-1].ts,
+                config=config_settle,
             )
         assert check.sweep_settled is False
         assert check.sweep_reject_reason == "unsettled"
@@ -258,11 +308,16 @@ class TestSweepClosureDiagnostics:
         # Case 3: no_next_bar
         config_settle2 = UnicornConfig(require_sweep_settlement=True)
         last_sweep = _make_sweep(bar_index=59)
-        with patch(SWEEP_PATCH, return_value=[last_sweep]), \
-             patch(BIAS_PATCH, side_effect=_mock_bias):
+        with patch(SWEEP_PATCH, return_value=[last_sweep]), patch(
+            BIAS_PATCH, side_effect=_mock_bias
+        ):
             check = check_criteria(
-                bars=bars, htf_bars=bars, ltf_bars=bars,
-                symbol="NQ", ts=bars[-1].ts, config=config_settle2,
+                bars=bars,
+                htf_bars=bars,
+                ltf_bars=bars,
+                symbol="NQ",
+                ts=bars[-1].ts,
+                config=config_settle2,
             )
         assert check.sweep_settled is False
         assert check.sweep_reject_reason == "no_next_bar"

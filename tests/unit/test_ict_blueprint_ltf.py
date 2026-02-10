@@ -1,7 +1,5 @@
 """Unit tests for ICT Blueprint LTF entry logic."""
 
-import pytest
-
 from app.services.backtest.engines.ict_blueprint.ltf_entry import (
     advance_setup,
     check_ltf_msb,
@@ -32,7 +30,9 @@ from app.services.backtest.engines.ict_blueprint.types import (
 
 def _make_ob(bias=Bias.BULLISH, top=50.0, bottom=45.0, msb_idx=5) -> OrderBlock:
     return OrderBlock(
-        top=top, bottom=bottom, bias=bias,
+        top=top,
+        bottom=bottom,
+        bias=bias,
         ob_id=(msb_idx, 3, 4, "long" if bias == Bias.BULLISH else "short"),
         anchor_swing=SwingPoint(2, 200, 45.0, True),
         msb_bar_index=msb_idx,
@@ -69,9 +69,15 @@ class TestOBZoneEntry:
     def test_percent_inside(self):
         ob = _make_ob(top=50.0, bottom=45.0)
         # Body from 46 to 48, fully inside OB → 100% overlap
-        assert check_ob_zone_entry(46.0, 49.0, 44.0, 48.0, ob, "percent_inside", 0.10) is True
+        assert (
+            check_ob_zone_entry(46.0, 49.0, 44.0, 48.0, ob, "percent_inside", 0.10)
+            is True
+        )
         # Body from 51 to 53, no overlap
-        assert check_ob_zone_entry(51.0, 53.0, 50.5, 53.0, ob, "percent_inside", 0.10) is False
+        assert (
+            check_ob_zone_entry(51.0, 53.0, 50.5, 53.0, ob, "percent_inside", 0.10)
+            is False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +209,7 @@ class TestFVG:
         bars = [
             (0, 100, 10.0, 12.0, 9.0, 11.0),
             (1, 200, 11.0, 16.0, 11.0, 15.0),  # big up
-            (2, 300, 15.0, 17.0, 14.0, 16.0),   # gap: bar[0].high=12 < bar[2].low=14
+            (2, 300, 15.0, 17.0, 14.0, 16.0),  # gap: bar[0].high=12 < bar[2].low=14
         ]
         fvg = detect_fvg(bars, 2)
         assert fvg is not None
@@ -229,12 +235,16 @@ class TestFVG:
 class TestTimeout:
     def test_timeout_exceeded(self):
         ob = _make_ob()
-        s = LTFSetup(ob=ob, side=Side.LONG, phase=SetupPhase.ENTRY_PENDING, msb_bar_index=10)
+        s = LTFSetup(
+            ob=ob, side=Side.LONG, phase=SetupPhase.ENTRY_PENDING, msb_bar_index=10
+        )
         assert should_timeout(s, bar_index=25, max_wait_bars=12) is True
 
     def test_not_timed_out(self):
         ob = _make_ob()
-        s = LTFSetup(ob=ob, side=Side.LONG, phase=SetupPhase.ENTRY_PENDING, msb_bar_index=10)
+        s = LTFSetup(
+            ob=ob, side=Side.LONG, phase=SetupPhase.ENTRY_PENDING, msb_bar_index=10
+        )
         assert should_timeout(s, bar_index=20, max_wait_bars=12) is False
 
     def test_wrong_phase(self):
@@ -298,8 +308,11 @@ class TestAdvanceSetup:
         setup = create_setup_for_ob(ob, Bias.BULLISH)
         htf = _make_htf_snapshot()
         params = ICTBlueprintParams(
-            entry_mode="breaker_retest", require_sweep=False,
-            max_wait_bars_after_msb=5, ltf_swing_lookback=1, breaker_candles=1,
+            entry_mode="breaker_retest",
+            require_sweep=False,
+            max_wait_bars_after_msb=5,
+            ltf_swing_lookback=1,
+            breaker_candles=1,
         )
 
         ltf_lows = [SwingPoint(10, 1000, 46.0, False)]
@@ -336,15 +349,25 @@ class TestAdvanceSetup:
         # L0 at index 10 should be rejected (stale)
         ltf_lows = [SwingPoint(10, 1000, 46.0, False)]
         ltf_highs = [SwingPoint(8, 800, 52.0, True)]
-        result = find_l0_h0(ltf_lows, ltf_highs, ob, current_index=25,
-                            last_exit_bar_index=new_setup.last_exit_bar_index)
+        result = find_l0_h0(
+            ltf_lows,
+            ltf_highs,
+            ob,
+            current_index=25,
+            last_exit_bar_index=new_setup.last_exit_bar_index,
+        )
         assert result is None  # L0 at 10 <= last_exit 20
 
         # L0 at index 25 should be accepted
         ltf_lows.append(SwingPoint(25, 2500, 47.0, False))
         ltf_highs.append(SwingPoint(23, 2300, 53.0, True))
-        result = find_l0_h0(ltf_lows, ltf_highs, ob, current_index=27,
-                            last_exit_bar_index=new_setup.last_exit_bar_index)
+        result = find_l0_h0(
+            ltf_lows,
+            ltf_highs,
+            ob,
+            current_index=27,
+            last_exit_bar_index=new_setup.last_exit_bar_index,
+        )
         assert result is not None
 
     def test_fvg_only_used_in_fvg_fill_mode(self):
@@ -357,7 +380,9 @@ class TestAdvanceSetup:
         setup.fvg = FVG(top=49.0, bottom=47.0, bar_index=9, bullish=True)
         setup.msb_bar_index = 9
 
-        from app.services.backtest.engines.ict_blueprint.ltf_entry import check_entry_trigger
+        from app.services.backtest.engines.ict_blueprint.ltf_entry import (
+            check_entry_trigger,
+        )
 
         # Bar that touches breaker but NOT FVG — should still trigger in breaker mode
         entry = check_entry_trigger(
@@ -367,7 +392,5 @@ class TestAdvanceSetup:
 
         # In fvg_fill mode with no FVG overlap — should NOT trigger
         setup.fvg = FVG(top=52.0, bottom=51.0, bar_index=9, bullish=True)
-        entry = check_entry_trigger(
-            47.5, 49.0, 46.5, 48.0, 10, setup, "fvg_fill", []
-        )
+        entry = check_entry_trigger(47.5, 49.0, 46.5, 48.0, 10, setup, "fvg_fill", [])
         assert entry is None  # FVG not filled (bar doesn't reach 52)

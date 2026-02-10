@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import Enum
 from math import floor
-from typing import Optional
+from typing import Any, Callable, Optional, Union
 from uuid import UUID
 
 from app.utils.time import to_eastern_time
@@ -56,7 +56,6 @@ from app.services.strategy.indicators.ict_patterns import (
     detect_mitigation_blocks,
     detect_liquidity_sweeps,
     detect_mss,
-    detect_displacement,
     _calculate_atr,
 )
 from app.services.strategy.indicators.tf_bias import (
@@ -105,7 +104,16 @@ MODEL_VERSIONS: dict[str, dict] = {
 MODEL_VERSION = "2.1"
 MODEL_CODENAME = MODEL_VERSIONS[MODEL_VERSION]["codename"]
 
-EXPECTED_SEGMENT_ORDER = ("ver", "bias", "side", "displ", "minscore", "window", "ts", "mode")
+EXPECTED_SEGMENT_ORDER = (
+    "ver",
+    "bias",
+    "side",
+    "displ",
+    "minscore",
+    "window",
+    "ts",
+    "mode",
+)
 
 
 def _label_segments(
@@ -122,7 +130,9 @@ def _label_segments(
     counts).  This keeps labels deterministic across identical configs.
     """
     segs: list[tuple[str, str]] = []
-    segs.append(("ver", f"{STRATEGY_FAMILY.lower()}_v{MODEL_VERSION.replace('.', '_')}"))
+    segs.append(
+        ("ver", f"{STRATEGY_FAMILY.lower()}_v{MODEL_VERSION.replace('.', '_')}")
+    )
 
     bias = "mtf" if bar_bundle is not None else "single"
     segs.append(("bias", bias))
@@ -133,7 +143,11 @@ def _label_segments(
         side = "long" if str(direction_filter).endswith("BULLISH") else "short"
     segs.append(("side", side))
 
-    displ = str(config.min_displacement_atr) if config.min_displacement_atr is not None else "off"
+    displ = (
+        str(config.min_displacement_atr)
+        if config.min_displacement_atr is not None
+        else "off"
+    )
     segs.append(("displ", displ))
 
     segs.append(("minscore", f"{config.min_scored_criteria}of4"))
@@ -157,7 +171,8 @@ def build_run_label(
 ) -> str:
     """Build a self-describing one-line run label from config + runtime params.
 
-    Format: Unicorn v2.1 | Bias=<profile> | Side=<dir> | Displ=<val> | MinScore=N/4 | Window=<profile> | TS=<val>
+    Format: Unicorn v2.1 | Bias=<profile> | Side=<dir> |
+    Displ=<val> | MinScore=N/4 | Window=<profile> | TS=<val>
 
     Contains only config choices — no market-derived facts (dates, symbols,
     bar counts).  Deterministic for identical configs.
@@ -170,7 +185,7 @@ def build_run_label(
         eval_mode=eval_mode,
     )
     # Human-friendly display format
-    display_map = {
+    display_map: dict[str, Union[str, Callable[[str], str]]] = {
         "ver": f"{STRATEGY_FAMILY} v{MODEL_VERSION}",
         "bias": lambda v: f"Bias={v.upper() if v == 'mtf' else v.capitalize()}",
         "side": lambda v: f"Side={'BiDir' if v == 'bidir' else v.capitalize()}",
@@ -257,6 +272,7 @@ class ScaleOutPreset(str, Enum):
       B (50% @ +1R)   — halves the runner, too aggressive.
       D (50% @ +0.75R) — locks in too little, chokes MFE capture.
     """
+
     NONE = "none"
     PROP_SAFE = "prop_safe"  # 33% at +1R
 
@@ -276,11 +292,12 @@ SCALE_OUT_PARAMS: dict[ScaleOutPreset, dict] = {
 
 class SessionProfile(str, Enum):
     """Trading session window profiles."""
+
     NY_OPEN = "ny_open"  # First 60 min of NY session
-    STRICT = "strict"    # NY AM only
-    NORMAL = "normal"    # London + NY AM
-    WIDE = "wide"        # London + NY AM + NY PM
-    LONDON = "london"    # London session only
+    STRICT = "strict"  # NY AM only
+    NORMAL = "normal"  # London + NY AM
+    WIDE = "wide"  # London + NY AM + NY PM
+    LONDON = "london"  # London session only
 
 
 # Session windows by profile
@@ -289,20 +306,20 @@ SESSION_WINDOWS = {
         (time(9, 30), time(10, 30)),  # First 60 min of NY
     ],
     SessionProfile.STRICT: [
-        (time(9, 30), time(11, 0)),   # NY AM only
+        (time(9, 30), time(11, 0)),  # NY AM only
     ],
     SessionProfile.NORMAL: [
-        (time(3, 0), time(4, 0)),     # London
-        (time(9, 30), time(11, 0)),   # NY AM
+        (time(3, 0), time(4, 0)),  # London
+        (time(9, 30), time(11, 0)),  # NY AM
     ],
     SessionProfile.WIDE: [
-        (time(3, 0), time(4, 0)),     # London
-        (time(9, 30), time(11, 0)),   # NY AM
+        (time(3, 0), time(4, 0)),  # London
+        (time(9, 30), time(11, 0)),  # NY AM
         (time(13, 30), time(15, 0)),  # NY PM
-        (time(19, 0), time(20, 0)),   # Asia
+        (time(19, 0), time(20, 0)),  # Asia
     ],
     SessionProfile.LONDON: [
-        (time(3, 0), time(4, 0)),     # London only
+        (time(3, 0), time(4, 0)),  # London only
     ],
 }
 
@@ -326,11 +343,11 @@ class UnicornConfig:
 
     # ATR-based thresholds
     atr_period: int = 14
-    fvg_min_atr_mult: float = 0.3      # FVG must be >= 0.3 * ATR
-    stop_max_atr_mult: float = 3.0     # Stop must be <= 3.0 * ATR
+    fvg_min_atr_mult: float = 0.3  # FVG must be >= 0.3 * ATR
+    stop_max_atr_mult: float = 3.0  # Stop must be <= 3.0 * ATR
 
     # FVG invalidation threshold (partial fill)
-    max_fvg_fill_pct: float = 1.0      # 1.0 = only 100% fill invalidates (legacy)
+    max_fvg_fill_pct: float = 1.0  # 1.0 = only 100% fill invalidates (legacy)
 
     # Stop placement buffer (points beyond FVG/sweep edge)
     stop_buffer_points: float = 2.0
@@ -344,15 +361,23 @@ class UnicornConfig:
     point_value_es: float = 50.0
 
     # Pre-entry bar-quality guards (None = disabled)
-    max_wick_ratio: Optional[float] = None      # e.g., 0.6 — skip if signal bar wick > 60%
-    max_range_atr_mult: Optional[float] = None  # e.g., 3.0 — skip if signal bar range > 3x ATR
+    max_wick_ratio: Optional[float] = None  # e.g., 0.6 — skip if signal bar wick > 60%
+    max_range_atr_mult: Optional[float] = (
+        None  # e.g., 3.0 — skip if signal bar range > 3x ATR
+    )
 
     # Displacement conviction guard (None = disabled)
-    min_displacement_atr: Optional[float] = None  # e.g., 0.5 — skip if MSS displacement < 0.5x ATR
+    min_displacement_atr: Optional[float] = (
+        None  # e.g., 0.5 — skip if MSS displacement < 0.5x ATR
+    )
 
     # Sweep closure confirmation gate
-    max_sweep_age_bars: Optional[int] = None     # e.g., 10 — only accept sweeps within N HTF bars
-    require_sweep_settlement: bool = False        # next bar must close on correct side of swept level
+    max_sweep_age_bars: Optional[int] = (
+        None  # e.g., 10 — only accept sweeps within N HTF bars
+    )
+    require_sweep_settlement: bool = (
+        False  # next bar must close on correct side of swept level
+    )
 
     # Backstop cleanup flag: when False, skip the redundant post-scoring displacement guard
     enable_displacement_backstop: bool = True
@@ -386,19 +411,27 @@ class UnicornConfig:
             raise ValueError("min_displacement_atr must be > 0 when set")
         if self.max_sweep_age_bars is not None and self.max_sweep_age_bars < 1:
             raise ValueError("max_sweep_age_bars must be >= 1 when set")
-        if self.confidence_tier_a is not None and not (0.0 < self.confidence_tier_a <= 1.0):
+        if self.confidence_tier_a is not None and not (
+            0.0 < self.confidence_tier_a <= 1.0
+        ):
             raise ValueError("confidence_tier_a must be in (0.0, 1.0] when set")
-        if self.confidence_tier_b is not None and not (0.0 < self.confidence_tier_b <= 1.0):
+        if self.confidence_tier_b is not None and not (
+            0.0 < self.confidence_tier_b <= 1.0
+        ):
             raise ValueError("confidence_tier_b must be in (0.0, 1.0] when set")
         if (self.confidence_tier_a is None) != (self.confidence_tier_b is None):
-            raise ValueError("confidence_tier_a and confidence_tier_b must both be set or both be None")
+            raise ValueError(
+                "confidence_tier_a and confidence_tier_b must both be set or both be None"
+            )
         if (
             self.confidence_tier_a is not None
             and self.confidence_tier_b is not None
             and self.confidence_tier_b >= self.confidence_tier_a
         ):
             raise ValueError("confidence_tier_b must be < confidence_tier_a")
-        if self.ny_am_cutoff_minutes is not None and not (1 <= self.ny_am_cutoff_minutes <= 90):
+        if self.ny_am_cutoff_minutes is not None and not (
+            1 <= self.ny_am_cutoff_minutes <= 90
+        ):
             raise ValueError("ny_am_cutoff_minutes must be 1-90 when set")
 
 
@@ -410,7 +443,7 @@ MAX_STOP_POINTS_NQ = 30  # 30 points max stop for NQ
 MAX_STOP_POINTS_ES = 10  # 10 points max stop for ES
 
 # Re-export point values from shared module for backward compatibility
-from app.utils.instruments import (  # noqa: E402
+from app.utils.instruments import (  # noqa: E402, F401
     POINT_VALUE_NQ,
     POINT_VALUE_ES,
     get_point_value,
@@ -420,6 +453,7 @@ from app.utils.instruments import (  # noqa: E402
 @dataclass
 class CriteriaScore:
     """Detailed scoring of each criterion."""
+
     htf_bias: bool = False
     liquidity_sweep: bool = False
     htf_fvg: bool = False
@@ -433,17 +467,19 @@ class CriteriaScore:
     @property
     def score(self) -> int:
         """Total criteria met (0-9)."""
-        return sum([
-            self.htf_bias,
-            self.liquidity_sweep,
-            self.htf_fvg,
-            self.breaker_block,
-            self.ltf_fvg,
-            self.mss,
-            self.stop_valid,
-            self.macro_window,
-            self.displacement_valid,
-        ])
+        return sum(
+            [
+                self.htf_bias,
+                self.liquidity_sweep,
+                self.htf_fvg,
+                self.breaker_block,
+                self.ltf_fvg,
+                self.mss,
+                self.stop_valid,
+                self.macro_window,
+                self.displacement_valid,
+            ]
+        )
 
     @property
     def missing(self) -> list[str]:
@@ -471,7 +507,10 @@ class CriteriaScore:
 
     @property
     def mandatory_met(self) -> bool:
-        """All 5 mandatory criteria must pass: htf_bias, stop_valid, macro_window, mss, displacement."""
+        """All 5 mandatory criteria must pass.
+
+        Checks: htf_bias, stop_valid, macro_window, mss, displacement.
+        """
         return (
             self.htf_bias
             and self.stop_valid
@@ -483,12 +522,14 @@ class CriteriaScore:
     @property
     def scored_count(self) -> int:
         """Count of passed scored criteria (out of 4)."""
-        return sum([
-            self.liquidity_sweep,
-            self.htf_fvg,
-            self.breaker_block,
-            self.ltf_fvg,
-        ])
+        return sum(
+            [
+                self.liquidity_sweep,
+                self.htf_fvg,
+                self.breaker_block,
+                self.ltf_fvg,
+            ]
+        )
 
     @property
     def scored_missing(self) -> list[str]:
@@ -515,8 +556,8 @@ class UnicornSetup:
 
     direction: BiasDirection
     confidence: float
-    entry_price: float           # Theoretical signal price (FVG midpoint)
-    entry_price_model: float     # Same as entry_price; backtest overrides with fill_price
+    entry_price: float  # Theoretical signal price (FVG midpoint)
+    entry_price_model: float  # Same as entry_price; backtest overrides with fill_price
     stop_price: float
     target_price: float
     risk_points: float
@@ -601,12 +642,12 @@ def is_in_macro_window(
     return False
 
 
-def _calculate_atr(
+def _calculate_atr_local(
     bars: list[OHLCVBar],
     period: int = 14,
 ) -> list[float]:
     """
-    Calculate Average True Range (ATR).
+    Calculate Average True Range (ATR) from OHLCVBar objects.
 
     Args:
         bars: List of OHLCV bars
@@ -878,9 +919,7 @@ def analyze_unicorn_setup(
         or htf_bias.final_confidence >= config.min_confidence
     )
     score.htf_bias = (
-        htf_bias.is_tradeable
-        and direction != BiasDirection.NEUTRAL
-        and confidence_ok
+        htf_bias.is_tradeable and direction != BiasDirection.NEUTRAL and confidence_ok
     )
 
     if direction == BiasDirection.NEUTRAL:
@@ -918,7 +957,7 @@ def analyze_unicorn_setup(
     htf_mss = detect_mss(htf_bars, lookback=50)
 
     # Detect patterns on LTF (with ATR-normalized threshold)
-    ltf_atr = _calculate_atr(ltf_bars, config.atr_period)
+    _calculate_atr(ltf_bars, config.atr_period)  # warmup ATR cache
     ltf_fvgs = detect_fvgs(
         ltf_bars,
         lookback=30,
@@ -939,7 +978,11 @@ def analyze_unicorn_setup(
 
     # 3. Find entry zone (HTF FVG)
     entry_fvg, entry_block, entry_price = find_entry_zone(
-        htf_fvgs, htf_breakers, htf_mitigations, direction, current_price,
+        htf_fvgs,
+        htf_breakers,
+        htf_mitigations,
+        direction,
+        current_price,
         max_fvg_fill_pct=config.max_fvg_fill_pct,
     )
     score.htf_fvg = entry_fvg is not None
@@ -950,9 +993,7 @@ def analyze_unicorn_setup(
     # 5. Check for MSS confirmation (prefer newest matching shift)
     relevant_mss: Optional[MarketStructureShift] = None
     for mss in reversed(htf_mss):
-        if (
-            direction == BiasDirection.BULLISH and mss.shift_type == "bullish"
-        ) or (
+        if (direction == BiasDirection.BULLISH and mss.shift_type == "bullish") or (
             direction == BiasDirection.BEARISH and mss.shift_type == "bearish"
         ):
             relevant_mss = mss
@@ -960,9 +1001,9 @@ def analyze_unicorn_setup(
     score.mss = relevant_mss is not None
 
     # 5b. Displacement validation (mandatory context gate)
-    score.displacement_valid = (
-        config.min_displacement_atr is None
-        or (relevant_mss is not None and relevant_mss.displacement_size >= config.min_displacement_atr)
+    score.displacement_valid = config.min_displacement_atr is None or (
+        relevant_mss is not None
+        and relevant_mss.displacement_size >= config.min_displacement_atr
     )
 
     # 6. Check for LTF FVG (DOL confirmation)
@@ -1104,10 +1145,14 @@ def evaluate_unicorn_model(
         )
 
     # EXIT: EOD with position
-    if snapshot.is_eod and has_position:
+    if snapshot.is_eod and has_position and position is not None:
         intents.append(
             make_intent(
-                action=IntentAction.CLOSE_LONG if position.side == "long" else IntentAction.CLOSE_SHORT,
+                action=(
+                    IntentAction.CLOSE_LONG
+                    if position.side == "long"
+                    else IntentAction.CLOSE_SHORT
+                ),
                 quantity=position.quantity,
                 reason="EOD exit",
             )
@@ -1125,11 +1170,15 @@ def evaluate_unicorn_model(
 
     # ENTRY: Analyze for Unicorn setup
     if not has_position:
-        setup = analyze_unicorn_setup(snapshot, htf_bias, htf_bars, ltf_bars, config=config)
+        setup = analyze_unicorn_setup(
+            snapshot, htf_bias, htf_bars, ltf_bars, config=config
+        )
 
         if setup is None:
             signals.append("no_setup_detected")
-        elif not setup.criteria_score.decide_entry(min_scored=config.min_scored_criteria):
+        elif not setup.criteria_score.decide_entry(
+            min_scored=config.min_scored_criteria
+        ):
             # Log which criteria failed
             cs = setup.criteria_score
             if not cs.mandatory_met:
@@ -1150,7 +1199,13 @@ def evaluate_unicorn_model(
                     f"scored_{cs.scored_count}/4_below_{config.min_scored_criteria}"
                 )
             for name in cs.missing:
-                if name not in ("htf_bias", "stop_valid", "macro_window", "mss", "displacement"):
+                if name not in (
+                    "htf_bias",
+                    "stop_valid",
+                    "macro_window",
+                    "mss",
+                    "displacement",
+                ):
                     signals.append(f"no_{name}")
         else:
             # Entry criteria met - generate entry intent
@@ -1190,7 +1245,7 @@ def evaluate_unicorn_model(
                 signals.append("entry_skipped_zero_qty")
 
         # Build metadata
-        metadata = {
+        metadata: dict[str, Any] = {
             "last_price": last_price,
             "htf_bias_direction": htf_bias.final_direction.value,
             "htf_bias_confidence": htf_bias.final_confidence,

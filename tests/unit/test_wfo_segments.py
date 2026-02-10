@@ -20,8 +20,12 @@ class TestComputeStability:
 
     def test_all_same_params(self):
         segments = [
-            WFOSegment(fold_index=i, tune_id=str(uuid4()), status="completed",
-                       best_params={"a": 1, "b": 2})
+            WFOSegment(
+                fold_index=i,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params={"a": 1, "b": 2},
+            )
             for i in range(5)
         ]
         result = _compute_stability(segments)
@@ -33,8 +37,12 @@ class TestComputeStability:
 
     def test_all_different_params(self):
         segments = [
-            WFOSegment(fold_index=i, tune_id=str(uuid4()), status="completed",
-                       best_params={"a": i})
+            WFOSegment(
+                fold_index=i,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params={"a": i},
+            )
             for i in range(4)
         ]
         result = _compute_stability(segments)
@@ -47,14 +55,30 @@ class TestComputeStability:
         params_a = {"x": 10}
         params_b = {"x": 20}
         segments = [
-            WFOSegment(fold_index=0, tune_id=str(uuid4()), status="completed",
-                       best_params=params_a),
-            WFOSegment(fold_index=1, tune_id=str(uuid4()), status="completed",
-                       best_params=params_a),
-            WFOSegment(fold_index=2, tune_id=str(uuid4()), status="completed",
-                       best_params=params_b),
-            WFOSegment(fold_index=3, tune_id=str(uuid4()), status="completed",
-                       best_params=params_a),
+            WFOSegment(
+                fold_index=0,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params=params_a,
+            ),
+            WFOSegment(
+                fold_index=1,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params=params_a,
+            ),
+            WFOSegment(
+                fold_index=2,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params=params_b,
+            ),
+            WFOSegment(
+                fold_index=3,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params=params_a,
+            ),
         ]
         result = _compute_stability(segments)
         assert result is not None
@@ -74,10 +98,16 @@ class TestComputeStability:
         assert result is None
 
     def test_single_fold(self):
-        result = _compute_stability([
-            WFOSegment(fold_index=0, tune_id=str(uuid4()), status="completed",
-                       best_params={"k": 5}),
-        ])
+        result = _compute_stability(
+            [
+                WFOSegment(
+                    fold_index=0,
+                    tune_id=str(uuid4()),
+                    status="completed",
+                    best_params={"k": 5},
+                ),
+            ]
+        )
         assert result is not None
         assert result.unique_param_sets == 1
         assert result.consistency == 1.0
@@ -85,12 +115,21 @@ class TestComputeStability:
 
     def test_skips_folds_without_params(self):
         segments = [
-            WFOSegment(fold_index=0, tune_id=str(uuid4()), status="completed",
-                       best_params={"a": 1}),
-            WFOSegment(fold_index=1, tune_id=str(uuid4()), status="failed",
-                       best_params=None),
-            WFOSegment(fold_index=2, tune_id=str(uuid4()), status="completed",
-                       best_params={"a": 1}),
+            WFOSegment(
+                fold_index=0,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params={"a": 1},
+            ),
+            WFOSegment(
+                fold_index=1, tune_id=str(uuid4()), status="failed", best_params=None
+            ),
+            WFOSegment(
+                fold_index=2,
+                tune_id=str(uuid4()),
+                status="completed",
+                best_params={"a": 1},
+            ),
         ]
         result = _compute_stability(segments)
         assert result is not None

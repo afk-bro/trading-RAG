@@ -65,25 +65,27 @@ class ChunkRepository:
                 f"${offset+13}, ${offset+14}, ${offset+15}, ${offset+16}, "
                 f"${offset+17}, NOW(), NOW())"
             )
-            params.extend([
-                doc_id,
-                workspace_id,
-                chunk.get("chunk_index", 0),
-                chunk["content"],
-                chunk.get("content_hash", ""),
-                chunk.get("token_count", 0),
-                chunk.get("section"),
-                chunk.get("time_start_secs"),
-                chunk.get("time_end_secs"),
-                chunk.get("page_start"),
-                chunk.get("page_end"),
-                chunk.get("locator_label"),
-                chunk.get("speaker"),
-                chunk.get("symbols", []),
-                chunk.get("entities", []),
-                chunk.get("topics", []),
-                chunk.get("quality_score", 1.0),
-            ])
+            params.extend(
+                [
+                    doc_id,
+                    workspace_id,
+                    chunk.get("chunk_index", 0),
+                    chunk["content"],
+                    chunk.get("content_hash", ""),
+                    chunk.get("token_count", 0),
+                    chunk.get("section"),
+                    chunk.get("time_start_secs"),
+                    chunk.get("time_end_secs"),
+                    chunk.get("page_start"),
+                    chunk.get("page_end"),
+                    chunk.get("locator_label"),
+                    chunk.get("speaker"),
+                    chunk.get("symbols", []),
+                    chunk.get("entities", []),
+                    chunk.get("topics", []),
+                    chunk.get("quality_score", 1.0),
+                ]
+            )
 
         query = f"""
             INSERT INTO chunks (

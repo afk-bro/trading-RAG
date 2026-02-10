@@ -64,7 +64,8 @@ def check_ob_zone_entry(
 def select_candidate_setups(active_setups: list[LTFSetup]) -> list[LTFSetup]:
     """Return active (non-timed-out, non-inactive) setups ordered newest OB first."""
     valid = [
-        s for s in active_setups
+        s
+        for s in active_setups
         if s.phase not in (SetupPhase.INACTIVE, SetupPhase.TIMED_OUT)
     ]
     # Newest OB first (by msb_bar_index descending)
@@ -196,7 +197,7 @@ def detect_fvg(
         return None
 
     b0 = h1_bars[pos - 2]  # candle 1
-    b2 = h1_bars[pos]      # candle 3
+    b2 = h1_bars[pos]  # candle 3
 
     # Bullish FVG
     if b0[3] < b2[4]:  # bar[-2].high < bar[0].low
@@ -301,8 +302,11 @@ def advance_setup(
     # SCANNING: look for L0/H0
     if setup.phase == SetupPhase.SCANNING:
         result = find_l0_h0(
-            ltf_swing_lows, ltf_swing_highs, setup.ob,
-            bar_idx, setup.last_exit_bar_index,
+            ltf_swing_lows,
+            ltf_swing_highs,
+            setup.ob,
+            bar_idx,
+            setup.last_exit_bar_index,
         )
         if result is not None:
             setup.l0, setup.h0 = result
@@ -316,14 +320,19 @@ def advance_setup(
     if setup.phase == SetupPhase.SWEEP_PENDING:
         # Check if L0/H0 needs update (newer L0 available)
         result = find_l0_h0(
-            ltf_swing_lows, ltf_swing_highs, setup.ob,
-            bar_idx, setup.last_exit_bar_index,
+            ltf_swing_lows,
+            ltf_swing_highs,
+            setup.ob,
+            bar_idx,
+            setup.last_exit_bar_index,
         )
         if result is not None:
             new_l0, new_h0 = result
-            if new_l0.index > setup.l0.index:
+            if setup.l0 is None or new_l0.index > setup.l0.index:
                 setup.l0, setup.h0 = new_l0, new_h0
 
+        if setup.l0 is None:
+            return None
         sweep = check_sweep(bar_low, setup.l0.price)
         if sweep is not None:
             # Sweep must be strictly lower than prior sweep (or first sweep)
@@ -334,12 +343,16 @@ def advance_setup(
 
     # MSB_PENDING: wait for close above H0
     if setup.phase == SetupPhase.MSB_PENDING:
+        if setup.h0 is None:
+            return None
         if check_ltf_msb(bar_close, setup.h0.price):
             setup.msb_bar_index = bar_idx
             setup.bars_since_msb = 0
 
             # Define breaker zone
-            setup.breaker = define_breaker_zone(h1_bars, bar_idx, params.breaker_candles)
+            setup.breaker = define_breaker_zone(
+                h1_bars, bar_idx, params.breaker_candles
+            )
 
             # Detect FVG
             setup.fvg = detect_fvg(h1_bars, bar_idx)
@@ -363,8 +376,14 @@ def advance_setup(
             return None
 
         entry_price = check_entry_trigger(
-            bar_open, bar_high, bar_low, bar_close,
-            bar_idx, setup, params.entry_mode, h1_bars,
+            bar_open,
+            bar_high,
+            bar_low,
+            bar_close,
+            bar_idx,
+            setup,
+            params.entry_mode,
+            h1_bars,
         )
         return entry_price
 
@@ -384,7 +403,9 @@ def create_setup_for_ob(ob: OrderBlock, htf_bias: Bias) -> LTFSetup:
     """
     side = Side.LONG if htf_bias == Bias.BULLISH else Side.SHORT
     return LTFSetup(
-        ob=ob, side=side, phase=SetupPhase.SCANNING,
+        ob=ob,
+        side=side,
+        phase=SetupPhase.SCANNING,
         last_exit_bar_index=ob.last_setup_bar_index,
     )
 
@@ -392,6 +413,7 @@ def create_setup_for_ob(ob: OrderBlock, htf_bias: Bias) -> LTFSetup:
 def get_active_setup_keys(setups: list[LTFSetup]) -> set[OBId]:
     """Return set of ob_ids that already have an active setup."""
     return {
-        s.ob.ob_id for s in setups
+        s.ob.ob_id
+        for s in setups
         if s.phase not in (SetupPhase.INACTIVE, SetupPhase.TIMED_OUT)
     }

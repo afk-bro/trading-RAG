@@ -114,7 +114,10 @@ class TestInsufficientDataExclusion:
         assert result.final_confidence > 0.0
         # The key assertion: confidence should not be dragged to WEAK
         # by a zero-confidence phantom component.
-        assert result.final_strength != BiasStrength.WEAK or result.final_direction == BiasDirection.NEUTRAL
+        assert (
+            result.final_strength != BiasStrength.WEAK
+            or result.final_direction == BiasDirection.NEUTRAL
+        )
 
     def test_all_insufficient_yields_zero_confidence(self):
         """If every component has insufficient data, confidence should be 0."""

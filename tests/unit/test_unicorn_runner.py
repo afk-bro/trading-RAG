@@ -10,8 +10,8 @@ import pytest
 
 ET = ZoneInfo("America/New_York")
 
-from app.services.strategy.models import OHLCVBar
-from app.services.backtest.engines.unicorn_runner import (
+from app.services.strategy.models import OHLCVBar  # noqa: E402
+from app.services.backtest.engines.unicorn_runner import (  # noqa: E402
     TradingSession,
     classify_session,
     check_criteria,
@@ -19,9 +19,7 @@ from app.services.backtest.engines.unicorn_runner import (
     format_backtest_report,
     format_trade_trace,
     CriteriaCheck,
-    SetupOccurrence,
     resolve_bar_exit,
-    ExitResult,
     IntrabarPolicy,
     TradeRecord,
     compute_adverse_wick_ratio,
@@ -31,24 +29,15 @@ from app.services.backtest.engines.unicorn_runner import (
     BarBundle,
     _asof_lookup,
 )
-from app.services.strategy.indicators.tf_bias import BiasDirection
-from app.services.strategy.strategies.unicorn_model import (
+from app.services.strategy.indicators.tf_bias import BiasDirection  # noqa: E402
+from app.services.strategy.strategies.unicorn_model import (  # noqa: E402
     CriteriaScore,
     UnicornConfig,
     SessionProfile,
     is_in_macro_window,
     get_max_stop_points,
     _ranges_overlap,
-    analyze_unicorn_setup,
 )
-from app.services.strategy.indicators.tf_bias import TimeframeBias
-from app.services.strategy.indicators.ict_patterns import (
-    FairValueGap,
-    FVGType,
-    BreakerBlock,
-    BlockType,
-)
-from app.services.strategy.models import MarketSnapshot
 
 
 def make_bar(
@@ -530,8 +519,12 @@ class TestParityDiagnostics:
     def test_setup_occurrence_has_parity_fields(self):
         """Parity fields are populated on setup records."""
         start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -619,6 +612,7 @@ class TestEnsureUtc:
     def test_utc_passthrough(self):
         """UTC datetime passes through unchanged."""
         from app.utils.time import ensure_utc
+
         ts = datetime(2024, 1, 15, 10, 30, tzinfo=timezone.utc)
         result = ensure_utc(ts)
         assert result == ts
@@ -627,6 +621,7 @@ class TestEnsureUtc:
     def test_non_utc_converts(self):
         """Non-UTC tz-aware datetime is converted to UTC."""
         from app.utils.time import ensure_utc
+
         et_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
         result = ensure_utc(et_ts)
         # 10:30 ET in winter = 15:30 UTC
@@ -637,6 +632,7 @@ class TestEnsureUtc:
     def test_naive_raises(self):
         """Naive datetime raises ValueError."""
         from app.utils.time import ensure_utc
+
         with pytest.raises(ValueError, match="tz-aware"):
             ensure_utc(datetime(2024, 1, 15, 10, 30))
 
@@ -647,7 +643,7 @@ class TestEnsureUtc:
 
 SLIP = 0.25  # 1 tick on NQ
 
-from typing import Optional
+from typing import Optional  # noqa: E402
 
 
 def _make_trade(
@@ -676,14 +672,15 @@ def _make_trade(
     )
 
 
-
 class TestResolveBarExitStopTarget:
     """Group A: stop/target basics."""
 
     def test_long_stop_hit(self):
         """Bar low pierces stop => stop_loss at stop-slip, pnl < 0."""
         trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 99.0, 100.5, 94.5, 96.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 99.0, 100.5, 94.5, 96.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is not None
         assert result.exit_reason == "stop_loss"
@@ -693,7 +690,9 @@ class TestResolveBarExitStopTarget:
     def test_long_target_hit(self):
         """Bar high reaches target => target at target-slip, pnl > 0."""
         trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 101.0, 111.0, 100.5, 109.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 101.0, 111.0, 100.5, 109.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is not None
         assert result.exit_reason == "target"
@@ -703,7 +702,9 @@ class TestResolveBarExitStopTarget:
     def test_short_stop_hit(self):
         """Bar high pierces stop => stop_loss at stop+slip, pnl < 0."""
         trade = _make_trade(BiasDirection.BEARISH, 100.0, 105.0, 90.0)
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 101.0, 105.5, 100.0, 104.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 101.0, 105.5, 100.0, 104.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is not None
         assert result.exit_reason == "stop_loss"
@@ -713,7 +714,9 @@ class TestResolveBarExitStopTarget:
     def test_short_target_hit(self):
         """Bar low reaches target => target at target+slip, pnl > 0."""
         trade = _make_trade(BiasDirection.BEARISH, 100.0, 105.0, 90.0)
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 99.0, 100.0, 89.0, 91.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 99.0, 100.0, 89.0, 91.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is not None
         assert result.exit_reason == "target"
@@ -728,7 +731,9 @@ class TestResolveBarExitAmbiguity:
         """Both hit, WORST => stop_loss."""
         trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
         # Bar spans from below stop to above target
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 105.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 105.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is not None
         assert result.exit_reason == "stop_loss"
@@ -736,7 +741,9 @@ class TestResolveBarExitAmbiguity:
     def test_same_bar_best_policy(self):
         """Both hit, BEST => target."""
         trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 105.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 105.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.BEST, SLIP)
         assert result is not None
         assert result.exit_reason == "target"
@@ -748,7 +755,9 @@ class TestResolveBarExitAmbiguity:
         """
         trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
         # Bullish bar: close > open
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 108.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 98.0, 111.0, 94.0, 108.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.OHLC_PATH, SLIP)
         assert result is not None
         assert result.exit_reason == "target"
@@ -773,7 +782,9 @@ class TestResolveBarExitGapThrough:
         """Bar opens above stop => fills at open+slip (not stop+slip)."""
         trade = _make_trade(BiasDirection.BEARISH, 100.0, 105.0, 90.0)
         # Bar gaps up — opens at 107, above the 105 stop
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 107.0, 108.0, 106.0, 107.5)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 107.0, 108.0, 106.0, 107.5
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is not None
         assert result.exit_reason == "stop_loss"
@@ -788,7 +799,9 @@ class TestResolveBarExitEdgeCases:
         """Neither stop nor target hit => None."""
         trade = _make_trade(BiasDirection.BULLISH, 100.0, 95.0, 110.0)
         # Bar stays within stop and target
-        bar = make_bar(trade.entry_time + timedelta(minutes=15), 100.0, 103.0, 97.0, 101.0)
+        bar = make_bar(
+            trade.entry_time + timedelta(minutes=15), 100.0, 103.0, 97.0, 101.0
+        )
         result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, SLIP)
         assert result is None
 
@@ -809,7 +822,11 @@ class TestEntryBarStopCheck:
         # 8 criteria to align which is non-trivial in synthetic data.
         entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
         trade = _make_trade(
-            BiasDirection.BULLISH, 100.0, 98.0, 106.0, entry_time=entry_time,
+            BiasDirection.BULLISH,
+            100.0,
+            98.0,
+            106.0,
+            entry_time=entry_time,
         )
         # Entry bar itself goes below stop
         entry_bar = make_bar(entry_time, 100.0, 101.0, 97.0, 99.0)
@@ -832,21 +849,27 @@ class TestComputeAdverseWickRatio:
 
     def test_bullish_long_big_upper_wick(self):
         """Long direction: upper wick is adverse. o=100, h=110, l=98, c=102."""
-        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 102.0)
+        bar = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 102.0
+        )
         ratio = compute_adverse_wick_ratio(bar, BiasDirection.BULLISH)
         # upper wick = (110 - 102) / (110 - 98) = 8/12
         assert ratio == pytest.approx(0.6667, rel=1e-3)
 
     def test_bearish_short_big_lower_wick(self):
         """Short direction: lower wick is adverse. o=100, h=102, l=90, c=98."""
-        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 102.0, 90.0, 98.0)
+        bar = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 102.0, 90.0, 98.0
+        )
         ratio = compute_adverse_wick_ratio(bar, BiasDirection.BEARISH)
         # lower wick = (98 - 90) / (102 - 90) = 8/12
         assert ratio == pytest.approx(0.6667, rel=1e-3)
 
     def test_zero_range_returns_zero(self):
         """Flat bar (high == low) returns 0.0."""
-        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 100.0, 100.0, 100.0)
+        bar = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 100.0, 100.0, 100.0
+        )
         assert compute_adverse_wick_ratio(bar, BiasDirection.BULLISH) == 0.0
         assert compute_adverse_wick_ratio(bar, BiasDirection.BEARISH) == 0.0
 
@@ -856,12 +879,16 @@ class TestComputeRangeAtrMult:
 
     def test_basic(self):
         """Bar range=12, ATR=10 => 1.2."""
-        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 105.0)
+        bar = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 105.0
+        )
         assert compute_range_atr_mult(bar, 10.0) == pytest.approx(1.2)
 
     def test_zero_atr_returns_zero(self):
         """ATR=0 => 0.0 (avoid division by zero)."""
-        bar = make_bar(datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 105.0)
+        bar = make_bar(
+            datetime(2024, 1, 15, 10, 0, tzinfo=ET), 100.0, 110.0, 98.0, 105.0
+        )
         assert compute_range_atr_mult(bar, 0.0) == 0.0
 
 
@@ -871,8 +898,12 @@ class TestWickGuardIntegration:
     def test_wick_guard_rejects_high_wick(self):
         """config.max_wick_ratio=0.5, signal bar wick ~ 0.67 => rejected."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         config = UnicornConfig(max_wick_ratio=0.5)
         result = run_unicorn_backtest(
@@ -901,8 +932,12 @@ class TestWickGuardIntegration:
     def test_wick_guard_disabled_by_default(self):
         """config.max_wick_ratio=None => no filtering."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         config = UnicornConfig()  # defaults: max_wick_ratio=None
         result = run_unicorn_backtest(
@@ -923,7 +958,9 @@ class TestWickGuardIntegration:
         htf_bars = generate_trending_bars(
             start_ts, 200, 17000, trend=2.0, volatility=10.0, interval_minutes=15
         )
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         config = UnicornConfig(max_range_atr_mult=2.0)
         result = run_unicorn_backtest(
@@ -948,8 +985,12 @@ class TestDisplacementGuard:
     def _make_backtest_bars(self):
         """Helper: generate standard bars for displacement guard tests."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
         return htf_bars, ltf_bars
 
     def test_criteria_check_stores_displacement_size(self):
@@ -1038,7 +1079,8 @@ class TestDisplacementGuard:
         # should have signal_displacement_atr as a float
         for result in [result_tight, result_loose]:
             qualifying = [
-                s for s in result.all_setups
+                s
+                for s in result.all_setups
                 if s.decide_entry_result and s.direction != BiasDirection.NEUTRAL
             ]
             for setup in qualifying:
@@ -1075,8 +1117,12 @@ class TestNYOpenProfile:
     def test_setup_session_diagnostic_always_set(self):
         """Every SetupOccurrence has setup_session populated and setup_in_macro_window is bool."""
         start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
-        htf_bars = generate_trending_bars(start, 100, 17500.0, trend=0.3, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start, 300, 17500.0, trend=0.1, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start, 100, 17500.0, trend=0.3, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start, 300, 17500.0, trend=0.1, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -1088,14 +1134,20 @@ class TestNYOpenProfile:
         assert len(result.all_setups) > 0, "Need at least one setup to test"
         for setup in result.all_setups:
             assert isinstance(setup.setup_session, str)
-            assert setup.setup_session != "", f"setup_session empty at {setup.timestamp}"
+            assert (
+                setup.setup_session != ""
+            ), f"setup_session empty at {setup.timestamp}"
             assert isinstance(setup.setup_in_macro_window, bool)
 
     def test_session_diagnostics_structure(self):
         """session_diagnostics dict has expected keys and types."""
         start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
-        htf_bars = generate_trending_bars(start, 100, 17500.0, trend=0.3, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start, 300, 17500.0, trend=0.1, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start, 100, 17500.0, trend=0.3, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start, 300, 17500.0, trend=0.1, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -1119,7 +1171,9 @@ class TestNYOpenProfile:
             assert isinstance(counts["take_pct"], float)
             assert isinstance(counts["in_macro_total"], int)
             assert isinstance(counts["take_pct_in_macro"], float)
-            assert counts["in_macro_total"] == counts["total"] - counts["macro_rejected"]
+            assert (
+                counts["in_macro_total"] == counts["total"] - counts["macro_rejected"]
+            )
 
         # Validate confidence_by_session entries
         for sess_key, stats in diag["confidence_by_session"].items():
@@ -1170,8 +1224,12 @@ class TestNYOpenProfile:
     def test_report_contains_diagnostic_sections(self):
         """Report includes CONFIG, SETUP DISPOSITION BY SESSION, and CONFIDENCE BY SESSION."""
         start = datetime(2024, 6, 10, 6, 0, tzinfo=ET)
-        htf_bars = generate_trending_bars(start, 100, 17500.0, trend=0.3, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start, 300, 17500.0, trend=0.1, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start, 100, 17500.0, trend=0.3, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start, 300, 17500.0, trend=0.1, interval_minutes=5
+        )
 
         config = UnicornConfig(session_profile=SessionProfile.NORMAL)
         result = run_unicorn_backtest(
@@ -1205,7 +1263,11 @@ class TestAsofLookup:
     def test_ts_before_first_entry_returns_none(self):
         """ts earlier than all entries => None."""
         series = [
-            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.8),
+            BiasState(
+                ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET),
+                direction=BiasDirection.BULLISH,
+                confidence=0.8,
+            ),
         ]
         early_ts = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
         assert _asof_lookup(series, early_ts) is None
@@ -1214,9 +1276,17 @@ class TestAsofLookup:
         """ts exactly matching an entry => returns that entry."""
         target_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
         series = [
-            BiasState(ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.6),
+            BiasState(
+                ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET),
+                direction=BiasDirection.BULLISH,
+                confidence=0.6,
+            ),
             BiasState(ts=target_ts, direction=BiasDirection.BEARISH, confidence=0.9),
-            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.5),
+            BiasState(
+                ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET),
+                direction=BiasDirection.BULLISH,
+                confidence=0.5,
+            ),
         ]
         result = _asof_lookup(series, target_ts)
         assert result is not None
@@ -1227,8 +1297,16 @@ class TestAsofLookup:
     def test_ts_between_entries_returns_earlier(self):
         """ts between two entries => returns the earlier one."""
         series = [
-            BiasState(ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET), direction=BiasDirection.BULLISH, confidence=0.6),
-            BiasState(ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET), direction=BiasDirection.BEARISH, confidence=0.9),
+            BiasState(
+                ts=datetime(2024, 1, 15, 10, 0, tzinfo=ET),
+                direction=BiasDirection.BULLISH,
+                confidence=0.6,
+            ),
+            BiasState(
+                ts=datetime(2024, 1, 15, 11, 0, tzinfo=ET),
+                direction=BiasDirection.BEARISH,
+                confidence=0.9,
+            ),
         ]
         between_ts = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
         result = _asof_lookup(series, between_ts)
@@ -1243,8 +1321,12 @@ class TestBiasSeriesPopulated:
     def test_bias_series_populated(self):
         """Backtest populates htf_bias_series with BiasState tuples."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -1269,8 +1351,12 @@ class TestIntermarketAgreementWithRefSeries:
     def test_agreement_present_with_ref_series(self):
         """Passing reference_bias_series populates intermarket_agreement in diagnostics."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         # First run to get htf_bias_series timestamps
         base_result = run_unicorn_backtest(
@@ -1308,7 +1394,13 @@ class TestIntermarketAgreementWithRefSeries:
 
         # Validate structure of by_agreement entries
         for label, entry in ia["by_agreement"].items():
-            assert label in ("aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary")
+            assert label in (
+                "aligned",
+                "divergent",
+                "neutral_involved",
+                "missing_ref",
+                "missing_primary",
+            )
             assert isinstance(entry["trades"], int)
             assert isinstance(entry["wins"], int)
             assert isinstance(entry["win_rate"], float)
@@ -1332,8 +1424,12 @@ class TestNoRefSeriesNoAgreementKey:
     def test_no_ref_series_no_agreement_key(self):
         """No reference_bias_series => no intermarket_agreement key."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -1353,12 +1449,18 @@ class TestIntermarketReportRendering:
     def test_report_contains_intermarket_section(self):
         """Report includes INTERMARKET AGREEMENT when ref series provided."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         # Build a simple all-bullish reference
         ref_series = [
-            BiasState(ts=htf_bars[i].ts, direction=BiasDirection.BULLISH, confidence=0.8)
+            BiasState(
+                ts=htf_bars[i].ts, direction=BiasDirection.BULLISH, confidence=0.8
+            )
             for i in range(len(htf_bars))
         ]
 
@@ -1377,8 +1479,12 @@ class TestIntermarketReportRendering:
     def test_report_no_intermarket_section_without_ref(self):
         """Report omits INTERMARKET AGREEMENT when no ref series."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -1406,13 +1512,20 @@ class TestCheckCriteriaBackwardCompat:
         check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
 
         result_old = check_criteria(
-            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
-            symbol="NQ", ts=check_ts,
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
         )
         result_new = check_criteria(
-            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
-            symbol="NQ", ts=check_ts,
-            h4_bars=None, h1_bars=None,
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
+            h4_bars=None,
+            h1_bars=None,
         )
 
         assert result_old.htf_bias_direction == result_new.htf_bias_direction
@@ -1423,18 +1536,29 @@ class TestCheckCriteriaBackwardCompat:
         """Passing h4/h1 bars changes bias confidence (more data = different weight)."""
         start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
         bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
-        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=2.0, interval_minutes=240)
-        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=1.0, interval_minutes=60)
+        h4_bars = generate_trending_bars(
+            start_ts, 25, 17000, trend=2.0, interval_minutes=240
+        )
+        h1_bars = generate_trending_bars(
+            start_ts, 100, 17000, trend=1.0, interval_minutes=60
+        )
         check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
 
         result_without = check_criteria(
-            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
-            symbol="NQ", ts=check_ts,
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
         )
         result_with = check_criteria(
-            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
-            symbol="NQ", ts=check_ts,
-            h4_bars=h4_bars, h1_bars=h1_bars,
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
+            h4_bars=h4_bars,
+            h1_bars=h1_bars,
         )
 
         # Both should produce valid results
@@ -1449,16 +1573,20 @@ class TestCausalAlignment:
 
     def test_causal_h4_alignment(self):
         """At 11:45, 08:00 4H bar (covering 08:00-12:00) is NOT complete."""
-        from app.services.backtest.engines.unicorn_runner import BarBundle
-
         # Create a 4H bar starting at 08:00 UTC
         h4_bar_0800 = make_bar(
             datetime(2024, 1, 2, 8, 0, tzinfo=timezone.utc),
-            17000, 17010, 16990, 17005,
+            17000,
+            17010,
+            16990,
+            17005,
         )
         h4_bar_0400 = make_bar(
             datetime(2024, 1, 2, 4, 0, tzinfo=timezone.utc),
-            16990, 17005, 16985, 17000,
+            16990,
+            17005,
+            16985,
+            17000,
         )
 
         h4_completed_ts = [
@@ -1468,6 +1596,7 @@ class TestCausalAlignment:
 
         # At 11:45, bisect_right finds how many completed bars
         from bisect import bisect_right
+
         ts = datetime(2024, 1, 2, 11, 45, tzinfo=timezone.utc)
         n_complete = bisect_right(h4_completed_ts, ts)
 
@@ -1478,11 +1607,17 @@ class TestCausalAlignment:
         """At 10:15, 10:00 1H bar (covering 10:00-11:00) is NOT complete."""
         h1_bar_0900 = make_bar(
             datetime(2024, 1, 2, 9, 0, tzinfo=timezone.utc),
-            17000, 17010, 16990, 17005,
+            17000,
+            17010,
+            16990,
+            17005,
         )
         h1_bar_1000 = make_bar(
             datetime(2024, 1, 2, 10, 0, tzinfo=timezone.utc),
-            17005, 17015, 16995, 17010,
+            17005,
+            17015,
+            16995,
+            17010,
         )
 
         h1_completed_ts = [
@@ -1491,6 +1626,7 @@ class TestCausalAlignment:
         ]
 
         from bisect import bisect_right
+
         ts = datetime(2024, 1, 2, 10, 15, tzinfo=timezone.utc)
         n_complete = bisect_right(h1_completed_ts, ts)
 
@@ -1502,10 +1638,18 @@ class TestCausalAlignment:
         from app.services.backtest.engines.unicorn_runner import BarBundle
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
-        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=8.0, interval_minutes=240)
-        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=2.0, interval_minutes=60)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
+        h4_bars = generate_trending_bars(
+            start_ts, 25, 17000, trend=8.0, interval_minutes=240
+        )
+        h1_bars = generate_trending_bars(
+            start_ts, 100, 17000, trend=2.0, interval_minutes=60
+        )
 
         bundle = BarBundle(h4=h4_bars, h1=h1_bars, m15=htf_bars, m5=ltf_bars)
 
@@ -1524,14 +1668,24 @@ class TestCausalAlignment:
     def test_backtest_without_bar_bundle_unchanged(self):
         """bar_bundle=None preserves existing behavior."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result_old = run_unicorn_backtest(
-            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
         )
         result_new = run_unicorn_backtest(
-            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
             bar_bundle=None,
         )
 
@@ -1565,7 +1719,9 @@ class TestHybrid1mExecution:
     def test_1m_stop_hit_precision(self):
         """Trade exits at minute 7, not at 15m boundary."""
         entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
-        trade = _make_trade(BiasDirection.BULLISH, 17000.0, 16990.0, 17020.0, entry_time=entry_time)
+        trade = _make_trade(
+            BiasDirection.BULLISH, 17000.0, 16990.0, 17020.0, entry_time=entry_time
+        )
 
         # Create 15 1m bars; minute 7 has low that pierces stop
         m1_bars = []
@@ -1593,7 +1749,9 @@ class TestHybrid1mExecution:
     def test_1m_target_hit_precision(self):
         """Trade hits target at minute 5, not at 15m boundary."""
         entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
-        trade = _make_trade(BiasDirection.BULLISH, 17000.0, 16990.0, 17010.0, entry_time=entry_time)
+        trade = _make_trade(
+            BiasDirection.BULLISH, 17000.0, 16990.0, 17010.0, entry_time=entry_time
+        )
 
         m1_bars = []
         for i in range(15):
@@ -1634,21 +1792,34 @@ class TestHybrid1mExecution:
     def test_1m_fallback_when_no_m1_data(self):
         """m1=None in BarBundle => identical to no-bundle behavior."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         # Bundle without m1 data
         bundle_no_m1 = BarBundle(m15=htf_bars, m5=ltf_bars, m1=None)
 
         result_no_bundle = run_unicorn_backtest(
-            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
         )
         result_bundle_no_m1 = run_unicorn_backtest(
-            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
             bar_bundle=bundle_no_m1,
         )
 
-        assert result_no_bundle.total_setups_scanned == result_bundle_no_m1.total_setups_scanned
+        assert (
+            result_no_bundle.total_setups_scanned
+            == result_bundle_no_m1.total_setups_scanned
+        )
         assert result_no_bundle.trades_taken == result_bundle_no_m1.trades_taken
 
     def test_1m_cross_bar_management(self):
@@ -1656,14 +1827,23 @@ class TestHybrid1mExecution:
         # This is structural: 1m management in the loop processes open trades
         # from previous 15m bars. We verify by running with m1 data.
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
-        m1_bars = generate_trending_bars(start_ts, 3000, 17000, trend=0.067, interval_minutes=1)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
+        m1_bars = generate_trending_bars(
+            start_ts, 3000, 17000, trend=0.067, interval_minutes=1
+        )
 
         bundle = BarBundle(m15=htf_bars, m5=ltf_bars, m1=m1_bars)
 
         result = run_unicorn_backtest(
-            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
             bar_bundle=bundle,
         )
 
@@ -1674,14 +1854,23 @@ class TestHybrid1mExecution:
     def test_1m_mfe_mae_precision(self):
         """MFE/MAE tracked at 1m granularity when m1 data available."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
-        m1_bars = generate_trending_bars(start_ts, 3000, 17000, trend=0.067, interval_minutes=1)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
+        m1_bars = generate_trending_bars(
+            start_ts, 3000, 17000, trend=0.067, interval_minutes=1
+        )
 
         bundle = BarBundle(m15=htf_bars, m5=ltf_bars, m1=m1_bars)
 
         result = run_unicorn_backtest(
-            symbol="NQ", htf_bars=htf_bars, ltf_bars=ltf_bars, dollars_per_trade=500,
+            symbol="NQ",
+            htf_bars=htf_bars,
+            ltf_bars=ltf_bars,
+            dollars_per_trade=500,
             bar_bundle=bundle,
         )
 
@@ -1695,6 +1884,7 @@ class TestHybrid1mExecution:
 # Phase 5: CLI synthetic multi-TF generation tests
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateSampleData:
     """Tests for generate_sample_data() in the CLI script."""
 
@@ -1702,6 +1892,7 @@ class TestGenerateSampleData:
         """Legacy mode returns (htf_bars, ltf_bars) tuple."""
         import sys
         from pathlib import Path
+
         sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
         from run_unicorn_backtest import generate_sample_data
 
@@ -1721,6 +1912,7 @@ class TestGenerateSampleData:
         """Multi-TF mode returns BarBundle with all timeframes populated."""
         import sys
         from pathlib import Path
+
         sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
         from run_unicorn_backtest import generate_sample_data
 
@@ -1751,13 +1943,20 @@ class TestCLIMultiTFSmoke:
     def test_cli_multi_tf_synthetic(self):
         """CLI script runs to completion with --multi-tf --synthetic."""
         import subprocess
+
         result = subprocess.run(
             [
                 sys.executable,
-                str(Path(__file__).parent.parent.parent / "scripts" / "run_unicorn_backtest.py"),
-                "--symbol", "NQ",
+                str(
+                    Path(__file__).parent.parent.parent
+                    / "scripts"
+                    / "run_unicorn_backtest.py"
+                ),
+                "--symbol",
+                "NQ",
                 "--synthetic",
-                "--days", "3",
+                "--days",
+                "3",
                 "--multi-tf",
             ],
             capture_output=True,
@@ -1765,7 +1964,9 @@ class TestCLIMultiTFSmoke:
             timeout=120,
         )
 
-        assert result.returncode == 0, f"CLI failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (
+            result.returncode == 0
+        ), f"CLI failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         # Should mention multi-TF in output
         assert "Multi-TF" in result.stdout or "multi" in result.stdout.lower()
 
@@ -1782,14 +1983,22 @@ class TestBiasSnapshot:
         """check_criteria with h4/h1 data populates per-TF directions."""
         start_ts = datetime(2024, 1, 2, 10, 0, tzinfo=ET)
         bars = generate_trending_bars(start_ts, 100, 17000, interval_minutes=15)
-        h4_bars = generate_trending_bars(start_ts, 25, 17000, trend=2.0, interval_minutes=240)
-        h1_bars = generate_trending_bars(start_ts, 100, 17000, trend=1.0, interval_minutes=60)
+        h4_bars = generate_trending_bars(
+            start_ts, 25, 17000, trend=2.0, interval_minutes=240
+        )
+        h1_bars = generate_trending_bars(
+            start_ts, 100, 17000, trend=1.0, interval_minutes=60
+        )
         check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
 
         result = check_criteria(
-            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
-            symbol="NQ", ts=check_ts,
-            h4_bars=h4_bars, h1_bars=h1_bars,
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
+            h4_bars=h4_bars,
+            h1_bars=h1_bars,
         )
 
         assert result.bias_snapshot is not None
@@ -1812,8 +2021,11 @@ class TestBiasSnapshot:
         check_ts = datetime(2024, 1, 2, 10, 30, tzinfo=ET)
 
         result = check_criteria(
-            bars=bars, htf_bars=bars, ltf_bars=bars[-60:],
-            symbol="NQ", ts=check_ts,
+            bars=bars,
+            htf_bars=bars,
+            ltf_bars=bars[-60:],
+            symbol="NQ",
+            ts=check_ts,
         )
 
         assert result.bias_snapshot is not None
@@ -1834,8 +2046,10 @@ class TestFormatTradeTrace:
     def _make_synthetic_result(self):
         """Build a minimal result with one deterministic trade for trace tests."""
         from app.services.backtest.engines.unicorn_runner import (
-            UnicornBacktestResult, TradeOutcome,
+            UnicornBacktestResult,
+            TradeOutcome,
         )
+
         entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
         exit_time = datetime(2024, 1, 15, 10, 30, tzinfo=ET)
 
@@ -1850,8 +2064,11 @@ class TestFormatTradeTrace:
             used_tfs=("m15", "m5"),
         )
         criteria = CriteriaCheck(
-            htf_bias_aligned=True, in_macro_window=True, stop_valid=True,
-            htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.65,
+            htf_bias_aligned=True,
+            in_macro_window=True,
+            stop_valid=True,
+            htf_bias_direction=BiasDirection.BULLISH,
+            htf_bias_confidence=0.65,
             bias_snapshot=snap,
         )
         trade = TradeRecord(
@@ -1888,7 +2105,9 @@ class TestFormatTradeTrace:
         m15_bars = []
         for i in range(10):
             ts = entry_time + timedelta(minutes=i * 15)
-            m15_bars.append(make_bar(ts, 17000.0 - i, 17005.0 - i, 16989.0 - i, 16995.0 - i))
+            m15_bars.append(
+                make_bar(ts, 17000.0 - i, 17005.0 - i, 16989.0 - i, 16995.0 - i)
+            )
         bundle = BarBundle(m15=m15_bars)
         return result, bundle, trade
 
@@ -1987,6 +2206,7 @@ class TestSeedReproducibility:
     def test_seed_reproducibility(self):
         """Same seed → identical trade list."""
         import random
+
         sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
         from run_unicorn_backtest import generate_sample_data
 
@@ -2014,7 +2234,9 @@ class TestIntermarketLabelOnTrade:
     def test_intermarket_label_on_trade(self):
         """_build_session_diagnostics sets intermarket_label on each trade."""
         from app.services.backtest.engines.unicorn_runner import (
-            UnicornBacktestResult, TradeOutcome, _build_session_diagnostics,
+            UnicornBacktestResult,
+            TradeOutcome,
+            _build_session_diagnostics,
         )
 
         entry_time = datetime(2024, 1, 15, 10, 0, tzinfo=ET)
@@ -2024,7 +2246,9 @@ class TestIntermarketLabelOnTrade:
             direction=BiasDirection.BULLISH,
             quantity=1,
             session=TradingSession.NY_AM,
-            criteria=CriteriaCheck(htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.7),
+            criteria=CriteriaCheck(
+                htf_bias_direction=BiasDirection.BULLISH, htf_bias_confidence=0.7
+            ),
             stop_price=16990.0,
             target_price=17020.0,
             risk_points=10.0,
@@ -2059,7 +2283,13 @@ class TestIntermarketLabelOnTrade:
         # _build_session_diagnostics sets intermarket_label
         result.session_diagnostics = _build_session_diagnostics(result)
 
-        valid_labels = {"aligned", "divergent", "neutral_involved", "missing_ref", "missing_primary"}
+        valid_labels = {
+            "aligned",
+            "divergent",
+            "neutral_involved",
+            "missing_ref",
+            "missing_primary",
+        }
         assert trade.intermarket_label is not None
         assert trade.intermarket_label in valid_labels
         # Both BULLISH → should be aligned
@@ -2075,8 +2305,12 @@ class TestDailyGovernorIntegration:
         from collections import Counter
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         config = UnicornConfig()
         governor = DailyGovernor(max_daily_loss_dollars=5000.0, max_trades_per_day=1)
@@ -2098,8 +2332,12 @@ class TestDailyGovernorIntegration:
     def test_governor_none_means_no_limit(self):
         """Without governor, no daily limits apply (backward compat)."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result_no_gov = run_unicorn_backtest(
             symbol="NQ",
@@ -2119,8 +2357,12 @@ class TestDailyGovernorIntegration:
         from app.services.backtest.engines.daily_governor import DailyGovernor
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         governor = DailyGovernor(max_daily_loss_dollars=300.0, max_trades_per_day=1)
 
@@ -2149,10 +2391,12 @@ class TestStructuralSizing:
     def test_wide_stop_skips_trade(self):
         """When stop is too wide for the risk budget, trade is skipped."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0,
-                                          volatility=20.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67,
-                                          volatility=7.0, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, volatility=20.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, volatility=7.0, interval_minutes=5
+        )
 
         # Very small budget: $50 per trade with NQ ($20/pt)
         # Any stop > 2.5 points should produce quantity=0 -> skip
@@ -2166,7 +2410,8 @@ class TestStructuralSizing:
 
         # Check that the mechanism exists (position_size_zero in reason)
         size_skipped = [
-            s for s in result.all_setups
+            s
+            for s in result.all_setups
             if s.reason_not_taken and "position_size_zero" in s.reason_not_taken
         ]
         assert isinstance(size_skipped, list)

@@ -265,7 +265,9 @@ class TestChartDataEndpoint:
         chart.set_db_pool(pool)
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
+        result = await chart.get_chart_data(
+            sample_run_id, ws=sample_ws, page=1, page_size=50
+        )
 
         assert result.status == "completed"
         assert len(result.equity) == 3
@@ -277,7 +279,9 @@ class TestChartDataEndpoint:
         assert result.notes == []
 
     @pytest.mark.asyncio
-    async def test_chart_data_404_on_missing_run(self, sample_run_id, sample_ws, mock_pool):
+    async def test_chart_data_404_on_missing_run(
+        self, sample_run_id, sample_ws, mock_pool
+    ):
         """Test 404 for non-existent run."""
         from fastapi import HTTPException
 
@@ -288,7 +292,9 @@ class TestChartDataEndpoint:
         conn.fetchrow.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
+            await chart.get_chart_data(
+                sample_run_id, ws=sample_ws, page=1, page_size=50
+            )
 
         assert exc_info.value.status_code == 404
 
@@ -306,7 +312,9 @@ class TestChartDataEndpoint:
         sample_backtest_row["equity_curve"] = []
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
+        result = await chart.get_chart_data(
+            sample_run_id, ws=sample_ws, page=1, page_size=50
+        )
 
         assert result.equity_source == "missing"
         assert len(result.equity) == 0
@@ -327,7 +335,9 @@ class TestChartDataEndpoint:
         sample_backtest_row["run_kind"] = "tune_variant"
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
+        result = await chart.get_chart_data(
+            sample_run_id, ws=sample_ws, page=1, page_size=50
+        )
 
         assert "tune variants" in result.notes[0].lower()
 
@@ -345,7 +355,9 @@ class TestChartDataEndpoint:
         sample_backtest_row["trades"] = None
         conn.fetchrow.return_value = sample_backtest_row
 
-        result = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=50)
+        result = await chart.get_chart_data(
+            sample_run_id, ws=sample_ws, page=1, page_size=50
+        )
 
         assert result.trades_pagination.total == 0
         assert result.exports.trades_csv is None
@@ -375,13 +387,17 @@ class TestChartDataEndpoint:
         conn.fetchrow.return_value = sample_backtest_row
 
         # Page 1
-        result1 = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=1, page_size=3)
+        result1 = await chart.get_chart_data(
+            sample_run_id, ws=sample_ws, page=1, page_size=3
+        )
         assert result1.trades_pagination.total == 7
         assert result1.trades_pagination.page == 1
         assert len(result1.trades_page) == 3
 
         # Page 2
-        result2 = await chart.get_chart_data(sample_run_id, ws=sample_ws, page=2, page_size=3)
+        result2 = await chart.get_chart_data(
+            sample_run_id, ws=sample_ws, page=2, page_size=3
+        )
         assert result2.trades_pagination.page == 2
         assert len(result2.trades_page) == 3
 
@@ -478,7 +494,9 @@ class TestSparklineEndpoint:
         assert result.y[2] == 10200.0
 
     @pytest.mark.asyncio
-    async def test_sparkline_404_on_missing_run(self, sample_run_id, sample_ws, mock_pool):
+    async def test_sparkline_404_on_missing_run(
+        self, sample_run_id, sample_ws, mock_pool
+    ):
         """Test 404 for non-existent run."""
         from fastapi import HTTPException
 

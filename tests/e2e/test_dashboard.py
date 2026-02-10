@@ -22,6 +22,7 @@ pytestmark = pytest.mark.e2e
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _goto_dashboard(page: Page, base_url: str, path: str = "/") -> None:
     """Navigate to a dashboard route and wait for the React SPA to hydrate."""
     url = f"{base_url}/dashboard{path}" if path != "/" else f"{base_url}/dashboard/"
@@ -104,7 +105,9 @@ class TestWorkspaceSwitcher:
 
         # Dropdown content should appear — either workspace list or
         # "Loading..." or "No workspaces" text, plus "New workspace" button
-        dropdown = admin_page.locator('div[role="listbox"], div:has-text("No workspaces"), div:has-text("Loading")')
+        dropdown = admin_page.locator(
+            'div[role="listbox"], div:has-text("No workspaces"), div:has-text("Loading")'
+        )
         expect(dropdown.first).to_be_visible(timeout=5000)
 
 

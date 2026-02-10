@@ -8,7 +8,7 @@ import pytest
 
 from app.services.backtest.engines.ict_blueprint.engine import ICTBlueprintEngine
 from app.services.backtest.engines.ict_blueprint.htf_provider import DefaultHTFProvider
-from app.services.backtest.engines.ict_blueprint.types import Bias, ICTBlueprintParams
+from app.services.backtest.engines.ict_blueprint.types import ICTBlueprintParams
 from app.services.backtest.engines.base import BacktestResult
 
 ES_DAILY_PATH = os.path.join("docs", "historical_data", "ES_daily.csv")
@@ -57,7 +57,9 @@ class TestICTBlueprintES:
         )
 
         assert isinstance(result, BacktestResult)
-        assert result.num_trades >= 1, f"Expected at least 1 trade, got {result.num_trades}"
+        assert (
+            result.num_trades >= 1
+        ), f"Expected at least 1 trade, got {result.num_trades}"
         assert len(result.equity_curve) > 0
         assert len(result.trades) == result.num_trades
 
@@ -107,7 +109,7 @@ class TestNoLookahead:
 
         # H1 bar at 10:00 on Jan 3 — should only see Jan 2's daily close
         h1_ts_jan3_10am = int(pd.Timestamp("2024-01-03 10:00:00").value)
-        snap = provider.get_state_at(h1_ts_jan3_10am)
+        provider.get_state_at(h1_ts_jan3_10am)
         # Provider should have processed at most daily bar 0 (Jan 2, closes at 16:00 Jan 2)
         # Jan 3's daily close is at 16:00 Jan 3, which is AFTER 10:00 Jan 3
         # So the state should reflect Jan 2 only
@@ -131,12 +133,12 @@ class TestNoLookahead:
 
         # H1 bar at 17:00 on Jan 2 — should see Jan 2's daily close
         h1_ts_jan2_5pm = int(pd.Timestamp("2024-01-02 17:00:00").value)
-        snap = provider.get_state_at(h1_ts_jan2_5pm)
+        provider.get_state_at(h1_ts_jan2_5pm)
         assert provider._processed_up_to == 0  # Jan 2 processed
 
         # H1 bar at 17:00 on Jan 3 — should see Jan 3's daily close
         h1_ts_jan3_5pm = int(pd.Timestamp("2024-01-03 17:00:00").value)
-        snap = provider.get_state_at(h1_ts_jan3_5pm)
+        provider.get_state_at(h1_ts_jan3_5pm)
         assert provider._processed_up_to == 1  # Jan 3 processed
 
     def test_date_only_index_gets_session_close_offset(self):

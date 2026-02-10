@@ -398,9 +398,7 @@ class PaperBroker(BrokerAdapter):
                 equity = state.cash + sum(
                     p.quantity * p.avg_price for p in state.positions.values()
                 )
-                risk_budget_dollars = compute_r_day(
-                    profile, equity, state.peak_equity
-                )
+                risk_budget_dollars = compute_r_day(profile, equity, state.peak_equity)
         if risk_budget_dollars is None:
             risk_budget_dollars = self._settings.paper_default_risk_budget_dollars
 

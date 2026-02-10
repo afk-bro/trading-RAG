@@ -5,8 +5,6 @@ Unit tests for ATR trailing stop logic in resolve_bar_exit.
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-import pytest
-
 from app.services.strategy.models import OHLCVBar
 from app.services.strategy.indicators.tf_bias import BiasDirection
 from app.services.backtest.engines.unicorn_runner import (
@@ -23,6 +21,7 @@ ET = ZoneInfo("America/New_York")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_bar(ts, open_, high, low, close):
     return OHLCVBar(ts=ts, open=open_, high=high, low=low, close=close, volume=100)
@@ -88,6 +87,7 @@ def _ts(minutes_offset=0):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestTrailNotActiveBeforeOneR:
     """Trail should not activate when MFE < 1R."""
 
@@ -95,11 +95,14 @@ class TestTrailNotActiveBeforeOneR:
         trade = _make_long_trade()  # entry=100, risk=5
         # Bar moves +0.8R (4 points), high=104
         bar = _make_bar(_ts(1), 101, 104, 100, 103)
-        result = resolve_bar_exit(
-            trade, bar, IntrabarPolicy.WORST, 0.0,
+        _result = resolve_bar_exit(
+            trade,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
             trail_atr_mult=1.5,
         )
-        assert result is None
+        assert _result is None
         assert not trade.trail_active
         assert trade.stop_price == 95.0  # unchanged
 
@@ -111,8 +114,11 @@ class TestTrailActivatesAtOneR:
         trade = _make_long_trade()  # entry=100, stop=95, risk=5, trail_dist=7.5
         # Bar hits exactly +1R: high=105
         bar = _make_bar(_ts(1), 101, 105, 100, 104)
-        result = resolve_bar_exit(
-            trade, bar, IntrabarPolicy.WORST, 0.0,
+        resolve_bar_exit(
+            trade,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
             trail_atr_mult=1.5,
         )
         assert trade.trail_active is True
@@ -169,7 +175,9 @@ class TestTrailExitReasonIsTrailStop:
 
         # Bar 2: price drops to hit trailed stop
         bar2 = _make_bar(_ts(2), 105, 106, 102.0, 102.5)
-        result = resolve_bar_exit(trade, bar2, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5)
+        result = resolve_bar_exit(
+            trade, bar2, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5
+        )
         assert result is not None
         assert result.exit_reason == "trail_stop"
 
@@ -181,7 +189,9 @@ class TestOriginalStopReasonIsStopLoss:
         trade = _make_long_trade()  # stop=95
         # Bar goes down and hits original stop, no activation
         bar = _make_bar(_ts(1), 100, 101, 94, 95)
-        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5)
+        result = resolve_bar_exit(
+            trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5
+        )
         assert result is not None
         assert result.exit_reason == "stop_loss"
         assert not trade.trail_active
@@ -193,17 +203,23 @@ class TestTrailAndBreakevenMutuallyExclusive:
     def test_trail_and_breakeven_mutually_exclusive(self):
         import subprocess
         import sys
+        from pathlib import Path
 
+        project_root = Path(__file__).resolve().parents[2]
         result = subprocess.run(
             [
-                sys.executable, "scripts/run_unicorn_backtest.py",
-                "--symbol", "NQ",
-                "--breakeven-at-r", "1.0",
-                "--trail-atr-mult", "1.5",
+                sys.executable,
+                "scripts/run_unicorn_backtest.py",
+                "--symbol",
+                "NQ",
+                "--breakeven-at-r",
+                "1.0",
+                "--trail-atr-mult",
+                "1.5",
             ],
             capture_output=True,
             text=True,
-            cwd="/home/x/dev/automation-infra/trading-RAG",
+            cwd=str(project_root),
         )
         assert result.returncode != 0
         assert "mutually exclusive" in result.stderr.lower()
@@ -217,7 +233,9 @@ class TestTargetSentinelInf:
         assert trade.target_price == float("inf")
         # Target should never trigger — bar goes very high
         bar = _make_bar(_ts(1), 101, 999999, 100, 500000)
-        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5)
+        result = resolve_bar_exit(
+            trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5
+        )
         # Should not exit via target (only trail_stop if activated and hit)
         # With high=999999, trail activates and stop moves way up.
         # But low=100 >= stop so no stop hit on this bar.
@@ -233,7 +251,9 @@ class TestBEFloorOnActivation:
 
     def test_be_floor_on_activation(self):
         # trail_distance = 10, risk = 5, so trail formula could put stop below entry
-        trade = _make_long_trade(entry=100.0, stop=95.0, risk=5.0, trail_dist=10.0, atr=5.0)
+        trade = _make_long_trade(
+            entry=100.0, stop=95.0, risk=5.0, trail_dist=10.0, atr=5.0
+        )
         # Activate: high = 105 (+1R)
         bar = _make_bar(_ts(1), 101, 105, 100, 104)
         resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=2.0)
@@ -293,7 +313,9 @@ class TestShortDirectionTrail:
 
         # Hit stop: high >= 97.5
         bar2 = _make_bar(_ts(2), 92, 98, 91, 97)
-        result = resolve_bar_exit(trade, bar2, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5)
+        result = resolve_bar_exit(
+            trade, bar2, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5
+        )
         assert result is not None
         assert result.exit_reason == "trail_stop"
 
@@ -327,8 +349,12 @@ class TestEodExitStillWorksWithTrail:
         eod_ts = datetime(2024, 6, 1, 15, 45, tzinfo=ET)
         bar_eod = _make_bar(eod_ts, 108, 109, 107, 108)
         result = resolve_bar_exit(
-            trade, bar_eod, IntrabarPolicy.WORST, 0.0,
-            eod_exit=True, eod_time=time(15, 45),
+            trade,
+            bar_eod,
+            IntrabarPolicy.WORST,
+            0.0,
+            eod_exit=True,
+            eod_time=time(15, 45),
             trail_atr_mult=1.5,
         )
         assert result is not None
@@ -345,7 +371,9 @@ class TestActivationPlusStopHitSameBar:
         # trail_high=106, trail formula: 106 - 7.5 = 98.5, BE floor = max(98.5, 100) = 100
         # Bar low=94 < stop=100 → stop hit
         bar = _make_bar(_ts(1), 101, 106, 94, 95)
-        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5)
+        result = resolve_bar_exit(
+            trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5
+        )
         assert trade.trail_active
         assert result is not None
         assert result.exit_reason == "trail_stop"
@@ -357,7 +385,9 @@ class TestActivationPlusStopHitSameBar:
         trade = _make_short_trade()
         # Bar dips to 95 (+1R), then spikes to 101 (above BE floor stop=100)
         bar = _make_bar(_ts(1), 99, 101, 94, 100)
-        result = resolve_bar_exit(trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5)
+        result = resolve_bar_exit(
+            trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5
+        )
         assert trade.trail_active
         assert result is not None
         assert result.exit_reason == "trail_stop"
@@ -372,7 +402,7 @@ class TestTrailRatchetMonotonicity:
 
         # Simulate 50 bars: uptrend then pullback then new high then chop
         prices = (
-            [100 + i * 0.5 for i in range(20)]   # grind up
+            [100 + i * 0.5 for i in range(20)]  # grind up
             + [110 - i * 0.3 for i in range(10)]  # pullback
             + [107 + i * 0.8 for i in range(10)]  # new high
             + [113 - i * 0.2 for i in range(10)]  # chop down
@@ -386,11 +416,15 @@ class TestTrailRatchetMonotonicity:
                 close=base + 0.5,
             )
             result = resolve_bar_exit(
-                trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5,
+                trade,
+                bar,
+                IntrabarPolicy.WORST,
+                0.0,
+                trail_atr_mult=1.5,
             )
-            assert trade.stop_price >= prev_stop, (
-                f"Stop regressed on bar {i}: {trade.stop_price} < {prev_stop}"
-            )
+            assert (
+                trade.stop_price >= prev_stop
+            ), f"Stop regressed on bar {i}: {trade.stop_price} < {prev_stop}"
             prev_stop = trade.stop_price
             if result is not None:
                 break
@@ -414,11 +448,15 @@ class TestTrailRatchetMonotonicity:
                 close=base - 0.5,
             )
             result = resolve_bar_exit(
-                trade, bar, IntrabarPolicy.WORST, 0.0, trail_atr_mult=1.5,
+                trade,
+                bar,
+                IntrabarPolicy.WORST,
+                0.0,
+                trail_atr_mult=1.5,
             )
-            assert trade.stop_price <= prev_stop, (
-                f"Stop loosened on bar {i}: {trade.stop_price} > {prev_stop}"
-            )
+            assert (
+                trade.stop_price <= prev_stop
+            ), f"Stop loosened on bar {i}: {trade.stop_price} > {prev_stop}"
             prev_stop = trade.stop_price
             if result is not None:
                 break
@@ -459,8 +497,12 @@ class TestTrailActivateR:
         # Bar moves +0.5R = 102.5
         bar = _make_bar(_ts(1), 101, 102.5, 100, 102)
         resolve_bar_exit(
-            trade, bar, IntrabarPolicy.WORST, 0.0,
-            trail_atr_mult=1.5, trail_activate_r=0.5,
+            trade,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
+            trail_atr_mult=1.5,
+            trail_activate_r=0.5,
         )
         assert trade.trail_active is True
         assert trade.stop_price >= 100.0  # BE floor
@@ -470,8 +512,12 @@ class TestTrailActivateR:
         # Bar moves +0.4R = 102.0
         bar = _make_bar(_ts(1), 101, 102.0, 100, 101.5)
         resolve_bar_exit(
-            trade, bar, IntrabarPolicy.WORST, 0.0,
-            trail_atr_mult=1.5, trail_activate_r=0.5,
+            trade,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
+            trail_atr_mult=1.5,
+            trail_activate_r=0.5,
         )
         assert trade.trail_active is False
 
@@ -480,7 +526,10 @@ class TestTrailActivateR:
         # +0.9R = 104.5, should NOT activate at default 1.0
         bar = _make_bar(_ts(1), 101, 104.5, 100, 104)
         resolve_bar_exit(
-            trade, bar, IntrabarPolicy.WORST, 0.0,
+            trade,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
             trail_atr_mult=1.5,
         )
         assert trade.trail_active is False
@@ -491,16 +540,24 @@ class TestTrailActivateR:
         trade_1r = _make_long_trade()
         bar = _make_bar(_ts(1), 101, 104, 100, 103)
         resolve_bar_exit(
-            trade_1r, bar, IntrabarPolicy.WORST, 0.0,
-            trail_atr_mult=1.5, trail_activate_r=1.0,
+            trade_1r,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
+            trail_atr_mult=1.5,
+            trail_activate_r=1.0,
         )
         assert not trade_1r.trail_active
 
         # At 0.5R: same bar activates
         trade_05r = _make_long_trade()
         resolve_bar_exit(
-            trade_05r, bar, IntrabarPolicy.WORST, 0.0,
-            trail_atr_mult=1.5, trail_activate_r=0.5,
+            trade_05r,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
+            trail_atr_mult=1.5,
+            trail_activate_r=0.5,
         )
         assert trade_05r.trail_active
 
@@ -509,8 +566,12 @@ class TestTrailActivateR:
         # +0.75R favorable = price drops to 96.25 (low=96.25)
         bar = _make_bar(_ts(1), 99, 100, 96.25, 97)
         resolve_bar_exit(
-            trade, bar, IntrabarPolicy.WORST, 0.0,
-            trail_atr_mult=1.5, trail_activate_r=0.75,
+            trade,
+            bar,
+            IntrabarPolicy.WORST,
+            0.0,
+            trail_atr_mult=1.5,
+            trail_activate_r=0.75,
         )
         assert trade.trail_active is True
         assert trade.stop_price <= 100.0  # BE floor

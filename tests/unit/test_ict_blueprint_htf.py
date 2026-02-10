@@ -1,7 +1,5 @@
 """Unit tests for ICT Blueprint HTF bias engine."""
 
-import pytest
-
 from app.services.backtest.engines.ict_blueprint.htf_bias import (
     SwingDetector,
     check_msb,
@@ -90,9 +88,9 @@ class TestSwingDetector:
         # Create a simple up-down-up pattern
         bars = [
             (0, 100, 10.0, 11.0, 9.0, 10.5),
-            (1, 200, 11.0, 14.0, 10.0, 13.0),   # swing high candidate
-            (2, 300, 12.0, 13.0, 8.0, 9.0),      # confirms bar 1 SH, swing low candidate
-            (3, 400, 9.0, 12.0, 9.0, 11.0),      # confirms bar 2 SL
+            (1, 200, 11.0, 14.0, 10.0, 13.0),  # swing high candidate
+            (2, 300, 12.0, 13.0, 8.0, 9.0),  # confirms bar 1 SH, swing low candidate
+            (3, 400, 9.0, 12.0, 9.0, 11.0),  # confirms bar 2 SL
         ]
         for b in bars:
             all_swings.extend(det.push(*b))
@@ -192,36 +190,42 @@ class TestOrderBlock:
         # Bar 0: bearish (close < open) — this should be the OB
         # Bar 1: bullish impulse
         # Bar 2: MSB candle (closes above swing high)
-        bars = self._make_bars([
-            (50.0, 51.0, 48.0, 49.0),  # bearish
-            (49.0, 55.0, 49.0, 54.0),  # bullish impulse
-            (54.0, 58.0, 53.0, 57.0),  # MSB bar
-        ])
+        bars = self._make_bars(
+            [
+                (50.0, 51.0, 48.0, 49.0),  # bearish
+                (49.0, 55.0, 49.0, 54.0),  # bullish impulse
+                (54.0, 58.0, 53.0, 57.0),  # MSB bar
+            ]
+        )
         anchor = SwingPoint(0, 0, 45.0, True)
         ob = identify_order_block(bars, 2, Bias.BULLISH, 1, anchor, 2)
         assert ob is not None
         assert ob.bottom == 48.0  # low of bar 0
-        assert ob.top == 51.0    # high of bar 0
+        assert ob.top == 51.0  # high of bar 0
 
     def test_bullish_ob_2_candles(self):
-        bars = self._make_bars([
-            (50.0, 51.0, 47.0, 48.0),  # bearish
-            (49.0, 50.0, 46.0, 47.0),  # bearish
-            (47.0, 55.0, 47.0, 54.0),  # impulse
-            (54.0, 58.0, 53.0, 57.0),  # MSB
-        ])
+        bars = self._make_bars(
+            [
+                (50.0, 51.0, 47.0, 48.0),  # bearish
+                (49.0, 50.0, 46.0, 47.0),  # bearish
+                (47.0, 55.0, 47.0, 54.0),  # impulse
+                (54.0, 58.0, 53.0, 57.0),  # MSB
+            ]
+        )
         anchor = SwingPoint(0, 0, 45.0, True)
         ob = identify_order_block(bars, 3, Bias.BULLISH, 2, anchor, 3)
         assert ob is not None
         assert ob.bottom == 46.0  # min low of both bearish candles
-        assert ob.top == 51.0     # max high of both bearish candles
+        assert ob.top == 51.0  # max high of both bearish candles
 
     def test_bearish_ob(self):
-        bars = self._make_bars([
-            (48.0, 52.0, 48.0, 51.0),  # bullish (close > open)
-            (51.0, 52.0, 44.0, 45.0),  # bearish impulse
-            (45.0, 46.0, 38.0, 39.0),  # MSB bar (closes below swing low)
-        ])
+        bars = self._make_bars(
+            [
+                (48.0, 52.0, 48.0, 51.0),  # bullish (close > open)
+                (51.0, 52.0, 44.0, 45.0),  # bearish impulse
+                (45.0, 46.0, 38.0, 39.0),  # MSB bar (closes below swing low)
+            ]
+        )
         anchor = SwingPoint(0, 0, 42.0, False)
         ob = identify_order_block(bars, 2, Bias.BEARISH, 1, anchor, 2)
         assert ob is not None
@@ -230,10 +234,12 @@ class TestOrderBlock:
 
     def test_no_opposing_candle(self):
         # All bullish before MSB — no bearish OB candle for bullish MSB
-        bars = self._make_bars([
-            (48.0, 52.0, 47.0, 51.0),  # bullish
-            (51.0, 56.0, 50.0, 55.0),  # bullish
-        ])
+        bars = self._make_bars(
+            [
+                (48.0, 52.0, 47.0, 51.0),  # bullish
+                (51.0, 56.0, 50.0, 55.0),  # bullish
+            ]
+        )
         anchor = SwingPoint(0, 0, 45.0, True)
         ob = identify_order_block(bars, 1, Bias.BULLISH, 1, anchor, 1)
         assert ob is None
@@ -247,9 +253,13 @@ class TestOrderBlock:
 class TestOBInvalidation:
     def test_boundary_breach_bullish(self):
         ob = OrderBlock(
-            top=50.0, bottom=45.0, bias=Bias.BULLISH,
-            ob_id=(1, 0, 0, "long"), anchor_swing=SwingPoint(0, 0, 45.0, True),
-            msb_bar_index=1, created_at_daily_index=0,
+            top=50.0,
+            bottom=45.0,
+            bias=Bias.BULLISH,
+            ob_id=(1, 0, 0, "long"),
+            anchor_swing=SwingPoint(0, 0, 45.0, True),
+            msb_bar_index=1,
+            created_at_daily_index=0,
         )
         state = HTFState(bias=Bias.BULLISH, active_obs=[ob])
         invalidate_obs(state, bar_close=44.0, current_daily_index=5, max_ob_age_bars=20)
@@ -257,9 +267,13 @@ class TestOBInvalidation:
 
     def test_boundary_breach_bearish(self):
         ob = OrderBlock(
-            top=50.0, bottom=45.0, bias=Bias.BEARISH,
-            ob_id=(1, 0, 0, "short"), anchor_swing=SwingPoint(0, 0, 50.0, False),
-            msb_bar_index=1, created_at_daily_index=0,
+            top=50.0,
+            bottom=45.0,
+            bias=Bias.BEARISH,
+            ob_id=(1, 0, 0, "short"),
+            anchor_swing=SwingPoint(0, 0, 50.0, False),
+            msb_bar_index=1,
+            created_at_daily_index=0,
         )
         state = HTFState(bias=Bias.BEARISH, active_obs=[ob])
         invalidate_obs(state, bar_close=51.0, current_daily_index=5, max_ob_age_bars=20)
@@ -267,9 +281,13 @@ class TestOBInvalidation:
 
     def test_bias_flip_invalidation(self):
         ob = OrderBlock(
-            top=50.0, bottom=45.0, bias=Bias.BULLISH,
-            ob_id=(1, 0, 0, "long"), anchor_swing=SwingPoint(0, 0, 45.0, True),
-            msb_bar_index=1, created_at_daily_index=0,
+            top=50.0,
+            bottom=45.0,
+            bias=Bias.BULLISH,
+            ob_id=(1, 0, 0, "long"),
+            anchor_swing=SwingPoint(0, 0, 45.0, True),
+            msb_bar_index=1,
+            created_at_daily_index=0,
         )
         state = HTFState(bias=Bias.BEARISH, active_obs=[ob])
         invalidate_obs(state, bar_close=47.0, current_daily_index=5, max_ob_age_bars=20)
@@ -277,22 +295,34 @@ class TestOBInvalidation:
 
     def test_expiry_invalidation(self):
         ob = OrderBlock(
-            top=50.0, bottom=45.0, bias=Bias.BULLISH,
-            ob_id=(1, 0, 0, "long"), anchor_swing=SwingPoint(0, 0, 45.0, True),
-            msb_bar_index=1, created_at_daily_index=0,
+            top=50.0,
+            bottom=45.0,
+            bias=Bias.BULLISH,
+            ob_id=(1, 0, 0, "long"),
+            anchor_swing=SwingPoint(0, 0, 45.0, True),
+            msb_bar_index=1,
+            created_at_daily_index=0,
         )
         state = HTFState(bias=Bias.BULLISH, active_obs=[ob])
-        invalidate_obs(state, bar_close=47.0, current_daily_index=25, max_ob_age_bars=20)
+        invalidate_obs(
+            state, bar_close=47.0, current_daily_index=25, max_ob_age_bars=20
+        )
         assert ob.invalidated is True
 
     def test_valid_ob_not_invalidated(self):
         ob = OrderBlock(
-            top=50.0, bottom=45.0, bias=Bias.BULLISH,
-            ob_id=(1, 0, 0, "long"), anchor_swing=SwingPoint(0, 0, 45.0, True),
-            msb_bar_index=1, created_at_daily_index=0,
+            top=50.0,
+            bottom=45.0,
+            bias=Bias.BULLISH,
+            ob_id=(1, 0, 0, "long"),
+            anchor_swing=SwingPoint(0, 0, 45.0, True),
+            msb_bar_index=1,
+            created_at_daily_index=0,
         )
         state = HTFState(bias=Bias.BULLISH, active_obs=[ob])
-        invalidate_obs(state, bar_close=47.0, current_daily_index=10, max_ob_age_bars=20)
+        invalidate_obs(
+            state, bar_close=47.0, current_daily_index=10, max_ob_age_bars=20
+        )
         assert ob.invalidated is False
 
 
@@ -401,15 +431,15 @@ class TestConsecutiveMSBs:
 
         # Build a sequence: low → high → higher-high → pullback → even-higher
         bar_data = [
-            (0, 100, 100.0, 105.0, 95.0, 102.0),   # neutral
-            (1, 200, 102.0, 110.0, 100.0, 108.0),   # swing high candidate
-            (2, 300, 108.0, 109.0, 98.0, 99.0),     # confirms SH at 1, SL candidate
-            (3, 400, 99.0, 107.0, 97.0, 106.0),     # confirms SL at 2
-            (4, 500, 106.0, 115.0, 105.0, 114.0),   # bullish MSB (close > SH[1]=110)
-            (5, 600, 114.0, 120.0, 113.0, 119.0),   # new SH candidate
-            (6, 700, 119.0, 119.5, 110.0, 111.0),   # confirms SH at 5, new SL
-            (7, 800, 111.0, 118.0, 109.0, 117.0),   # confirms SL at 6
-            (8, 900, 117.0, 125.0, 116.0, 124.0),   # 2nd bullish MSB (close > SH[5]=120)
+            (0, 100, 100.0, 105.0, 95.0, 102.0),  # neutral
+            (1, 200, 102.0, 110.0, 100.0, 108.0),  # swing high candidate
+            (2, 300, 108.0, 109.0, 98.0, 99.0),  # confirms SH at 1, SL candidate
+            (3, 400, 99.0, 107.0, 97.0, 106.0),  # confirms SL at 2
+            (4, 500, 106.0, 115.0, 105.0, 114.0),  # bullish MSB (close > SH[1]=110)
+            (5, 600, 114.0, 120.0, 113.0, 119.0),  # new SH candidate
+            (6, 700, 119.0, 119.5, 110.0, 111.0),  # confirms SH at 5, new SL
+            (7, 800, 111.0, 118.0, 109.0, 117.0),  # confirms SL at 6
+            (8, 900, 117.0, 125.0, 116.0, 124.0),  # 2nd bullish MSB (close > SH[5]=120)
         ]
 
         for bar in bar_data:

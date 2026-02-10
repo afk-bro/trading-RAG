@@ -14,23 +14,25 @@ import pytest
 # Ensure scripts importable
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.services.strategy.models import OHLCVBar
-from app.services.backtest.engines.unicorn_runner import BiasState
-from app.services.strategy.strategies.unicorn_model import BiasDirection
+from app.services.strategy.models import OHLCVBar  # noqa: E402
+from app.services.backtest.engines.unicorn_runner import BiasState  # noqa: E402
+from app.services.strategy.strategies.unicorn_model import BiasDirection  # noqa: E402
 
-from scripts.run_unicorn_backtest import (
+from scripts.run_unicorn_backtest import (  # noqa: E402
     build_reference_bias_series,
     _sort_and_normalize_tz,
-    REF_HTF_LOOKBACK,
-    REF_LTF_LOOKBACK,
 )
 
 
 def _make_bar(ts: datetime, price: float = 100.0) -> OHLCVBar:
     """Helper: create a minimal OHLCVBar (ts must be tz-aware)."""
     return OHLCVBar(
-        ts=ts, open=price, high=price + 1, low=price - 1,
-        close=price + 0.5, volume=1000,
+        ts=ts,
+        open=price,
+        high=price + 1,
+        low=price - 1,
+        close=price + 0.5,
+        volume=1000,
     )
 
 
@@ -41,6 +43,7 @@ def _utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> dat
 def _utc_bar_series(n: int, base_hour: int = 9) -> list[OHLCVBar]:
     """Generate n bars spaced 15 min apart, handling hour rollover."""
     from datetime import timedelta
+
     base = _utc(2024, 1, 2, base_hour, 0)
     return [_make_bar(base + timedelta(minutes=i * 15)) for i in range(n)]
 
@@ -99,19 +102,35 @@ class TestCliRefArgs:
     def test_ref_htf_without_ref_symbol_errors(self):
         """--ref-htf without --ref-symbol should error."""
         from scripts.run_unicorn_backtest import main
+
         with pytest.raises(SystemExit):
-            with patch("sys.argv", [
-                "prog", "--symbol", "NQ", "--synthetic",
-                "--ref-htf", "some/path.csv",
-            ]):
+            with patch(
+                "sys.argv",
+                [
+                    "prog",
+                    "--symbol",
+                    "NQ",
+                    "--synthetic",
+                    "--ref-htf",
+                    "some/path.csv",
+                ],
+            ):
                 main()
 
     def test_ref_symbol_same_as_symbol_errors(self):
         """--ref-symbol matching --symbol should error."""
         from scripts.run_unicorn_backtest import main
+
         with pytest.raises(SystemExit):
-            with patch("sys.argv", [
-                "prog", "--symbol", "NQ", "--synthetic",
-                "--ref-symbol", "NQ",
-            ]):
+            with patch(
+                "sys.argv",
+                [
+                    "prog",
+                    "--symbol",
+                    "NQ",
+                    "--synthetic",
+                    "--ref-symbol",
+                    "NQ",
+                ],
+            ):
                 main()

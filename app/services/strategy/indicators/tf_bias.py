@@ -14,7 +14,7 @@ Each timeframe contributes to a final bias with confidence scoring.
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Optional, TypeGuard
 
 from app.services.strategy.models import OHLCVBar
 
@@ -46,7 +46,9 @@ class TimeframeBiasComponent:
     factors: dict = field(default_factory=dict)  # Debug info
 
 
-def _is_component_usable(component: Optional["TimeframeBiasComponent"]) -> bool:
+def _is_component_usable(
+    component: Optional["TimeframeBiasComponent"],
+) -> TypeGuard["TimeframeBiasComponent"]:
     """Return True if a bias component should participate in scoring.
 
     A component is unusable when:
@@ -225,8 +227,6 @@ def compute_rsi(prices: list[float], period: int = 14) -> list[float]:
 
     for i in range(period - 1):
         rsi_values.append(50.0)  # Warmup period
-
-    multiplier = 1 / period
 
     for i in range(period - 1, len(gains)):
         if i >= period:
@@ -514,7 +514,7 @@ def compute_h4_bias(
 
     current_er = er_values[-1]
     ema50_slope = _compute_ema_slope(ema50, 5)
-    ema200_slope = _compute_ema_slope(ema200, 5)
+    _ema200_slope = _compute_ema_slope(ema200, 5)  # noqa: F841
 
     # EMA crossover position
     ema_diff = (ema50[-1] - ema200[-1]) / ema200[-1] * 100
@@ -882,9 +882,7 @@ def compute_tf_bias(
 
     # Final confidence combines direction confidence, weighted confidence, and alignment
     final_confidence = (
-        direction_confidence * 0.4
-        + weighted_confidence * 0.4
-        + alignment_score * 0.2
+        direction_confidence * 0.4 + weighted_confidence * 0.4 + alignment_score * 0.2
     )
 
     # Determine strength

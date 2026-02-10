@@ -35,7 +35,13 @@ def _make_daily_df(n=60) -> pd.DataFrame:
     open_ = close + np.random.uniform(-10, 10, n)
 
     df = pd.DataFrame(
-        {"Open": open_, "High": high, "Low": low, "Close": close, "Volume": np.random.randint(1000, 5000, n)},
+        {
+            "Open": open_,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Volume": np.random.randint(1000, 5000, n),
+        },
         index=dates,
     )
     return df
@@ -64,8 +70,10 @@ def _make_h1_df(daily_df: pd.DataFrame) -> pd.DataFrame:
             c = h1_closes[j + 1]
             o = h1_closes[j]
             h = max(o, c) + np.random.uniform(0, d_range * 0.1)
-            l = min(o, c) - np.random.uniform(0, d_range * 0.1)
-            rows.append({"Open": o, "High": h, "Low": l, "Close": c, "Volume": 500, "ts": ts})
+            low = min(o, c) - np.random.uniform(0, d_range * 0.1)
+            rows.append(
+                {"Open": o, "High": h, "Low": low, "Close": c, "Volume": 500, "ts": ts}
+            )
 
     h1_df = pd.DataFrame(rows).set_index("ts")
     h1_df.index.name = None
@@ -119,7 +127,9 @@ class TestICTBlueprintEngine:
             initial_cash=100000,
         )
         for point in result.equity_curve:
-            assert not np.isnan(point["equity"]), f"NaN found in equity curve at {point['t']}"
+            assert not np.isnan(
+                point["equity"]
+            ), f"NaN found in equity curve at {point['t']}"
 
     def test_empty_df_returns_empty_result(self):
         daily_df = _make_daily_df(5)

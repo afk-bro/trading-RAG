@@ -81,9 +81,7 @@ class TestCreateBatch:
         mock_transaction.__aexit__ = AsyncMock()
 
         mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(
-            return_value=[{"id": chunk_id1}, {"id": chunk_id2}]
-        )
+        mock_conn.fetch = AsyncMock(return_value=[{"id": chunk_id1}, {"id": chunk_id2}])
         mock_conn.transaction = MagicMock(return_value=mock_transaction)
 
         mock_pool = MagicMock()

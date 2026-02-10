@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Optional
 
 from .types import (
-    Bias,
     ClosedTrade,
     HTFStateSnapshot,
     LTFSetup,
@@ -204,15 +203,18 @@ def process_derisk(
         if half <= 0:
             return None
         if position.side == Side.LONG:
-            pnl_points = (h1_high - position.entry_price)
+            pnl_points = h1_high - position.entry_price
         else:
-            pnl_points = (position.entry_price - h1_low)
+            pnl_points = position.entry_price - h1_low
         # Approximate: use the trigger level as fill (conservative)
-        fill_price = position.entry_price + (risk * trigger_rr if position.side == Side.LONG
-                                              else -(risk * trigger_rr))
+        fill_price = position.entry_price + (
+            risk * trigger_rr if position.side == Side.LONG else -(risk * trigger_rr)
+        )
         pnl_points = abs(fill_price - position.entry_price)
         position.remaining_size -= half
-        return pnl_points * half  # Return PnL in point-units (multiply by point_value later)
+        return (
+            pnl_points * half
+        )  # Return PnL in point-units (multiply by point_value later)
 
     return None
 

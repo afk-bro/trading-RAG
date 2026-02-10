@@ -10,13 +10,10 @@ import pytest
 from app.services.strategy.models import OHLCVBar
 from app.services.strategy.indicators.ict_patterns import (
     FVGType,
-    BlockType,
     detect_fvgs,
-    detect_breaker_blocks,
     detect_liquidity_sweeps,
     detect_mss,
     detect_displacement,
-    detect_mitigation_blocks,
 )
 from app.services.strategy.indicators.tf_bias import (
     BiasDirection,
@@ -41,7 +38,9 @@ def make_bar(
     return OHLCVBar(ts=ts, open=open_, high=high, low=low, close=close, volume=volume)
 
 
-def make_bars_from_closes(closes: list[float], base_ts: datetime = None) -> list[OHLCVBar]:
+def make_bars_from_closes(
+    closes: list[float], base_ts: datetime = None
+) -> list[OHLCVBar]:
     """Create bars from a list of close prices (simple test data)."""
     if base_ts is None:
         base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -50,13 +49,15 @@ def make_bars_from_closes(closes: list[float], base_ts: datetime = None) -> list
     for i, close in enumerate(closes):
         ts = base_ts + timedelta(hours=i)
         # Simple bars where OHLC are close to close price
-        bars.append(make_bar(
-            ts=ts,
-            open_=close - 1,
-            high=close + 2,
-            low=close - 2,
-            close=close,
-        ))
+        bars.append(
+            make_bar(
+                ts=ts,
+                open_=close - 1,
+                high=close + 2,
+                low=close - 2,
+                close=close,
+            )
+        )
     return bars
 
 
@@ -68,8 +69,12 @@ class TestFairValueGapDetection:
         base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 100, 102, 99, 101),  # bar 0
-            make_bar(base_ts + timedelta(hours=1), 101, 110, 101, 109),  # bar 1 (big up)
-            make_bar(base_ts + timedelta(hours=2), 109, 115, 108, 114),  # bar 2 (gap above bar 0)
+            make_bar(
+                base_ts + timedelta(hours=1), 101, 110, 101, 109
+            ),  # bar 1 (big up)
+            make_bar(
+                base_ts + timedelta(hours=2), 109, 115, 108, 114
+            ),  # bar 2 (gap above bar 0)
         ]
         # bar[0].high = 102, bar[2].low = 108 -> gap from 102 to 108
 
@@ -86,8 +91,12 @@ class TestFairValueGapDetection:
         base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
             make_bar(base_ts, 110, 112, 108, 109),  # bar 0
-            make_bar(base_ts + timedelta(hours=1), 109, 109, 100, 101),  # bar 1 (big down)
-            make_bar(base_ts + timedelta(hours=2), 101, 103, 99, 100),  # bar 2 (gap below bar 0)
+            make_bar(
+                base_ts + timedelta(hours=1), 109, 109, 100, 101
+            ),  # bar 1 (big down)
+            make_bar(
+                base_ts + timedelta(hours=2), 101, 103, 99, 100
+            ),  # bar 2 (gap below bar 0)
         ]
         # bar[0].low = 108, bar[2].high = 103 -> gap from 103 to 108
 
@@ -104,7 +113,9 @@ class TestFairValueGapDetection:
         bars = [
             make_bar(base_ts, 100, 105, 98, 103),
             make_bar(base_ts + timedelta(hours=1), 103, 107, 102, 106),
-            make_bar(base_ts + timedelta(hours=2), 106, 108, 104, 107),  # low overlaps bar 0 high
+            make_bar(
+                base_ts + timedelta(hours=2), 106, 108, 104, 107
+            ),  # low overlaps bar 0 high
         ]
 
         fvgs = detect_fvgs(bars)
@@ -116,7 +127,9 @@ class TestFairValueGapDetection:
         bars = [
             make_bar(base_ts, 100, 102, 99, 101),
             make_bar(base_ts + timedelta(hours=1), 101, 106, 101, 105),
-            make_bar(base_ts + timedelta(hours=2), 105, 108, 103, 107),  # gap = 1 (102 to 103)
+            make_bar(
+                base_ts + timedelta(hours=2), 105, 108, 103, 107
+            ),  # gap = 1 (102 to 103)
         ]
 
         # Small gap should be detected with no filter
@@ -148,11 +161,17 @@ class TestFairValueGapDetection:
         """FVG should be unfilled when as_of_ts is before the fill bar."""
         base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
         bars = [
-            make_bar(base_ts, 100, 102, 99, 101),                       # bar 0
+            make_bar(base_ts, 100, 102, 99, 101),  # bar 0
             make_bar(base_ts + timedelta(hours=1), 101, 110, 101, 109),  # bar 1
-            make_bar(base_ts + timedelta(hours=2), 109, 115, 108, 114),  # bar 2 (creates bullish FVG: 102..108)
-            make_bar(base_ts + timedelta(hours=3), 114, 116, 110, 115),  # bar 3 (no new FVG, no fill)
-            make_bar(base_ts + timedelta(hours=4), 115, 115, 98, 99),   # bar 4 (fills FVG, low=98 < gap_low=102)
+            make_bar(
+                base_ts + timedelta(hours=2), 109, 115, 108, 114
+            ),  # bar 2 (creates bullish FVG: 102..108)
+            make_bar(
+                base_ts + timedelta(hours=3), 114, 116, 110, 115
+            ),  # bar 3 (no new FVG, no fill)
+            make_bar(
+                base_ts + timedelta(hours=4), 115, 115, 98, 99
+            ),  # bar 4 (fills FVG, low=98 < gap_low=102)
         ]
 
         # Before the fill bar: original FVG should be unfilled
@@ -189,10 +208,14 @@ class TestFVGInvalidation:
         from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
 
         fvg = FairValueGap(
-            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
-            gap_size=6.0, bar_index=1,
+            fvg_type=FVGType.BULLISH,
+            gap_high=108.0,
+            gap_low=102.0,
+            gap_size=6.0,
+            bar_index=1,
             timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            filled=False, fill_percent=0.0,
+            filled=False,
+            fill_percent=0.0,
         )
         assert fvg.invalidated(max_fill_pct=1.0) is False
         assert fvg.invalidated(max_fill_pct=0.5) is False
@@ -202,10 +225,14 @@ class TestFVGInvalidation:
         from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
 
         fvg = FairValueGap(
-            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
-            gap_size=6.0, bar_index=1,
+            fvg_type=FVGType.BULLISH,
+            gap_high=108.0,
+            gap_low=102.0,
+            gap_size=6.0,
+            bar_index=1,
             timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            filled=False, fill_percent=0.75,
+            filled=False,
+            fill_percent=0.75,
         )
         assert fvg.invalidated(max_fill_pct=0.75) is True
         assert fvg.invalidated(max_fill_pct=0.80) is False
@@ -216,10 +243,14 @@ class TestFVGInvalidation:
         from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
 
         fvg = FairValueGap(
-            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
-            gap_size=6.0, bar_index=1,
+            fvg_type=FVGType.BULLISH,
+            gap_high=108.0,
+            gap_low=102.0,
+            gap_size=6.0,
+            bar_index=1,
             timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            filled=True, fill_percent=1.0,
+            filled=True,
+            fill_percent=1.0,
         )
         assert fvg.invalidated(max_fill_pct=1.0) is True
         assert fvg.invalidated(max_fill_pct=0.5) is True
@@ -229,10 +260,14 @@ class TestFVGInvalidation:
         from app.services.strategy.indicators.ict_patterns import FairValueGap, FVGType
 
         fvg_partial = FairValueGap(
-            fvg_type=FVGType.BULLISH, gap_high=108.0, gap_low=102.0,
-            gap_size=6.0, bar_index=1,
+            fvg_type=FVGType.BULLISH,
+            gap_high=108.0,
+            gap_low=102.0,
+            gap_size=6.0,
+            bar_index=1,
             timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            filled=False, fill_percent=0.5,
+            filled=False,
+            fill_percent=0.5,
         )
         # With default threshold, partial fill is NOT invalidated
         assert fvg_partial.invalidated() is False
@@ -247,11 +282,15 @@ class TestLiquiditySweepDetection:
         bars = [
             make_bar(base_ts, 105, 107, 104, 106),
             make_bar(base_ts + timedelta(hours=1), 106, 108, 105, 107),
-            make_bar(base_ts + timedelta(hours=2), 107, 108, 100, 100),  # swing low at 100
+            make_bar(
+                base_ts + timedelta(hours=2), 107, 108, 100, 100
+            ),  # swing low at 100
             make_bar(base_ts + timedelta(hours=3), 100, 103, 99, 102),
             make_bar(base_ts + timedelta(hours=4), 102, 105, 101, 104),
             make_bar(base_ts + timedelta(hours=5), 104, 106, 103, 105),
-            make_bar(base_ts + timedelta(hours=6), 105, 107, 98, 106),  # sweeps 100, closes above
+            make_bar(
+                base_ts + timedelta(hours=6), 105, 107, 98, 106
+            ),  # sweeps 100, closes above
         ]
 
         sweeps = detect_liquidity_sweeps(bars, swing_lookback=2, lookback=10)
@@ -271,18 +310,26 @@ class TestMSSDetection:
         bars = [
             make_bar(base_ts, 110, 112, 108, 109),
             make_bar(base_ts + timedelta(hours=1), 109, 111, 107, 108),
-            make_bar(base_ts + timedelta(hours=2), 108, 110, 106, 107),  # swing high at 110
+            make_bar(
+                base_ts + timedelta(hours=2), 108, 110, 106, 107
+            ),  # swing high at 110
             make_bar(base_ts + timedelta(hours=3), 107, 109, 105, 106),
             make_bar(base_ts + timedelta(hours=4), 106, 108, 104, 105),
-            make_bar(base_ts + timedelta(hours=5), 105, 107, 103, 104),  # swing low at 103
-            make_bar(base_ts + timedelta(hours=6), 104, 112, 103, 111),  # MSS - breaks above 110
+            make_bar(
+                base_ts + timedelta(hours=5), 105, 107, 103, 104
+            ),  # swing low at 103
+            make_bar(
+                base_ts + timedelta(hours=6), 104, 112, 103, 111
+            ),  # MSS - breaks above 110
         ]
 
         mss_list = detect_mss(bars, swing_lookback=2, lookback=10)
 
         bullish_mss = [m for m in mss_list if m.shift_type == "bullish"]
         # Should detect at least one bullish shift
-        assert len(bullish_mss) >= 0  # May or may not detect depending on swing detection
+        assert (
+            len(bullish_mss) >= 0
+        )  # May or may not detect depending on swing detection
 
 
 class TestDisplacementDetection:
@@ -295,23 +342,27 @@ class TestDisplacementDetection:
         bars = []
         for i in range(20):
             price = 100 + i * 0.5
-            bars.append(make_bar(
-                base_ts + timedelta(hours=i),
-                price - 1,
-                price + 1,
-                price - 1,
-                price,
-            ))
+            bars.append(
+                make_bar(
+                    base_ts + timedelta(hours=i),
+                    price - 1,
+                    price + 1,
+                    price - 1,
+                    price,
+                )
+            )
 
         # Add a displacement candle (big move)
-        bars.append(make_bar(
-            base_ts + timedelta(hours=20),
-            110,
-            125,  # Big up move
-            109,
-            124,
-            volume=5000,
-        ))
+        bars.append(
+            make_bar(
+                base_ts + timedelta(hours=20),
+                110,
+                125,  # Big up move
+                109,
+                124,
+                volume=5000,
+            )
+        )
 
         displacements = detect_displacement(bars, atr_period=14, atr_multiple=2.0)
 
@@ -353,7 +404,20 @@ class TestTFBiasIndicators:
     def test_efficiency_ratio_choppy(self):
         """ER should be low for choppy market."""
         # Choppy market (oscillating)
-        prices = [100.0, 102.0, 100.0, 102.0, 100.0, 102.0, 100.0, 102.0, 100.0, 102.0, 100.0, 102.0]
+        prices = [
+            100.0,
+            102.0,
+            100.0,
+            102.0,
+            100.0,
+            102.0,
+            100.0,
+            102.0,
+            100.0,
+            102.0,
+            100.0,
+            102.0,
+        ]
         er = compute_efficiency_ratio(prices, period=10)
 
         # ER should be low for choppy market
@@ -386,11 +450,31 @@ class TestTFBiasIndicators:
             base = 100 + i * 2
             # Add some variation to create swing points
             if i % 3 == 0:
-                bars.append(make_bar(base_ts + timedelta(hours=i), base, base + 3, base - 1, base + 2))
+                bars.append(
+                    make_bar(
+                        base_ts + timedelta(hours=i), base, base + 3, base - 1, base + 2
+                    )
+                )
             elif i % 3 == 1:
-                bars.append(make_bar(base_ts + timedelta(hours=i), base + 2, base + 4, base + 1, base + 3))
+                bars.append(
+                    make_bar(
+                        base_ts + timedelta(hours=i),
+                        base + 2,
+                        base + 4,
+                        base + 1,
+                        base + 3,
+                    )
+                )
             else:
-                bars.append(make_bar(base_ts + timedelta(hours=i), base + 3, base + 5, base + 2, base + 1))
+                bars.append(
+                    make_bar(
+                        base_ts + timedelta(hours=i),
+                        base + 3,
+                        base + 5,
+                        base + 2,
+                        base + 1,
+                    )
+                )
 
         direction, confidence = detect_hh_hl_pattern(bars, lookback=12)
 
@@ -419,13 +503,15 @@ class TestTFBiasComputation:
         bars = []
         for i in range(250):  # Need enough for EMA(200)
             price = 100 + i * 0.5
-            bars.append(make_bar(
-                base_ts + timedelta(hours=i),
-                price - 0.5,
-                price + 1,
-                price - 1,
-                price,
-            ))
+            bars.append(
+                make_bar(
+                    base_ts + timedelta(hours=i),
+                    price - 0.5,
+                    price + 1,
+                    price - 1,
+                    price,
+                )
+            )
 
         bias = compute_tf_bias(
             daily_bars=bars,

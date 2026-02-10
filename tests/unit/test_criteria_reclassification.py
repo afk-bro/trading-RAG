@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
-from app.services.strategy.models import OHLCVBar
-from app.services.strategy.strategies.unicorn_model import (
+from app.services.strategy.models import OHLCVBar  # noqa: E402
+from app.services.strategy.strategies.unicorn_model import (  # noqa: E402
     CriteriaScore,
     UnicornConfig,
     SessionProfile,
@@ -26,19 +26,20 @@ from app.services.strategy.strategies.unicorn_model import (
     build_run_label,
     build_run_key,
 )
-from app.services.backtest.engines.unicorn_runner import (
+from app.services.backtest.engines.unicorn_runner import (  # noqa: E402
     CriteriaCheck,
     MANDATORY_CRITERIA,
     SCORED_CRITERIA,
     check_criteria,
     run_unicorn_backtest,
 )
-from app.services.strategy.indicators.tf_bias import BiasDirection
+from app.services.strategy.indicators.tf_bias import BiasDirection  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_bar(
     ts: datetime,
@@ -125,9 +126,7 @@ class TestDisplacementMandatory:
         config = UnicornConfig(min_displacement_atr=None)
 
         # When displacement_atr is None, displacement_valid auto-passes
-        cs.displacement_valid = (
-            config.min_displacement_atr is None
-        )
+        cs.displacement_valid = config.min_displacement_atr is None
         assert cs.displacement_valid is True
 
     def test_displacement_passes_when_sufficient(self):
@@ -210,8 +209,7 @@ class TestLegacyDefaultConfigUnchanged:
 
         # Simulate analyze_unicorn_setup logic: None => auto-pass
         displacement_valid = (
-            config.min_displacement_atr is None
-            or True  # Would check MSS displacement
+            config.min_displacement_atr is None or True  # Would check MSS displacement
         )
         assert displacement_valid is True
 
@@ -295,8 +293,12 @@ class TestBackwardCompatGoldenRun:
         Every setup that check_criteria produces must have displacement_valid=True.
         """
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         config = UnicornConfig()  # default: min_displacement_atr=None
         assert config.min_displacement_atr is None
@@ -320,8 +322,12 @@ class TestBackwardCompatGoldenRun:
     def test_check_criteria_sets_displacement_valid_true_when_none(self):
         """Direct check_criteria call with default config produces displacement_valid=True."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 100, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 300, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 100, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 300, 17000, trend=0.67, interval_minutes=5
+        )
 
         config = UnicornConfig()
         check = check_criteria(
@@ -341,8 +347,12 @@ class TestEnforcedDisplacementRun:
     def test_enforced_displacement_fewer_or_equal_trades(self):
         """--min-displacement-atr 0.3 must produce <= trades vs None."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         baseline = run_unicorn_backtest(
             symbol="NQ",
@@ -366,8 +376,12 @@ class TestEnforcedDisplacementRun:
     def test_rejection_reason_attributes_displacement_correctly(self):
         """Setups rejected by displacement must cite it as mandatory failure."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -382,7 +396,10 @@ class TestEnforcedDisplacementRun:
             if not setup.criteria.displacement_valid:
                 # Must be attributed to mandatory failure, not scored
                 assert setup.reason_not_taken is not None
-                assert "mandatory" in setup.reason_not_taken or "displacement" in setup.reason_not_taken, (
+                assert (
+                    "mandatory" in setup.reason_not_taken
+                    or "displacement" in setup.reason_not_taken
+                ), (
                     f"Displacement rejection not properly attributed: "
                     f"reason='{setup.reason_not_taken}' at {setup.timestamp}"
                 )
@@ -405,7 +422,9 @@ class TestNoMSSNoDisplacement:
         if config.min_displacement_atr is None:
             check.displacement_valid = True
         elif check.mss_found:
-            check.displacement_valid = check.mss_displacement_atr >= config.min_displacement_atr
+            check.displacement_valid = (
+                check.mss_displacement_atr >= config.min_displacement_atr
+            )
         else:
             check.displacement_valid = False
 
@@ -420,8 +439,12 @@ class TestNoMSSNoDisplacement:
         """check_criteria with no MSS and displacement threshold => both fail."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
         # Flat bars — unlikely to produce MSS patterns
-        htf_bars = generate_trending_bars(start_ts, 100, 17000, trend=0.0, volatility=0.1, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 300, 17000, trend=0.0, volatility=0.1, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 100, 17000, trend=0.0, volatility=0.1, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 300, 17000, trend=0.0, volatility=0.1, interval_minutes=5
+        )
 
         config = UnicornConfig(min_displacement_atr=0.3)
         check = check_criteria(
@@ -434,9 +457,9 @@ class TestNoMSSNoDisplacement:
         )
 
         if not check.mss_found:
-            assert check.displacement_valid is False, (
-                "displacement_valid should be False when mss_found=False and threshold is set"
-            )
+            assert (
+                check.displacement_valid is False
+            ), "displacement_valid should be False when mss_found=False and threshold is set"
             missing = check.missing_criteria()
             assert "mss" in missing
             assert "displacement" in missing
@@ -451,8 +474,12 @@ class TestBackstopRedundancy:
         the actual rejection path for any setup that passed mandatory.
         """
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -480,8 +507,12 @@ class TestReportSplitLabels:
         from app.services.backtest.engines.unicorn_runner import format_backtest_report
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -493,8 +524,12 @@ class TestReportSplitLabels:
         report = format_backtest_report(result)
         assert "/4" in report, "Report should reference scored criteria out of 4"
         assert "9/9" in report, "Report should reference valid setups as 9/9"
-        assert "/5" not in report, "Report must not reference old '/5' scored denominator"
-        assert "8/8" not in report, "Report must not reference old '8/8' valid setup count"
+        assert (
+            "/5" not in report
+        ), "Report must not reference old '/5' scored denominator"
+        assert (
+            "8/8" not in report
+        ), "Report must not reference old '8/8' valid setup count"
 
 
 # ===========================================================================
@@ -543,7 +578,11 @@ class TestBuildRunLabel:
         assert "Mode=Research" in label
 
     def test_mtf_long_only_with_displacement(self):
-        cfg = UnicornConfig(min_displacement_atr=0.3, min_scored_criteria=2, session_profile=SessionProfile.STRICT)
+        cfg = UnicornConfig(
+            min_displacement_atr=0.3,
+            min_scored_criteria=2,
+            session_profile=SessionProfile.STRICT,
+        )
         label = build_run_label(
             cfg,
             direction_filter=BiasDirection.BULLISH,
@@ -575,12 +614,24 @@ class TestBuildRunKey:
 
     def test_default_config_key(self):
         key = build_run_key(UnicornConfig())
-        assert key == "ver_unicorn_v2_1_bias_single_side_bidir_displ_off_minscore_3of4_window_normal_ts_none_mode_research"
+        expected = (
+            "ver_unicorn_v2_1_bias_single_side_bidir"
+            "_displ_off_minscore_3of4_window_normal"
+            "_ts_none_mode_research"
+        )
+        assert key == expected
 
     def test_key_matches_label_semantics(self):
         """Key and label encode the same config choices."""
-        cfg = UnicornConfig(min_displacement_atr=0.3, session_profile=SessionProfile.STRICT)
-        key = build_run_key(cfg, direction_filter=BiasDirection.BULLISH, time_stop_minutes=30, bar_bundle=object())
+        cfg = UnicornConfig(
+            min_displacement_atr=0.3, session_profile=SessionProfile.STRICT
+        )
+        key = build_run_key(
+            cfg,
+            direction_filter=BiasDirection.BULLISH,
+            time_stop_minutes=30,
+            bar_bundle=object(),
+        )
         assert "bias_mtf" in key
         assert "side_long" in key
         assert "displ_0_3" in key
@@ -608,9 +659,22 @@ class TestBuildRunKey:
     def test_key_only_lowercase_alnum_underscore(self):
         """run_key must match [a-z0-9_]+ only."""
         import re
-        for cfg in [UnicornConfig(), UnicornConfig(min_displacement_atr=0.3, session_profile=SessionProfile.STRICT)]:
-            key = build_run_key(cfg, direction_filter=BiasDirection.BULLISH, time_stop_minutes=30, bar_bundle=object())
-            assert re.fullmatch(r"[a-z0-9_]+", key), f"Key contains invalid chars: {key}"
+
+        for cfg in [
+            UnicornConfig(),
+            UnicornConfig(
+                min_displacement_atr=0.3, session_profile=SessionProfile.STRICT
+            ),
+        ]:
+            key = build_run_key(
+                cfg,
+                direction_filter=BiasDirection.BULLISH,
+                time_stop_minutes=30,
+                bar_bundle=object(),
+            )
+            assert re.fullmatch(
+                r"[a-z0-9_]+", key
+            ), f"Key contains invalid chars: {key}"
 
     def test_key_max_length_160(self):
         """run_key must be at most MAX_KEY_LEN characters."""
@@ -619,10 +683,18 @@ class TestBuildRunKey:
 
     def test_key_deterministic_across_calls(self):
         """Same config produces same key across multiple calls."""
-        cfg = UnicornConfig(min_displacement_atr=0.5, session_profile=SessionProfile.WIDE)
-        k1 = build_run_key(cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45)
-        k2 = build_run_key(cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45)
-        k3 = build_run_key(cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45)
+        cfg = UnicornConfig(
+            min_displacement_atr=0.5, session_profile=SessionProfile.WIDE
+        )
+        k1 = build_run_key(
+            cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45
+        )
+        k2 = build_run_key(
+            cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45
+        )
+        k3 = build_run_key(
+            cfg, direction_filter=BiasDirection.BEARISH, time_stop_minutes=45
+        )
         assert k1 == k2 == k3
 
 
@@ -636,7 +708,9 @@ class TestLabelSegmentOrder:
 
     def test_order_stable_across_configs(self):
         """Same key order with MTF + long + displacement + time stop."""
-        cfg = UnicornConfig(min_displacement_atr=0.3, session_profile=SessionProfile.STRICT)
+        cfg = UnicornConfig(
+            min_displacement_atr=0.3, session_profile=SessionProfile.STRICT
+        )
         segs = _label_segments(
             cfg,
             direction_filter=BiasDirection.BULLISH,
@@ -654,8 +728,12 @@ class TestRunLabelInReport:
         from app.services.backtest.engines.unicorn_runner import format_backtest_report
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -676,8 +754,12 @@ class TestRunLabelInReport:
         from app.services.backtest.engines.unicorn_runner import format_backtest_report
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -701,8 +783,12 @@ class TestRunKeyInExports:
 
     def _make_result(self):
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
         return run_unicorn_backtest(
             symbol="NQ",
             htf_bars=htf_bars,
@@ -747,8 +833,12 @@ class TestRunKeyInExports:
             pytest.skip("No trades to trace")
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
         bar_bundle = BarBundle(m15=htf_bars, m5=ltf_bars)
 
         trace = format_trade_trace(
@@ -777,8 +867,12 @@ class TestDisplacementBackstopFlag:
     def test_backstop_disabled_skips_guard(self):
         """With flag=False and displacement threshold set, no backstop rejections."""
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",
@@ -791,9 +885,9 @@ class TestDisplacementBackstopFlag:
         )
 
         for setup in result.all_setups:
-            assert not setup.displacement_guard_rejected, (
-                f"Backstop fired at {setup.timestamp} despite enable_displacement_backstop=False"
-            )
+            assert (
+                not setup.displacement_guard_rejected
+            ), f"Backstop fired at {setup.timestamp} despite enable_displacement_backstop=False"
 
 
 # ===========================================================================
@@ -853,8 +947,12 @@ class TestGovernorInReport:
         from app.services.backtest.engines.daily_governor import DailyGovernor
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         governor = DailyGovernor(max_daily_loss_dollars=300.0, max_trades_per_day=1)
         result = run_unicorn_backtest(
@@ -884,8 +982,12 @@ class TestGovernorInReport:
         from app.services.backtest.engines.unicorn_runner import format_backtest_report
 
         start_ts = datetime(2024, 1, 2, 9, 30, tzinfo=ET)
-        htf_bars = generate_trending_bars(start_ts, 200, 17000, trend=2.0, interval_minutes=15)
-        ltf_bars = generate_trending_bars(start_ts, 600, 17000, trend=0.67, interval_minutes=5)
+        htf_bars = generate_trending_bars(
+            start_ts, 200, 17000, trend=2.0, interval_minutes=15
+        )
+        ltf_bars = generate_trending_bars(
+            start_ts, 600, 17000, trend=0.67, interval_minutes=5
+        )
 
         result = run_unicorn_backtest(
             symbol="NQ",

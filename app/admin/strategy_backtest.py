@@ -3,10 +3,8 @@
 Provides UI for running strategy backtests on historical data.
 """
 
-from collections import Counter
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, Form, Request
@@ -23,7 +21,12 @@ templates_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # Path to historical data
-DATA_PATH = Path(__file__).parent.parent.parent / "docs" / "historical_data" / "GLBX-20260129-JNB8PDSQ7C"
+DATA_PATH = (
+    Path(__file__).parent.parent.parent
+    / "docs"
+    / "historical_data"
+    / "GLBX-20260129-JNB8PDSQ7C"
+)
 CSV_FILE = DATA_PATH / "glbx-mdp3-20210128-20260127.ohlcv-1m.csv"
 
 
@@ -96,7 +99,11 @@ async def run_strategy_backtest(
                 "strategy_backtest_results.html",
                 {
                     "request": request,
-                    "error": f"Insufficient data: {len(htf_bars)} HTF bars, {len(ltf_bars)} LTF bars. Need at least 50 HTF and 30 LTF bars.",
+                    "error": (
+                        f"Insufficient data: {len(htf_bars)} HTF bars,"
+                        f" {len(ltf_bars)} LTF bars."
+                        " Need at least 50 HTF and 30 LTF bars."
+                    ),
                 },
             )
 
@@ -166,26 +173,30 @@ async def run_strategy_backtest(
         # Build confidence buckets for template
         confidence_buckets = []
         for bucket in result.confidence_buckets:
-            confidence_buckets.append({
-                "min_conf": bucket.min_confidence,
-                "max_conf": bucket.max_confidence,
-                "trades": bucket.trade_count,
-                "win_rate": bucket.win_rate,
-                "avg_r": bucket.avg_r_multiple,
-                "pnl": bucket.total_pnl,
-            })
+            confidence_buckets.append(
+                {
+                    "min_conf": bucket.min_confidence,
+                    "max_conf": bucket.max_confidence,
+                    "trades": bucket.trade_count,
+                    "win_rate": bucket.win_rate,
+                    "avg_r": bucket.avg_r_multiple,
+                    "pnl": bucket.total_pnl,
+                }
+            )
 
         # Build criteria bottlenecks for template
         criteria_bottlenecks = []
         for b in result.criteria_bottlenecks:
-            criteria_bottlenecks.append({
-                "criterion": b.criterion,
-                "fail_rate": b.fail_rate,
-                "fail_count": b.fail_count,
-            })
+            criteria_bottlenecks.append(
+                {
+                    "criterion": b.criterion,
+                    "fail_rate": b.fail_rate,
+                    "fail_count": b.fail_count,
+                }
+            )
 
         # Calculate R-metrics
-        r_metrics = {
+        r_metrics: dict[str, Any] = {
             "total_r": 0.0,
             "avg_win_r": 0.0,
             "avg_loss_r": 0.0,
@@ -208,7 +219,9 @@ async def run_strategy_backtest(
             # Expectancy in R: E = (Win% × Avg Win R) − (Loss% × |Avg Loss R|)
             win_pct = len(win_r_values) / len(result.trades)
             loss_pct = len(loss_r_values) / len(result.trades)
-            r_metrics["expectancy_r"] = (win_pct * r_metrics["avg_win_r"]) - (loss_pct * abs(r_metrics["avg_loss_r"]))
+            r_metrics["expectancy_r"] = (win_pct * r_metrics["avg_win_r"]) - (
+                loss_pct * abs(r_metrics["avg_loss_r"])
+            )
 
             # R Distribution buckets
             buckets = [
@@ -220,11 +233,13 @@ async def run_strategy_backtest(
             ]
             for label, condition in buckets:
                 count = len([r for r in r_values if condition(r)])
-                r_metrics["r_distribution"].append({
-                    "label": label,
-                    "count": count,
-                    "pct": count / len(result.trades) * 100 if result.trades else 0,
-                })
+                r_metrics["r_distribution"].append(
+                    {
+                        "label": label,
+                        "count": count,
+                        "pct": count / len(result.trades) * 100 if result.trades else 0,
+                    }
+                )
 
         # Chart data for JavaScript
         chart_data = {
@@ -239,7 +254,9 @@ async def run_strategy_backtest(
             "symbol": symbol,
             "start_date": start_date,
             "end_date": end_date,
-            "direction_filter": direction.replace("_", " ").title() if direction != "both" else None,
+            "direction_filter": (
+                direction.replace("_", " ").title() if direction != "both" else None
+            ),
             "min_criteria": min_criteria,
             "slippage": slippage,
             "commission": commission,
@@ -250,7 +267,9 @@ async def run_strategy_backtest(
             "wins": result.wins,
             "losses": result.losses,
             "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor if result.profit_factor != float("inf") else 999.99,
+            "profit_factor": (
+                result.profit_factor if result.profit_factor != float("inf") else 999.99
+            ),
             "total_pnl_points": result.total_pnl_points,
             "total_pnl_dollars": result.total_pnl_dollars,
             "expectancy_points": result.expectancy_points,

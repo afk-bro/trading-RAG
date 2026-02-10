@@ -53,7 +53,14 @@ class DefaultHTFProvider:
         for i, (ts_val, row) in enumerate(daily_df.iterrows()):
             ts_ns = int(pd.Timestamp(ts_val).value) + close_offset_ns
             self._daily_bars.append(
-                (i, ts_ns, float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"]))
+                (
+                    i,
+                    ts_ns,
+                    float(row["Open"]),
+                    float(row["High"]),
+                    float(row["Low"]),
+                    float(row["Close"]),
+                )
             )
 
         self._state = HTFState()
@@ -96,7 +103,9 @@ class DefaultHTFProvider:
         sample_ts = pd.Timestamp(index[0])
 
         # Check 1: if timestamps carry time, it should be close to session_close_hour
-        if not (sample_ts.hour == 0 and sample_ts.minute == 0 and sample_ts.second == 0):
+        if not (
+            sample_ts.hour == 0 and sample_ts.minute == 0 and sample_ts.second == 0
+        ):
             if sample_ts.hour != session_close_hour:
                 logger.warning(
                     "Daily bar timestamp hour (%d) != session_close_hour (%d). "

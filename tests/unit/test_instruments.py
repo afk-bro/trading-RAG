@@ -1,6 +1,11 @@
 """Unit tests for app.utils.instruments."""
 
-from app.utils.instruments import get_point_value, data_root, POINT_VALUE_NQ, POINT_VALUE_ES
+from app.utils.instruments import (
+    get_point_value,
+    data_root,
+    POINT_VALUE_NQ,
+    POINT_VALUE_ES,
+)
 
 
 class TestGetPointValue:

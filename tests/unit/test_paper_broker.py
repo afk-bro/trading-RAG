@@ -845,8 +845,11 @@ class TestPaperBrokerEvalProfile:
             timeframe="5m",
             quantity=1.0,
         )
-        with patch.object(broker, "_check_idempotency", return_value=None), \
-             patch.object(broker._policy_engine, "evaluate", return_value=approved_decision):
+        with patch.object(
+            broker, "_check_idempotency", return_value=None
+        ), patch.object(
+            broker._policy_engine, "evaluate", return_value=approved_decision
+        ):
             result = await broker.execute_intent(open_intent, fill_price=100.0)
         assert result.success, f"Execution failed: {result.error}"
 
@@ -860,8 +863,11 @@ class TestPaperBrokerEvalProfile:
             timeframe="5m",
             quantity=1.0,
         )
-        with patch.object(broker, "_check_idempotency", return_value=None), \
-             patch.object(broker._policy_engine, "evaluate", return_value=approved_decision):
+        with patch.object(
+            broker, "_check_idempotency", return_value=None
+        ), patch.object(
+            broker._policy_engine, "evaluate", return_value=approved_decision
+        ):
             result = await broker.execute_intent(close_intent, fill_price=150.0)
         assert result.success, f"Close failed: {result.error}"
 

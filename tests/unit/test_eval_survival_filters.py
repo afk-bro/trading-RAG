@@ -11,7 +11,6 @@ from app.services.backtest.engines.daily_governor import DailyGovernor
 from app.services.strategy.indicators.tf_bias import (
     BiasDirection,
     compute_weekly_bias,
-    BiasStrength,
 )
 from app.services.strategy.strategies.unicorn_model import (
     SessionProfile,
@@ -39,6 +38,7 @@ ET = ZoneInfo("America/New_York")
 # ---------------------------------------------------------------------------
 # 1. LONDON session profile
 # ---------------------------------------------------------------------------
+
 
 class TestSessionProfileLondon:
     def test_london_in_session_windows(self):
@@ -76,6 +76,7 @@ class TestSessionProfileLondon:
 # 2. Confidence gate (unit-level: tests the gate logic directly)
 # ---------------------------------------------------------------------------
 
+
 class TestConfidenceGate:
     """The confidence gate in the runner rejects when
     criteria.htf_bias_confidence < config.min_confidence.
@@ -101,27 +102,29 @@ class TestConfidenceGate:
 # 3. Alignment gate (unit-level: tests _asof_lookup + direction comparison)
 # ---------------------------------------------------------------------------
 
+
 class TestAlignmentGate:
     def _make_bias_series(self, direction, ts_offset_minutes=0):
         ts = datetime(2025, 3, 10, 3, 30, tzinfo=ET)
-        return [BiasState(
-            ts=ts,
-            direction=direction,
-            confidence=0.8,
-        )]
+        return [
+            BiasState(
+                ts=ts,
+                direction=direction,
+                confidence=0.8,
+            )
+        ]
 
     def test_rejects_divergent(self):
         """Primary=BULLISH, ref=BEARISH -> rejected."""
-        primary = BiasDirection.BULLISH
+        _primary = BiasDirection.BULLISH
         series = self._make_bias_series(BiasDirection.BEARISH)
         ts = datetime(2025, 3, 10, 3, 35, tzinfo=ET)
         ref = _asof_lookup(series, ts)
         assert ref is not None
-        assert ref.direction != primary
+        assert ref.direction != _primary
 
     def test_rejects_neutral(self):
         """Primary=BULLISH, ref=NEUTRAL -> rejected."""
-        primary = BiasDirection.BULLISH
         series = self._make_bias_series(BiasDirection.NEUTRAL)
         ts = datetime(2025, 3, 10, 3, 35, tzinfo=ET)
         ref = _asof_lookup(series, ts)
@@ -153,6 +156,7 @@ class TestAlignmentGate:
 # ---------------------------------------------------------------------------
 # 4. R-based daily loss halt
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateRDay:
     def test_sets_threshold(self):
@@ -215,6 +219,7 @@ class TestUpdateRDay:
 # 5. Partial exit (scale-out)
 # ---------------------------------------------------------------------------
 
+
 def _make_trade(
     qty: int = 2,
     entry_price: float = 100.0,
@@ -231,10 +236,20 @@ def _make_trade(
         quantity=qty,
         session=TradingSession.NY_AM,
         criteria=CriteriaCheck(),
-        stop_price=entry_price - risk_points if direction == BiasDirection.BULLISH else entry_price + risk_points,
-        target_price=float("inf") if direction == BiasDirection.BULLISH else float("-inf"),
+        stop_price=(
+            entry_price - risk_points
+            if direction == BiasDirection.BULLISH
+            else entry_price + risk_points
+        ),
+        target_price=(
+            float("inf") if direction == BiasDirection.BULLISH else float("-inf")
+        ),
         risk_points=risk_points,
-        initial_stop=entry_price - risk_points if direction == BiasDirection.BULLISH else entry_price + risk_points,
+        initial_stop=(
+            entry_price - risk_points
+            if direction == BiasDirection.BULLISH
+            else entry_price + risk_points
+        ),
         entry_atr=risk_points,
     )
     if partial_exit_r is not None:
@@ -310,7 +325,9 @@ class TestPartialExit:
     def test_partial_exit_leg1_pnl(self):
         """Leg1 PnL = risk_points * partial_exit_r."""
         # Long
-        trade_long = _make_trade(qty=4, entry_price=200.0, risk_points=10.0, partial_exit_r=1.5)
+        trade_long = _make_trade(
+            qty=4, entry_price=200.0, risk_points=10.0, partial_exit_r=1.5
+        )
         expected_price = 200.0 + (10.0 * 1.5)  # 215.0
         assert trade_long.partial_exit_price == expected_price
         pnl = expected_price - trade_long.entry_price
@@ -318,8 +335,11 @@ class TestPartialExit:
 
         # Short
         trade_short = _make_trade(
-            qty=4, entry_price=200.0, risk_points=10.0,
-            direction=BiasDirection.BEARISH, partial_exit_r=1.0,
+            qty=4,
+            entry_price=200.0,
+            risk_points=10.0,
+            direction=BiasDirection.BEARISH,
+            partial_exit_r=1.0,
         )
         expected_price_short = 200.0 - (10.0 * 1.0)  # 190.0
         assert trade_short.partial_exit_price == expected_price_short
@@ -358,6 +378,7 @@ class TestPartialExit:
 # 6. Governor partial-leg counting
 # ---------------------------------------------------------------------------
 
+
 class TestGovernorPartialLegCounting:
     def test_governor_skips_partial_leg_count(self):
         """Partial legs should not increment day_trade_count."""
@@ -384,12 +405,16 @@ class TestGovernorPartialLegCounting:
         gov = DailyGovernor(max_trades_per_day=2, max_daily_loss_dollars=5000.0)
 
         # Setup 1: partial leg + trailer leg
-        gov.record_trade_close(50.0, is_partial_leg=True)   # leg 1 (partial)
-        gov.record_trade_close(100.0, is_partial_leg=False)  # leg 2 (trailer = setup close)
+        gov.record_trade_close(50.0, is_partial_leg=True)  # leg 1 (partial)
+        gov.record_trade_close(
+            100.0, is_partial_leg=False
+        )  # leg 2 (trailer = setup close)
 
         # Setup 2: partial leg + trailer leg
-        gov.record_trade_close(30.0, is_partial_leg=True)   # leg 1 (partial)
-        gov.record_trade_close(-40.0, is_partial_leg=False)  # leg 2 (trailer = setup close)
+        gov.record_trade_close(30.0, is_partial_leg=True)  # leg 1 (partial)
+        gov.record_trade_close(
+            -40.0, is_partial_leg=False
+        )  # leg 2 (trailer = setup close)
 
         assert gov.day_trade_count == 2
         assert gov.allows_entry() is False
@@ -410,6 +435,7 @@ class TestGovernorPartialLegCounting:
 # 7. ScaleOutPreset enum
 # ---------------------------------------------------------------------------
 
+
 class TestScaleOutPreset:
     def test_none_disables_partial_exit(self):
         params = SCALE_OUT_PARAMS[ScaleOutPreset.NONE]
@@ -423,9 +449,10 @@ class TestScaleOutPreset:
 
     def test_only_two_presets_exist(self):
         """Tuning phase closed — exactly NONE and PROP_SAFE, nothing else."""
-        assert set(ScaleOutPreset) == {ScaleOutPreset.NONE, ScaleOutPreset.PROP_SAFE}, (
-            "Scale-out tuning phase is closed. Do not add presets."
-        )
+        assert set(ScaleOutPreset) == {
+            ScaleOutPreset.NONE,
+            ScaleOutPreset.PROP_SAFE,
+        }, "Scale-out tuning phase is closed. Do not add presets."
 
     def test_enum_from_string(self):
         assert ScaleOutPreset("none") == ScaleOutPreset.NONE
@@ -436,15 +463,23 @@ class TestScaleOutPreset:
 # 8. Weekly bias gate (Feature 1)
 # ---------------------------------------------------------------------------
 
+
 def _make_weekly_bars(price: float, n: int = 250) -> list[OHLCVBar]:
     """Generate N weekly bars with a steady uptrend from `price`."""
     bars = []
     for i in range(n):
         p = price + i * 0.5
-        bars.append(OHLCVBar(
-            ts=datetime(2020, 1, 6, tzinfo=timezone.utc) + __import__("datetime").timedelta(weeks=i),
-            open=p, high=p + 2.0, low=p - 1.0, close=p + 1.0, volume=1000.0,
-        ))
+        bars.append(
+            OHLCVBar(
+                ts=datetime(2020, 1, 6, tzinfo=timezone.utc)
+                + __import__("datetime").timedelta(weeks=i),
+                open=p,
+                high=p + 2.0,
+                low=p - 1.0,
+                close=p + 1.0,
+                volume=1000.0,
+            )
+        )
     return bars
 
 
@@ -468,10 +503,17 @@ class TestWeeklyBiasGate:
         bars = []
         for i in range(250):
             p = 200.0 - i * 0.5
-            bars.append(OHLCVBar(
-                ts=datetime(2020, 1, 6, tzinfo=timezone.utc) + __import__("datetime").timedelta(weeks=i),
-                open=p, high=p + 1.0, low=p - 2.0, close=p - 1.0, volume=1000.0,
-            ))
+            bars.append(
+                OHLCVBar(
+                    ts=datetime(2020, 1, 6, tzinfo=timezone.utc)
+                    + __import__("datetime").timedelta(weeks=i),
+                    open=p,
+                    high=p + 1.0,
+                    low=p - 2.0,
+                    close=p - 1.0,
+                    volume=1000.0,
+                )
+            )
         result = compute_weekly_bias(bars)
         assert result.direction == BiasDirection.BEARISH
 
@@ -485,6 +527,7 @@ class TestWeeklyBiasGate:
 # ---------------------------------------------------------------------------
 # 9. Confidence tiering (Feature 2)
 # ---------------------------------------------------------------------------
+
 
 class TestConfidenceTiering:
     def test_tier_a_full_size(self):
@@ -568,6 +611,7 @@ class TestConfidenceTiering:
 # 10. NY AM timebox tightening (Feature 3)
 # ---------------------------------------------------------------------------
 
+
 class TestNyAmCutoff:
     def test_apply_cutoff_shortens_window(self):
         """60-min cutoff changes 9:30-11:00 to 9:30-10:30."""
@@ -588,16 +632,18 @@ class TestNyAmCutoff:
         # Without cutoff: in window (9:30-11:00)
         assert is_in_macro_window(ts, SessionProfile.STRICT) is True
         # With cutoff: out (9:30-10:30)
-        assert is_in_macro_window(
-            ts, SessionProfile.STRICT, ny_am_cutoff_minutes=60
-        ) is False
+        assert (
+            is_in_macro_window(ts, SessionProfile.STRICT, ny_am_cutoff_minutes=60)
+            is False
+        )
 
     def test_is_in_macro_window_cutoff_inside(self):
         """10:00 ET should still be IN with 60-min cutoff."""
         ts = datetime(2025, 3, 10, 10, 0, tzinfo=ET)
-        assert is_in_macro_window(
-            ts, SessionProfile.STRICT, ny_am_cutoff_minutes=60
-        ) is True
+        assert (
+            is_in_macro_window(ts, SessionProfile.STRICT, ny_am_cutoff_minutes=60)
+            is True
+        )
 
     def test_config_validation_cutoff_range(self):
         """Cutoff must be 1-90 minutes."""
@@ -613,14 +659,16 @@ class TestNyAmCutoff:
     def test_cutoff_none_uses_default(self):
         """When cutoff is None, full 9:30-11:00 window applies."""
         ts = datetime(2025, 3, 10, 10, 45, tzinfo=ET)
-        assert is_in_macro_window(
-            ts, SessionProfile.STRICT, ny_am_cutoff_minutes=None
-        ) is True
+        assert (
+            is_in_macro_window(ts, SessionProfile.STRICT, ny_am_cutoff_minutes=None)
+            is True
+        )
 
 
 # ---------------------------------------------------------------------------
 # 11. Eval-mode default locks (strict profile)
 # ---------------------------------------------------------------------------
+
 
 class TestEvalModeDefaults:
     """Verify --eval-mode --session-profile strict locks proven features."""
@@ -703,6 +751,7 @@ class TestEvalModeDefaults:
 # ---------------------------------------------------------------------------
 # 12. Adaptive confidence tiering
 # ---------------------------------------------------------------------------
+
 
 class TestAdaptiveConfidenceTiering:
     """Test adaptive confidence tiering integration with governor + runner logic."""
