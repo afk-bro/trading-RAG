@@ -583,9 +583,12 @@ class TestPineDiscoveryMetrics:
 
     def test_record_pine_discovery_run_partial(self):
         """record_pine_discovery_run records partial (with errors) metrics."""
-        from app.routers.metrics import record_pine_discovery_run
+        from app.routers.metrics import (
+            PINE_DISCOVERY_RUNS_TOTAL,
+            record_pine_discovery_run,
+        )
 
-        # Record a partial run with errors
+        before = PINE_DISCOVERY_RUNS_TOTAL.labels(status="partial")._value.get()
         record_pine_discovery_run(
             status="partial",
             duration=1.5,
@@ -594,23 +597,24 @@ class TestPineDiscoveryMetrics:
             specs_generated=1,
             errors_count=3,
         )
-
-        # Function should complete without error
-        assert True
+        after = PINE_DISCOVERY_RUNS_TOTAL.labels(status="partial")._value.get()
+        assert after == before + 1
 
     def test_record_pine_discovery_run_failed(self):
         """record_pine_discovery_run records failed metrics."""
-        from app.routers.metrics import record_pine_discovery_run
+        from app.routers.metrics import (
+            PINE_DISCOVERY_RUNS_TOTAL,
+            record_pine_discovery_run,
+        )
 
-        # Record a failed run
+        before = PINE_DISCOVERY_RUNS_TOTAL.labels(status="failed")._value.get()
         record_pine_discovery_run(
             status="failed",
             duration=0.1,
             errors_count=1,
         )
-
-        # Function should complete without error
-        assert True
+        after = PINE_DISCOVERY_RUNS_TOTAL.labels(status="failed")._value.get()
+        assert after == before + 1
 
     def test_record_pine_discovery_error(self):
         """record_pine_discovery_error increments error counter."""
@@ -740,38 +744,49 @@ class TestArchiveMetrics:
 
     def test_record_pine_archive_run_success(self):
         """record_pine_archive_run records success metrics."""
-        from app.routers.metrics import record_pine_archive_run
+        from app.routers.metrics import (
+            PINE_ARCHIVE_RUNS_TOTAL,
+            PINE_SCRIPTS_ARCHIVED_TOTAL,
+            record_pine_archive_run,
+        )
 
+        runs_before = PINE_ARCHIVE_RUNS_TOTAL.labels(status="success")._value.get()
+        archived_before = PINE_SCRIPTS_ARCHIVED_TOTAL._value.get()
         record_pine_archive_run(
             status="success",
             duration=1.5,
             archived_count=5,
         )
-
-        # Function should complete without error
-        assert True
+        assert (
+            PINE_ARCHIVE_RUNS_TOTAL.labels(status="success")._value.get()
+            == runs_before + 1
+        )
+        assert PINE_SCRIPTS_ARCHIVED_TOTAL._value.get() == archived_before + 5
 
     def test_record_pine_archive_run_failed(self):
         """record_pine_archive_run records failed metrics."""
-        from app.routers.metrics import record_pine_archive_run
+        from app.routers.metrics import PINE_ARCHIVE_RUNS_TOTAL, record_pine_archive_run
 
+        before = PINE_ARCHIVE_RUNS_TOTAL.labels(status="failed")._value.get()
         record_pine_archive_run(
             status="failed",
             duration=0.1,
             archived_count=0,
         )
-
-        # Function should complete without error
-        assert True
+        assert (
+            PINE_ARCHIVE_RUNS_TOTAL.labels(status="failed")._value.get() == before + 1
+        )
 
     def test_record_pine_scripts_archived(self):
         """record_pine_scripts_archived increments counter."""
-        from app.routers.metrics import record_pine_scripts_archived
+        from app.routers.metrics import (
+            PINE_SCRIPTS_ARCHIVED_TOTAL,
+            record_pine_scripts_archived,
+        )
 
+        before = PINE_SCRIPTS_ARCHIVED_TOTAL._value.get()
         record_pine_scripts_archived(count=10)
-
-        # Function should complete without error
-        assert True
+        assert PINE_SCRIPTS_ARCHIVED_TOTAL._value.get() == before + 10
 
 
 class TestDiscoveryResultWithArchived:
@@ -1000,8 +1015,18 @@ class TestIngestMetrics:
 
     def test_record_pine_discovery_run_with_ingest(self):
         """record_pine_discovery_run records ingest metrics."""
-        from app.routers.metrics import record_pine_discovery_run
+        from app.routers.metrics import (
+            PINE_DISCOVERY_RUNS_TOTAL,
+            PINE_SCRIPTS_INGESTED_TOTAL,
+            PINE_INGEST_CHUNKS_TOTAL,
+            PINE_INGEST_FAILED_TOTAL,
+            record_pine_discovery_run,
+        )
 
+        runs_before = PINE_DISCOVERY_RUNS_TOTAL.labels(status="success")._value.get()
+        ingested_before = PINE_SCRIPTS_INGESTED_TOTAL._value.get()
+        chunks_before = PINE_INGEST_CHUNKS_TOTAL._value.get()
+        failed_before = PINE_INGEST_FAILED_TOTAL._value.get()
         record_pine_discovery_run(
             status="success",
             duration=2.5,
@@ -1013,9 +1038,13 @@ class TestIngestMetrics:
             chunks_created=15,
             errors_count=0,
         )
-
-        # Function should complete without error
-        assert True
+        assert (
+            PINE_DISCOVERY_RUNS_TOTAL.labels(status="success")._value.get()
+            == runs_before + 1
+        )
+        assert PINE_SCRIPTS_INGESTED_TOTAL._value.get() == ingested_before + 5
+        assert PINE_INGEST_CHUNKS_TOTAL._value.get() == chunks_before + 15
+        assert PINE_INGEST_FAILED_TOTAL._value.get() == failed_before + 1
 
 
 class TestFormattingModule:

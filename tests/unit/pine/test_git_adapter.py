@@ -609,9 +609,20 @@ class TestPineReposMetrics:
 
     def test_record_pine_repo_scan(self):
         """record_pine_repo_scan records scan metrics."""
-        from app.routers.metrics import record_pine_repo_scan
+        from app.routers.metrics import (
+            PINE_REPO_SCAN_RUNS,
+            PINE_REPO_SCRIPTS_DISCOVERED,
+            record_pine_repo_scan,
+        )
 
-        # Should not raise
+        runs_before = PINE_REPO_SCAN_RUNS.labels(status="success")._value.get()
+        new_before = PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="new")._value.get()
+        updated_before = PINE_REPO_SCRIPTS_DISCOVERED.labels(
+            change_type="updated"
+        )._value.get()
+        deleted_before = PINE_REPO_SCRIPTS_DISCOVERED.labels(
+            change_type="deleted"
+        )._value.get()
         record_pine_repo_scan(
             status="success",
             duration=5.5,
@@ -619,5 +630,18 @@ class TestPineReposMetrics:
             scripts_updated=2,
             scripts_deleted=1,
         )
-
-        assert True
+        assert (
+            PINE_REPO_SCAN_RUNS.labels(status="success")._value.get() == runs_before + 1
+        )
+        assert (
+            PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="new")._value.get()
+            == new_before + 3
+        )
+        assert (
+            PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="updated")._value.get()
+            == updated_before + 2
+        )
+        assert (
+            PINE_REPO_SCRIPTS_DISCOVERED.labels(change_type="deleted")._value.get()
+            == deleted_before + 1
+        )
