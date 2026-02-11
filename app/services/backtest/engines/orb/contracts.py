@@ -10,7 +10,7 @@ changing semantics. Optional keys can be added without a version bump.
 
 from __future__ import annotations
 
-ORB_EVENT_SCHEMA_VERSION = "1.0.0"
+ORB_EVENT_SCHEMA_VERSION = "1.1.0"
 
 # Common keys present on every event
 COMMON_REQUIRED_KEYS = frozenset(
@@ -60,6 +60,23 @@ ORB_EVENT_TYPES: dict[str, frozenset[str]] = {
             "target",
             "size",
             "risk_points",
+        }
+    ),
+    "position_closed": frozenset(
+        {
+            "exit_reason",
+            "exit_price",
+            "pnl",
+            "side",
+            "entry_bar",
+            "exit_bar",
+        }
+    ),
+    "gate_rejected": frozenset(
+        {
+            "gate_name",
+            "detail",
+            "direction",
         }
     ),
 }

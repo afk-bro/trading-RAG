@@ -100,8 +100,9 @@ class ORBEngine:
             ):
                 # Force close if in TRADE_MGMT
                 if state.phase == ORBPhase.TRADE_MGMT and state.position is not None:
+                    pos = state.position
                     trade = self._close_position(
-                        state.position,
+                        pos,
                         bar_open,  # close at session boundary bar open
                         ts_utc_iso,
                         bar_index,
@@ -112,6 +113,22 @@ class ORBEngine:
                     )
                     closed_trades.append(trade)
                     equity += trade.pnl
+                    events.append(
+                        {
+                            "type": "position_closed",
+                            "bar_index": bar_index,
+                            "ts": ts_utc_iso,
+                            "session_date": session_date_str,
+                            "phase": ORBPhase.EXIT.value,
+                            "schema_version": ORB_EVENT_SCHEMA_VERSION,
+                            "exit_reason": "session_close",
+                            "exit_price": bar_open,
+                            "pnl": trade.pnl,
+                            "side": pos.side,
+                            "entry_bar": pos.entry_bar,
+                            "exit_bar": bar_index,
+                        }
+                    )
                     state.position = None
                 state.reset()
 
@@ -289,6 +306,20 @@ class ORBEngine:
                     )
                     closed_trades.append(trade)
                     equity += trade.pnl
+
+                    evt = _evt_base("position_closed", ORBPhase.EXIT)
+                    evt.update(
+                        {
+                            "exit_reason": exit_reason,
+                            "exit_price": exit_price,
+                            "pnl": trade.pnl,
+                            "side": pos.side,
+                            "entry_bar": pos.entry_bar,
+                            "exit_bar": bar_index,
+                        }
+                    )
+                    events.append(evt)
+
                     state.position = None
                     state.phase = ORBPhase.EXIT
 
@@ -321,11 +352,13 @@ class ORBEngine:
             if last_ts.tzinfo is None:
                 last_ts = last_ts.tz_localize("UTC")
             last_close = float(df.iloc[-1]["Close"])
+            eod_bar = len(df) - 1
+            pos = state.position
             trade = self._close_position(
-                state.position,
+                pos,
                 last_close,
                 last_ts.isoformat(),
-                len(df) - 1,
+                eod_bar,
                 "eod",
                 p,
                 commission_bps,
@@ -333,6 +366,24 @@ class ORBEngine:
             )
             closed_trades.append(trade)
             equity += trade.pnl
+
+            et_dt_eod = last_ts.to_pydatetime().astimezone(_ET)
+            events.append(
+                {
+                    "type": "position_closed",
+                    "bar_index": eod_bar,
+                    "ts": last_ts.isoformat(),
+                    "session_date": et_dt_eod.date().isoformat(),
+                    "phase": ORBPhase.EXIT.value,
+                    "schema_version": ORB_EVENT_SCHEMA_VERSION,
+                    "exit_reason": "eod",
+                    "exit_price": last_close,
+                    "pnl": trade.pnl,
+                    "side": pos.side,
+                    "entry_bar": pos.entry_bar,
+                    "exit_bar": eod_bar,
+                }
+            )
             state.position = None
 
         # Contract validation (runs under assert — free in production with -O)
@@ -485,12 +536,30 @@ class ORBEngine:
         risk_points = abs(entry_price - stop)
 
         if risk_points < 1e-9:
+            evt = _evt_base("gate_rejected", ORBPhase.ENTRY)
+            evt.update(
+                {
+                    "gate_name": "zero_risk",
+                    "detail": "Risk points too small for position sizing",
+                    "direction": direction,
+                }
+            )
+            events.append(evt)
             return False
 
         target = self._compute_target(entry_price, direction, risk_points, p)
         size = self._compute_size(equity, risk_points, p)
 
         if size <= 0:
+            evt = _evt_base("gate_rejected", ORBPhase.ENTRY)
+            evt.update(
+                {
+                    "gate_name": "zero_size",
+                    "detail": "Position size rounded to zero",
+                    "direction": direction,
+                }
+            )
+            events.append(evt)
             return False
 
         state.position = ORBPosition(

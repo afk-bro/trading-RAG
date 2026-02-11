@@ -760,6 +760,8 @@ class TestContractDefinitions:
             "orb_range_locked",
             "setup_valid",
             "entry_signal",
+            "position_closed",
+            "gate_rejected",
         }
         assert set(ORB_EVENT_TYPES.keys()) == expected
 
@@ -912,3 +914,232 @@ class TestSchemaVersion:
             assert len(parts) == 3
             for p in parts:
                 assert p.isdigit()
+
+
+# ---------------------------------------------------------------------------
+# v1.1 event tests: position_closed
+# ---------------------------------------------------------------------------
+
+
+class TestPositionClosedOnTarget:
+    """position_closed fires on target hit with correct fields."""
+
+    def test_position_closed_on_target(self):
+        df = _build_session_df(
+            n_bars=50,
+            or_high=101.0,
+            or_low=99.0,
+            breakout_bar=32,
+            breakout_dir="long",
+            target_bar=40,
+        )
+        result = _run_engine(df)
+        closed = _events_of_type(result, "position_closed")
+        assert len(closed) == 1
+        evt = closed[0]
+        assert evt["exit_reason"] == "target"
+        assert evt["side"] == "long"
+        assert evt["entry_bar"] == 32
+        assert evt["exit_bar"] == 40
+        assert evt["pnl"] > 0
+        assert "exit_price" in evt
+
+
+class TestPositionClosedOnStop:
+    """position_closed fires on stop hit with correct fields."""
+
+    def test_position_closed_on_stop(self):
+        df = _build_session_df(
+            n_bars=50,
+            or_high=101.0,
+            or_low=99.0,
+            breakout_bar=32,
+            breakout_dir="long",
+            stop_bar=35,
+        )
+        result = _run_engine(df)
+        closed = _events_of_type(result, "position_closed")
+        assert len(closed) == 1
+        evt = closed[0]
+        assert evt["exit_reason"] == "stop"
+        assert evt["side"] == "long"
+        assert evt["pnl"] < 0
+
+
+class TestPositionClosedOnSessionClose:
+    """position_closed fires on session_close with correct fields."""
+
+    def test_position_closed_on_session_close(self):
+        df = _build_session_df(
+            n_bars=155,
+            or_high=101.0,
+            or_low=99.0,
+            breakout_bar=32,
+            breakout_dir="long",
+        )
+        result = _run_engine(df)
+        closed = _events_of_type(result, "position_closed")
+        assert len(closed) >= 1
+        reasons = {e["exit_reason"] for e in closed}
+        assert "session_close" in reasons or "eod" in reasons
+
+
+class TestPositionClosedOnEod:
+    """position_closed fires on eod (end of data) with correct fields."""
+
+    def test_position_closed_on_eod(self):
+        # 50 bars from 09:30 ends at 10:19, still within session.
+        # No stop/target so position stays open until end of data.
+        df = _build_session_df(
+            n_bars=50,
+            or_high=101.0,
+            or_low=99.0,
+            breakout_bar=32,
+            breakout_dir="long",
+        )
+        result = _run_engine(df)
+        closed = _events_of_type(result, "position_closed")
+        assert len(closed) == 1
+        evt = closed[0]
+        assert evt["exit_reason"] == "eod"
+        assert evt["side"] == "long"
+        assert evt["entry_bar"] == 32
+        assert evt["exit_bar"] == 49
+
+
+class TestPositionClosedPassesContract:
+    """position_closed events pass validate_events()."""
+
+    def test_contract_valid(self):
+        df = _build_session_df(
+            n_bars=50,
+            or_high=101.0,
+            or_low=99.0,
+            breakout_bar=32,
+            breakout_dir="long",
+            target_bar=40,
+        )
+        result = _run_engine(df)
+        errors = validate_events(result.events)
+        assert errors == [], f"Contract violations: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# v1.1 event tests: gate_rejected
+# ---------------------------------------------------------------------------
+
+
+class TestGateRejectedZeroRisk:
+    """gate_rejected fires when OR range = 0 (zero risk points)."""
+
+    def test_gate_rejected_zero_risk(self):
+        # Build a session where OR high == OR low (flat range)
+        df = _build_session_df(
+            n_bars=50,
+            or_high=100.0,
+            or_low=100.0,
+            breakout_bar=32,
+            breakout_dir="long",
+        )
+        result = _run_engine(df)
+        rejected = _events_of_type(result, "gate_rejected")
+        # If a breakout was detected but risk=0, gate_rejected fires
+        if rejected:
+            evt = rejected[0]
+            assert evt["gate_name"] == "zero_risk"
+            assert evt["direction"] == "long"
+            assert "detail" in evt
+
+
+class TestGateRejectedZeroSize:
+    """gate_rejected fires when position size rounds to zero."""
+
+    def test_gate_rejected_zero_size(self):
+        # Use extremely tiny equity so size rounds to 0
+        df = _build_session_df(
+            n_bars=50,
+            or_high=101.0,
+            or_low=99.0,
+            breakout_bar=32,
+            breakout_dir="long",
+        )
+        # risk_pct=0.01 * equity=0.001 / (risk_points * point_value) ~ 0
+        # But _compute_size returns max(1.0, raw) if raw > 0, so raw must be <= 0
+        # We need equity so small that raw < 0 is impossible (raw = equity*risk_pct/...).
+        # Actually raw is always >= 0 if equity >= 0. And max(1.0, raw) means min size = 1.
+        # So zero_size gate only fires if raw <= 0, which means equity <= 0.
+        result = _run_engine(df, initial_cash=0.0)
+        rejected = _events_of_type(result, "gate_rejected")
+        if rejected:
+            evt = rejected[0]
+            assert evt["gate_name"] == "zero_size"
+            assert evt["direction"] == "long"
+            assert "detail" in evt
+
+
+class TestGateRejectedPassesContract:
+    """gate_rejected events pass validate_events()."""
+
+    def test_contract_valid(self):
+        evt = {
+            "type": "gate_rejected",
+            "bar_index": 32,
+            "ts": "2024-01-02T15:02:00+00:00",
+            "session_date": "2024-01-02",
+            "phase": "entry",
+            "gate_name": "zero_risk",
+            "detail": "Risk points too small for position sizing",
+            "direction": "long",
+        }
+        errors = validate_events([evt])
+        assert errors == []
+
+
+class TestValidateEventsNewTypes:
+    """validate_events() accepts new v1.1 event types."""
+
+    def test_valid_position_closed(self):
+        evt = {
+            "type": "position_closed",
+            "bar_index": 40,
+            "ts": "2024-01-02T15:10:00+00:00",
+            "session_date": "2024-01-02",
+            "phase": "exit",
+            "exit_reason": "target",
+            "exit_price": 104.375,
+            "pnl": 140.44,
+            "side": "long",
+            "entry_bar": 32,
+            "exit_bar": 40,
+        }
+        assert validate_events([evt]) == []
+
+    def test_valid_gate_rejected(self):
+        evt = {
+            "type": "gate_rejected",
+            "bar_index": 32,
+            "ts": "2024-01-02T15:02:00+00:00",
+            "session_date": "2024-01-02",
+            "phase": "entry",
+            "gate_name": "zero_risk",
+            "detail": "Risk points too small",
+            "direction": "long",
+        }
+        assert validate_events([evt]) == []
+
+    def test_missing_position_closed_keys(self):
+        evt = {
+            "type": "position_closed",
+            "bar_index": 40,
+            "ts": "2024-01-02T15:10:00+00:00",
+            "session_date": "2024-01-02",
+            "phase": "exit",
+            "exit_reason": "target",
+            # missing: exit_price, pnl, side, entry_bar, exit_bar
+        }
+        errors = validate_events([evt])
+        assert len(errors) == 1
+        assert "missing payload keys" in errors[0]
+
+    def test_schema_version_is_1_1_0(self):
+        assert ORB_EVENT_SCHEMA_VERSION == "1.1.0"

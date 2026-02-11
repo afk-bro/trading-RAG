@@ -192,7 +192,34 @@ NY_AM_ORB_V1 = StrategyPreset(
 )
 
 
+NY_AM_ORB_V1_1 = StrategyPreset(
+    slug="ny-am-orb-v1.1",
+    name="NY AM ORB v1.1",
+    description=(
+        "Opening Range Breakout during the New York AM session. "
+        "Waits for the opening range to form, then trades confirmed "
+        "breakouts with a stop at the opposite OR level. "
+        "v1.1 adds position_closed and gate_rejected events."
+    ),
+    engine="orb",
+    param_schema=NY_AM_ORB_V1.param_schema,
+    default_params=dict(NY_AM_ORB_V1.default_params),
+    events=[
+        "orb_range_update",
+        "orb_range_locked",
+        "setup_valid",
+        "entry_signal",
+        "position_closed",
+        "gate_rejected",
+    ],
+    tags=dict(NY_AM_ORB_V1.tags),
+    version="1.1",
+    schema_version="1.1.0",
+)
+
+
 # All available presets keyed by slug
 PRESETS: dict[str, StrategyPreset] = {
     NY_AM_ORB_V1.slug: NY_AM_ORB_V1,
+    NY_AM_ORB_V1_1.slug: NY_AM_ORB_V1_1,
 }
