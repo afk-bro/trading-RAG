@@ -295,8 +295,8 @@ The internal ops alerts system (`app/services/ops_alerts/`) provides business-le
 | `health_degraded` | HIGH/CRITICAL | System health is degraded or in error state | Health snapshot |
 | `weak_coverage:P1` | HIGH | P1 priority coverage gaps exist | Coverage stats |
 | `weak_coverage:P2` | MEDIUM | P2 priority coverage gaps exist | Coverage stats |
-| `drift_spike` | MEDIUM | Match quality drifted from baseline | Match run stats |
-| `confidence_drop` | MEDIUM | Match confidence below threshold | Match run stats |
+| `drift_spike` | MEDIUM | Match quality drifted from baseline | Strategy intel snapshots |
+| `confidence_drop` | MEDIUM | Match confidence below threshold | Strategy intel snapshots |
 | `strategy_confidence_low` | MEDIUM/HIGH | Strategy version confidence score low | Strategy intel |
 
 ### Strategy Confidence Alert (`strategy_confidence_low`)

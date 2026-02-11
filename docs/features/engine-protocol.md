@@ -87,7 +87,7 @@ Semver: `MAJOR.MINOR.PATCH`
 | Change | Bump | Example |
 |--------|------|---------|
 | Optional key added to existing event | None | Adding `latency_ms` to `entry_signal` |
-| New event type added | Minor | Adding `position_closed` type |
+| New event type added | Minor | Adding `position_closed` type (done in ORB v1.1) |
 | Required key added to existing type | Major | Adding required `slippage` to `entry_signal` |
 | Required key removed or renamed | Major | Renaming `price` to `fill_price` |
 | Semantic change to existing key | Major | Changing `pnl` from gross to net |
@@ -232,7 +232,7 @@ ORB v1 is the canonical example:
 - Engine: `app/services/backtest/engines/orb/engine.py`
 - Contract: `app/services/backtest/engines/orb/contracts.py`
 - Types: `app/services/backtest/engines/orb/types.py`
-- Preset: `app/strategies/presets.py` (`NY_AM_ORB_V1`)
+- Preset: `app/strategies/presets.py` (`NY_AM_ORB_V1`, `NY_AM_ORB_V1_1`)
 - Golden tests: `tests/golden/test_orb_golden.py`
 - Live smoke: `tests/golden/test_orb_live_smoke.py`
 - Feature doc: `docs/features/orb-engine.md`

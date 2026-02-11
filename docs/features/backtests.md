@@ -380,9 +380,11 @@ Dedicated backtest engine for intraday Opening Range Breakout strategies. See `d
 
 **Engine**: `app/services/backtest/engines/orb/` (engine, contracts, types)
 
-**Preset**: `NY_AM_ORB_V1` — frozen at `version="1.0"`, `schema_version="1.0.0"`. Do not mutate; clone to `ny-am-orb-v1.1` for changes.
+**Presets**:
+- `NY_AM_ORB_V1` — frozen at `version="1.0"`, `schema_version="1.0.0"`. Do not mutate.
+- `NY_AM_ORB_V1_1` — `version="1.1"`, `schema_version="1.1.0"`. Adds `position_closed` and `gate_rejected` events.
 
-**Event types**: `orb_range_update`, `orb_range_locked`, `setup_valid`, `entry_signal`. All events carry `schema_version` and pass `validate_events()` contract validation.
+**Event types**: `orb_range_update`, `orb_range_locked`, `setup_valid`, `entry_signal`, `position_closed`, `gate_rejected`. All events carry `schema_version` and pass `validate_events()` contract validation.
 
 **State machine**: PREMARKET → OR_BUILD → BREAKOUT_SCAN → ENTRY → TRADE_MGMT → EXIT → LOCKOUT
 

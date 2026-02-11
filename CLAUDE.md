@@ -159,7 +159,8 @@ pytest -m slow -v                            # Slow tests (large data, skipped b
 
 See `docs/features/ops.md` for full details.
 
-- `require_admin_token()` - Admin endpoint protection
+- `require_auth("admin")` - Router-level JWT + role-based access on admin-tier routers
+- `require_admin_token()` - Per-endpoint admin protection on `/admin/*` and `/debug/*`
 - `RateLimiter`, `WorkspaceSemaphore` - Rate/concurrency limiting
 - Prometheus alerts in `ops/prometheus/rules/`
 - Runbooks in `docs/ops/runbooks.md`
@@ -169,7 +170,7 @@ See `docs/features/ops.md` for full details.
 Detailed documentation for subsystems:
 
 - `docs/features/backtests.md` - Backtest tuning, WFO, test generator, pre-entry guards, coaching (process score, loss attribution, run lineage)
-- `docs/features/orb-engine.md` - ORB v1 engine specification, event contract, v1.1 roadmap
+- `docs/features/orb-engine.md` - ORB engine specification, event contract, v1.0 + v1.1 events
 - `docs/features/engine-protocol.md` - Reference engine protocol (interface, events, versioning, golden fixtures, consumer checklist)
 - `docs/features/pine-scripts.md` - Pine Script registry, ingest, auto-strategy
 - `docs/features/execution.md` - Paper execution, strategy runner

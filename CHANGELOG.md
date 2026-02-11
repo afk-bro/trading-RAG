@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **ORB Engine v1.1** — `position_closed` and `gate_rejected` events, schema 1.1.0, `NY_AM_ORB_V1_1` preset
+- **Alert analytics integration** — `_fetch_buckets()` queries `strategy_intel_snapshots` for drift/confidence evaluation
+- JWT `require_auth("admin")` at router level on all admin-tier routers; redundant per-endpoint `require_admin_token` removed
+
 ### Changed
 - Extracted dashboards SQL into `DashboardsRepository` layer
 - Consolidated duplicate `fmtPct`, `fmtNum`, `fmtPnl` into `@/lib/chart-utils`

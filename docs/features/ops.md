@@ -22,7 +22,8 @@ Single-page operational health view for "what's broken?" diagnostics.
 
 ## Security (`app/deps/security.py`)
 
-- `require_admin_token()` - Admin endpoint protection (hmac.compare_digest)
+- `require_auth("admin")` - Router-level JWT + role-based access control on admin-tier routers
+- `require_admin_token()` - Per-endpoint admin protection on `/admin/*` and `/debug/*` (hmac.compare_digest)
 - `require_workspace_access()` - Multi-tenant authorization stub
 - `RateLimiter` - Sliding window rate limiting
 - `WorkspaceSemaphore` - Per-workspace concurrency caps

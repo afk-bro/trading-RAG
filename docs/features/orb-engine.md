@@ -17,7 +17,7 @@ All events carry common keys: `type`, `bar_index`, `ts`, `session_date`, `phase`
 
 ### Schema Versioning
 
-- Current schema version: **1.0.0**
+- v1.0 schema version: **1.0.0** (see v1.1 below for **1.1.0**)
 - Events carry `schema_version` on every record
 - Contract validation via `validate_events()` in `contracts.py`
 
@@ -40,11 +40,13 @@ Golden fixture at `tests/golden/fixtures/orb_v1_golden_run.json` captures exact 
 and trade output for a deterministic synthetic session. If the fixture breaks, ORB
 semantics changed.
 
-## v1.1 Roadmap
+## v1.1 (current)
+
+Schema bumped from 1.0.0 → 1.1.0. Preset: `NY_AM_ORB_V1_1` (slug `ny-am-orb-v1.1`).
 
 ### New Event: `position_closed`
 
-Fires when a position exits (target, stop, session_close, eod).
+Emitted when a position exits (target, stop, session_close, eod).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -55,16 +57,15 @@ Fires when a position exits (target, stop, session_close, eod).
 | `entry_bar` | int | Bar index of entry |
 | `exit_bar` | int | Bar index of exit |
 
-Makes replay and coaching cleaner — consumers can react to position lifecycle
-without parsing the trades list.
+Consumers can react to position lifecycle without parsing the trades list.
 
 ### New Event: `gate_rejected`
 
-Fires when a pre-entry gate filters out a candidate trade.
+Emitted when a pre-entry gate filters out a candidate trade.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `gate_name` | string | Gate identifier (e.g. `"regime_filter"`, `"max_drawdown"`) |
+| `gate_name` | string | Gate identifier (e.g. `"zero_risk"`, `"zero_size"`) |
 | `detail` | string | Human-readable rejection reason |
 | `direction` | string | The rejected direction |
 
