@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.repositories.alerts import AlertsRepository
 from app.services.alerts.evaluators import RuleEvaluator
 from app.services.alerts.models import (
+    AlertBucket,
     ConfidenceDropConfig,
     DriftSpikeConfig,
     RuleType,
@@ -16,6 +17,18 @@ from app.services.alerts.models import (
 from app.services.alerts.transitions import AlertTransitionManager
 
 logger = structlog.get_logger(__name__)
+
+_TIMEFRAME_BUCKET_CONFIGS: dict[str, dict[str, Any]] = {
+    "1h": {"trunc": "hour", "lookback": "48 hours", "min_buckets": 4},
+    "4h": {"trunc": "hour", "lookback": "7 days", "min_buckets": 4},
+    "1d": {"trunc": "day", "lookback": "30 days", "min_buckets": 4},
+    "1w": {"trunc": "week", "lookback": "90 days", "min_buckets": 4},
+}
+
+
+def _timeframe_to_bucket_config(timeframe: str) -> dict[str, Any]:
+    """Map alert timeframe to SQL date_trunc interval and lookback."""
+    return _TIMEFRAME_BUCKET_CONFIGS.get(timeframe, _TIMEFRAME_BUCKET_CONFIGS["1d"])
 
 
 class AlertEvaluatorJob:
@@ -217,11 +230,48 @@ class AlertEvaluatorJob:
         strategy_entity_id: UUID,
         regime_key: str,
         timeframe: str,
-    ) -> list:
-        """
-        Fetch drift/confidence bucket data.
+    ) -> list[AlertBucket]:
+        """Fetch drift/confidence bucket data from strategy intel snapshots."""
+        bucket_cfg = _timeframe_to_bucket_config(timeframe)
 
-        TODO: Integrate with existing analytics queries.
-        """
-        # Placeholder - integrate with existing regime drift queries
-        return []
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    date_trunc($1, sis.as_of_ts) AS bucket_start,
+                    AVG(sis.confidence_score) AS avg_confidence,
+                    COUNT(*) FILTER (WHERE sis.regime != $2) AS drift_count,
+                    COUNT(*) AS total_count
+                FROM strategy_intel_snapshots sis
+                JOIN strategy_versions sv ON sv.id = sis.strategy_version_id
+                WHERE sv.strategy_entity_id = $3
+                  AND sis.workspace_id = $4
+                  AND sis.as_of_ts >= NOW() - $5::interval
+                GROUP BY bucket_start
+                ORDER BY bucket_start ASC
+                """,
+                bucket_cfg["trunc"],
+                regime_key,
+                strategy_entity_id,
+                workspace_id,
+                bucket_cfg["lookback"],
+            )
+
+        if not rows:
+            return []
+
+        buckets: list[AlertBucket] = []
+        for row in rows:
+            total = row["total_count"]
+            drift_count = row["drift_count"]
+            drift_score = drift_count / total if total > 0 else 0.0
+            avg_conf = (
+                float(row["avg_confidence"])
+                if row["avg_confidence"] is not None
+                else 0.0
+            )
+            buckets.append(
+                AlertBucket(drift_score=drift_score, avg_confidence=avg_conf)
+            )
+
+        return buckets

@@ -101,6 +101,14 @@ class AlertEvent(BaseModel):
 
 
 @dataclass
+class AlertBucket:
+    """Aggregated drift/confidence data for a time bucket."""
+
+    drift_score: float
+    avg_confidence: float
+
+
+@dataclass
 class EvalResult:
     """Result of rule evaluation."""
 
