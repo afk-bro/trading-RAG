@@ -23,7 +23,7 @@ from app.schemas import (
     IntentEvaluateResponse,
 )
 from app.services.policy_engine import PolicyEngine
-from app.deps.security import require_admin_token, require_auth
+from app.deps.security import require_auth
 
 
 router = APIRouter(
@@ -164,7 +164,6 @@ async def _journal_events(
 )
 async def evaluate_intent(
     request: IntentEvaluateRequest,
-    _: None = Depends(require_admin_token),
 ) -> IntentEvaluateResponse:
     """
     Evaluate a trade intent against policy rules.
@@ -225,7 +224,6 @@ async def evaluate_intent(
     },
 )
 async def list_rules(
-    _: None = Depends(require_admin_token),
 ) -> dict:
     """
     List all active policy rules.

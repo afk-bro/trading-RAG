@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import Settings, get_settings
-from app.deps.security import require_admin_token, require_auth
+from app.deps.security import require_auth
 from app.routers.pine import match_pine_scripts
 from app.routers.youtube import (
     fetch_transcript,
@@ -110,7 +110,6 @@ async def check_kb_for_video(
 async def youtube_match_pine(
     request: YouTubeMatchPineRequest,
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_admin_token),
 ) -> YouTubeMatchPineResponse:
     """
     Match YouTube video content to Pine scripts.

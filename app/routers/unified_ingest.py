@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.config import Settings, get_settings
-from app.deps.security import require_admin_token, require_auth
+from app.deps.security import require_auth
 from app.schemas import IngestResponse, SourceType
 from app.services.ingest import DetectedSource, detect_source_type
 
@@ -47,7 +47,6 @@ async def unified_ingest(
         None, description="File upload (.pdf, .txt, .md)"
     ),
     idempotency_key: Optional[str] = Form(None, description="Idempotency key"),
-    _: bool = Depends(require_admin_token),
     settings: Settings = Depends(get_settings),
 ) -> UnifiedIngestResponse:
     """

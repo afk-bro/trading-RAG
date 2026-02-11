@@ -30,7 +30,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.config import Settings, get_settings
 from app.deps.security import (
-    require_admin_token,
     require_auth,
     get_current_user,
     require_workspace_access,
@@ -1523,7 +1522,6 @@ Options:
 async def ingest(
     request: IngestRequest,
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_admin_token),
 ) -> IngestResponse:
     """Ingest trials from tune runs."""
     request_id = str(uuid.uuid4())

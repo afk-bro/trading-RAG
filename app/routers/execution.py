@@ -16,7 +16,6 @@ from app.schemas import (
 )
 from app.deps.security import (
     check_workspace_consistency,
-    require_admin_token,
     require_auth,
 )
 from app.services.execution.factory import get_paper_broker
@@ -75,7 +74,6 @@ def _get_version_repo() -> StrategyVersionsRepository:
 )
 async def execute_intent(
     request: ExecutionRequest,
-    _: None = Depends(require_admin_token),
 ) -> ExecutionResult:
     """
     Execute a trade intent.
@@ -181,7 +179,6 @@ async def execute_intent(
 )
 async def get_paper_state(
     workspace_id: UUID,
-    _: None = Depends(require_admin_token),
 ) -> PaperState:
     """
     Get current paper trading state for workspace.
@@ -200,7 +197,6 @@ async def get_paper_state(
 )
 async def get_paper_positions(
     workspace_id: UUID,
-    _: None = Depends(require_admin_token),
 ) -> list[PaperPosition]:
     """
     Get open paper positions for workspace.
@@ -218,7 +214,6 @@ async def get_paper_positions(
 )
 async def reconcile_paper_state(
     workspace_id: UUID,
-    _: None = Depends(require_admin_token),
 ) -> ReconciliationResult:
     """
     Reconcile paper state from journal.
@@ -257,7 +252,6 @@ async def reconcile_paper_state(
 )
 async def reset_paper_state(
     workspace_id: UUID,
-    _: None = Depends(require_admin_token),
 ) -> dict:
     """
     Reset paper state (development only).

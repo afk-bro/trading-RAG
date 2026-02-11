@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.deps.security import require_admin_token, require_auth
+from app.deps.security import require_auth
 from app.repositories.strategy_intel import StrategyIntelRepository, IntelSnapshot
 from app.repositories.strategy_versions import StrategyVersionsRepository
 from app.services.intel import IntelRunner
@@ -175,7 +175,6 @@ async def get_preset(slug: str) -> dict[str, Any]:
 async def instantiate_preset(
     slug: str,
     request: InstantiatePresetRequest,
-    _: bool = Depends(require_admin_token),
 ) -> dict[str, Any]:
     """Create a strategy and draft version from a preset."""
     preset = PRESETS.get(slug)
@@ -253,7 +252,6 @@ async def instantiate_preset(
 async def get_strategy_cards(
     workspace_id: UUID = Query(..., description="Workspace ID"),
     ids: str = Query(..., description="Comma-separated strategy UUIDs"),
-    _: bool = Depends(require_admin_token),
 ) -> dict[str, StrategyCard]:
     """
     Bulk fetch strategy cards by IDs.
@@ -301,7 +299,6 @@ async def list_strategies(
     q: Optional[str] = Query(None, description="Search name/tags"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyListResponse:
     """List strategies with filters."""
     pool = _get_pool()
@@ -337,7 +334,6 @@ async def list_strategies(
 async def get_strategy(
     strategy_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyDetailResponse:
     """Get strategy by ID."""
     pool = _get_pool()
@@ -359,7 +355,6 @@ async def get_strategy(
 )
 async def create_strategy(
     request: StrategyCreateRequest,
-    _: bool = Depends(require_admin_token),
 ) -> StrategyDetailResponse:
     """Create a new strategy."""
     pool = _get_pool()
@@ -396,7 +391,6 @@ async def update_strategy(
     strategy_id: UUID,
     request: StrategyUpdateRequest,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyDetailResponse:
     """Update strategy fields."""
     pool = _get_pool()
@@ -453,7 +447,6 @@ async def get_candidates_by_intent(
     timeframes: Optional[str] = Query(None, description="Comma-separated timeframes"),
     topics: Optional[str] = Query(None, description="Comma-separated topics"),
     limit: int = Query(10, ge=1, le=50, description="Max results"),
-    _: bool = Depends(require_admin_token),
 ) -> list[CandidateStrategy]:
     """Find candidate strategies by intent tags."""
     pool = _get_pool()
@@ -556,7 +549,6 @@ async def create_version(
     strategy_id: UUID,
     request: StrategyVersionCreateRequest,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyVersionResponse:
     """Create a new strategy version in draft state."""
     pool = _get_pool()
@@ -607,7 +599,6 @@ async def list_versions(
     state: Optional[str] = Query(None, description="Filter by state"),
     limit: int = Query(50, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyVersionListResponse:
     """List versions for a strategy."""
     pool = _get_pool()
@@ -647,7 +638,6 @@ async def get_version(
     strategy_id: UUID,
     version_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyVersionResponse:
     """Get a specific version by ID."""
     pool = _get_pool()
@@ -677,7 +667,6 @@ async def activate_version(
     version_id: UUID,
     request: VersionTransitionRequest,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyVersionResponse:
     """Activate a version (transitions from draft/paused to active)."""
     pool = _get_pool()
@@ -720,7 +709,6 @@ async def pause_version(
     version_id: UUID,
     request: VersionTransitionRequest,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyVersionResponse:
     """Pause an active version."""
     pool = _get_pool()
@@ -763,7 +751,6 @@ async def retire_version(
     version_id: UUID,
     request: VersionTransitionRequest,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> StrategyVersionResponse:
     """Retire a version (terminal state)."""
     pool = _get_pool()
@@ -806,7 +793,6 @@ async def get_version_transitions(
     version_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
     limit: int = Query(50, ge=1, le=100, description="Max results"),
-    _: bool = Depends(require_admin_token),
 ) -> list[VersionTransitionResponse]:
     """Get state transition history for a version."""
     pool = _get_pool()
@@ -875,7 +861,6 @@ async def get_latest_intel(
     strategy_id: UUID,
     version_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
-    _: bool = Depends(require_admin_token),
 ) -> IntelSnapshotResponse:
     """Get the latest intel snapshot for a strategy version."""
     pool = _get_pool()
@@ -915,7 +900,6 @@ async def list_intel_snapshots(
     cursor: Optional[datetime] = Query(
         None, description="Cursor (as_of_ts) for pagination"
     ),
-    _: bool = Depends(require_admin_token),
 ) -> IntelSnapshotListResponse:
     """List intel snapshots for a strategy version (newest first)."""
     pool = _get_pool()
@@ -969,7 +953,6 @@ async def recompute_intel(
     version_id: UUID,
     workspace_id: UUID = Query(..., description="Workspace ID"),
     force: bool = Query(False, description="Force even if inputs unchanged"),
-    _: bool = Depends(require_admin_token),
 ) -> IntelSnapshotResponse:
     """Recompute intel for a strategy version."""
     pool = _get_pool()

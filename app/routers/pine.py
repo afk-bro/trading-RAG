@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
-from app.deps.security import require_admin_token, require_auth
+from app.deps.security import require_auth
 from app.schemas import (
     PineBuildStats,
     PineChunkItem,
@@ -149,7 +149,6 @@ def derive_lint_path(registry_path: Path) -> Path | None:
 async def ingest_pine_registry(
     request: PineIngestRequest,
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_admin_token),
 ) -> PineIngestResponse:
     """
     Ingest Pine Script files from a registry file.
@@ -325,7 +324,6 @@ async def ingest_pine_registry(
 async def rebuild_and_ingest_pine(
     request: PineRebuildAndIngestRequest,
     settings: Settings = Depends(get_settings),
-    _: bool = Depends(require_admin_token),
 ) -> PineRebuildAndIngestResponse:
     """
     Rebuild Pine registry from source files and ingest into RAG.
@@ -603,7 +601,6 @@ async def list_pine_scripts(
     order_dir: Literal["asc", "desc"] = Query("desc", description="Sort direction"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    _: bool = Depends(require_admin_token),
 ) -> PineScriptListResponse:
     """List Pine scripts with filtering and pagination."""
     from app.routers.ingest import _db_pool
@@ -732,7 +729,6 @@ async def match_pine_scripts(
         None, description="Filter by lint status (true=no errors)"
     ),
     top_k: int = Query(10, ge=1, le=50, description="Max results to return"),
-    _: bool = Depends(require_admin_token),
 ) -> PineMatchResponse:
     """
     Search Pine scripts with semantic matching.
@@ -943,7 +939,6 @@ async def lookup_pine_script(
     rel_path: str = Query(
         ..., description="Relative file path (e.g., 'macd_mean_reversion.pine')"
     ),
-    _: bool = Depends(require_admin_token),
 ) -> PineScriptLookupResponse:
     """Lookup a Pine script by its relative path."""
     import json
@@ -1018,7 +1013,6 @@ async def get_pine_script(
     chunk_limit: int = Query(50, ge=1, le=200, description="Max chunks to return"),
     chunk_offset: int = Query(0, ge=0, description="Chunk pagination offset"),
     include_lint_findings: bool = Query(False, description="Include lint findings"),
-    _: bool = Depends(require_admin_token),
 ) -> PineScriptDetailResponse:
     """Get Pine script details by document ID."""
     from app.routers.ingest import _db_pool

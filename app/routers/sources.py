@@ -7,7 +7,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.deps.security import require_admin_token, require_auth
+from app.deps.security import require_auth
 from app.schemas import (
     SourceDetailResponse,
     SourceListItem,
@@ -66,7 +66,6 @@ async def list_sources(
     order_dir: Literal["asc", "desc"] = Query("desc", description="Sort direction"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    _: bool = Depends(require_admin_token),
 ) -> SourceListResponse:
     """List sources with filtering and pagination."""
     from app.routers.ingest import _db_pool
@@ -190,7 +189,6 @@ async def get_source(
     include_health: bool = Query(False, description="Include health status"),
     chunk_limit: int = Query(50, ge=1, le=200, description="Chunks per page"),
     chunk_offset: int = Query(0, ge=0, description="Chunk pagination offset"),
-    _: bool = Depends(require_admin_token),
 ) -> SourceDetailResponse:
     """Get source details with optional chunks."""
     from app.routers.ingest import _db_pool
@@ -329,7 +327,6 @@ async def get_source_by_video_id(
     video_id: str,
     workspace_id: UUID = Query(..., description="Workspace ID"),
     include_chunks: bool = Query(False, description="Include chunk content"),
-    _: bool = Depends(require_admin_token),
 ) -> SourceDetailResponse:
     """Get YouTube source by video ID."""
     from app.routers.ingest import _db_pool
