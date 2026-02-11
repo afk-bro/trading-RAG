@@ -7,6 +7,8 @@ from typing import Optional
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.deps.security import require_auth
+
 from app.config import Settings, get_settings
 from app.schemas import (
     ChunkResult,
@@ -38,7 +40,7 @@ from app.services.reranker import (
     get_reranker,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("member"))])
 logger = structlog.get_logger(__name__)
 
 # Global connection pool and clients (set during app startup)

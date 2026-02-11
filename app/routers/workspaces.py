@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.lifespan import get_db_pool
-from app.deps.security import check_workspace_consistency
+from app.deps.security import check_workspace_consistency, require_auth
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("member"))])
 
 
 # ---------------------------------------------------------------------------

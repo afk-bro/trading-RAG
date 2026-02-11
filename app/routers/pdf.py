@@ -8,6 +8,8 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
+from app.deps.security import require_auth
+
 from app.config import Settings, get_settings
 from app.schemas import PDFIngestResponse, SourceType
 from app.services.chunker import Chunk, Chunker
@@ -18,7 +20,7 @@ from app.services.pdf_extractor import (
     get_page_markers,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 # Import the ingest pipeline from main ingest router

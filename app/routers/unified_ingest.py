@@ -8,11 +8,11 @@ import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.config import Settings, get_settings
-from app.deps.security import require_admin_token
+from app.deps.security import require_admin_token, require_auth
 from app.schemas import IngestResponse, SourceType
 from app.services.ingest import DetectedSource, detect_source_type
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 

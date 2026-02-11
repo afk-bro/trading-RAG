@@ -10,8 +10,10 @@ from uuid import UUID
 
 import structlog
 from asyncpg.exceptions import UniqueViolationError
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+
+from app.deps.security import require_auth
 
 from app.repositories.recommendation_records import (
     RecommendationRecordsRepository,
@@ -19,7 +21,11 @@ from app.repositories.recommendation_records import (
     RecordStatus,
 )
 
-router = APIRouter(prefix="/forward", tags=["forward-metrics"])
+router = APIRouter(
+    prefix="/forward",
+    tags=["forward-metrics"],
+    dependencies=[Depends(require_auth("member"))],
+)
 logger = structlog.get_logger(__name__)
 
 # Global connection pool (set during app startup)

@@ -10,12 +10,14 @@ import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.deps.security import require_auth
+
 from app.config import Settings, get_settings
 from app.routers.ingest import compute_content_hash, ingest_pipeline
 from app.schemas import SourceType, YouTubeIngestRequest, YouTubeIngestResponse
 from app.services.chunker import Chunker, normalize_transcript
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 

@@ -11,7 +11,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.lifespan import get_db_pool
-from app.deps.security import check_workspace_consistency
+from app.deps.security import check_workspace_consistency, require_auth
 from app.repositories.dashboards import DashboardsRepository
 from app.repositories.run_events import RunEventsRepository
 from app.repositories.trade_events import EventFilters, TradeEventsRepository
@@ -33,7 +33,10 @@ _log = structlog.get_logger(__name__)
 router = APIRouter(
     prefix="/dashboards",
     tags=["dashboards"],
-    dependencies=[Depends(check_workspace_consistency)],
+    dependencies=[
+        Depends(check_workspace_consistency),
+        Depends(require_auth("member")),
+    ],
 )
 
 

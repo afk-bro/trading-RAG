@@ -3,11 +3,12 @@
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.deps.security import require_auth
 from app.schemas import JobResponse, JobStatus
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("member"))])
 logger = structlog.get_logger(__name__)
 
 # In-memory job store (replace with Redis/DB in production)

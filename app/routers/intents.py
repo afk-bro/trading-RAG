@@ -23,10 +23,14 @@ from app.schemas import (
     IntentEvaluateResponse,
 )
 from app.services.policy_engine import PolicyEngine
-from app.deps.security import require_admin_token
+from app.deps.security import require_admin_token, require_auth
 
 
-router = APIRouter(prefix="/intents", tags=["intents"])
+router = APIRouter(
+    prefix="/intents",
+    tags=["intents"],
+    dependencies=[Depends(require_auth("admin"))],
+)
 logger = structlog.get_logger(__name__)
 
 # Global state (set during app startup)

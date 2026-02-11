@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 from uuid import UUID
 
+import jwt
 import structlog
 from fastapi import Depends, HTTPException, Request, status
 
@@ -310,6 +311,7 @@ class RequestContext:
     workspace_id: Optional[UUID] = None
     role: Optional[str] = None
     is_admin: bool = False
+    is_admin_token: bool = False
 
 
 ROLE_RANK = {"viewer": 1, "member": 2, "admin": 3, "owner": 4}
@@ -327,53 +329,77 @@ def verify_admin_token(token: str) -> bool:
     return hmac.compare_digest(token.encode(), admin_token.encode())
 
 
-async def get_current_user_v2(
-    authorization: Optional[str] = None,
-    x_admin_token: Optional[str] = None,
-) -> RequestContext:
-    """
-    Resolve user identity from JWT or admin token.
-
-    Does NOT resolve workspace - that's separate.
-
-    Args:
-        authorization: Bearer token from Authorization header
-        x_admin_token: Admin token from X-Admin-Token header
-
-    Returns:
-        RequestContext with resolved user identity
-
-    Raises:
-        HTTPException 401: Missing or invalid authentication
-    """
-    # (1) Admin token bypass
+async def get_current_user_v2(request: Request) -> RequestContext:
+    """Resolve user identity from JWT or admin token."""
+    # (1) Admin token via X-Admin-Token header
+    x_admin_token = request.headers.get("X-Admin-Token")
     if x_admin_token:
         if verify_admin_token(x_admin_token):
-            return RequestContext(is_admin=True)
+            return RequestContext(is_admin=True, is_admin_token=True)
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
-    # (2) Require Authorization header
-    if not authorization or not authorization.startswith("Bearer "):
+    # (2) Authorization: Bearer header
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        # (2b) Fallback: admin_token cookie (for admin HTML UI)
+        cookie_token = request.cookies.get("admin_token")
+        if cookie_token and verify_admin_token(cookie_token):
+            return RequestContext(is_admin=True, is_admin_token=True)
         raise HTTPException(status_code=401, detail="Missing authorization header")
 
-    token = authorization.split(" ", 1)[1]
+    token = authorization[7:]  # Strip "Bearer "
 
-    # (3) Validate via Supabase Auth API
+    # (3) Check if bearer token IS the admin token (backward compat)
+    if verify_admin_token(token):
+        return RequestContext(is_admin=True, is_admin_token=True)
+
+    # (4) Local JWT decode
+    from app.config import get_settings
+
+    config = get_settings()
+
+    if not config.supabase_jwt_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="JWT authentication not configured (SUPABASE_JWT_SECRET missing)",
+        )
+
+    issuer = config.supabase_jwt_issuer
+    if not issuer and config.supabase_url:
+        issuer = config.supabase_url.rstrip("/") + "/auth/v1"
+
+    decode_options = {"require": ["exp", "sub"]}
+    decode_kwargs: dict = {
+        "algorithms": ["HS256"],
+        "audience": config.supabase_jwt_audience,
+        "options": decode_options,
+    }
+    if issuer:
+        decode_kwargs["issuer"] = issuer
+
     try:
-        from app.deps.supabase import get_supabase_client
+        payload = jwt.decode(token, config.supabase_jwt_secret, **decode_kwargs)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidIssuerError:
+        raise HTTPException(status_code=401, detail="Invalid token issuer")
+    except jwt.InvalidAudienceError:
+        raise HTTPException(status_code=401, detail="Invalid token audience")
+    except jwt.MissingRequiredClaimError as e:
+        raise HTTPException(status_code=401, detail=f"Missing required claim: {e}")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-        supabase = get_supabase_client()
-        user_response = supabase.auth.get_user(token)
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="Token missing sub claim")
 
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
+    try:
+        user_id = UUID(sub)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=401, detail="Invalid user ID in token")
 
-        return RequestContext(user_id=UUID(user_response.user.id))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning("Auth validation failed", error=str(e))
-        raise HTTPException(status_code=401, detail="Authentication failed")
+    return RequestContext(user_id=user_id)
 
 
 async def require_workspace_access_v2(
@@ -429,6 +455,47 @@ async def require_workspace_access_v2(
         workspace_id=workspace_id,
         role=role,
     )
+
+
+def require_auth(min_role: str = "member"):
+    """Factory: returns a FastAPI dependency that enforces auth + workspace RBAC.
+
+    Usage:
+        router = APIRouter(dependencies=[Depends(require_auth("member"))])
+    """
+
+    async def dependency(request: Request) -> RequestContext:
+        # 1. Authenticate user
+        ctx = await get_current_user_v2(request)
+
+        # 2. Admin token bypasses workspace RBAC
+        if ctx.is_admin:
+            # Still resolve workspace for scoping if available
+            try:
+                ws = get_workspace_ctx(request)
+                ctx.workspace_id = ws.workspace_id
+            except HTTPException:
+                pass  # No workspace context is OK for admin
+            return ctx
+
+        # 3. Resolve workspace context
+        ws = get_workspace_ctx(request)
+
+        # 4. Check workspace membership + role
+        from app.core.lifespan import get_db_pool
+
+        pool = get_db_pool()
+        if not pool:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+
+        return await require_workspace_access_v2(
+            ctx=ctx,
+            workspace_id=ws.workspace_id,
+            min_role=min_role,
+            pool=pool,
+        )
+
+    return dependency
 
 
 # =============================================================================

@@ -6,12 +6,14 @@ from typing import Optional
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from app.deps.security import require_auth
+
 from app.config import Settings, get_settings
 from app.routers.jobs import complete_job, create_job, fail_job, update_job_progress
 from app.schemas import JobStatus, ReembedRequest, ReembedResponse
 from app.services.embedder import OllamaEmbedder
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 # Global connection pool and clients (set during app startup)

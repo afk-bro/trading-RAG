@@ -41,6 +41,18 @@ class Settings(BaseSettings):
         default=None,
         description="Supabase database password for direct PostgreSQL connection",
     )
+    supabase_jwt_secret: Optional[str] = Field(
+        default=None,
+        description="JWT secret for local token validation (from Supabase project settings)",
+    )
+    supabase_jwt_audience: str = Field(
+        default="authenticated",
+        description="Expected JWT audience claim",
+    )
+    supabase_jwt_issuer: Optional[str] = Field(
+        default=None,
+        description="Expected JWT issuer (defaults to supabase_url + '/auth/v1')",
+    )
     database_url: Optional[str] = Field(
         default=None,
         description="Direct PostgreSQL connection URL (overrides Supabase URL construction)",

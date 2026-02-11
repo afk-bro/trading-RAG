@@ -5,7 +5,9 @@ from typing import Any, Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+
+from app.deps.security import require_auth
 from pydantic import BaseModel, Field
 
 from app.repositories.backtests import BacktestRepository
@@ -22,7 +24,11 @@ from app.services.testing import (
 )
 
 
-router = APIRouter(prefix="/testing", tags=["testing"])
+router = APIRouter(
+    prefix="/testing",
+    tags=["testing"],
+    dependencies=[Depends(require_auth("admin"))],
+)
 logger = structlog.get_logger(__name__)
 
 # Global connection pool (set during app startup)

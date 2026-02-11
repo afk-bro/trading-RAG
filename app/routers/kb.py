@@ -5,7 +5,9 @@ from typing import Optional
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from app.deps.security import require_auth
 
 from app.schemas import (
     KBEntityType,
@@ -26,7 +28,11 @@ from app.schemas import (
 )
 from app.services.kb_types import EntityType, ClaimType
 
-router = APIRouter(prefix="/kb", tags=["knowledge-base"])
+router = APIRouter(
+    prefix="/kb",
+    tags=["knowledge-base"],
+    dependencies=[Depends(require_auth("member"))],
+)
 logger = structlog.get_logger(__name__)
 
 # Global connection pool (set during app startup)

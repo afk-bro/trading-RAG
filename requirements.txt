@@ -13,6 +13,7 @@ anthropic>=0.40.0
 # Database
 asyncpg==0.29.0
 supabase==2.3.4
+PyJWT>=2.8.0
 
 # Vector database
 qdrant-client==1.16.2

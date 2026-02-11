@@ -7,7 +7,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.deps.security import require_admin_token
+from app.deps.security import require_admin_token, require_auth
 from app.schemas import (
     SourceDetailResponse,
     SourceListItem,
@@ -15,7 +15,7 @@ from app.schemas import (
     SourceType,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 

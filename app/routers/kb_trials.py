@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.config import Settings, get_settings
 from app.deps.security import (
     require_admin_token,
+    require_auth,
     get_current_user,
     require_workspace_access,
     get_rate_limiter,
@@ -46,7 +47,11 @@ from app.services.strategies.registry import (
     list_strategies,
 )
 
-router = APIRouter(prefix="/kb/trials", tags=["trading-kb"])
+router = APIRouter(
+    prefix="/kb/trials",
+    tags=["trading-kb"],
+    dependencies=[Depends(require_auth("admin"))],
+)
 logger = structlog.get_logger(__name__)
 
 # Global connection pool (set during app startup)

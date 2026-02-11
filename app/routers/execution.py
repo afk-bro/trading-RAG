@@ -14,7 +14,11 @@ from app.schemas import (
     PaperPosition,
     ReconciliationResult,
 )
-from app.deps.security import check_workspace_consistency, require_admin_token
+from app.deps.security import (
+    check_workspace_consistency,
+    require_admin_token,
+    require_auth,
+)
 from app.services.execution.factory import get_paper_broker
 from app.repositories.trade_events import TradeEventsRepository
 from app.repositories.strategy_versions import StrategyVersionsRepository
@@ -23,7 +27,7 @@ from app.repositories.strategy_versions import StrategyVersionsRepository
 router = APIRouter(
     prefix="/execute",
     tags=["execution"],
-    dependencies=[Depends(check_workspace_consistency)],
+    dependencies=[Depends(check_workspace_consistency), Depends(require_auth("admin"))],
 )
 logger = structlog.get_logger(__name__)
 

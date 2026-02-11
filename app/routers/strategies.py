@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.deps.security import require_admin_token
+from app.deps.security import require_admin_token, require_auth
 from app.repositories.strategy_intel import StrategyIntelRepository, IntelSnapshot
 from app.repositories.strategy_versions import StrategyVersionsRepository
 from app.services.intel import IntelRunner
@@ -44,7 +44,7 @@ from app.schemas import (
 )
 from app.services.strategy import StrategyRepository
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 

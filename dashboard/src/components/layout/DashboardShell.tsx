@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { Outlet, Link, useLocation } from "react-router-dom";
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useUrlState } from "@/hooks/use-url-state";
 import { useSetWorkspaceId, useWorkspaceId } from "@/context/workspace";
+import { useAuth } from "@/context/auth";
 import { DateRangeSelector } from "./DateRangeSelector";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
-import { Activity } from "lucide-react";
+import { Activity, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function DashboardShell() {
@@ -12,6 +13,8 @@ export function DashboardShell() {
   const globalWsId = useWorkspaceId();
   const setGlobalWsId = useSetWorkspaceId();
   const [daysStr, setDays] = useUrlState("days", "30");
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
   // Sync: URL → global context (URL is source of truth when present)
   useEffect(() => {
@@ -43,6 +46,11 @@ export function DashboardShell() {
   const wsParam = workspaceId ? `?workspace_id=${workspaceId}` : "";
   const isBacktests = location.pathname.startsWith("/dashboard/backtests");
   const isDashboard = !isBacktests;
+
+  async function handleSignOut() {
+    await signOut();
+    navigate("/login");
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -81,12 +89,26 @@ export function DashboardShell() {
             />
           </div>
 
-          {workspaceId && !isBacktests && (
-            <DateRangeSelector
-              value={days}
-              onChange={(d) => setDays(String(d))}
-            />
-          )}
+          <div className="flex items-center gap-3">
+            {workspaceId && !isBacktests && (
+              <DateRangeSelector
+                value={days}
+                onChange={(d) => setDays(String(d))}
+              />
+            )}
+            {user && (
+              <span className="text-xs text-text-muted truncate max-w-[160px]">
+                {user.email}
+              </span>
+            )}
+            <button
+              onClick={handleSignOut}
+              className="p-1.5 rounded-md text-text-muted hover:text-foreground hover:bg-bg-tertiary transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 

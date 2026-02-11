@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
-from app.deps.security import require_admin_token
+from app.deps.security import require_admin_token, require_auth
 from app.schemas import (
     PineBuildStats,
     PineChunkItem,
@@ -31,7 +31,7 @@ from app.schemas import (
 )
 from app.services.pine import PineIngestService, build_and_write_registry, load_registry
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 # Maximum registry file size (20 MB)

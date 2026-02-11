@@ -1,7 +1,25 @@
 import { getActiveWorkspaceId } from "@/context/workspace";
+import { supabase } from "@/lib/supabase";
 
 const BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? window.location.origin;
+
+async function getAuthToken(): Promise<string | null> {
+  // Prefer Supabase session token
+  const { data } = await supabase.auth.getSession();
+  if (data.session?.access_token) {
+    return data.session.access_token;
+  }
+  // Fallback: legacy admin token
+  return localStorage.getItem("admin_token");
+}
+
+function handle401() {
+  // Redirect to login unless already there
+  if (!window.location.pathname.startsWith("/dashboard/login")) {
+    window.location.href = "/dashboard/login";
+  }
+}
 
 async function request<T>(
   method: "GET" | "POST" | "PATCH",
@@ -23,7 +41,7 @@ async function request<T>(
     "Content-Type": "application/json",
   };
 
-  const token = localStorage.getItem("admin_token");
+  const token = await getAuthToken();
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -39,6 +57,11 @@ async function request<T>(
     body: body ? JSON.stringify(body) : undefined,
     signal,
   });
+
+  if (res.status === 401) {
+    handle401();
+    throw new Error("401: Unauthorized");
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
@@ -67,12 +90,18 @@ export function apiPatch<T>(path: string, body: unknown, signal?: AbortSignal): 
 export async function downloadFile(path: string, filename: string) {
   const url = new URL(path, BASE_URL);
   const headers: Record<string, string> = {};
-  const token = localStorage.getItem("admin_token");
+  const token = await getAuthToken();
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(url.toString(), { headers });
+
+  if (res.status === 401) {
+    handle401();
+    throw new Error("401: Unauthorized");
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status}: ${text}`);

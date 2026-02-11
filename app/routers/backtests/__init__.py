@@ -8,12 +8,18 @@ This package contains the backtest API endpoints split into modules:
 - schemas.py: Pydantic request/response models
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.deps.security import require_auth
 
 from . import chart, runs, tunes, wfo, wfo_chart
 
 # Create combined router with prefix
-router = APIRouter(prefix="/backtests", tags=["backtests"])
+router = APIRouter(
+    prefix="/backtests",
+    tags=["backtests"],
+    dependencies=[Depends(require_auth("member"))],
+)
 
 # Include sub-routers
 router.include_router(runs.router)

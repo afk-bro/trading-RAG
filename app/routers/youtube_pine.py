@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import Settings, get_settings
-from app.deps.security import require_admin_token
+from app.deps.security import require_admin_token, require_auth
 from app.routers.pine import match_pine_scripts
 from app.routers.youtube import (
     fetch_transcript,
@@ -35,7 +35,7 @@ from app.services.intent import (
     rerank,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 # Max characters to use for extraction

@@ -321,6 +321,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         embed_model=settings.embed_model,
     )
 
+    if not settings.supabase_jwt_secret:
+        logger.warning(
+            "SUPABASE_JWT_SECRET not set — JWT authentication disabled, admin-token-only mode"
+        )
+
     # Initialize Qdrant client
     _qdrant_client = await _init_qdrant(settings)
 

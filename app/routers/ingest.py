@@ -8,13 +8,15 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.deps.security import require_auth
+
 from app.config import Settings, get_settings
 from app.schemas import IngestRequest, IngestResponse, SourceType
 from app.services.chunker import Chunk, Chunker
 from app.services.embedder import get_embedder
 from app.services.extractor import get_extractor
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth("admin"))])
 logger = structlog.get_logger(__name__)
 
 # Global connection pool and clients (set during app startup)
