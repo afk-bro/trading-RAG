@@ -58,9 +58,19 @@ def test_app(mock_db_pool, mock_qdrant_client):
 
 @pytest.fixture
 def client(test_app):
-    """Create test client with mocked dependencies."""
-    with TestClient(test_app, raise_server_exceptions=False) as test_client:
-        yield test_client
+    """Create test client with mocked dependencies and admin auth bypass.
+
+    Sets ADMIN_TOKEN and sends X-Admin-Token on every request so that tests
+    checking validation, 503, 404, etc. are not blocked by the auth layer
+    before they reach the logic under test.
+    """
+    with patch.dict(os.environ, {"ADMIN_TOKEN": TEST_ADMIN_TOKEN}):
+        with TestClient(
+            test_app,
+            raise_server_exceptions=False,
+            headers={"X-Admin-Token": TEST_ADMIN_TOKEN},
+        ) as test_client:
+            yield test_client
 
 
 @pytest.fixture

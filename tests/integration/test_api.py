@@ -7,9 +7,14 @@ Run with: pytest tests/integration/ -v
 Skip tests requiring DB: pytest tests/integration/ -v -m "not requires_db"
 """
 
+import os
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
-import uuid
+
+_TEST_ADMIN_TOKEN = "test-admin-token"
+os.environ["ADMIN_TOKEN"] = _TEST_ADMIN_TOKEN
 
 
 # Mark all tests in this module as integration tests
@@ -118,7 +123,11 @@ class TestIngestEndpoint:
 
         from app.main import app
 
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with TestClient(
+            app,
+            raise_server_exceptions=False,
+            headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
+        ) as client:
             # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
             original_pool = ingest_module._db_pool
             ingest_module._db_pool = None
@@ -200,7 +209,11 @@ class TestQueryEndpoint:
 
         from app.main import app
 
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with TestClient(
+            app,
+            raise_server_exceptions=False,
+            headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
+        ) as client:
             # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
             original_pool = query_module._db_pool
             query_module._db_pool = None
@@ -244,7 +257,11 @@ class TestReembedEndpoint:
 
         from app.main import app
 
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with TestClient(
+            app,
+            raise_server_exceptions=False,
+            headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
+        ) as client:
             # Reset the router's _db_pool AFTER lifespan runs but BEFORE request
             original_pool = reembed_module._db_pool
             reembed_module._db_pool = None

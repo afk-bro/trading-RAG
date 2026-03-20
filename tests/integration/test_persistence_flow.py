@@ -12,8 +12,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-# Set admin token for tests
-os.environ["ADMIN_TOKEN"] = "test-token"
+# Set admin token for tests — must match TEST_ADMIN_TOKEN in conftest.py
+os.environ["ADMIN_TOKEN"] = "test-admin-token"
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def client_with_pool(mock_db_pool):
     set_db_pool(mock_db_pool)
 
     # Yield client
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-Admin-Token": os.environ["ADMIN_TOKEN"]})
     yield client, mock_db_pool
 
     # Cleanup
@@ -275,7 +275,7 @@ class TestPersistenceWithoutPool:
         # Ensure pool is None
         set_db_pool(None)
 
-        client = TestClient(app)
+        client = TestClient(app, headers={"X-Admin-Token": os.environ["ADMIN_TOKEN"]})
 
         response = client.post(
             "/testing/run-plans/generate-and-execute",

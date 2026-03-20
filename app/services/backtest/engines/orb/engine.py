@@ -272,8 +272,9 @@ class ORBEngine:
 
             # TRADE_MGMT
             if state.phase == ORBPhase.TRADE_MGMT:
+                if state.position is None:
+                    continue
                 pos = state.position
-                assert pos is not None
 
                 exit_price: Optional[float] = None
                 exit_reason: Optional[str] = None
