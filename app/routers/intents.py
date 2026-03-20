@@ -223,8 +223,7 @@ async def evaluate_intent(
         200: {"description": "List of active policy rules"},
     },
 )
-async def list_rules(
-) -> dict:
+async def list_rules() -> dict:
     """
     List all active policy rules.
 
