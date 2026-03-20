@@ -10,6 +10,7 @@ Run Orchestrator, ensuring that:
 
 import io
 import json
+import os
 import csv
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -20,6 +21,9 @@ from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.routers.testing import set_db_pool
+
+_TEST_ADMIN_TOKEN = "test-admin-token"
+os.environ["ADMIN_TOKEN"] = _TEST_ADMIN_TOKEN
 
 
 # =============================================================================
@@ -198,7 +202,9 @@ class TestGenerateAndExecuteIntegration:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(
-                transport=transport, base_url="http://test"
+                transport=transport,
+                base_url="http://test",
+                headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
             ) as client:
                 # Create multipart form data
                 files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
@@ -254,7 +260,9 @@ class TestGenerateAndExecuteIntegration:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(
-                transport=transport, base_url="http://test"
+                transport=transport,
+                base_url="http://test",
+                headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
             ) as client:
                 files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                 data = {
@@ -312,7 +320,9 @@ class TestGenerateAndExecuteIntegration:
 
                 transport = ASGITransport(app=app)
                 async with AsyncClient(
-                    transport=transport, base_url="http://test"
+                    transport=transport,
+                    base_url="http://test",
+                    headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
                 ) as client:
                     files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                     data = {
@@ -363,7 +373,9 @@ class TestGenerateAndExecuteIntegration:
 
                 transport = ASGITransport(app=app)
                 async with AsyncClient(
-                    transport=transport, base_url="http://test"
+                    transport=transport,
+                    base_url="http://test",
+                    headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
                 ) as client:
                     files = {"file": ("test_btc.csv", sample_ohlcv_csv, "text/csv")}
                     data = {
@@ -408,7 +420,9 @@ class TestGenerateAndExecuteIntegration:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(
-                transport=transport, base_url="http://test"
+                transport=transport,
+                base_url="http://test",
+                headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
             ) as client:
                 files = {"file": ("bad.csv", bad_csv, "text/csv")}
                 data = {
@@ -450,7 +464,9 @@ class TestGenerateAndExecuteIntegration:
 
             transport = ASGITransport(app=app)
             async with AsyncClient(
-                transport=transport, base_url="http://test"
+                transport=transport,
+                base_url="http://test",
+                headers={"X-Admin-Token": _TEST_ADMIN_TOKEN},
             ) as client:
                 files = {"file": ("bad.csv", bad_csv, "text/csv")}
                 data = {

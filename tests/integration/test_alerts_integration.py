@@ -15,8 +15,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-# Set admin token for tests
-os.environ.setdefault("ADMIN_TOKEN", "test-token")
+# Set admin token for tests — must match TEST_ADMIN_TOKEN in conftest.py
+os.environ["ADMIN_TOKEN"] = "test-admin-token"
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 
@@ -66,7 +66,7 @@ def client():
 @pytest.fixture
 def admin_headers():
     """Headers with admin token."""
-    return {"X-Admin-Token": "test-token"}
+    return {"X-Admin-Token": "test-admin-token"}
 
 
 # =============================================================================
