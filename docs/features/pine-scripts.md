@@ -86,6 +86,23 @@ Query params: `workspace_id` (required), `symbol`, `status`, `q`, `order_by`, `o
 
 Query params: `workspace_id` (required), `include_chunks`, `chunk_limit`, `chunk_offset`, `include_lint_findings`
 
+## DB-Backed Discovery State
+
+Pine script discovery state is persisted in two tables:
+
+**`strategy_scripts`** — One row per discovered script (unique on `workspace_id + source_type + rel_path`):
+- `sha256`, `status` (`discovered → spec_generated → published → archived`), `spec_json`, `lint_json`
+- `doc_id`, `ingest_status`, `last_ingested_sha` — ingest tracking (populated after KB ingest)
+- `repo_id`, `scan_commit`, `source_url` — populated for GitHub-sourced scripts
+- `deleted_at` — soft delete; `NULL` = active
+
+**`pine_repos`** — GitHub repositories registered for auto-discovery:
+- `repo_slug` (owner/repo), `branch`, `clone_path`, `scan_globs` (`**/*.pine` by default)
+- `last_scan_at`, `last_scan_ok`, `scripts_count` — scan state
+- `next_scan_at`, `failure_count` — polling schedule with exponential backoff on failures
+
+The pg_cron function `pine_archive_stale_scripts(older_than_days, batch_limit, dry_run)` archives scripts not seen in N days (default 7). Runs at 3:35 AM UTC daily when pg_cron is available; otherwise trigger via the admin endpoint.
+
 ## Auto-Strategy Discovery
 
 Automatic parameter spec generation from Pine Script inputs (`app/services/pine/spec_generator.py`).

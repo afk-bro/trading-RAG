@@ -96,9 +96,23 @@ PostgreSQL tables (via Supabase):
 | `chunks` | Text segments with token counts, metadata arrays |
 | `chunk_vectors` | Maps chunks to embedding model/collection |
 | `chunk_validations` | QA status per chunk (verified, needs_review, garbage) |
+| `strategies` | Strategy registry (name, config, active version FK) |
 | `strategy_versions` | Immutable config snapshots with state machine |
 | `strategy_intel_snapshots` | Regime + confidence time series |
+| `strategy_scripts` | Pine script discovery state (path, sha256, spec, ingest status) |
+| `pine_repos` | GitHub repo registry for Pine script auto-discovery |
 | `paper_equity_snapshots` | Equity tracking for paper trading |
+| `price_poll_state` | Live price polling schedule per (exchange, symbol, timeframe) |
+| `backtest_tunes` | Parameter sweep sessions |
+| `backtest_tune_runs` | Individual trials within a tune |
+| `wfo_runs` | Walk-Forward Optimization sessions |
+| `artifact_index` | Output artifact tracking for tune/WFO jobs |
+| `ops_alerts` | System health alerts (active, acknowledged, resolved) |
+| `jobs` | Background job queue |
+| `job_runs` | Per-attempt execution records |
+| `idempotency_keys` | API idempotency keys (7-day expiry) |
+| `ohlcv_candles` | Stored price candles |
+| `core_symbols` | Symbol registry |
 
 All tables FK to workspaces. Migrations in `migrations/`.
 
