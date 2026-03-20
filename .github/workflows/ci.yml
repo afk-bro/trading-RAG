@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
@@ -45,7 +45,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
@@ -64,7 +64,7 @@ jobs:
           QDRANT_PORT: 6333
 
       - name: Upload coverage report
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         if: always()
         with:
           file: ./coverage.xml
@@ -84,7 +84,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Wait for Qdrant
         run: |
@@ -115,9 +115,8 @@ jobs:
 
   # Full integration tests with DB - runs nightly or on-demand only
   # Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY secrets to be configured
-  # continue-on-error: some tests require Ollama (KB gates) and fully-migrated DB
-  # (e.g. pine_repos table) which are not provisioned in CI. Results are visible
-  # in the run log but won't fail the workflow until those are addressed.
+  # continue-on-error: some tests require Ollama (KB gates) which is not provisioned
+  # in CI. Results are visible in the run log but won't fail the workflow.
   integration-tests-full:
     continue-on-error: true
     runs-on: ubuntu-latest
@@ -148,7 +147,7 @@ jobs:
         if: steps.secrets-check.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Wait for Qdrant
         if: steps.secrets-check.outputs.skip != 'true'
@@ -189,7 +188,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
@@ -254,7 +253,7 @@ jobs:
         if: steps.secrets-check.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Wait for Qdrant
         if: steps.secrets-check.outputs.skip != 'true'
