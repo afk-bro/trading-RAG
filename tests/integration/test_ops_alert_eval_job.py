@@ -49,6 +49,7 @@ def sample_job():
         payload={
             "workspace_id": None,
             "triggered_by": "test",
+            "dry_run": True,
         },
         attempt=1,
         max_attempts=3,
